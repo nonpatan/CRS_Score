@@ -905,11 +905,20 @@ function renderMembers() {
   }
 
   // เติม dropdown เลือกวิชาพื้นฐานที่ยังไม่ได้เป็นสมาชิก (ไม่รวมตัวเอง)
+  // กรองเฉพาะชั้นปีและภาคเรียนเดียวกับวิชาบูรณาการนี้ กันเลือกผิดชั้น/ผิดเทอมโดยไม่ตั้งใจ
   const memberIds = new Set(members.map(m => m.member_subject_id));
   const candidates = allSubjects.filter(s =>
-    s.subject_type === "พื้นฐาน" && s.id !== currentSubject.id && !memberIds.has(s.id)
+    s.subject_type === "พื้นฐาน" &&
+    s.id !== currentSubject.id &&
+    !memberIds.has(s.id) &&
+    s.grade_level === currentSubject.grade_level &&
+    s.term === currentSubject.term
   );
-  fillSelect(elSelAddMember, candidates, s => s.name + "  (" + s.level + (s.grade_level ? " " + s.grade_level : "") + ")", "— เลือกวิชาพื้นฐาน —");
+  const memberPlaceholder = candidates.length > 0
+    ? "— เลือกวิชาพื้นฐาน —"
+    : "— ไม่มีวิชาพื้นฐานชั้น " + (currentSubject.grade_level || "-") +
+      (currentSubject.term ? " เทอม " + currentSubject.term : "") + " ให้เลือก —";
+  fillSelect(elSelAddMember, candidates, subjectLabel, memberPlaceholder);
 }
 
 document.getElementById("btn-add-member").addEventListener("click", async () => {
