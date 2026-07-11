@@ -257,3 +257,54 @@ create index if not exists remarks_subject_idx on remarks(subject_id);
 alter table attendance_sessions disable row level security;
 alter table attendance_records  disable row level security;
 alter table remarks             disable row level security;
+
+
+-- ============================================================
+-- ข้อมูลตัวอย่าง (seed) — สมรรถนะหลัก 6 ด้าน ผูกกับวิชาตัวอย่างเดิม
+-- ------------------------------------------------------------
+-- ชื่อ 6 ด้าน อ้างอิงจากไฟล์ "ตัวอย่างแบบเก็บคะแนน.xlsx" ชีต "สมรรถนะหลัก"
+-- (แก้คำว่า "วิทยากร" เป็น "วิทยาการ" ในด้านที่ 6 ตามที่ยืนยันกับผู้ใช้แล้ว
+-- เพราะต้นฉบับพิมพ์ผิด) max_score = 100 ตายตัวตามกติกาสมรรถนะหลัก (ดู CLAUDE.md)
+-- เช็คก่อนว่าวิชานี้เคยมีหน่วย "สมรรถนะหลัก" แล้วหรือยัง มีแล้วจะไม่สร้างซ้ำ (idempotent)
+-- ============================================================
+do $$
+declare
+  v_subject uuid;
+  v_unit    uuid;
+  v_ind     uuid;
+  v_name    text;
+  v_seq     integer := 1;
+  v_names   text[] := array[
+    'ด้านการจัดการตนเอง',
+    'ด้านการคิดขั้นสูง',
+    'ด้านการสื่อสาร',
+    'ด้านการรวมพลังทำงานเป็นทีม',
+    'ด้านการพลเมืองที่เข้มแข็ง',
+    'ด้านการอยู่ร่วมกับธรรมชาติและวิทยาการอย่างยั่งยืน'
+  ];
+begin
+  select id into v_subject from subjects where name = 'วิทยาการคำนวณ' limit 1;
+  if v_subject is null then
+    return; -- ไม่มีวิชาตัวอย่างนี้แล้ว ข้ามไปเฉยๆ ไม่ต้อง error
+  end if;
+
+  if exists (select 1 from units where subject_id = v_subject and kind = 'สมรรถนะหลัก') then
+    return; -- เคยสร้างไว้แล้ว ไม่ต้องสร้างซ้ำ
+  end if;
+
+  foreach v_name in array v_names loop
+    insert into units (subject_id, kind, name, max_score, seq)
+    values (v_subject, 'สมรรถนะหลัก', v_name, 100, v_seq)
+    returning id into v_unit;
+
+    insert into indicators (unit_id, name, max_score, seq)
+    values (v_unit, 'องค์ประกอบที่ 1', 50, 1) returning id into v_ind;
+    insert into collections (indicator_id, seq, max_score) values (v_ind, 1, 50);
+
+    insert into indicators (unit_id, name, max_score, seq)
+    values (v_unit, 'องค์ประกอบที่ 2', 50, 2) returning id into v_ind;
+    insert into collections (indicator_id, seq, max_score) values (v_ind, 1, 50);
+
+    v_seq := v_seq + 1;
+  end loop;
+end $$;

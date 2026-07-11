@@ -31,7 +31,7 @@
   .wrap { max-width: 560px; margin: 0 auto; }
   header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
   header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
-  header .nav { font-size: 14px; margin: 0 0 16px; }
+  header .nav { font-size: 14px; margin: 0 0 16px; display: flex; gap: 16px; }
   header .nav a { color: var(--teal); text-decoration: none; font-weight: 500; }
 
   .card {
@@ -107,7 +107,7 @@
   <header>
     <h1>กรอกคะแนน</h1>
     <p>หลักสูตรฐานสมรรถนะ · เลือกวิชาและครั้งที่ แล้วกรอกคะแนนนักเรียน</p>
-    <div class="nav"><a href="attendance.html">ไปหน้าเช็คชื่อ →</a></div>
+    <div class="nav"><a href="attendance.html">เช็คชื่อ →</a><a href="summary.html">สรุปคะแนน →</a></div>
   </header>
 
   <!-- เลือกว่าจะกรอกคะแนนของครั้งไหน -->
@@ -117,7 +117,14 @@
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
     <div class="field">
-      <label for="sel-unit">หน่วยใหญ่</label>
+      <label for="sel-kind">ประเภทคะแนน</label>
+      <select id="sel-kind">
+        <option value="วิชา">คะแนนวิชา</option>
+        <option value="สมรรถนะหลัก">สมรรถนะหลัก 6 ด้าน</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="sel-unit" id="lbl-unit">หน่วยใหญ่</label>
       <select id="sel-unit"><option value="">— เลือกวิชาก่อน —</option></select>
     </div>
     <div class="field">
@@ -155,6 +162,8 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // อ้างอิง element ที่ใช้บ่อย
 const elSubject    = document.getElementById("sel-subject");
+const elKind       = document.getElementById("sel-kind");
+const elUnitLabel  = document.getElementById("lbl-unit");
 const elUnit       = document.getElementById("sel-unit");
 const elIndicator  = document.getElementById("sel-indicator");
 const elCollection = document.getElementById("sel-collection");
@@ -205,26 +214,45 @@ async function loadSubjects() {
 elSubject.addEventListener("change", async () => {
   resetBelow("unit");
   const id = elSubject.value;
-  if (!id) return;
+  if (!id) { currentSubject = null; await loadUnits(); return; }
 
   // เก็บ object วิชาไว้ใช้ label ตามระดับชั้น
   const { data: subj } = await sb.from("subjects").select("*").eq("id", id).single();
   currentSubject = subj;
 
-  // โหลดหน่วยใหญ่เฉพาะประเภท "วิชา" ก่อน (สมรรถนะหลักค่อยเพิ่มทีหลัง)
-  const { data: units, error } = await sb
-    .from("units")
-    .select("*")
-    .eq("subject_id", id)
-    .eq("kind", "วิชา")
-    .order("seq");
-  if (error) { showToast("โหลดหน่วยใหญ่ไม่สำเร็จ", false); return; }
-  fillSelect(elUnit, units, u => u.name + "  (เต็ม " + u.max_score + ")", "— เลือกหน่วยใหญ่ —");
+  await loadUnits();
 
   // โหลดนักเรียน (ตอนนี้ดึงทั้งหมด ทีหลังค่อยกรองตามห้อง/วิชา)
   const { data: studs } = await sb.from("students").select("*").order("student_no");
   students = studs || [];
 });
+
+// ---------- เมื่อเปลี่ยนประเภทคะแนน (วิชา / สมรรถนะหลัก): โหลดหน่วยใหญ่ใหม่ ----------
+elKind.addEventListener("change", () => {
+  resetBelow("indicator");
+  loadUnits();
+});
+
+// โหลดหน่วยใหญ่ตามวิชา + ประเภทคะแนนที่เลือกอยู่ (ใช้ร่วมกันทั้งตอนเปลี่ยนวิชาและเปลี่ยนประเภท)
+async function loadUnits() {
+  const isCoreCompetency = elKind.value === "สมรรถนะหลัก";
+  elUnitLabel.textContent = isCoreCompetency ? "ด้านสมรรถนะหลัก" : "หน่วยใหญ่";
+
+  if (!currentSubject) {
+    elUnit.innerHTML = "<option value=''>— เลือกวิชาก่อน —</option>";
+    return;
+  }
+
+  const { data: units, error } = await sb
+    .from("units")
+    .select("*")
+    .eq("subject_id", currentSubject.id)
+    .eq("kind", elKind.value)
+    .order("seq");
+  if (error) { showToast("โหลดหน่วยใหญ่ไม่สำเร็จ", false); return; }
+  const placeholder = isCoreCompetency ? "— เลือกด้าน —" : "— เลือกหน่วยใหญ่ —";
+  fillSelect(elUnit, units, u => u.name + "  (เต็ม " + u.max_score + ")", placeholder);
+}
 
 // ---------- เมื่อเลือกหน่วยใหญ่: โหลดหน่วยย่อย ----------
 elUnit.addEventListener("change", async () => {
