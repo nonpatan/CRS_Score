@@ -148,6 +148,38 @@
 
   <!-- เลือกวิชาที่จะจัดการ หรือสร้างวิชาใหม่ -->
   <div class="card">
+    <div class="row2">
+      <div class="field">
+        <label for="filter-grade">ชั้น</label>
+        <select id="filter-grade">
+          <option value="">— ทุกชั้น —</option>
+          <optgroup label="ประถม">
+            <option value="ป.1">ป.1</option>
+            <option value="ป.2">ป.2</option>
+            <option value="ป.3">ป.3</option>
+            <option value="ป.4">ป.4</option>
+            <option value="ป.5">ป.5</option>
+            <option value="ป.6">ป.6</option>
+          </optgroup>
+          <optgroup label="มัธยม">
+            <option value="ม.1">ม.1</option>
+            <option value="ม.2">ม.2</option>
+            <option value="ม.3">ม.3</option>
+            <option value="ม.4">ม.4</option>
+            <option value="ม.5">ม.5</option>
+            <option value="ม.6">ม.6</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="field">
+        <label for="filter-term">ภาคเรียน</label>
+        <select id="filter-term">
+          <option value="">— ทุกภาคเรียน —</option>
+          <option value="1">ภาคเรียน 1</option>
+          <option value="2">ภาคเรียน 2</option>
+        </select>
+      </div>
+    </div>
     <div class="field">
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
@@ -293,6 +325,8 @@ const SUPABASE_ANON_KEY = "sb_publishable_EEGLPPMa3fIX1aRR6GA3Xw_mF4mh5X0";
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // อ้างอิง element ที่ใช้บ่อย
+const elFilterGrade  = document.getElementById("filter-grade");
+const elFilterTerm   = document.getElementById("filter-term");
 const elSubject      = document.getElementById("sel-subject");
 const elSubjectForm  = document.getElementById("subject-form");
 const elSubjectFormTitle = document.getElementById("subject-form-title");
@@ -401,14 +435,44 @@ function fillSelect(el, items, getLabel, placeholder) {
   }
 }
 
+// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ภาคเรียน (ถ้ามี) — ให้หาง่ายขึ้นเวลามีวิชาเยอะ
+function subjectLabel(s) {
+  const parts = [s.code || "(ไม่มีรหัส)", s.name];
+  if (s.term) parts.push("เทอม " + s.term);
+  if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
+  return parts.join("  ·  ");
+}
+
 // ---------- โหลดวิชาทั้งหมด ----------
 async function loadSubjects(selectId) {
   const { data, error } = await sb.from("subjects").select("*").order("created_at");
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
   allSubjects = data || [];
-  fillSelect(elSubject, data, s => s.name + "  (" + s.level + (s.grade_level ? " " + s.grade_level : "") + ")" + (s.subject_type === "บูรณาการ" ? " · บูรณาการ" : ""), "— เลือกวิชา —");
+  if (selectId) {
+    // เพิ่ง สร้าง/แก้ไข วิชานี้มา — ตั้งตัวกรองให้ตรงกับวิชานี้ จะได้ไม่หายไปจากลิสต์
+    const target = allSubjects.find(s => s.id === selectId);
+    if (target) {
+      elFilterGrade.value = target.grade_level || "";
+      elFilterTerm.value = target.term || "";
+    }
+  }
+  applySubjectFilter();
   if (selectId) elSubject.value = selectId;
 }
+
+// ---------- กรองรายชื่อวิชาตามชั้น/ภาคเรียนที่เลือก แล้วเติมลง dropdown ----------
+function applySubjectFilter() {
+  const gradeFilter = elFilterGrade.value;
+  const termFilter = elFilterTerm.value;
+  const filtered = allSubjects.filter(s => {
+    if (gradeFilter && s.grade_level !== gradeFilter) return false;
+    if (termFilter && s.term !== termFilter) return false;
+    return true;
+  });
+  fillSelect(elSubject, filtered, subjectLabel, "— เลือกวิชา (" + filtered.length + " วิชา) —");
+}
+elFilterGrade.addEventListener("change", () => { applySubjectFilter(); hideAll(); });
+elFilterTerm.addEventListener("change", () => { applySubjectFilter(); hideAll(); });
 
 // ---------- เลือกวิชา ----------
 elSubject.addEventListener("change", async () => {
@@ -433,6 +497,13 @@ document.getElementById("btn-new-subject").addEventListener("click", () => {
   currentSubject = null;
   elSubject.value = "";
   fillSubjectForm(null);
+  // เติมชั้น/ภาคเรียนตามตัวกรองที่เลือกอยู่ให้อัตโนมัติ (สะดวกเวลาไล่เพิ่มวิชาทีละชั้น)
+  if (elFilterGrade.value) {
+    fLevel.value = elFilterGrade.value.startsWith("ป.") ? "ประถม" : "มัธยม";
+    updateGradeOptions(elFilterGrade.value);
+    updateLevelDependentFields();
+  }
+  if (elFilterTerm.value) fTerm.value = elFilterTerm.value;
   elSubjectForm.style.display = "block";
   elSubjectFormTitle.textContent = "สร้างวิชาใหม่";
   elDelSubject.style.display = "none";
