@@ -107,6 +107,14 @@
 
   .hint { color: var(--muted); font-size: 14px; }
 
+  .member-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+  }
+  .member-row .title { flex: 1; font-size: 14px; }
+  .member-row .weight { color: var(--muted); font-size: 13px; }
+  .member-row .weight.zero { color: var(--danger); }
+
   /* กล่อง popup สำหรับเพิ่ม/แก้ node */
   .overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.4);
@@ -151,8 +159,21 @@
   <div class="card" id="subject-form" style="display:none">
     <div class="section-title" id="subject-form-title">ข้อมูลวิชา</div>
     <div class="field">
-      <label for="f-name">ชื่อวิชา</label>
-      <input type="text" id="f-name" placeholder="เช่น วิทยาการคำนวณ">
+      <label for="f-type">ประเภทวิชา</label>
+      <select id="f-type">
+        <option value="พื้นฐาน">วิชาพื้นฐาน (กรอกคะแนนตรง)</option>
+        <option value="บูรณาการ">วิชาบูรณาการ (รวมจากวิชาพื้นฐานหลายวิชา)</option>
+      </select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-name">ชื่อวิชา</label>
+        <input type="text" id="f-name" placeholder="เช่น วิทยาการคำนวณ">
+      </div>
+      <div class="field">
+        <label for="f-code">รหัสวิชา</label>
+        <input type="text" id="f-code" placeholder="เช่น ว21101">
+      </div>
     </div>
     <div class="row2">
       <div class="field">
@@ -163,8 +184,18 @@
         </select>
       </div>
       <div class="field">
+        <label for="f-grade">ชั้น</label>
+        <select id="f-grade"></select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
         <label for="f-max">คะแนนเต็มวิชา</label>
         <input type="number" id="f-max" min="1" step="1" value="100">
+      </div>
+      <div class="field" id="field-credits">
+        <label for="f-credits">หน่วยกิต</label>
+        <input type="number" id="f-credits" min="0.5" step="0.5" placeholder="เช่น 1.0">
       </div>
     </div>
     <div class="row2">
@@ -172,25 +203,28 @@
         <label for="f-year">ปีการศึกษา</label>
         <input type="text" id="f-year" placeholder="เช่น 2568">
       </div>
-      <div class="field">
+      <div class="field" id="field-term">
         <label for="f-term">ภาคเรียน</label>
-        <input type="text" id="f-term" placeholder="เช่น 1">
+        <select id="f-term">
+          <option value="1">1</option>
+          <option value="2">2</option>
+        </select>
       </div>
     </div>
     <div class="field">
       <label for="f-teacher">ครูผู้สอน</label>
       <input type="text" id="f-teacher" placeholder="ชื่อหรืออีเมลครู">
     </div>
-    <div class="field">
+    <div class="field" id="field-periods">
       <label for="f-periods">จำนวนคาบเรียนทั้งเทอม</label>
-      <input type="number" id="f-periods" min="1" step="1" placeholder="เว้นว่างได้ (ใช้คำนวณ มส. เฉพาะมัธยม)">
-      <div class="field-note">ใช้เป็นตัวหารคำนวณเปอร์เซ็นต์เวลาเรียนสำหรับ มส. — ถ้าไม่กรอก จะเช็ค มส. ไม่ได้</div>
+      <input type="number" id="f-periods" min="1" step="1" placeholder="เว้นว่างได้ (ใช้คำนวณ มส.)">
+      <div class="field-note" id="periods-note">ใช้เป็นตัวหารคำนวณเปอร์เซ็นต์เวลาเรียนสำหรับ มส. — ถ้าไม่กรอก จะเช็ค มส. ไม่ได้</div>
     </div>
     <button class="primary" id="btn-save-subject">บันทึกข้อมูลวิชา</button>
     <button class="danger" id="btn-del-subject" style="width:100%; margin-top:8px; display:none">ลบวิชานี้</button>
   </div>
 
-  <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก -->
+  <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
   <div class="card" id="structure-card" style="display:none">
     <div class="section-title">คะแนนวิชา</div>
     <div id="units-vicha"></div>
@@ -199,6 +233,21 @@
     <div class="section-title" style="margin-top:20px">สมรรถนะหลัก 6 ด้าน</div>
     <div id="units-competency"></div>
     <button class="ghost small" id="btn-add-unit-competency">+ เพิ่มด้านสมรรถนะหลัก</button>
+  </div>
+
+  <!-- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) -->
+  <div class="card" id="members-card" style="display:none">
+    <div class="section-title">วิชาพื้นฐานที่ประกอบกันเป็นวิชานี้</div>
+    <div class="field-note" style="margin-bottom:10px">
+      คะแนนของแต่ละวิชายังกรอกแยกตามปกติที่หน้า "กรอกคะแนน" หน้านี้แค่กำหนดว่าวิชาไหน
+      ประกอบกันเป็นวิชาบูรณาการนี้บ้าง — หน้าสรุปจะถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียน
+      (จำนวนคาบเรียนทั้งเทอม) ของแต่ละวิชาให้เอง ถ้าวิชาไหนติด ร./มส. วิชาบูรณาการนี้จะติดตามด้วย
+    </div>
+    <div id="member-list"></div>
+    <div class="row2" style="margin-top:10px">
+      <select id="sel-add-member"></select>
+      <button class="ghost" id="btn-add-member">+ เพิ่ม</button>
+    </div>
   </div>
 
   <div class="card hint" id="empty-hint">เลือกวิชาเพื่อจัดการโครงสร้าง หรือกด "สร้างวิชาใหม่"</div>
@@ -248,20 +297,67 @@ const elSubject      = document.getElementById("sel-subject");
 const elSubjectForm  = document.getElementById("subject-form");
 const elSubjectFormTitle = document.getElementById("subject-form-title");
 const elStructure    = document.getElementById("structure-card");
+const elMembersCard  = document.getElementById("members-card");
 const elEmptyHint    = document.getElementById("empty-hint");
 const elToast        = document.getElementById("toast");
 const elUnitsVicha   = document.getElementById("units-vicha");
 const elUnitsComp    = document.getElementById("units-competency");
 const elDelSubject   = document.getElementById("btn-del-subject");
+const elMemberList   = document.getElementById("member-list");
+const elSelAddMember = document.getElementById("sel-add-member");
 
 // ฟิลด์ในฟอร์มวิชา
+const fType = document.getElementById("f-type");
 const fName = document.getElementById("f-name");
+const fCode = document.getElementById("f-code");
 const fLevel = document.getElementById("f-level");
+const fGrade = document.getElementById("f-grade");
 const fMax = document.getElementById("f-max");
+const fCredits = document.getElementById("f-credits");
 const fYear = document.getElementById("f-year");
 const fTerm = document.getElementById("f-term");
 const fTeacher = document.getElementById("f-teacher");
 const fPeriods = document.getElementById("f-periods");
+const fieldCredits = document.getElementById("field-credits");
+const fieldTerm = document.getElementById("field-term");
+
+// ตัวเลือกชั้นเรียนตามระดับ
+const GRADE_OPTIONS = {
+  "ประถม": ["ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6"],
+  "มัธยม": ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"]
+};
+
+function updateGradeOptions(keepValue) {
+  const opts = GRADE_OPTIONS[fLevel.value] || [];
+  fGrade.innerHTML = "";
+  for (const g of opts) {
+    const o = document.createElement("option");
+    o.value = g; o.textContent = g;
+    fGrade.appendChild(o);
+  }
+  if (keepValue && opts.includes(keepValue)) fGrade.value = keepValue;
+}
+
+// หน่วยกิต/ภาคเรียน (แบบเลือก) ใช้เฉพาะมัธยม — ประถมไม่มีหน่วยกิต และไม่ต้องเลือกภาคเรียน
+function updateLevelDependentFields() {
+  const isMatthayom = fLevel.value === "มัธยม";
+  fieldCredits.style.display = isMatthayom ? "block" : "none";
+  fieldTerm.style.display = isMatthayom ? "block" : "none";
+  if (!isMatthayom) { fCredits.value = ""; }
+}
+fLevel.addEventListener("change", () => { updateGradeOptions(); updateLevelDependentFields(); });
+
+// วิชาบูรณาการไม่มีหน่วยใหญ่/สมรรถนะหลักเป็นของตัวเอง แต่มีวิชาพื้นฐานสมาชิกแทน
+function updateTypeDependentUI() {
+  const isIntegrated = fType.value === "บูรณาการ";
+  document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
+  if (currentSubject) {
+    elStructure.style.display = isIntegrated ? "none" : "block";
+    elMembersCard.style.display = isIntegrated ? "block" : "none";
+    if (isIntegrated) loadMembers();
+  }
+}
+fType.addEventListener("change", updateTypeDependentUI);
 
 // popup
 const elOverlay = document.getElementById("overlay");
@@ -279,6 +375,8 @@ const mNote = document.getElementById("modal-note");
 let currentSubject = null;    // object วิชาที่เลือกอยู่ (null = โหมดสร้างใหม่)
 let units = [];               // ต้นไม้โครงสร้างของวิชานี้ (units > indicators > collections > scores)
 let modalContext = null;      // เก็บว่ากำลังเพิ่ม/แก้ node ประเภทอะไร ของใคร
+let allSubjects = [];         // วิชาทั้งหมด (ใช้เลือกวิชาพื้นฐานมาเป็นสมาชิกวิชาบูรณาการ)
+let members = [];             // แถว integration_members ของวิชาบูรณาการที่กำลังดูอยู่
 
 function showToast(msg, ok) {
   elToast.textContent = msg;
@@ -304,7 +402,8 @@ function fillSelect(el, items, getLabel, placeholder) {
 async function loadSubjects(selectId) {
   const { data, error } = await sb.from("subjects").select("*").order("created_at");
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
-  fillSelect(elSubject, data, s => s.name + "  (" + s.level + ")", "— เลือกวิชา —");
+  allSubjects = data || [];
+  fillSelect(elSubject, data, s => s.name + "  (" + s.level + (s.grade_level ? " " + s.grade_level : "") + ")" + (s.subject_type === "บูรณาการ" ? " · บูรณาการ" : ""), "— เลือกวิชา —");
   if (selectId) elSubject.value = selectId;
 }
 
@@ -318,9 +417,12 @@ elSubject.addEventListener("change", async () => {
   fillSubjectForm(subj);
   elDelSubject.style.display = "block";
   elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
-  await loadStructure();
-  elStructure.style.display = "block";
   elEmptyHint.style.display = "none";
+  updateTypeDependentUI();
+  if (subj.subject_type === "พื้นฐาน") {
+    await loadStructure();
+    elStructure.style.display = "block";
+  }
 });
 
 // ---------- กดสร้างวิชาใหม่ ----------
@@ -331,41 +433,65 @@ document.getElementById("btn-new-subject").addEventListener("click", () => {
   elSubjectForm.style.display = "block";
   elSubjectFormTitle.textContent = "สร้างวิชาใหม่";
   elDelSubject.style.display = "none";
-  elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วยได้
+  elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วย/วิชาย่อยได้
+  elMembersCard.style.display = "none";
   elEmptyHint.style.display = "none";
   fName.focus();
 });
 
 function fillSubjectForm(subj) {
   elSubjectForm.style.display = "block";
+  fType.value = subj ? subj.subject_type : "พื้นฐาน";
   fName.value = subj ? subj.name : "";
+  fCode.value = subj && subj.code ? subj.code : "";
   fLevel.value = subj ? subj.level : "ประถม";
+  updateGradeOptions(subj ? subj.grade_level : null);
+  updateLevelDependentFields();
   fMax.value = subj ? subj.max_score : 100;
+  fCredits.value = subj && subj.credits ? subj.credits : "";
   fYear.value = subj && subj.year ? subj.year : "";
-  fTerm.value = subj && subj.term ? subj.term : "";
+  fTerm.value = subj && subj.term ? subj.term : "1";
   fTeacher.value = subj && subj.teacher ? subj.teacher : "";
   fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
+  document.getElementById("field-periods").style.display = (subj && subj.subject_type === "บูรณาการ") ? "none" : "block";
 }
 
 // ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
 document.getElementById("btn-save-subject").addEventListener("click", async () => {
   const name = fName.value.trim();
   if (!name) { showToast("กรุณากรอกชื่อวิชา", false); return; }
+  const code = fCode.value.trim();
+  if (!code) { showToast("กรุณากรอกรหัสวิชา", false); return; }
+  const gradeLevel = fGrade.value;
+  if (!gradeLevel) { showToast("กรุณาเลือกชั้น", false); return; }
   const maxScore = Number(fMax.value);
   if (isNaN(maxScore) || maxScore <= 0) { showToast("คะแนนเต็มวิชาต้องมากกว่า 0", false); return; }
 
+  const isMatthayom = fLevel.value === "มัธยม";
+  const isIntegrated = fType.value === "บูรณาการ";
+
+  let credits = null;
+  if (isMatthayom && fCredits.value.trim() !== "") {
+    credits = Number(fCredits.value);
+    if (isNaN(credits) || credits <= 0) { showToast("หน่วยกิตต้องมากกว่า 0", false); return; }
+  }
+
   let periods = null;
-  if (fPeriods.value.trim() !== "") {
+  if (!isIntegrated && fPeriods.value.trim() !== "") {
     periods = Number(fPeriods.value);
     if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
   }
 
   const payload = {
+    subject_type: fType.value,
     name: name,
+    code: code,
     level: fLevel.value,
+    grade_level: gradeLevel,
     max_score: maxScore,
+    credits: credits,
     year: fYear.value.trim() || null,
-    term: fTerm.value.trim() || null,
+    term: isMatthayom ? fTerm.value : null,
     teacher: fTeacher.value.trim() || null,
     total_periods: periods
   };
@@ -376,29 +502,47 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     showToast("บันทึกข้อมูลวิชาแล้ว", true);
     await loadSubjects(currentSubject.id);
     currentSubject = { ...currentSubject, ...payload };
+    updateTypeDependentUI();
   } else {
     const { data, error } = await sb.from("subjects").insert(payload).select().single();
     if (error) { showToast("สร้างวิชาไม่สำเร็จ: " + error.message, false); return; }
     currentSubject = data;
-    showToast("สร้างวิชาแล้ว เพิ่มหน่วยใหญ่ได้เลย", true);
+    showToast("สร้างวิชาแล้ว " + (isIntegrated ? "เพิ่มวิชาย่อยได้เลย" : "เพิ่มหน่วยใหญ่ได้เลย"), true);
     await loadSubjects(data.id);
     elSubject.value = data.id;
     elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
     elDelSubject.style.display = "block";
-    await loadStructure();
-    elStructure.style.display = "block";
+    updateTypeDependentUI();
+    if (!isIntegrated) {
+      await loadStructure();
+      elStructure.style.display = "block";
+    }
   }
 });
 
-// ---------- ลบวิชา (กันไว้ถ้ามีคะแนน) ----------
+// ---------- ลบวิชา (กันไว้ถ้ามีคะแนน หรือยังเป็นสมาชิกของวิชาบูรณาการอื่นอยู่) ----------
 elDelSubject.addEventListener("click", async () => {
   if (!currentSubject) return;
-  const scoreCount = countScoresInUnits(units);
-  if (scoreCount > 0) {
-    showToast("ลบไม่ได้ วิชานี้มีคะแนนนักเรียนกรอกไว้แล้ว " + scoreCount + " ช่อง", false);
-    return;
+
+  if (currentSubject.subject_type === "พื้นฐาน") {
+    const scoreCount = countScoresInUnits(units);
+    if (scoreCount > 0) {
+      showToast("ลบไม่ได้ วิชานี้มีคะแนนนักเรียนกรอกไว้แล้ว " + scoreCount + " ช่อง", false);
+      return;
+    }
+    const { data: refs, error: refErr } = await sb
+      .from("integration_members")
+      .select("integrated:integrated_subject_id(name)")
+      .eq("member_subject_id", currentSubject.id);
+    if (refErr) { showToast("ตรวจสอบวิชาบูรณาการที่อ้างถึงไม่สำเร็จ: " + refErr.message, false); return; }
+    if (refs && refs.length > 0) {
+      const names = refs.map(r => r.integrated.name).join(", ");
+      showToast("ลบไม่ได้ วิชานี้เป็นสมาชิกของวิชาบูรณาการ: " + names, false);
+      return;
+    }
   }
-  if (!confirm("ยืนยันลบวิชา \"" + currentSubject.name + "\" ? หน่วยใหญ่/ย่อย/ครั้งที่ทั้งหมดจะถูกลบด้วย")) return;
+
+  if (!confirm("ยืนยันลบวิชา \"" + currentSubject.name + "\" ?")) return;
   const { error } = await sb.from("subjects").delete().eq("id", currentSubject.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบวิชาแล้ว", true);
@@ -654,10 +798,69 @@ async function doDelete(table, id) {
   await loadStructure();
 }
 
+// ---------- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) ----------
+async function loadMembers() {
+  const { data, error } = await sb
+    .from("integration_members")
+    .select("*, member:member_subject_id(*)")
+    .eq("integrated_subject_id", currentSubject.id);
+  if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
+  members = data || [];
+  renderMembers();
+}
+
+function renderMembers() {
+  elMemberList.innerHTML = "";
+  if (members.length === 0) {
+    elMemberList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีวิชาพื้นฐานในวิชาบูรณาการนี้</div>";
+  }
+  for (const m of members) {
+    const row = document.createElement("div");
+    row.className = "member-row";
+    const weight = m.member.total_periods;
+    const weightText = weight ? weight + " คาบ" : "ยังไม่ตั้งจำนวนคาบ (น้ำหนัก 0)";
+    row.innerHTML =
+      "<span class='title'>" + escapeHtml(m.member.name) +
+      " <span class='hint'>(" + m.member.level + (m.member.grade_level ? " " + m.member.grade_level : "") + ")</span></span>" +
+      "<span class='weight" + (weight ? "" : " zero") + "'>" + weightText + "</span>";
+    const delBtn = makeIconBtn("🗑", "del", () => removeMember(m));
+    row.appendChild(delBtn);
+    elMemberList.appendChild(row);
+  }
+
+  // เติม dropdown เลือกวิชาพื้นฐานที่ยังไม่ได้เป็นสมาชิก (ไม่รวมตัวเอง)
+  const memberIds = new Set(members.map(m => m.member_subject_id));
+  const candidates = allSubjects.filter(s =>
+    s.subject_type === "พื้นฐาน" && s.id !== currentSubject.id && !memberIds.has(s.id)
+  );
+  fillSelect(elSelAddMember, candidates, s => s.name + "  (" + s.level + (s.grade_level ? " " + s.grade_level : "") + ")", "— เลือกวิชาพื้นฐาน —");
+}
+
+document.getElementById("btn-add-member").addEventListener("click", async () => {
+  const memberId = elSelAddMember.value;
+  if (!memberId) { showToast("เลือกวิชาพื้นฐานก่อน", false); return; }
+  const { error } = await sb.from("integration_members").insert({
+    integrated_subject_id: currentSubject.id,
+    member_subject_id: memberId
+  });
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มวิชาแล้ว", true);
+  await loadMembers();
+});
+
+async function removeMember(m) {
+  if (!confirm("ยืนยันเอา \"" + m.member.name + "\" ออกจากวิชาบูรณาการนี้? (ไม่ลบคะแนนของวิชานั้น)")) return;
+  const { error } = await sb.from("integration_members").delete().eq("id", m.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เอาออกแล้ว", true);
+  await loadMembers();
+}
+
 function hideAll() {
   currentSubject = null;
   elSubjectForm.style.display = "none";
   elStructure.style.display = "none";
+  elMembersCard.style.display = "none";
   elEmptyHint.style.display = "block";
 }
 

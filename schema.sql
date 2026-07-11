@@ -308,3 +308,50 @@ begin
     v_seq := v_seq + 1;
   end loop;
 end $$;
+
+
+-- ============================================================
+-- ส่วนวิชาพื้นฐาน / วิชาบูรณาการ + ข้อมูลวิชาเพิ่มเติม (รหัสวิชา/หน่วยกิต/ชั้น)
+-- ------------------------------------------------------------
+-- ต่อท้ายของเดิม ไม่รื้อของเดิม — รันซ้ำได้เอง (idempotent)
+-- ============================================================
+
+-- รหัสวิชา — ทุกวิชาควรมี แต่ปล่อย nullable ตอน migrate เพราะวิชาเก่ายังไม่เคยกรอก
+-- (ฝั่งหน้าเว็บ manage.html บังคับกรอกก่อนบันทึกสำหรับวิชาที่สร้าง/แก้ไขใหม่)
+alter table subjects add column if not exists code text;
+
+-- หน่วยกิต — ใช้เฉพาะวิชาระดับมัธยม (ประถมไม่มีหน่วยกิตแบบมัธยม) nullable เสมอ
+alter table subjects add column if not exists credits numeric;
+alter table subjects drop constraint if exists subjects_credits_ok;
+alter table subjects add constraint subjects_credits_ok check (credits is null or credits > 0);
+
+-- ชั้นเรียน เช่น 'ป.1'..'ป.6' หรือ 'ม.1'..'ม.6' — ต้องระบุทั้งประถมและมัธยม
+-- (nullable ตอน migrate เพราะวิชาเก่ายังไม่เคยกรอก บังคับกรอกฝั่งหน้าเว็บแทน)
+alter table subjects add column if not exists grade_level text;
+
+-- ประเภทวิชา: 'พื้นฐาน' = วิชาเดี่ยวกรอกคะแนนตรง, 'บูรณาการ' = วิชารวมหลายวิชาพื้นฐาน
+-- (ไม่มีหน่วยใหญ่/สมรรถนะหลักเป็นของตัวเอง คำนวณจากวิชาพื้นฐานสมาชิกแทน)
+alter table subjects add column if not exists subject_type text not null default 'พื้นฐาน';
+alter table subjects drop constraint if exists subjects_type_ok;
+alter table subjects add constraint subjects_type_ok check (subject_type in ('พื้นฐาน', 'บูรณาการ'));
+
+
+-- ------------------------------------------------------------
+-- 10) สมาชิกวิชาบูรณาการ (วิชาพื้นฐานที่ประกอบกันเป็นวิชาบูรณาการ 1 ตัว)
+-- ------------------------------------------------------------
+-- กรอกคะแนนแยกที่วิชาพื้นฐาน (member_subject_id) ตามปกติ ไม่กรอกที่วิชาบูรณาการตรงๆ
+-- หน้าสรุปจะรวมคะแนนวิชาพื้นฐานเข้าวิชาบูรณาการ ถ่วงน้ำหนักด้วย subjects.total_periods
+-- ของวิชาพื้นฐานแต่ละตัว (ยืนยันกับผู้ใช้แล้วว่าใช้เวลาเรียนเป็นน้ำหนัก ไม่ใช่หน่วยกิต)
+create table if not exists integration_members (
+  id                    uuid primary key default gen_random_uuid(),
+  integrated_subject_id uuid not null references subjects(id) on delete cascade,
+  member_subject_id     uuid not null references subjects(id) on delete cascade,
+  created_at            timestamptz default now(),
+
+  constraint integration_members_unique unique (integrated_subject_id, member_subject_id),
+  constraint integration_members_no_self check (integrated_subject_id <> member_subject_id)
+);
+create index if not exists integration_members_integrated_idx on integration_members(integrated_subject_id);
+create index if not exists integration_members_member_idx on integration_members(member_subject_id);
+
+alter table integration_members disable row level security;
