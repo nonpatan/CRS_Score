@@ -211,7 +211,7 @@
         </select>
       </div>
     </div>
-    <div class="field">
+    <div class="field" id="field-teacher">
       <label for="f-teacher">ครูผู้สอน</label>
       <input type="text" id="f-teacher" placeholder="ชื่อหรืออีเมลครู">
     </div>
@@ -348,9 +348,12 @@ function updateLevelDependentFields() {
 fLevel.addEventListener("change", () => { updateGradeOptions(); updateLevelDependentFields(); });
 
 // วิชาบูรณาการไม่มีหน่วยใหญ่/สมรรถนะหลักเป็นของตัวเอง แต่มีวิชาพื้นฐานสมาชิกแทน
+// ครูผู้สอนก็ไม่ต้องมี เพราะซ้ำกับครูของวิชาพื้นฐานแต่ละตัวที่ประกอบกันอยู่แล้ว
 function updateTypeDependentUI() {
   const isIntegrated = fType.value === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
+  document.getElementById("field-teacher").style.display = isIntegrated ? "none" : "block";
+  if (isIntegrated) fTeacher.value = "";
   if (currentSubject) {
     elStructure.style.display = isIntegrated ? "none" : "block";
     elMembersCard.style.display = isIntegrated ? "block" : "none";
@@ -453,7 +456,9 @@ function fillSubjectForm(subj) {
   fTerm.value = subj && subj.term ? subj.term : "1";
   fTeacher.value = subj && subj.teacher ? subj.teacher : "";
   fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
-  document.getElementById("field-periods").style.display = (subj && subj.subject_type === "บูรณาการ") ? "none" : "block";
+  const isIntegratedSubj = subj && subj.subject_type === "บูรณาการ";
+  document.getElementById("field-periods").style.display = isIntegratedSubj ? "none" : "block";
+  document.getElementById("field-teacher").style.display = isIntegratedSubj ? "none" : "block";
 }
 
 // ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
@@ -492,7 +497,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     credits: credits,
     year: fYear.value.trim() || null,
     term: isMatthayom ? fTerm.value : null,
-    teacher: fTeacher.value.trim() || null,
+    teacher: isIntegrated ? null : (fTeacher.value.trim() || null),
     total_periods: periods
   };
 
