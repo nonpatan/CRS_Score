@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เช็คชื่อ — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
+  header .nav { font-size: 14px; margin: 0 0 16px; }
+  header .nav a { color: var(--teal); text-decoration: none; font-weight: 500; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  select, input[type="number"], input[type="date"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+  }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+
+  button.load, button.save {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--teal);
+    color: var(--white);
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  button.load:disabled, button.save:disabled { opacity: 0.5; cursor: default; }
+
+  .session-note { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+
+  .student-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .student-row:last-child { border-bottom: none; }
+  .student-info { flex: 1; min-width: 0; }
+  .student-info .name { font-weight: 500; }
+  .student-info .meta { color: var(--muted); font-size: 13px; }
+  .student-row select { width: 120px; }
+
+  .toast {
+    position: sticky;
+    bottom: 12px;
+    text-align: center;
+    font-size: 14px;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 12px;
+    display: none;
+  }
+  .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
+  .toast.err { display: block; background: #fceaea; color: var(--danger); }
+
+  .hint { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>เช็คชื่อ</h1>
+    <p>เลือกวิชา วันที่ และจำนวนคาบ แล้วติ๊กสถานะรายคน</p>
+    <div class="nav"><a href="index.html">← ไปหน้ากรอกคะแนน</a></div>
+  </header>
+
+  <!-- เลือกวิชา / วันที่ / จำนวนคาบ แล้วโหลดรายชื่อมาติ๊ก -->
+  <div class="card">
+    <div class="field">
+      <label for="sel-subject">วิชา</label>
+      <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
+    </div>
+    <div class="field">
+      <label for="inp-date">วันที่เช็คชื่อ</label>
+      <input type="date" id="inp-date">
+    </div>
+    <div class="field">
+      <label for="inp-periods">จำนวนคาบที่ครั้งนี้ครอบคลุม</label>
+      <input type="number" id="inp-periods" min="1" step="1" value="1">
+    </div>
+    <button class="load" id="btn-load">โหลดรายชื่อ</button>
+  </div>
+
+  <!-- รายชื่อนักเรียนให้ติ๊กสถานะ -->
+  <div class="card" id="students-card" style="display:none">
+    <div class="session-note" id="session-note"></div>
+    <div id="student-list"></div>
+    <button class="save" id="btn-save">บันทึกการเช็คชื่อ</button>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <div class="card hint" id="empty-hint">เลือกวิชาและวันที่ แล้วกด "โหลดรายชื่อ" เพื่อเริ่มเช็คชื่อ</div>
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+// ============================================================
+// ตั้งค่า Supabase — โปรเจกต์เดียวกับหน้ากรอกคะแนน (index.html)
+// ============================================================
+const SUPABASE_URL = "https://cbfblvsasamxuwgcpmtj.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_EEGLPPMa3fIX1aRR6GA3Xw_mF4mh5X0";
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// สถานะเช็คชื่อที่เลือกได้ทั้งหมด (ต้องตรงกับ check constraint ใน schema.sql)
+const STATUS_OPTIONS = ["มา", "ขาด", "ลาป่วย", "ลากิจ", "มาสาย"];
+
+// อ้างอิง element ที่ใช้บ่อย
+const elSubject      = document.getElementById("sel-subject");
+const elDate          = document.getElementById("inp-date");
+const elPeriods       = document.getElementById("inp-periods");
+const btnLoad         = document.getElementById("btn-load");
+const elStudentsCard  = document.getElementById("students-card");
+const elStudentList   = document.getElementById("student-list");
+const elSessionNote   = document.getElementById("session-note");
+const elEmptyHint     = document.getElementById("empty-hint");
+const elToast         = document.getElementById("toast");
+const btnSave         = document.getElementById("btn-save");
+
+// เก็บ state ที่กำลังทำงานอยู่
+let currentSubjectId = null;
+let currentSession = null;   // object ครั้งที่เช็คชื่อ ถ้ายังไม่เคยมี = null (จะสร้างใหม่ตอนบันทึก)
+let students = [];           // รายชื่อนักเรียนทั้งหมด
+
+// helper: ใส่ options ลง select
+function fillSelect(el, items, getLabel, placeholder) {
+  el.innerHTML = "";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholder;
+  el.appendChild(opt0);
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it.id;
+    o.textContent = getLabel(it);
+    el.appendChild(o);
+  }
+}
+
+function showToast(msg, ok) {
+  elToast.textContent = msg;
+  elToast.className = "toast " + (ok ? "ok" : "err");
+  setTimeout(() => { elToast.className = "toast"; }, 2500);
+}
+
+// ตั้งวันที่เริ่มต้นเป็นวันนี้ (ตามเวลาเครื่อง ไม่ใช้ toISOString เพราะจะเพี้ยนเรื่อง timezone)
+function todayStr() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mm + "-" + dd;
+}
+elDate.value = todayStr();
+
+// ---------- โหลดวิชาทั้งหมด ----------
+async function loadSubjects() {
+  const { data, error } = await sb
+    .from("subjects")
+    .select("*")
+    .order("created_at");
+  if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
+  fillSelect(elSubject, data, s => s.name + "  (" + s.level + ")", "— เลือกวิชา —");
+}
+
+elSubject.addEventListener("change", () => {
+  currentSubjectId = elSubject.value || null;
+  hideStudents();
+});
+
+// ---------- กดโหลดรายชื่อ: หาครั้งที่เช็คชื่อเดิม (ถ้ามี) แล้ววาดรายชื่อ ----------
+btnLoad.addEventListener("click", async () => {
+  if (!currentSubjectId) { showToast("เลือกวิชาก่อน", false); return; }
+  if (!elDate.value) { showToast("เลือกวันที่ก่อน", false); return; }
+  const periods = Number(elPeriods.value);
+  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+
+  btnLoad.disabled = true;
+
+  // โหลดนักเรียนทั้งหมด (ทีหลังค่อยกรองตามห้อง/วิชา)
+  const { data: studs, error: studErr } = await sb.from("students").select("*").order("student_no");
+  if (studErr) { showToast("โหลดรายชื่อนักเรียนไม่สำเร็จ", false); btnLoad.disabled = false; return; }
+  students = studs || [];
+
+  // เช็คว่าวิชานี้ วันนี้ เคยเช็คชื่อไปแล้วหรือยัง (ถ้ามี = โหมดแก้ไข)
+  const { data: existingSession, error: sessErr } = await sb
+    .from("attendance_sessions")
+    .select("*")
+    .eq("subject_id", currentSubjectId)
+    .eq("session_date", elDate.value)
+    .maybeSingle();
+  if (sessErr) { showToast("ตรวจสอบครั้งที่เช็คชื่อไม่สำเร็จ: " + sessErr.message, false); btnLoad.disabled = false; return; }
+
+  let scoreMap = {}; // student_id -> status เดิม (ถ้ามี)
+  if (existingSession) {
+    currentSession = existingSession;
+    elPeriods.value = existingSession.periods_covered; // ใช้ค่าที่เคยบันทึกไว้ก่อน แก้ต่อได้
+    const { data: records, error: recErr } = await sb
+      .from("attendance_records")
+      .select("student_id, status")
+      .eq("session_id", existingSession.id);
+    if (recErr) { showToast("โหลดผลเช็คชื่อเดิมไม่สำเร็จ", false); btnLoad.disabled = false; return; }
+    for (const r of (records || [])) scoreMap[r.student_id] = r.status;
+    elSessionNote.textContent = "พบข้อมูลเช็คชื่อของวันนี้แล้ว — กำลังแก้ไขของเดิม";
+  } else {
+    currentSession = null; // จะสร้างครั้งใหม่ตอนกดบันทึก
+    elSessionNote.textContent = "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
+  }
+
+  renderStudents(scoreMap, periods);
+  btnLoad.disabled = false;
+});
+
+// วาดรายชื่อนักเรียน + ช่องเลือกสถานะ
+function renderStudents(scoreMap, periods) {
+  elStudentList.innerHTML = "";
+  for (const stu of students) {
+    const row = document.createElement("div");
+    row.className = "student-row";
+
+    const info = document.createElement("div");
+    info.className = "student-info";
+    info.innerHTML =
+      "<div class='name'>" + stu.name + "</div>" +
+      "<div class='meta'>เลขที่ " + stu.student_no +
+      (stu.classroom ? " · " + stu.classroom : "") + "</div>";
+
+    const sel = document.createElement("select");
+    sel.dataset.studentId = stu.id;
+    for (const status of STATUS_OPTIONS) {
+      const o = document.createElement("option");
+      o.value = status;
+      o.textContent = status;
+      sel.appendChild(o);
+    }
+    sel.value = scoreMap[stu.id] || "มา"; // ค่าเริ่มต้น = มา ถ้าไม่มีข้อมูลเดิม
+
+    row.appendChild(info);
+    row.appendChild(sel);
+    elStudentList.appendChild(row);
+  }
+
+  elStudentsCard.style.display = "block";
+  elEmptyHint.style.display = "none";
+}
+
+// ---------- บันทึก: สร้าง/แก้ไขครั้งที่เช็คชื่อ แล้ว upsert สถานะทุกคน ----------
+btnSave.addEventListener("click", async () => {
+  const periods = Number(elPeriods.value);
+  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+
+  btnSave.disabled = true;
+
+  let sessionId;
+  if (currentSession) {
+    // เคยมีครั้งนี้อยู่แล้ว แก้ไขจำนวนคาบได้ (เผื่อครูกรอกผิดตอนแรก)
+    const { error } = await sb
+      .from("attendance_sessions")
+      .update({ periods_covered: periods })
+      .eq("id", currentSession.id);
+    if (error) { showToast("แก้ไขครั้งที่เช็คชื่อไม่สำเร็จ: " + error.message, false); btnSave.disabled = false; return; }
+    sessionId = currentSession.id;
+  } else {
+    // ยังไม่เคยมี สร้างครั้งใหม่
+    const { data, error } = await sb
+      .from("attendance_sessions")
+      .insert({ subject_id: currentSubjectId, session_date: elDate.value, periods_covered: periods })
+      .select()
+      .single();
+    if (error) { showToast("สร้างครั้งเช็คชื่อไม่สำเร็จ: " + error.message, false); btnSave.disabled = false; return; }
+    currentSession = data;
+    sessionId = data.id;
+  }
+
+  const selects = elStudentList.querySelectorAll("select");
+  const rows = [];
+  for (const sel of selects) {
+    rows.push({
+      session_id: sessionId,
+      student_id: sel.dataset.studentId,
+      status: sel.value
+    });
+  }
+
+  // upsert อาศัย unique(session_id, student_id) กรอกซ้ำ = ทับค่าเดิม
+  const { error } = await sb
+    .from("attendance_records")
+    .upsert(rows, { onConflict: "session_id,student_id" });
+  btnSave.disabled = false;
+
+  if (error) showToast("บันทึกไม่สำเร็จ: " + error.message, false);
+  else { showToast("บันทึกแล้ว " + rows.length + " คน", true); elSessionNote.textContent = "บันทึกล่าสุดแล้ว — แก้ต่อได้ถ้าจำเป็น"; }
+});
+
+function hideStudents() {
+  elStudentsCard.style.display = "none";
+  elEmptyHint.style.display = "block";
+  currentSession = null;
+}
+
+// เริ่มทำงาน
+loadSubjects();
+</script>
+</body>
+</html>
