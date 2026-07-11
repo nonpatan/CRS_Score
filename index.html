@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>กรอกคะแนน — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  select, input[type="number"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+  }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+
+  .student-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .student-row:last-child { border-bottom: none; }
+  .student-info { flex: 1; min-width: 0; }
+  .student-info .name { font-weight: 500; }
+  .student-info .meta { color: var(--muted); font-size: 13px; }
+  .student-row input[type="number"] { width: 96px; text-align: center; }
+
+  .full-note { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  button.save {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--teal);
+    color: var(--white);
+    cursor: pointer;
+    margin-top: 16px;
+  }
+  button.save:disabled { opacity: 0.5; cursor: default; }
+
+  .toast {
+    position: sticky;
+    bottom: 12px;
+    text-align: center;
+    font-size: 14px;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 12px;
+    display: none;
+  }
+  .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
+  .toast.err { display: block; background: #fceaea; color: var(--danger); }
+
+  .hint { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>กรอกคะแนน</h1>
+    <p>หลักสูตรฐานสมรรถนะ · เลือกวิชาและครั้งที่ แล้วกรอกคะแนนนักเรียน</p>
+  </header>
+
+  <!-- เลือกว่าจะกรอกคะแนนของครั้งไหน -->
+  <div class="card">
+    <div class="field">
+      <label for="sel-subject">วิชา</label>
+      <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
+    </div>
+    <div class="field">
+      <label for="sel-unit">หน่วยใหญ่</label>
+      <select id="sel-unit"><option value="">— เลือกวิชาก่อน —</option></select>
+    </div>
+    <div class="field">
+      <label for="sel-indicator">หน่วยย่อย</label>
+      <select id="sel-indicator"><option value="">—</option></select>
+    </div>
+    <div class="field">
+      <label for="sel-collection">ครั้งที่</label>
+      <select id="sel-collection"><option value="">—</option></select>
+    </div>
+  </div>
+
+  <!-- รายชื่อนักเรียนให้กรอกคะแนน -->
+  <div class="card" id="students-card" style="display:none">
+    <div id="collection-head" class="field"></div>
+    <div id="student-list"></div>
+    <button class="save" id="btn-save">บันทึกคะแนน</button>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <div class="card hint" id="empty-hint">เลือกครั้งที่เพื่อเริ่มกรอกคะแนน</div>
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+// ============================================================
+// ตั้งค่า Supabase — แก้ 2 บรรทัดนี้ให้เป็นของโปรเจกต์ตัวเอง
+//   หาได้จาก Supabase dashboard > Project Settings > API
+// ============================================================
+const SUPABASE_URL = "https://cbfblvsasamxuwgcpmtj.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_EEGLPPMa3fIX1aRR6GA3Xw_mF4mh5X0";
+
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// อ้างอิง element ที่ใช้บ่อย
+const elSubject    = document.getElementById("sel-subject");
+const elUnit       = document.getElementById("sel-unit");
+const elIndicator  = document.getElementById("sel-indicator");
+const elCollection = document.getElementById("sel-collection");
+const elStudentsCard = document.getElementById("students-card");
+const elStudentList  = document.getElementById("student-list");
+const elCollHead   = document.getElementById("collection-head");
+const elEmptyHint  = document.getElementById("empty-hint");
+const elToast      = document.getElementById("toast");
+const btnSave      = document.getElementById("btn-save");
+
+// เก็บ state ที่กำลังทำงานอยู่
+let currentSubject = null;      // object วิชาที่เลือก
+let currentCollection = null;   // object ครั้งที่ที่เลือก
+let students = [];              // รายชื่อนักเรียนของวิชานี้
+
+// helper: ใส่ options ลง select
+function fillSelect(el, items, getLabel, placeholder) {
+  el.innerHTML = "";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholder;
+  el.appendChild(opt0);
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it.id;
+    o.textContent = getLabel(it);
+    el.appendChild(o);
+  }
+}
+
+function showToast(msg, ok) {
+  elToast.textContent = msg;
+  elToast.className = "toast " + (ok ? "ok" : "err");
+  setTimeout(() => { elToast.className = "toast"; }, 2500);
+}
+
+// ---------- โหลดวิชาทั้งหมด ----------
+async function loadSubjects() {
+  const { data, error } = await sb
+    .from("subjects")
+    .select("*")
+    .order("created_at");
+  if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
+  fillSelect(elSubject, data, s => s.name + "  (" + s.level + ")", "— เลือกวิชา —");
+}
+
+// ---------- เมื่อเลือกวิชา: โหลดหน่วยใหญ่ + นักเรียน ----------
+elSubject.addEventListener("change", async () => {
+  resetBelow("unit");
+  const id = elSubject.value;
+  if (!id) return;
+
+  // เก็บ object วิชาไว้ใช้ label ตามระดับชั้น
+  const { data: subj } = await sb.from("subjects").select("*").eq("id", id).single();
+  currentSubject = subj;
+
+  // โหลดหน่วยใหญ่เฉพาะประเภท "วิชา" ก่อน (สมรรถนะหลักค่อยเพิ่มทีหลัง)
+  const { data: units, error } = await sb
+    .from("units")
+    .select("*")
+    .eq("subject_id", id)
+    .eq("kind", "วิชา")
+    .order("seq");
+  if (error) { showToast("โหลดหน่วยใหญ่ไม่สำเร็จ", false); return; }
+  fillSelect(elUnit, units, u => u.name + "  (เต็ม " + u.max_score + ")", "— เลือกหน่วยใหญ่ —");
+
+  // โหลดนักเรียน (ตอนนี้ดึงทั้งหมด ทีหลังค่อยกรองตามห้อง/วิชา)
+  const { data: studs } = await sb.from("students").select("*").order("student_no");
+  students = studs || [];
+});
+
+// ---------- เมื่อเลือกหน่วยใหญ่: โหลดหน่วยย่อย ----------
+elUnit.addEventListener("change", async () => {
+  resetBelow("indicator");
+  const id = elUnit.value;
+  if (!id) return;
+  const { data, error } = await sb
+    .from("indicators")
+    .select("*")
+    .eq("unit_id", id)
+    .order("seq");
+  if (error) { showToast("โหลดหน่วยย่อยไม่สำเร็จ", false); return; }
+  fillSelect(elIndicator, data, i => i.name + "  (เต็ม " + i.max_score + ")", "— เลือกหน่วยย่อย —");
+});
+
+// ---------- เมื่อเลือกหน่วยย่อย: โหลดครั้งที่ ----------
+elIndicator.addEventListener("change", async () => {
+  resetBelow("collection");
+  const id = elIndicator.value;
+  if (!id) return;
+  const { data, error } = await sb
+    .from("collections")
+    .select("*")
+    .eq("indicator_id", id)
+    .order("seq");
+  if (error) { showToast("โหลดครั้งที่ไม่สำเร็จ", false); return; }
+  fillSelect(elCollection, data, c => "ครั้งที่ " + c.seq + "  (เต็ม " + c.max_score + ")", "— เลือกครั้งที่ —");
+});
+
+// ---------- เมื่อเลือกครั้งที่: แสดงรายชื่อนักเรียนให้กรอก ----------
+elCollection.addEventListener("change", async () => {
+  const id = elCollection.value;
+  if (!id) { hideStudents(); return; }
+
+  const { data: coll } = await sb.from("collections").select("*").eq("id", id).single();
+  currentCollection = coll;
+
+  // ดึงคะแนนเดิมของ collection นี้ มาเติมในช่องกรอก
+  const { data: existing } = await sb
+    .from("scores")
+    .select("student_id, raw_score")
+    .eq("collection_id", id);
+  const scoreMap = {};
+  for (const s of (existing || [])) scoreMap[s.student_id] = s.raw_score;
+
+  renderStudents(scoreMap);
+});
+
+// วาดรายชื่อนักเรียน + ช่องกรอกคะแนน
+function renderStudents(scoreMap) {
+  elCollHead.innerHTML =
+    "<label>กำลังกรอก: ครั้งที่ " + currentCollection.seq +
+    "  ·  คะแนนเต็ม " + currentCollection.max_score + "</label>" +
+    "<div class='full-note'>กรอกได้ไม่เกิน " + currentCollection.max_score + " คะแนน</div>";
+
+  elStudentList.innerHTML = "";
+  for (const stu of students) {
+    const row = document.createElement("div");
+    row.className = "student-row";
+
+    const info = document.createElement("div");
+    info.className = "student-info";
+    info.innerHTML =
+      "<div class='name'>" + stu.name + "</div>" +
+      "<div class='meta'>เลขที่ " + stu.student_no +
+      (stu.classroom ? " · " + stu.classroom : "") + "</div>";
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = String(currentCollection.max_score);
+    input.step = "0.5";
+    input.dataset.studentId = stu.id;
+    if (scoreMap[stu.id] !== undefined) input.value = scoreMap[stu.id];
+
+    row.appendChild(info);
+    row.appendChild(input);
+    elStudentList.appendChild(row);
+  }
+
+  elStudentsCard.style.display = "block";
+  elEmptyHint.style.display = "none";
+}
+
+// ---------- บันทึก: upsert ทุกช่องที่กรอก ----------
+btnSave.addEventListener("click", async () => {
+  const inputs = elStudentList.querySelectorAll("input[type=number]");
+  const rows = [];
+  const cap = currentCollection.max_score;
+
+  for (const inp of inputs) {
+    if (inp.value === "") continue;               // เว้นว่าง = ยังไม่กรอก ข้ามไป
+    let val = Number(inp.value);
+    if (isNaN(val) || val < 0) { showToast("มีคะแนนไม่ถูกต้อง", false); return; }
+    if (val > cap) { showToast("มีคะแนนเกิน " + cap, false); return; }
+    rows.push({
+      student_id: inp.dataset.studentId,
+      collection_id: currentCollection.id,
+      raw_score: val,
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  if (rows.length === 0) { showToast("ยังไม่ได้กรอกคะแนน", false); return; }
+
+  btnSave.disabled = true;
+  // upsert อาศัย unique(student_id, collection_id) กรอกซ้ำ = ทับค่าเดิม
+  const { error } = await sb
+    .from("scores")
+    .upsert(rows, { onConflict: "student_id,collection_id" });
+  btnSave.disabled = false;
+
+  if (error) showToast("บันทึกไม่สำเร็จ: " + error.message, false);
+  else showToast("บันทึกแล้ว " + rows.length + " คน", true);
+});
+
+// ---------- ตัวช่วยล้าง dropdown ชั้นล่าง ----------
+function resetBelow(level) {
+  const order = ["unit", "indicator", "collection"];
+  const from = order.indexOf(level);
+  for (let i = from; i < order.length; i++) {
+    const el = { unit: elUnit, indicator: elIndicator, collection: elCollection }[order[i]];
+    el.innerHTML = "<option value=''>—</option>";
+  }
+  hideStudents();
+}
+
+function hideStudents() {
+  elStudentsCard.style.display = "none";
+  elEmptyHint.style.display = "block";
+  currentCollection = null;
+}
+
+// เริ่มทำงาน
+loadSubjects();
+</script>
+</body>
+</html>
