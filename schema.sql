@@ -654,3 +654,35 @@ drop policy if exists enrollments_insert on enrollments;
 create policy enrollments_insert on enrollments for insert with check (can_edit_subject(subject_id));
 drop policy if exists enrollments_delete on enrollments;
 create policy enrollments_delete on enrollments for delete using (can_edit_subject(subject_id));
+
+
+-- ============================================================
+-- ส่วนชั่วโมงชดเชย (ใช้ "เติมตัวเลขให้ถึงเกณฑ์" แทนการข้ามเช็ค มส. ทั้งหมด)
+-- ------------------------------------------------------------
+-- ยืนยันกับผู้ใช้แล้ว: ไม่ใช่ "ผ่อนผัน" แบบข้ามกฎ แต่ให้นักเรียนชดเชยเวลาเรียนที่ขาด
+-- (ทำงาน/เรียนเสริม ฯลฯ) แล้วครูบันทึกจำนวนคาบที่ชดเชยได้ตรงนี้ ระบบจะบวกเข้าไปใน
+-- attended_periods ตอนคำนวณ % เข้าเรียนสำหรับเช็ค มส. — ครูเจ้าของวิชานั้นเพิ่มเองได้เลย
+-- ไม่ต้องรอ admin อนุมัติ (ยืนยันแล้ว)
+-- ------------------------------------------------------------
+-- 13) ชั่วโมงชดเชยของนักเรียนต่อวิชา
+-- ------------------------------------------------------------
+create table if not exists makeup_hours (
+  id          uuid primary key default gen_random_uuid(),
+  student_id  uuid not null references students(id) on delete cascade,
+  subject_id  uuid not null references subjects(id) on delete cascade,
+  periods     numeric not null,          -- จำนวนคาบที่ชดเชยได้ (บวกเข้า attended_periods ตรงๆ)
+  reason      text not null,             -- รายละเอียด/เหตุผล บังคับกรอกเสมอ
+  created_at  timestamptz default now(),
+
+  constraint makeup_hours_periods_ok check (periods > 0)
+);
+create index if not exists makeup_hours_student_idx on makeup_hours(student_id);
+create index if not exists makeup_hours_subject_idx on makeup_hours(subject_id);
+
+alter table makeup_hours enable row level security;
+drop policy if exists makeup_hours_select on makeup_hours;
+create policy makeup_hours_select on makeup_hours for select using (auth.role() = 'authenticated');
+drop policy if exists makeup_hours_insert on makeup_hours;
+create policy makeup_hours_insert on makeup_hours for insert with check (can_edit_subject(subject_id));
+drop policy if exists makeup_hours_delete on makeup_hours;
+create policy makeup_hours_delete on makeup_hours for delete using (can_edit_subject(subject_id));
