@@ -64,6 +64,23 @@ export function percentToGrade(p) {
   return 0;
 }
 
+// นับจำนวนคาบที่ขาดสะสมจริงของนักเรียน 1 คน (ถ่วงน้ำหนักแบบเดียวกับเช็ค มส.: ขาด = เต็ม 1,
+// ลาป่วย/ลากิจ = ครึ่งเดียว, มา/มาสาย = ไม่นับ) จาก session ที่เช็คชื่อไปแล้วเท่านั้น — ไม่ใช่
+// % ของคาบทั้งเทอม เพราะถ้าเทียบเป็น % ตั้งแต่ต้นเทอม (ที่เช็คชื่อไปแค่ไม่กี่ครั้ง) ตัวเลขจะ
+// เพี้ยนสูงเกินจริง ทำให้ต้นเทอมติด มส. ง่ายเกินไปทั้งที่ยังเหลือเวลาทั้งเทอมให้แก้ตัวอีกเยอะ
+// (บั๊กที่ผู้ใช้เจอจริงตอนเปิดเทอมใหม่ — ยืนยันแก้แล้ว 2026-07)
+export function computeMissedPeriods(studentId, sessionsArr) {
+  let missed = 0;
+  for (const sess of sessionsArr) {
+    const rec = (sess.attendance_records || []).find(r => r.student_id === studentId);
+    if (!rec) continue; // ยังไม่มีบันทึกของคนนี้ในครั้งนี้ ข้ามไป ไม่นับ
+    if (rec.status === "ขาด") missed += sess.periods_covered;
+    else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") missed += sess.periods_covered * 0.5;
+    // 'มา'/'มาสาย' ไม่นับ (ไม่ขาด)
+  }
+  return missed;
+}
+
 // โหลดข้อมูลเต็มของวิชา 1 ตัว (โครงสร้างคะแนน + ร. + เช็คชื่อ + ชั่วโมงชดเชย) — ใช้ได้ทั้งวิชาพื้นฐานเดี่ยว
 // และวิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ
 export async function loadSubjectData(subjectId) {
@@ -136,30 +153,28 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 
   // 2) เช็ค มส. — ใช้ทั้งประถมและมัธยม (ยืนยันกับผู้ใช้แล้ว) ต้องมีทั้ง total_periods
   //    กับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้ง ไม่งั้นข้ามไปคิดเกรดตามปกติ (ยัง เช็ค มส. ไม่ได้)
-  // มส. มี 2 ระดับ ตาม % เวลาเรียนดิบ (ก่อนหักชั่วโมงชดเชย) — ยืนยันกับผู้ใช้แล้ว:
-  //   >= 60% และ < 80%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชยดันให้ถึง 80% ได้
-  //   <  60%             → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย (ห้ามเด็ดขาด)
+  // มส. มี 2 ระดับ ตาม "จำนวนคาบขาดสะสมจริง" เทียบกับเพดานคาบที่ขาดได้สูงสุด (ไม่ใช่ % ของคาบ
+  // ทั้งเทอมแบบเดิม — เปลี่ยนเพราะเทียบ % ตั้งแต่ต้นเทอมทำให้ติด มส. ง่ายเกินจริง ยืนยันแล้ว
+  // 2026-07): เพดานคำนวณจาก total_periods ทั้งเทอมเสมอ (ไม่ใช่คาบที่เช็คไปแล้ว) เพราะงั้นต้น
+  // เทอมที่ยังเช็คไม่กี่ครั้ง คาบขาดสะสมจะยังน้อยกว่าเพดานเยอะ ไม่ติด มส. ง่ายๆ
+  //   ขาดสะสม > 20% ของคาบทั้งเทอม และ <= 40%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชย
+  //     ลบยอดขาดสุทธิให้ไม่เกิน 20% ได้
+  //   ขาดสะสม > 40% ของคาบทั้งเทอม             → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
   if (subj.total_periods && sessionsArr.length > 0) {
-    let rawAttended = 0;
-    for (const sess of sessionsArr) {
-      const rec = (sess.attendance_records || []).find(r => r.student_id === studentId);
-      if (!rec) continue; // ยังไม่มีบันทึกของคนนี้ในครั้งนี้ ข้ามไป ไม่นับ
-      if (rec.status === "มา" || rec.status === "มาสาย") rawAttended += sess.periods_covered;
-      else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") rawAttended += sess.periods_covered * 0.5;
-      // 'ขาด' ไม่นับ (น้ำหนัก 0)
-    }
-    const rawPercentAttend = (rawAttended / subj.total_periods) * 100;
+    const rawMissed = computeMissedPeriods(studentId, sessionsArr);
+    const maxMissedRetake = subj.total_periods * 0.40;
+    const maxMissedMakeup = subj.total_periods * 0.20;
 
-    if (rawPercentAttend < 60) {
-      // ต่ำกว่า 60% ดิบๆ — ชดเชยช่วยไม่ได้แล้ว ต้องเรียนซ้ำรายวิชา (ไม่บวก makeupTotal เข้าไปเลย)
-      return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "retake", percentAttend: rawPercentAttend } };
+    if (rawMissed > maxMissedRetake) {
+      // ขาดเกินเพดานเรียนซ้ำแล้ว — ชดเชยช่วยไม่ได้แล้ว ต้องเรียนซ้ำรายวิชา (ไม่หัก makeupTotal เข้าไปเลย)
+      return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake } };
     }
-    if (rawPercentAttend < 80) {
-      const percentAttend = ((rawAttended + makeupTotal) / subj.total_periods) * 100;
-      if (percentAttend < 80) {
-        return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "makeup", percentAttend, makeupTotal } };
+    if (rawMissed > maxMissedMakeup) {
+      const netMissed = Math.max(0, rawMissed - makeupTotal);
+      if (netMissed > maxMissedMakeup) {
+        return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal } };
       }
-      // ชดเชยจนครบ 80% แล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
+      // ชดเชยจนขาดสุทธิไม่เกินเพดานแล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
     }
   }
 
