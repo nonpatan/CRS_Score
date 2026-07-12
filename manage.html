@@ -143,6 +143,7 @@
       <a href="index.html">กรอกคะแนน</a>
       <a href="attendance.html">เช็คชื่อ</a>
       <a href="summary.html">สรุปคะแนน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
   </header>
 
@@ -189,6 +190,9 @@
 
   <!-- ฟอร์มข้อมูลวิชา (โผล่เมื่อเลือกวิชา หรือกดสร้างใหม่) -->
   <div class="card" id="subject-form" style="display:none">
+    <div id="readonly-banner" style="display:none; background:var(--danger-soft); color:var(--danger); padding:8px 12px; border-radius:8px; margin-bottom:14px; font-size:13px;">
+      คุณไม่ใช่เจ้าของวิชานี้ — ดูได้อย่างเดียว แก้ไข/ลบไม่ได้ (ให้ admin ตั้งเป็นเจ้าของก่อน)
+    </div>
     <div class="section-title" id="subject-form-title">ข้อมูลวิชา</div>
     <div class="field">
       <label for="f-type">ประเภทวิชา</label>
@@ -246,6 +250,11 @@
     <div class="field" id="field-teacher">
       <label for="f-teacher">ครูผู้สอน</label>
       <input type="text" id="f-teacher" placeholder="ชื่อหรืออีเมลครู">
+    </div>
+    <div class="field" id="field-owner" style="display:none">
+      <label for="f-owner">เจ้าของวิชา (แก้/ลบวิชานี้ได้)</label>
+      <select id="f-owner"></select>
+      <div class="field-note">เห็นเฉพาะ admin — ใช้กำหนดว่าครูบัญชีไหนแก้ไข/ลบวิชานี้ได้</div>
     </div>
     <div class="field" id="field-periods">
       <label for="f-periods">จำนวนคาบเรียนทั้งเทอม</label>
@@ -314,15 +323,16 @@
 </div>
 
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+import { sb, requireAuth, signOut, getProfile } from "./supabase-client.js";
 
-// ============================================================
-// ตั้งค่า Supabase — โปรเจกต์เดียวกับหน้าอื่น
-// ============================================================
-const SUPABASE_URL = "https://cbfblvsasamxuwgcpmtj.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_EEGLPPMa3fIX1aRR6GA3Xw_mF4mh5X0";
+// ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
+const session = await requireAuth();
+if (!session) throw new Error("redirecting to login");
+document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
 
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const myProfile = await getProfile(session.user.id);
+const isAdminUser = !!myProfile && myProfile.role === "admin";
+const myUserId = session.user.id;
 
 // อ้างอิง element ที่ใช้บ่อย
 const elFilterGrade  = document.getElementById("filter-grade");
@@ -352,8 +362,45 @@ const fYear = document.getElementById("f-year");
 const fTerm = document.getElementById("f-term");
 const fTeacher = document.getElementById("f-teacher");
 const fPeriods = document.getElementById("f-periods");
+const fOwner = document.getElementById("f-owner");
 const fieldCredits = document.getElementById("field-credits");
 const fieldTerm = document.getElementById("field-term");
+const fieldOwner = document.getElementById("field-owner");
+
+// admin เท่านั้นที่เห็น/แก้ "เจ้าของวิชา" ได้ — โหลดรายชื่อครูทั้งหมดไว้เติม dropdown
+let allProfiles = [];
+if (isAdminUser) {
+  const { data } = await sb.from("profiles").select("*").order("email");
+  allProfiles = data || [];
+  fieldOwner.style.display = "block";
+  fOwner.innerHTML = "<option value=''>— ไม่มีเจ้าของ (admin แก้ได้อย่างเดียว) —</option>";
+  for (const p of allProfiles) {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = (p.name || p.email || p.id) + (p.role === "admin" ? " (admin)" : "");
+    fOwner.appendChild(o);
+  }
+}
+
+// เช็คว่าคนที่ล็อกอินอยู่ตอนนี้ แก้ไข/ลบวิชาที่กำลังเปิดอยู่ได้ไหม (admin หรือเจ้าของวิชา)
+function canEditCurrentSubject() {
+  if (isAdminUser) return true;
+  if (!currentSubject) return true; // ยังไม่ได้เลือกวิชา (โหมดสร้างใหม่) แก้ได้แน่นอน
+  return currentSubject.owner_id === myUserId;
+}
+
+// ซ่อน/ปิดปุ่มแก้ไขทั้งหมด ถ้าไม่ใช่เจ้าของวิชานี้ (RLS เป็นตัวกันจริงอยู่แล้ว
+// อันนี้แค่กันสับสน ไม่ให้กดแล้วเจอ error "บันทึกไม่สำเร็จ" เฉยๆ)
+function applyEditPermissionUI() {
+  const canEdit = canEditCurrentSubject();
+  document.getElementById("readonly-banner").style.display = canEdit ? "none" : "block";
+  document.getElementById("btn-save-subject").style.display = canEdit ? "block" : "none";
+  elDelSubject.style.display = (canEdit && currentSubject) ? "block" : "none";
+  document.getElementById("btn-add-unit-vicha").style.display = canEdit ? "inline-block" : "none";
+  document.getElementById("btn-add-unit-competency").style.display = canEdit ? "inline-block" : "none";
+  document.getElementById("btn-add-member").style.display = canEdit ? "inline-block" : "none";
+  elSelAddMember.style.display = canEdit ? "block" : "none";
+}
 
 // ตัวเลือกชั้นเรียนตามระดับ
 const GRADE_OPTIONS = {
@@ -482,10 +529,10 @@ elSubject.addEventListener("change", async () => {
   if (error) { showToast("โหลดวิชาไม่สำเร็จ", false); return; }
   currentSubject = subj;
   fillSubjectForm(subj);
-  elDelSubject.style.display = "block";
   elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
   elEmptyHint.style.display = "none";
   updateTypeDependentUI();
+  applyEditPermissionUI();
   if (subj.subject_type === "พื้นฐาน") {
     await loadStructure();
     elStructure.style.display = "block";
@@ -506,10 +553,10 @@ document.getElementById("btn-new-subject").addEventListener("click", () => {
   if (elFilterTerm.value) fTerm.value = elFilterTerm.value;
   elSubjectForm.style.display = "block";
   elSubjectFormTitle.textContent = "สร้างวิชาใหม่";
-  elDelSubject.style.display = "none";
   elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วย/วิชาย่อยได้
   elMembersCard.style.display = "none";
   elEmptyHint.style.display = "none";
+  applyEditPermissionUI();
   fName.focus();
 });
 
@@ -527,6 +574,7 @@ function fillSubjectForm(subj) {
   fTerm.value = subj && subj.term ? subj.term : "1";
   fTeacher.value = subj && subj.teacher ? subj.teacher : "";
   fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
+  if (isAdminUser) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
   const isIntegratedSubj = subj && subj.subject_type === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegratedSubj ? "none" : "block";
   document.getElementById("field-teacher").style.display = isIntegratedSubj ? "none" : "block";
@@ -571,6 +619,10 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     teacher: isIntegrated ? null : (fTeacher.value.trim() || null),
     total_periods: periods
   };
+  // เจ้าของวิชา: admin เลือกเองได้ (รวมถึงเปลี่ยนเจ้าของทีหลัง) ส่วนครูทั่วไปตอนสร้างวิชาใหม่
+  // จะได้เป็นเจ้าของอัตโนมัติ — ตอนแก้ไขวิชาเดิมไม่ต้องส่ง owner_id ไปทับ (ไม่มีสิทธิ์เปลี่ยนอยู่แล้ว)
+  if (isAdminUser) payload.owner_id = fOwner.value || null;
+  else if (!currentSubject) payload.owner_id = myUserId;
 
   if (currentSubject) {
     const { error } = await sb.from("subjects").update(payload).eq("id", currentSubject.id);
@@ -579,6 +631,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     await loadSubjects(currentSubject.id);
     currentSubject = { ...currentSubject, ...payload };
     updateTypeDependentUI();
+    applyEditPermissionUI();
   } else {
     const { data, error } = await sb.from("subjects").insert(payload).select().single();
     if (error) { showToast("สร้างวิชาไม่สำเร็จ: " + error.message, false); return; }
@@ -587,8 +640,8 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     await loadSubjects(data.id);
     elSubject.value = data.id;
     elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
-    elDelSubject.style.display = "block";
     updateTypeDependentUI();
+    applyEditPermissionUI();
     if (!isIntegrated) {
       await loadStructure();
       elStructure.style.display = "block";
@@ -679,6 +732,7 @@ function renderStructure() {
 }
 
 function renderUnit(unit) {
+  const canEdit = canEditCurrentSubject();
   const block = document.createElement("div");
   block.className = "unit-block";
 
@@ -687,8 +741,10 @@ function renderUnit(unit) {
   head.innerHTML =
     "<span class='title'>" + escapeHtml(unit.name) + "</span>" +
     "<span class='cap'>เต็ม " + unit.max_score + "</span>";
-  head.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("unit", "edit", unit)));
-  head.appendChild(makeIconBtn("🗑", "del", () => deleteUnit(unit)));
+  if (canEdit) {
+    head.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("unit", "edit", unit)));
+    head.appendChild(makeIconBtn("🗑", "del", () => deleteUnit(unit)));
+  }
   block.appendChild(head);
 
   for (const ind of (unit.indicators || [])) {
@@ -697,8 +753,10 @@ function renderUnit(unit) {
     row.innerHTML =
       "<span class='title'>" + escapeHtml(ind.name) + "</span>" +
       "<span class='cap'>เต็ม " + ind.max_score + "</span>";
-    row.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("indicator", "edit", ind)));
-    row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
+    if (canEdit) {
+      row.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("indicator", "edit", ind)));
+      row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
+    }
     block.appendChild(row);
 
     for (const coll of (ind.collections || [])) {
@@ -707,21 +765,27 @@ function renderUnit(unit) {
       crow.innerHTML =
         "<span class='title'>ครั้งที่ " + coll.seq + "</span>" +
         "<span class='cap'>เต็ม " + coll.max_score + "</span>";
-      crow.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("collection", "edit", coll)));
-      crow.appendChild(makeIconBtn("🗑", "del", () => deleteCollection(coll)));
+      if (canEdit) {
+        crow.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("collection", "edit", coll)));
+        crow.appendChild(makeIconBtn("🗑", "del", () => deleteCollection(coll)));
+      }
       block.appendChild(crow);
     }
 
-    const addColl = document.createElement("div");
-    addColl.className = "add-row collection";
-    addColl.appendChild(makeAddBtn("+ เพิ่มครั้งที่", () => openNodeModal("collection", "add", ind)));
-    block.appendChild(addColl);
+    if (canEdit) {
+      const addColl = document.createElement("div");
+      addColl.className = "add-row collection";
+      addColl.appendChild(makeAddBtn("+ เพิ่มครั้งที่", () => openNodeModal("collection", "add", ind)));
+      block.appendChild(addColl);
+    }
   }
 
-  const addInd = document.createElement("div");
-  addInd.className = "add-row indicator";
-  addInd.appendChild(makeAddBtn("+ เพิ่มหน่วยย่อย", () => openNodeModal("indicator", "add", unit)));
-  block.appendChild(addInd);
+  if (canEdit) {
+    const addInd = document.createElement("div");
+    addInd.className = "add-row indicator";
+    addInd.appendChild(makeAddBtn("+ เพิ่มหน่วยย่อย", () => openNodeModal("indicator", "add", unit)));
+    block.appendChild(addInd);
+  }
 
   return block;
 }
@@ -890,6 +954,7 @@ function renderMembers() {
   if (members.length === 0) {
     elMemberList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีวิชาพื้นฐานในวิชาบูรณาการนี้</div>";
   }
+  const canEdit = canEditCurrentSubject();
   for (const m of members) {
     const row = document.createElement("div");
     row.className = "member-row";
@@ -899,8 +964,7 @@ function renderMembers() {
       "<span class='title'>" + escapeHtml(m.member.name) +
       " <span class='hint'>(" + m.member.level + (m.member.grade_level ? " " + m.member.grade_level : "") + ")</span></span>" +
       "<span class='weight" + (weight ? "" : " zero") + "'>" + weightText + "</span>";
-    const delBtn = makeIconBtn("🗑", "del", () => removeMember(m));
-    row.appendChild(delBtn);
+    if (canEdit) row.appendChild(makeIconBtn("🗑", "del", () => removeMember(m)));
     elMemberList.appendChild(row);
   }
 

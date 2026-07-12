@@ -355,3 +355,265 @@ create index if not exists integration_members_integrated_idx on integration_mem
 create index if not exists integration_members_member_idx on integration_members(member_subject_id);
 
 alter table integration_members disable row level security;
+
+
+-- ============================================================
+-- ส่วน Auth + RLS  —  เฟส 1: โครงสร้าง (ปลอดภัย รันได้เลย ไม่กระทบเว็บที่ใช้อยู่)
+-- ------------------------------------------------------------
+-- เฟสนี้แค่เพิ่มตาราง/ฟังก์ชัน/นโยบายไว้เฉยๆ ยังไม่เปิด RLS จริง (ตารางทุกตัว
+-- ยัง disable row level security เหมือนเดิม) เว็บปัจจุบันจะยังทำงานปกติทุกอย่าง
+-- ห้ามรันเฟส 2 (ท้ายไฟล์) จนกว่าจะทดสอบหน้า login.html ในเครื่องผ่านหมดแล้ว
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 11) โปรไฟล์ผู้ใช้ (ผูกกับ auth.users ของ Supabase) — เก็บ role
+-- ------------------------------------------------------------
+create table if not exists profiles (
+  id          uuid primary key references auth.users(id) on delete cascade,
+  email       text,
+  name        text,
+  role        text not null default 'teacher',
+  created_at  timestamptz default now(),
+
+  constraint profiles_role_ok check (role in ('admin', 'teacher'))
+);
+
+-- สร้างโปรไฟล์อัตโนมัติ (role='teacher' เป็นค่าเริ่มต้นเสมอ) ทุกครั้งที่ Admin เพิ่มบัญชี
+-- ใหม่ผ่าน Supabase Dashboard (Authentication > Add user) — เลื่อน role เป็น 'admin' เอง
+-- ทีหลังผ่าน SQL Editor: update profiles set role='admin' where email='...'
+create or replace function handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, role)
+  values (new.id, new.email, 'teacher')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_user();
+
+-- เจ้าของวิชา (ครูที่สร้าง/รับผิดชอบวิชานั้น) — nullable เพราะวิชาเก่ายังไม่มีเจ้าของ
+-- (แก้ไขได้เฉพาะ admin จนกว่าจะมีคนตั้งเจ้าของให้ผ่าน manage.html)
+alter table subjects add column if not exists owner_id uuid references auth.users(id);
+
+-- ------------------------------------------------------------
+-- ฟังก์ชันช่วยเช็คสิทธิ์ (security definer เพื่อไม่ให้ชนกับ RLS ของตารางที่มันอ่านเอง)
+-- ------------------------------------------------------------
+create or replace function is_admin()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from profiles where id = auth.uid() and role = 'admin'
+  );
+$$;
+
+create or replace function can_edit_subject(p_subject_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select is_admin() or exists (
+    select 1 from subjects where id = p_subject_id and owner_id = auth.uid()
+  );
+$$;
+
+create or replace function can_edit_unit(p_unit_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from units u where u.id = p_unit_id and can_edit_subject(u.subject_id)
+  );
+$$;
+
+create or replace function can_edit_indicator(p_indicator_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from indicators i join units u on u.id = i.unit_id
+    where i.id = p_indicator_id and can_edit_subject(u.subject_id)
+  );
+$$;
+
+create or replace function can_edit_collection(p_collection_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from collections c
+    join indicators i on i.id = c.indicator_id
+    join units u on u.id = i.unit_id
+    where c.id = p_collection_id and can_edit_subject(u.subject_id)
+  );
+$$;
+
+create or replace function can_edit_session(p_session_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from attendance_sessions s where s.id = p_session_id and can_edit_subject(s.subject_id)
+  );
+$$;
+
+-- ------------------------------------------------------------
+-- นโยบาย RLS ของทุกตาราง (สร้างไว้ล่วงหน้า แต่ยังไม่มีผลจนกว่าจะ enable row level
+-- security ในเฟส 2 ท้ายไฟล์) — กติกา: authenticated อ่านได้หมด, แก้ไข/ลบ/เพิ่ม
+-- ได้เฉพาะ admin หรือเจ้าของวิชานั้น (owner_id) ยกเว้น students ที่ admin เท่านั้น
+-- ------------------------------------------------------------
+drop policy if exists profiles_select on profiles;
+create policy profiles_select on profiles for select using (auth.role() = 'authenticated');
+drop policy if exists profiles_update on profiles;
+create policy profiles_update on profiles for update using (is_admin()) with check (is_admin());
+
+drop policy if exists subjects_select on subjects;
+create policy subjects_select on subjects for select using (auth.role() = 'authenticated');
+drop policy if exists subjects_insert on subjects;
+create policy subjects_insert on subjects for insert with check (is_admin() or owner_id = auth.uid());
+drop policy if exists subjects_update on subjects;
+create policy subjects_update on subjects for update using (is_admin() or owner_id = auth.uid()) with check (is_admin() or owner_id = auth.uid());
+drop policy if exists subjects_delete on subjects;
+create policy subjects_delete on subjects for delete using (is_admin() or owner_id = auth.uid());
+
+drop policy if exists units_select on units;
+create policy units_select on units for select using (auth.role() = 'authenticated');
+drop policy if exists units_insert on units;
+create policy units_insert on units for insert with check (can_edit_subject(subject_id));
+drop policy if exists units_update on units;
+create policy units_update on units for update using (can_edit_subject(subject_id)) with check (can_edit_subject(subject_id));
+drop policy if exists units_delete on units;
+create policy units_delete on units for delete using (can_edit_subject(subject_id));
+
+drop policy if exists indicators_select on indicators;
+create policy indicators_select on indicators for select using (auth.role() = 'authenticated');
+drop policy if exists indicators_insert on indicators;
+create policy indicators_insert on indicators for insert with check (can_edit_unit(unit_id));
+drop policy if exists indicators_update on indicators;
+create policy indicators_update on indicators for update using (can_edit_unit(unit_id)) with check (can_edit_unit(unit_id));
+drop policy if exists indicators_delete on indicators;
+create policy indicators_delete on indicators for delete using (can_edit_unit(unit_id));
+
+drop policy if exists collections_select on collections;
+create policy collections_select on collections for select using (auth.role() = 'authenticated');
+drop policy if exists collections_insert on collections;
+create policy collections_insert on collections for insert with check (can_edit_indicator(indicator_id));
+drop policy if exists collections_update on collections;
+create policy collections_update on collections for update using (can_edit_indicator(indicator_id)) with check (can_edit_indicator(indicator_id));
+drop policy if exists collections_delete on collections;
+create policy collections_delete on collections for delete using (can_edit_indicator(indicator_id));
+
+drop policy if exists scores_select on scores;
+create policy scores_select on scores for select using (auth.role() = 'authenticated');
+drop policy if exists scores_insert on scores;
+create policy scores_insert on scores for insert with check (can_edit_collection(collection_id));
+drop policy if exists scores_update on scores;
+create policy scores_update on scores for update using (can_edit_collection(collection_id)) with check (can_edit_collection(collection_id));
+drop policy if exists scores_delete on scores;
+create policy scores_delete on scores for delete using (can_edit_collection(collection_id));
+
+drop policy if exists attendance_sessions_select on attendance_sessions;
+create policy attendance_sessions_select on attendance_sessions for select using (auth.role() = 'authenticated');
+drop policy if exists attendance_sessions_insert on attendance_sessions;
+create policy attendance_sessions_insert on attendance_sessions for insert with check (can_edit_subject(subject_id));
+drop policy if exists attendance_sessions_update on attendance_sessions;
+create policy attendance_sessions_update on attendance_sessions for update using (can_edit_subject(subject_id)) with check (can_edit_subject(subject_id));
+drop policy if exists attendance_sessions_delete on attendance_sessions;
+create policy attendance_sessions_delete on attendance_sessions for delete using (can_edit_subject(subject_id));
+
+drop policy if exists attendance_records_select on attendance_records;
+create policy attendance_records_select on attendance_records for select using (auth.role() = 'authenticated');
+drop policy if exists attendance_records_insert on attendance_records;
+create policy attendance_records_insert on attendance_records for insert with check (can_edit_session(session_id));
+drop policy if exists attendance_records_update on attendance_records;
+create policy attendance_records_update on attendance_records for update using (can_edit_session(session_id)) with check (can_edit_session(session_id));
+drop policy if exists attendance_records_delete on attendance_records;
+create policy attendance_records_delete on attendance_records for delete using (can_edit_session(session_id));
+
+drop policy if exists remarks_select on remarks;
+create policy remarks_select on remarks for select using (auth.role() = 'authenticated');
+drop policy if exists remarks_insert on remarks;
+create policy remarks_insert on remarks for insert with check (can_edit_subject(subject_id));
+drop policy if exists remarks_update on remarks;
+create policy remarks_update on remarks for update using (can_edit_subject(subject_id)) with check (can_edit_subject(subject_id));
+drop policy if exists remarks_delete on remarks;
+create policy remarks_delete on remarks for delete using (can_edit_subject(subject_id));
+
+drop policy if exists integration_members_select on integration_members;
+create policy integration_members_select on integration_members for select using (auth.role() = 'authenticated');
+drop policy if exists integration_members_insert on integration_members;
+create policy integration_members_insert on integration_members for insert with check (can_edit_subject(integrated_subject_id));
+drop policy if exists integration_members_delete on integration_members;
+create policy integration_members_delete on integration_members for delete using (can_edit_subject(integrated_subject_id));
+
+-- นักเรียน: ยังไม่มีหน้าจัดการนักเรียน (ดู CLAUDE.md) เลยให้แก้ได้เฉพาะ admin ไปก่อน
+-- อ่านได้ทุกคนที่ล็อกอินแล้ว (ทุกวิชาใช้รายชื่อร่วมกัน)
+drop policy if exists students_select on students;
+create policy students_select on students for select using (auth.role() = 'authenticated');
+drop policy if exists students_write on students;
+create policy students_write on students for all using (is_admin()) with check (is_admin());
+
+
+-- ============================================================
+-- ส่วน Auth + RLS  —  เฟส 2: เปิดใช้งานจริง (⚠️ ห้ามรันจนกว่าจะพร้อม)
+-- ------------------------------------------------------------
+-- รันบล็อกนี้แล้ว เว็บทุกหน้าจะ "ต้องล็อกอินก่อนถึงจะใช้ได้ทันที" (อ่าน/เขียนทั้งหมด
+-- ต้องผ่าน auth) ห้ามรันจนกว่าจะเช็คครบทุกข้อนี้ก่อน:
+--   1. login.html + สคริปต์เช็คล็อกอินกลาง (auth-guard.js) ขึ้น GitHub Pages แล้ว
+--   2. สร้างบัญชี Admin ตัวเองผ่าน Supabase Dashboard (Authentication > Add user)
+--      แล้วทดสอบล็อกอินที่ login.html ผ่านจริงอย่างน้อย 1 รอบ
+--   3. รัน SQL ตั้ง role ตัวเองเป็น admin แล้ว:
+--        update profiles set role = 'admin' where email = 'อีเมลที่ใช้สมัคร';
+-- ถ้ารันบล็อกนี้ไปแล้วเว็บพัง ให้รัน "alter table X disable row level security;"
+-- ทีละตาราง (รายชื่อตารางอยู่ท้ายสุดของไฟล์นี้) เพื่อปิด RLS กลับเป็นเหมือนเดิมชั่วคราว
+-- ============================================================
+alter table profiles              enable row level security;
+alter table subjects              enable row level security;
+alter table units                 enable row level security;
+alter table indicators            enable row level security;
+alter table collections           enable row level security;
+alter table scores                enable row level security;
+alter table students              enable row level security;
+alter table attendance_sessions   enable row level security;
+alter table attendance_records    enable row level security;
+alter table remarks               enable row level security;
+alter table integration_members   enable row level security;
+
+-- ทางฉุกเฉิน (rollback): copy 11 บรรทัดนี้ไปรันแทน ถ้าต้องปิด RLS กลับเป็นเดิมทั้งหมด
+-- alter table profiles              disable row level security;
+-- alter table subjects              disable row level security;
+-- alter table units                 disable row level security;
+-- alter table indicators            disable row level security;
+-- alter table collections           disable row level security;
+-- alter table scores                disable row level security;
+-- alter table students              disable row level security;
+-- alter table attendance_sessions   disable row level security;
+-- alter table attendance_records    disable row level security;
+-- alter table remarks               disable row level security;
+-- alter table integration_members   disable row level security;
