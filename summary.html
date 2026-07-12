@@ -411,7 +411,9 @@ function computeIntegratedStudent(studentId) {
   for (const md of memberDataList) {
     const r = computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions);
     const weight = md.subject.total_periods || 0;
-    memberResults.push({ subject: md.subject, result: r.result, weight });
+    // เก็บสมรรถนะหลักของวิชาย่อยนี้ไว้ด้วย (ถ้ามี) — แสดงแยกตามวิชาที่กรอกไว้จริง ไม่ถัวเฉลี่ยรวม
+    // เพราะสมรรถนะหลักมักกรอกแค่บางวิชา ถัวเฉลี่ยรวมกับวิชาที่ไม่มีข้อมูลจะทำให้คะแนนต่ำลงผิดๆ
+    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits });
     if (r.result.type === "มส.") hasMs = true;
     else if (r.result.type === "ร.") hasR = true;
     else { weightedSum += r.result.percentScore * weight; weightSum += weight; }
@@ -479,6 +481,16 @@ function renderIntegratedCard(stu, ir) {
       resultBadgeLabel(m.result) + "</span></div>";
   }).join("");
 
+  // สมรรถนะหลัก: แสดงแยกตามวิชาย่อยที่มีข้อมูลจริง (ไม่ถัวเฉลี่ยรวม เพราะมักกรอกแค่บางวิชา)
+  const membersWithComp = ir.memberResults.filter(m => m.competencyUnits.length > 0);
+  const competencySection = membersWithComp.map(m => {
+    const grid = m.competencyUnits.map(u =>
+      "<div class='comp-item'>" + escapeHtml(u.name) + "<br><span class='val'>" + u.scaled.toFixed(1) + " / " + u.max + "</span></div>"
+    ).join("");
+    return "<div class='hint' style='margin:8px 0 4px'>" + escapeHtml(m.subject.name) + "</div>" +
+      "<div class='comp-grid'>" + grid + "</div>";
+  }).join("");
+
   let overallHtml;
   if (ir.overall.type === "มส.") {
     overallHtml =
@@ -505,6 +517,10 @@ function renderIntegratedCard(stu, ir) {
       "<div class='section'>" +
         "<div class='section-title'>วิชาพื้นฐานที่ประกอบกัน</div>" +
         (memberRows || "<div class='hint'>ไม่มีวิชาย่อย</div>") +
+      "</div>" +
+      "<div class='section'>" +
+        "<div class='section-title'>สมรรถนะหลัก 6 ด้าน (ตามวิชาย่อยที่กรอกไว้)</div>" +
+        (competencySection || "<div class='hint'>ยังไม่มีวิชาย่อยไหนกรอกสมรรถนะหลักไว้</div>") +
       "</div>" +
       "<div class='section'>" + overallHtml + "</div>" +
     "</div>"
