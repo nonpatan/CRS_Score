@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เข้าสู่ระบบ — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+    --danger-soft: #fceaea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .wrap { max-width: 380px; width: 100%; }
+  header { text-align: center; margin-bottom: 20px; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  input[type="email"], input[type="password"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+  }
+  input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .field { margin-bottom: 14px; }
+
+  button.primary {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--teal);
+    color: var(--white);
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+
+  .toast {
+    text-align: center;
+    font-size: 14px;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 12px;
+    display: none;
+  }
+  .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
+  .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
+
+  .hint { color: var(--muted); font-size: 13px; text-align: center; margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>เข้าสู่ระบบ</h1>
+    <p>ระบบเก็บคะแนนหลักสูตรฐานสมรรถนะ</p>
+  </header>
+
+  <div class="card">
+    <div class="field">
+      <label for="f-email">อีเมล</label>
+      <input type="email" id="f-email" autocomplete="username" placeholder="ครู@โรงเรียน.ac.th">
+    </div>
+    <div class="field">
+      <label for="f-password">รหัสผ่าน</label>
+      <input type="password" id="f-password" autocomplete="current-password">
+    </div>
+    <button class="primary" id="btn-login">เข้าสู่ระบบ</button>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <p class="hint">ยังไม่มีบัญชี? ติดต่อผู้ดูแลระบบให้สร้างบัญชีให้ก่อน</p>
+</div>
+
+<script type="module">
+import { sb } from "./supabase-client.js";
+
+const fEmail = document.getElementById("f-email");
+const fPassword = document.getElementById("f-password");
+const btnLogin = document.getElementById("btn-login");
+const elToast = document.getElementById("toast");
+
+function showToast(msg, ok) {
+  elToast.textContent = msg;
+  elToast.className = "toast " + (ok ? "ok" : "err");
+}
+
+// ถ้าล็อกอินอยู่แล้ว ข้ามหน้านี้ไปเลย
+const { data: { session } } = await sb.auth.getSession();
+if (session) {
+  const params = new URLSearchParams(location.search);
+  location.href = params.get("next") || "index.html";
+}
+
+async function doLogin() {
+  const email = fEmail.value.trim();
+  const password = fPassword.value;
+  if (!email || !password) { showToast("กรอกอีเมลและรหัสผ่านให้ครบ", false); return; }
+
+  btnLogin.disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  btnLogin.disabled = false;
+
+  if (error) { showToast("เข้าสู่ระบบไม่สำเร็จ: " + error.message, false); return; }
+
+  showToast("เข้าสู่ระบบสำเร็จ กำลังพาไป...", true);
+  const params = new URLSearchParams(location.search);
+  location.href = params.get("next") || "index.html";
+}
+
+btnLogin.addEventListener("click", doLogin);
+fPassword.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+</script>
+</body>
+</html>
