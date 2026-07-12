@@ -475,6 +475,26 @@ function renderMakeupList() {
   }
 }
 
+// เช็ค % เวลาเรียนดิบ (ก่อนชดเชย) ของนักเรียนคนหนึ่งในวิชานี้ — คืน null ถ้าเช็คไม่ได้
+// (ยังไม่ตั้งจำนวนคาบทั้งเทอม หรือยังไม่เคยเช็คชื่อเลย)
+async function getRawAttendPercent(subjectId, studentId) {
+  const { data: subj } = await sb.from("subjects").select("total_periods").eq("id", subjectId).single();
+  if (!subj || !subj.total_periods) return null;
+  const { data: sessionsData } = await sb
+    .from("attendance_sessions")
+    .select("periods_covered, attendance_records(status, student_id)")
+    .eq("subject_id", subjectId);
+  if (!sessionsData || sessionsData.length === 0) return null;
+  let attended = 0;
+  for (const sess of sessionsData) {
+    const rec = (sess.attendance_records || []).find(r => r.student_id === studentId);
+    if (!rec) continue;
+    if (rec.status === "มา" || rec.status === "มาสาย") attended += sess.periods_covered;
+    else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") attended += sess.periods_covered * 0.5;
+  }
+  return (attended / subj.total_periods) * 100;
+}
+
 document.getElementById("btn-add-makeup").addEventListener("click", async () => {
   const studentId = elMakeupStudent.value;
   const periods = Number(document.getElementById("inp-makeup-periods").value);
@@ -482,6 +502,13 @@ document.getElementById("btn-add-makeup").addEventListener("click", async () => 
   if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
   if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
   if (!reason) { showToast("กรอกเหตุผล/รายละเอียดก่อน", false); return; }
+
+  // เวลาเรียนดิบต่ำกว่า 60% แล้ว = ต้องเรียนซ้ำรายวิชา ชดเชยชั่วโมงช่วยไม่ได้แล้ว (ยืนยันแล้ว)
+  const rawPercent = await getRawAttendPercent(currentSubjectId, studentId);
+  if (rawPercent !== null && rawPercent < 60) {
+    showToast("นักเรียนคนนี้เข้าเรียน " + rawPercent.toFixed(1) + "% (ต่ำกว่า 60%) ต้องเรียนซ้ำรายวิชา บันทึกชั่วโมงชดเชยไม่ได้แล้ว", false);
+    return;
+  }
 
   const { error } = await sb.from("makeup_hours").insert({
     subject_id: currentSubjectId, student_id: studentId, periods, reason

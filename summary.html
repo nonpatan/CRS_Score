@@ -387,20 +387,30 @@ function computeSubjectResult(studentId, subj, unitsTree, remarksArr, sessionsAr
 
   // 2) เช็ค มส. — ใช้ทั้งประถมและมัธยม (ยืนยันกับผู้ใช้แล้ว) ต้องมีทั้ง total_periods
   //    กับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้ง ไม่งั้นข้ามไปคิดเกรดตามปกติ (ยัง เช็ค มส. ไม่ได้)
+  // มส. มี 2 ระดับ ตาม % เวลาเรียนดิบ (ก่อนหักชั่วโมงชดเชย) — ยืนยันกับผู้ใช้แล้ว:
+  //   >= 60% และ < 80%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชยดันให้ถึง 80% ได้
+  //   <  60%             → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย (ห้ามเด็ดขาด)
   if (subj.total_periods && sessionsArr.length > 0) {
-    let attended = 0;
+    let rawAttended = 0;
     for (const sess of sessionsArr) {
       const rec = (sess.attendance_records || []).find(r => r.student_id === studentId);
       if (!rec) continue; // ยังไม่มีบันทึกของคนนี้ในครั้งนี้ ข้ามไป ไม่นับ
-      if (rec.status === "มา" || rec.status === "มาสาย") attended += sess.periods_covered;
-      else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") attended += sess.periods_covered * 0.5;
+      if (rec.status === "มา" || rec.status === "มาสาย") rawAttended += sess.periods_covered;
+      else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") rawAttended += sess.periods_covered * 0.5;
       // 'ขาด' ไม่นับ (น้ำหนัก 0)
     }
-    attended += makeupTotal;
+    const rawPercentAttend = (rawAttended / subj.total_periods) * 100;
 
-    const percentAttend = (attended / subj.total_periods) * 100;
-    if (percentAttend < 80) {
-      return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", percentAttend, makeupTotal } };
+    if (rawPercentAttend < 60) {
+      // ต่ำกว่า 60% ดิบๆ — ชดเชยช่วยไม่ได้แล้ว ต้องเรียนซ้ำรายวิชา (ไม่บวก makeupTotal เข้าไปเลย)
+      return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "retake", percentAttend: rawPercentAttend } };
+    }
+    if (rawPercentAttend < 80) {
+      const percentAttend = ((rawAttended + makeupTotal) / subj.total_periods) * 100;
+      if (percentAttend < 80) {
+        return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "makeup", percentAttend, makeupTotal } };
+      }
+      // ชดเชยจนครบ 80% แล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
     }
   }
 
@@ -558,10 +568,15 @@ function renderStudentCard(stu, r) {
       "<div class='result-line'><span>ผลการเรียน</span><span class='badge bad'>ร.</span></div>" +
       "<div class='result-note'>เหตุผล: " + r.result.reason + "</div>";
   } else if (r.result.type === "มส.") {
+    const isRetake = r.result.subtype === "retake";
     resultHtml =
       "<div class='result-line'><span>ผลการเรียน</span><span class='badge bad'>มส.</span></div>" +
-      "<div class='result-note'>เข้าเรียน " + r.result.percentAttend.toFixed(1) + "% (ต่ำกว่า 80%)" +
-      (r.result.makeupTotal > 0 ? " — รวมชดเชยแล้ว " + r.result.makeupTotal + " คาบ" : "") + "</div>";
+      "<div class='result-note'>เข้าเรียน " + r.result.percentAttend.toFixed(1) + "% (ต่ำกว่า 80%) — " +
+      (isRetake
+        ? "<b>ต้องเรียนซ้ำรายวิชา</b> (ต่ำกว่า 60% ชั่วโมงชดเชยช่วยไม่ได้แล้ว)"
+        : "เรียนเพิ่มเติมให้ครบเวลาได้ (60-80%)" +
+          (r.result.makeupTotal > 0 ? " — ชดเชยไปแล้ว " + r.result.makeupTotal + " คาบ ยังไม่พอ" : "")) +
+      "</div>";
   } else {
     const g = r.result.grade;
     const badgeClass = g >= 3 ? "good" : (g >= 1.5 ? "mid" : "bad");
