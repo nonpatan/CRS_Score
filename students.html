@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จัดการนักเรียน — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+    --danger-soft: #fceaea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
+  header .nav { font-size: 14px; margin: 0 0 16px; display: flex; gap: 16px; flex-wrap: wrap; }
+  header .nav a { color: var(--teal); text-decoration: none; font-weight: 500; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  select, input[type="text"], textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+  }
+  textarea { resize: vertical; min-height: 100px; font-family: monospace; font-size: 14px; }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field-note { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .row2 { display: flex; gap: 12px; }
+  .row2 > * { flex: 1; }
+
+  button {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--teal); color: var(--white); width: 100%; margin-top: 8px; }
+  button.ghost { background: var(--teal-soft); color: var(--teal); }
+  button.danger { background: var(--danger-soft); color: var(--danger); }
+  button.small { font-size: 13px; padding: 6px 10px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .section-title {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.03em; margin: 4px 0 10px;
+  }
+
+  .student-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .student-row:last-child { border-bottom: none; }
+  .student-row .info { flex: 1; min-width: 0; }
+  .student-row .name { font-weight: 500; }
+  .student-row .meta { color: var(--muted); font-size: 13px; }
+  .icon-btn {
+    background: none; border: none; cursor: pointer; font-size: 15px;
+    padding: 4px 6px; color: var(--muted); border-radius: 6px;
+  }
+  .icon-btn:hover { background: var(--bg); }
+  .icon-btn.del:hover { background: var(--danger-soft); color: var(--danger); }
+
+  table.preview { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  table.preview th, table.preview td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
+  table.preview th { background: var(--bg); }
+  table.preview tr.err td { background: var(--danger-soft); }
+
+  .toast {
+    position: sticky; bottom: 12px; text-align: center; font-size: 14px;
+    padding: 10px; border-radius: 8px; margin-top: 12px; display: none;
+  }
+  .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
+  .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
+
+  .hint { color: var(--muted); font-size: 14px; }
+  .readonly-note {
+    background: var(--amber-soft, #faf1dd); color: var(--amber, #93690f);
+    padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>จัดการนักเรียน</h1>
+    <p>เพิ่ม/แก้ไข/ลบนักเรียน ทีละคนหรือวางจาก Excel ทีละหลายคน</p>
+    <div class="nav">
+      <a href="index.html">กรอกคะแนน</a>
+      <a href="attendance.html">เช็คชื่อ</a>
+      <a href="summary.html">สรุปคะแนน</a>
+      <a href="manage.html">จัดการโครงสร้าง</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+  </header>
+
+  <div id="readonly-note" class="readonly-note" style="display:none">
+    คุณไม่ใช่ admin — ดูรายชื่อนักเรียนได้อย่างเดียว เพิ่ม/แก้/ลบไม่ได้
+  </div>
+
+  <!-- วางจาก Excel -->
+  <div class="card" id="import-card" style="display:none">
+    <div class="section-title">วางจาก Excel (เพิ่มทีละหลายคน)</div>
+    <div class="field-note" style="margin-bottom:10px">
+      คัดลอกจาก Excel มา 5 คอลัมน์เรียงตามนี้: <b>ชั้นปี, ห้อง, รหัสประจำตัว, ชื่อ, นามสกุล</b>
+      (คั่นด้วย tab อัตโนมัติเวลา copy จาก Excel — ไม่ต้องมีหัวตาราง) แล้ววางในช่องด้านล่าง
+    </div>
+    <div class="field">
+      <textarea id="import-text" placeholder="ม.3	1	12345	เล็ก	เด่นดี
+ม.3	1	12346	กานต์	ใจงาม"></textarea>
+    </div>
+    <button class="ghost" id="btn-preview" style="width:100%">ตรวจสอบข้อมูลก่อนบันทึก</button>
+    <div id="preview-area"></div>
+    <button class="primary" id="btn-import-save" style="display:none">บันทึกทั้งหมด</button>
+  </div>
+
+  <!-- เพิ่มทีละคน -->
+  <div class="card" id="add-card" style="display:none">
+    <div class="section-title">เพิ่มนักเรียนทีละคน</div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-grade">ชั้นปี</label>
+        <select id="f-grade">
+          <option value="">— เลือกชั้น —</option>
+          <optgroup label="ประถม">
+            <option value="ป.1">ป.1</option><option value="ป.2">ป.2</option>
+            <option value="ป.3">ป.3</option><option value="ป.4">ป.4</option>
+            <option value="ป.5">ป.5</option><option value="ป.6">ป.6</option>
+          </optgroup>
+          <optgroup label="มัธยม">
+            <option value="ม.1">ม.1</option><option value="ม.2">ม.2</option>
+            <option value="ม.3">ม.3</option><option value="ม.4">ม.4</option>
+            <option value="ม.5">ม.5</option><option value="ม.6">ม.6</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-classroom">ห้อง</label>
+        <input type="text" id="f-classroom" placeholder="เช่น 1">
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-studentno">รหัสประจำตัว</label>
+      <input type="text" id="f-studentno">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-firstname">ชื่อ</label>
+        <input type="text" id="f-firstname">
+      </div>
+      <div class="field">
+        <label for="f-lastname">นามสกุล</label>
+        <input type="text" id="f-lastname">
+      </div>
+    </div>
+    <button class="primary" id="btn-add-one">เพิ่มนักเรียน</button>
+  </div>
+
+  <!-- filter + list -->
+  <div class="card">
+    <div class="row2">
+      <div class="field">
+        <label for="filter-grade">กรองตามชั้น</label>
+        <select id="filter-grade"><option value="">— ทุกชั้น —</option></select>
+      </div>
+      <div class="field">
+        <label for="filter-classroom">กรองตามห้อง</label>
+        <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="list-card">
+    <div class="section-title" id="list-title">รายชื่อนักเรียน</div>
+    <div id="student-list"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module">
+import { sb, requireAuth, signOut, getProfile } from "./supabase-client.js";
+
+const session = await requireAuth();
+if (!session) throw new Error("redirecting to login");
+document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
+
+const myProfile = await getProfile(session.user.id);
+const isAdminUser = !!myProfile && myProfile.role === "admin";
+
+const elToast = document.getElementById("toast");
+function showToast(msg, ok) {
+  elToast.textContent = msg;
+  elToast.className = "toast " + (ok ? "ok" : "err");
+  setTimeout(() => { elToast.className = "toast"; }, 3000);
+}
+
+if (!isAdminUser) {
+  document.getElementById("readonly-note").style.display = "block";
+} else {
+  document.getElementById("import-card").style.display = "block";
+  document.getElementById("add-card").style.display = "block";
+}
+
+let allStudents = [];
+
+async function loadStudents() {
+  const { data, error } = await sb.from("students").select("*").order("grade_level").order("classroom").order("student_no");
+  if (error) { showToast("โหลดรายชื่อไม่สำเร็จ: " + error.message, false); return; }
+  allStudents = data || [];
+  fillFilterOptions();
+  renderList();
+}
+
+function fillFilterOptions() {
+  const grades = [...new Set(allStudents.map(s => s.grade_level).filter(Boolean))].sort();
+  const elFg = document.getElementById("filter-grade");
+  const keepGrade = elFg.value;
+  elFg.innerHTML = "<option value=''>— ทุกชั้น —</option>";
+  for (const g of grades) { const o = document.createElement("option"); o.value = g; o.textContent = g; elFg.appendChild(o); }
+  if (grades.includes(keepGrade)) elFg.value = keepGrade;
+
+  const rooms = [...new Set(allStudents.map(s => s.classroom).filter(Boolean))].sort();
+  const elFc = document.getElementById("filter-classroom");
+  const keepRoom = elFc.value;
+  elFc.innerHTML = "<option value=''>— ทุกห้อง —</option>";
+  for (const r of rooms) { const o = document.createElement("option"); o.value = r; o.textContent = r; elFc.appendChild(o); }
+  if (rooms.includes(keepRoom)) elFc.value = keepRoom;
+}
+document.getElementById("filter-grade").addEventListener("change", renderList);
+document.getElementById("filter-classroom").addEventListener("change", renderList);
+
+function renderList() {
+  const gradeFilter = document.getElementById("filter-grade").value;
+  const roomFilter = document.getElementById("filter-classroom").value;
+  const filtered = allStudents.filter(s => {
+    if (gradeFilter && s.grade_level !== gradeFilter) return false;
+    if (roomFilter && s.classroom !== roomFilter) return false;
+    return true;
+  });
+  document.getElementById("list-title").textContent = "รายชื่อนักเรียน (" + filtered.length + " คน)";
+
+  const elList = document.getElementById("student-list");
+  elList.innerHTML = "";
+  if (filtered.length === 0) { elList.innerHTML = "<div class='hint'>ไม่มีนักเรียนตรงตัวกรอง</div>"; return; }
+
+  for (const stu of filtered) {
+    const row = document.createElement("div");
+    row.className = "student-row";
+    const info = document.createElement("div");
+    info.className = "info";
+    info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) + "</div>" +
+      "<div class='meta'>เลขที่ " + escapeHtml(stu.student_no) +
+      (stu.grade_level ? " · " + escapeHtml(stu.grade_level) : "") +
+      (stu.classroom ? "/" + escapeHtml(stu.classroom) : "") + "</div>";
+    row.appendChild(info);
+    if (isAdminUser) {
+      const delBtn = document.createElement("button");
+      delBtn.className = "icon-btn del";
+      delBtn.textContent = "🗑";
+      delBtn.addEventListener("click", () => deleteStudent(stu));
+      row.appendChild(delBtn);
+    }
+    elList.appendChild(row);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ---------- ลบนักเรียน (กันไว้ถ้ามีคะแนน/เช็คชื่อ/ร./ลงทะเบียนวิชาอยู่) ----------
+async function deleteStudent(stu) {
+  const [{ count: scoreCount }, { count: attCount }, { count: remarkCount }, { count: enrollCount }] = await Promise.all([
+    sb.from("scores").select("id", { count: "exact", head: true }).eq("student_id", stu.id),
+    sb.from("attendance_records").select("id", { count: "exact", head: true }).eq("student_id", stu.id),
+    sb.from("remarks").select("id", { count: "exact", head: true }).eq("student_id", stu.id),
+    sb.from("enrollments").select("id", { count: "exact", head: true }).eq("student_id", stu.id)
+  ]);
+  const total = (scoreCount || 0) + (attCount || 0) + (remarkCount || 0);
+  if (total > 0) {
+    showToast("ลบไม่ได้ นักเรียนคนนี้มีคะแนน/เช็คชื่อ/ร. บันทึกไว้แล้ว (" + total + " รายการ)", false);
+    return;
+  }
+  if ((enrollCount || 0) > 0 && !confirm("นักเรียนคนนี้ลงทะเบียนอยู่ " + enrollCount + " วิชา จะลบพร้อมเลิกลงทะเบียนทั้งหมดหรือไม่?")) return;
+  if ((enrollCount || 0) === 0 && !confirm("ยืนยันลบ \"" + stu.name + "\" ?")) return;
+
+  const { error } = await sb.from("students").delete().eq("id", stu.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("ลบแล้ว", true);
+  await loadStudents();
+}
+
+// ---------- เพิ่มทีละคน ----------
+document.getElementById("btn-add-one").addEventListener("click", async () => {
+  const grade = document.getElementById("f-grade").value;
+  const classroom = document.getElementById("f-classroom").value.trim();
+  const studentNo = document.getElementById("f-studentno").value.trim();
+  const first = document.getElementById("f-firstname").value.trim();
+  const last = document.getElementById("f-lastname").value.trim();
+  if (!grade) { showToast("เลือกชั้นก่อน", false); return; }
+  if (!classroom) { showToast("กรอกห้องก่อน", false); return; }
+  if (!studentNo) { showToast("กรอกรหัสประจำตัวก่อน", false); return; }
+  if (!first) { showToast("กรอกชื่อก่อน", false); return; }
+
+  const { error } = await sb.from("students").insert({
+    grade_level: grade, classroom, student_no: studentNo,
+    name: (first + " " + last).trim()
+  });
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มนักเรียนแล้ว", true);
+  document.getElementById("f-studentno").value = "";
+  document.getElementById("f-firstname").value = "";
+  document.getElementById("f-lastname").value = "";
+  await loadStudents();
+});
+
+// ---------- วางจาก Excel ----------
+let parsedRows = [];
+document.getElementById("btn-preview").addEventListener("click", () => {
+  const raw = document.getElementById("import-text").value;
+  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  parsedRows = lines.map(line => {
+    const cols = line.split("\t");
+    const [grade, classroom, studentNo, first, last] = cols;
+    const errors = [];
+    if (!grade || !grade.trim()) errors.push("ไม่มีชั้นปี");
+    if (!classroom || !classroom.trim()) errors.push("ไม่มีห้อง");
+    if (!studentNo || !studentNo.trim()) errors.push("ไม่มีรหัสประจำตัว");
+    if (!first || !first.trim()) errors.push("ไม่มีชื่อ");
+    return {
+      grade: (grade || "").trim(), classroom: (classroom || "").trim(),
+      studentNo: (studentNo || "").trim(), first: (first || "").trim(), last: (last || "").trim(),
+      errors
+    };
+  });
+  renderPreview();
+});
+
+function renderPreview() {
+  const area = document.getElementById("preview-area");
+  if (parsedRows.length === 0) { area.innerHTML = "<div class='hint'>ยังไม่มีข้อมูล ลองวางแล้วกดตรวจสอบอีกครั้ง</div>"; document.getElementById("btn-import-save").style.display = "none"; return; }
+
+  let html = "<table class='preview'><tr><th>ชั้น</th><th>ห้อง</th><th>รหัส</th><th>ชื่อ</th><th>นามสกุล</th><th>สถานะ</th></tr>";
+  let errCount = 0;
+  for (const r of parsedRows) {
+    const isErr = r.errors.length > 0;
+    if (isErr) errCount++;
+    html += "<tr class='" + (isErr ? "err" : "") + "'><td>" + escapeHtml(r.grade) + "</td><td>" + escapeHtml(r.classroom) +
+      "</td><td>" + escapeHtml(r.studentNo) + "</td><td>" + escapeHtml(r.first) + "</td><td>" + escapeHtml(r.last) +
+      "</td><td>" + (isErr ? escapeHtml(r.errors.join(", ")) : "โอเค") + "</td></tr>";
+  }
+  html += "</table>";
+  html += "<div class='field-note' style='margin-top:8px'>รวม " + parsedRows.length + " แถว — ผิด " + errCount + " แถว (แถวที่ผิดจะไม่ถูกบันทึก)</div>";
+  area.innerHTML = html;
+  document.getElementById("btn-import-save").style.display = parsedRows.some(r => r.errors.length === 0) ? "block" : "none";
+}
+
+document.getElementById("btn-import-save").addEventListener("click", async () => {
+  const validRows = parsedRows.filter(r => r.errors.length === 0);
+  if (validRows.length === 0) { showToast("ไม่มีแถวที่ถูกต้องให้บันทึก", false); return; }
+
+  const payload = validRows.map(r => ({
+    grade_level: r.grade, classroom: r.classroom, student_no: r.studentNo,
+    name: (r.first + " " + r.last).trim()
+  }));
+
+  const btn = document.getElementById("btn-import-save");
+  btn.disabled = true;
+  const { error } = await sb.from("students").insert(payload);
+  btn.disabled = false;
+  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มนักเรียนแล้ว " + validRows.length + " คน", true);
+  document.getElementById("import-text").value = "";
+  parsedRows = [];
+  renderPreview();
+  await loadStudents();
+});
+
+// เริ่มทำงาน
+loadStudents();
+</script>
+</body>
+</html>

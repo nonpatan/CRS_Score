@@ -143,6 +143,7 @@
       <a href="index.html">กรอกคะแนน</a>
       <a href="attendance.html">เช็คชื่อ</a>
       <a href="summary.html">สรุปคะแนน</a>
+      <a href="students.html">นักเรียน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
   </header>
@@ -276,6 +277,24 @@
     <button class="ghost small" id="btn-add-unit-competency">+ เพิ่มด้านสมรรถนะหลัก</button>
   </div>
 
+  <!-- รายชื่อนักเรียนในวิชานี้ (เฉพาะวิชาพื้นฐาน) -->
+  <div class="card" id="enroll-card" style="display:none">
+    <div class="section-title">นักเรียนในวิชานี้</div>
+    <div class="field-note" style="margin-bottom:10px">
+      รายชื่อตรงนี้คือคนที่จะเห็นให้กรอกคะแนน/เช็คชื่อ/สรุปผลของวิชานี้ — เพิ่มทั้งห้องได้ทีเดียว
+      หรือเพิ่มทีละคน (เผื่อนักเรียนซ้ำชั้น/ติด มส. ที่ต้องเรียนร่วมห้องอื่น)
+    </div>
+    <div class="row2" style="margin-bottom:10px">
+      <select id="sel-bulk-classroom"></select>
+      <button class="ghost" id="btn-bulk-add-classroom">+ เพิ่มทั้งห้อง</button>
+    </div>
+    <div id="enroll-list"></div>
+    <div class="row2" style="margin-top:10px">
+      <select id="sel-add-student"></select>
+      <button class="ghost" id="btn-add-student">+ เพิ่มทีละคน</button>
+    </div>
+  </div>
+
   <!-- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) -->
   <div class="card" id="members-card" style="display:none">
     <div class="section-title">วิชาพื้นฐานที่ประกอบกันเป็นวิชานี้</div>
@@ -341,6 +360,10 @@ const elSubject      = document.getElementById("sel-subject");
 const elSubjectForm  = document.getElementById("subject-form");
 const elSubjectFormTitle = document.getElementById("subject-form-title");
 const elStructure    = document.getElementById("structure-card");
+const elEnrollCard   = document.getElementById("enroll-card");
+const elEnrollList   = document.getElementById("enroll-list");
+const elSelBulkClassroom = document.getElementById("sel-bulk-classroom");
+const elSelAddStudent = document.getElementById("sel-add-student");
 const elMembersCard  = document.getElementById("members-card");
 const elEmptyHint    = document.getElementById("empty-hint");
 const elToast        = document.getElementById("toast");
@@ -437,8 +460,10 @@ function updateTypeDependentUI() {
   if (isIntegrated) fTeacher.value = "";
   if (currentSubject) {
     elStructure.style.display = isIntegrated ? "none" : "block";
+    elEnrollCard.style.display = isIntegrated ? "none" : "block";
     elMembersCard.style.display = isIntegrated ? "block" : "none";
     if (isIntegrated) loadMembers();
+    else loadEnrollments();
   }
 }
 fType.addEventListener("change", updateTypeDependentUI);
@@ -553,7 +578,8 @@ document.getElementById("btn-new-subject").addEventListener("click", () => {
   if (elFilterTerm.value) fTerm.value = elFilterTerm.value;
   elSubjectForm.style.display = "block";
   elSubjectFormTitle.textContent = "สร้างวิชาใหม่";
-  elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วย/วิชาย่อยได้
+  elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วย/นักเรียน/วิชาย่อยได้
+  elEnrollCard.style.display = "none";
   elMembersCard.style.display = "none";
   elEmptyHint.style.display = "none";
   applyEditPermissionUI();
@@ -938,6 +964,105 @@ async function doDelete(table, id) {
   await loadStructure();
 }
 
+// ---------- นักเรียนในวิชานี้ (เฉพาะวิชาพื้นฐาน) ----------
+let allStudentsForEnroll = [];
+let currentEnrollments = [];
+
+async function loadEnrollments() {
+  const { data: students, error: stuErr } = await sb.from("students").select("*").order("grade_level").order("classroom").order("student_no");
+  if (stuErr) { showToast("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + stuErr.message, false); return; }
+  allStudentsForEnroll = students || [];
+
+  const { data: enrollRows, error } = await sb
+    .from("enrollments")
+    .select("id, student:student_id(*)")
+    .eq("subject_id", currentSubject.id);
+  if (error) { showToast("โหลดรายชื่อลงทะเบียนไม่สำเร็จ: " + error.message, false); return; }
+  currentEnrollments = (enrollRows || [])
+    .filter(e => e.student)
+    .sort((a, b) => (a.student.student_no || "").localeCompare(b.student.student_no || ""));
+  renderEnrollments();
+}
+
+function renderEnrollments() {
+  const canEdit = canEditCurrentSubject();
+
+  // dropdown "เพิ่มทั้งห้อง" — เฉพาะห้องที่ชั้นปีตรงกับวิชานี้
+  const classroomsForGrade = [...new Set(
+    allStudentsForEnroll.filter(s => s.grade_level === currentSubject.grade_level).map(s => s.classroom).filter(Boolean)
+  )].sort();
+  elSelBulkClassroom.innerHTML = "";
+  if (classroomsForGrade.length === 0) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "— ไม่มีห้อง " + (currentSubject.grade_level || "-") + " ในระบบ —";
+    elSelBulkClassroom.appendChild(o);
+  } else {
+    for (const c of classroomsForGrade) {
+      const o = document.createElement("option");
+      o.value = c; o.textContent = currentSubject.grade_level + "/" + c;
+      elSelBulkClassroom.appendChild(o);
+    }
+  }
+  document.getElementById("btn-bulk-add-classroom").style.display = canEdit ? "inline-block" : "none";
+  elSelBulkClassroom.style.display = canEdit ? "block" : "none";
+
+  // รายชื่อที่ลงทะเบียนแล้ว
+  elEnrollList.innerHTML = "";
+  if (currentEnrollments.length === 0) {
+    elEnrollList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีนักเรียนในวิชานี้</div>";
+  }
+  const enrolledIds = new Set(currentEnrollments.map(e => e.student.id));
+  for (const e of currentEnrollments) {
+    const row = document.createElement("div");
+    row.className = "member-row";
+    row.innerHTML = "<span class='title'>" + escapeHtml(e.student.name) +
+      " <span class='hint'>(เลขที่ " + escapeHtml(e.student.student_no) +
+      (e.student.classroom ? " · " + escapeHtml(e.student.grade_level || "") + "/" + escapeHtml(e.student.classroom) : "") +
+      ")</span></span>";
+    if (canEdit) row.appendChild(makeIconBtn("🗑", "del", () => removeEnrollment(e)));
+    elEnrollList.appendChild(row);
+  }
+
+  // dropdown เพิ่มทีละคน — ทุกคนที่ยังไม่ได้ลงทะเบียน ไม่จำกัดชั้น/ห้อง (เผื่อนักเรียนซ้ำชั้น)
+  const candidates = allStudentsForEnroll.filter(s => !enrolledIds.has(s.id));
+  const label = s => s.name + "  (เลขที่ " + s.student_no + (s.classroom ? " · " + (s.grade_level || "") + "/" + s.classroom : "") + ")";
+  fillSelect(elSelAddStudent, candidates, label, "— เลือกนักเรียน —");
+  document.getElementById("btn-add-student").style.display = canEdit ? "inline-block" : "none";
+  elSelAddStudent.style.display = canEdit ? "block" : "none";
+}
+
+document.getElementById("btn-bulk-add-classroom").addEventListener("click", async () => {
+  const classroom = elSelBulkClassroom.value;
+  if (!classroom) { showToast("ไม่มีห้องให้เพิ่ม", false); return; }
+  const enrolledIds = new Set(currentEnrollments.map(e => e.student.id));
+  const toAdd = allStudentsForEnroll.filter(s =>
+    s.grade_level === currentSubject.grade_level && s.classroom === classroom && !enrolledIds.has(s.id)
+  );
+  if (toAdd.length === 0) { showToast("ทุกคนในห้องนี้อยู่ในวิชาแล้ว", false); return; }
+  const payload = toAdd.map(s => ({ subject_id: currentSubject.id, student_id: s.id }));
+  const { error } = await sb.from("enrollments").insert(payload);
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มแล้ว " + toAdd.length + " คน", true);
+  await loadEnrollments();
+});
+
+document.getElementById("btn-add-student").addEventListener("click", async () => {
+  const studentId = elSelAddStudent.value;
+  if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
+  const { error } = await sb.from("enrollments").insert({ subject_id: currentSubject.id, student_id: studentId });
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มแล้ว", true);
+  await loadEnrollments();
+});
+
+async function removeEnrollment(e) {
+  if (!confirm("เอา \"" + e.student.name + "\" ออกจากวิชานี้?")) return;
+  const { error } = await sb.from("enrollments").delete().eq("id", e.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เอาออกแล้ว", true);
+  await loadEnrollments();
+}
+
 // ---------- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) ----------
 async function loadMembers() {
   const { data, error } = await sb
@@ -1009,6 +1134,7 @@ function hideAll() {
   currentSubject = null;
   elSubjectForm.style.display = "none";
   elStructure.style.display = "none";
+  elEnrollCard.style.display = "none";
   elMembersCard.style.display = "none";
   elEmptyHint.style.display = "block";
 }

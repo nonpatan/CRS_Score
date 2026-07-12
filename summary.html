@@ -128,6 +128,7 @@
       <a href="index.html">กรอกคะแนน</a>
       <a href="attendance.html">เช็คชื่อ</a>
       <a href="manage.html">จัดการโครงสร้าง</a>
+      <a href="students.html">นักเรียน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
   </header>
@@ -181,7 +182,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut } from "./supabase-client.js";
+import { sb, requireAuth, signOut, getRosterForSubject } from "./supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -298,9 +299,6 @@ elSubject.addEventListener("change", async () => {
   const { data: subj } = await sb.from("subjects").select("*").eq("id", id).single();
   currentSubject = subj;
 
-  const { data: studs } = await sb.from("students").select("*").order("student_no");
-  students = studs || [];
-
   if (subj.subject_type === "บูรณาการ") {
     // วิชาบูรณาการ: โหลดรายชื่อวิชาพื้นฐานสมาชิก แล้วโหลดข้อมูลเต็มของแต่ละวิชา
     const { data: memberRows, error: memErr } = await sb
@@ -310,12 +308,19 @@ elSubject.addEventListener("change", async () => {
     if (memErr) { showEmpty("โหลดวิชาย่อยไม่สำเร็จ: " + memErr.message); return; }
     integrationMembers = memberRows || [];
     memberDataList = await Promise.all(integrationMembers.map(m => loadSubjectData(m.member_subject_id)));
+
+    // รายชื่อนักเรียน = รวมนักเรียนที่ลงทะเบียนในวิชาพื้นฐานสมาชิกทุกตัว (เอาแค่ครั้งเดียวต่อคน)
+    const rosters = await Promise.all(integrationMembers.map(m => getRosterForSubject(m.member_subject_id)));
+    const seen = new Map();
+    for (const roster of rosters) for (const s of roster) seen.set(s.id, s);
+    students = [...seen.values()].sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
   } else {
-    // วิชาพื้นฐาน: โหลดโครงสร้างคะแนน + ร. + เช็คชื่อของตัวเอง
+    // วิชาพื้นฐาน: โหลดโครงสร้างคะแนน + ร. + เช็คชื่อของตัวเอง + รายชื่อที่ลงทะเบียน
     const data = await loadSubjectData(id);
     units = data.units;
     remarksData = data.remarksData;
     sessions = data.sessions;
+    students = await getRosterForSubject(id);
   }
 
   fillSelect(elStudent, students, s => s.name + "  (เลขที่ " + s.student_no + ")", "— ทั้งห้อง —");

@@ -107,7 +107,7 @@
   <header>
     <h1>เช็คชื่อ</h1>
     <p>เลือกวิชา วันที่ และจำนวนคาบ แล้วติ๊กสถานะรายคน</p>
-    <div class="nav"><a href="index.html">กรอกคะแนน</a><a href="summary.html">สรุปคะแนน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="#" id="btn-signout">ออกจากระบบ</a></div>
+    <div class="nav"><a href="index.html">กรอกคะแนน</a><a href="summary.html">สรุปคะแนน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="students.html">นักเรียน</a><a href="#" id="btn-signout">ออกจากระบบ</a></div>
   </header>
 
   <!-- เลือกวิชา / วันที่ / จำนวนคาบ แล้วโหลดรายชื่อมาติ๊ก -->
@@ -171,7 +171,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut } from "./supabase-client.js";
+import { sb, requireAuth, signOut, getRosterForSubject } from "./supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -279,10 +279,8 @@ btnLoad.addEventListener("click", async () => {
 
   btnLoad.disabled = true;
 
-  // โหลดนักเรียนทั้งหมด (ทีหลังค่อยกรองตามห้อง/วิชา)
-  const { data: studs, error: studErr } = await sb.from("students").select("*").order("student_no");
-  if (studErr) { showToast("โหลดรายชื่อนักเรียนไม่สำเร็จ", false); btnLoad.disabled = false; return; }
-  students = studs || [];
+  // โหลดรายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ตั้งค่าที่หน้าจัดการโครงสร้าง)
+  students = await getRosterForSubject(currentSubjectId);
 
   // เช็คว่าวิชานี้ วันนี้ เคยเช็คชื่อไปแล้วหรือยัง (ถ้ามี = โหมดแก้ไข)
   const { data: existingSession, error: sessErr } = await sb

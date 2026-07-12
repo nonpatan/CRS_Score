@@ -32,3 +32,17 @@ export async function getProfile(userId) {
   if (error) return null;
   return data;
 }
+
+// รายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ผ่านตาราง enrollments) เรียงตามเลขที่
+// ใช้แทนการดึง "นักเรียนทั้งหมด" แบบเดิม — วิชาไหนยังไม่มีใครลงทะเบียนจะได้ [] เปล่าๆ
+export async function getRosterForSubject(subjectId) {
+  const { data, error } = await sb
+    .from("enrollments")
+    .select("student:student_id(*)")
+    .eq("subject_id", subjectId);
+  if (error) return [];
+  return (data || [])
+    .map(e => e.student)
+    .filter(Boolean)
+    .sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
+}
