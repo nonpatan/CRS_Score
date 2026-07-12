@@ -169,6 +169,27 @@
 
   <div class="card hint" id="empty-hint">เลือกวิชาและวันที่ แล้วกด "โหลดรายชื่อ" เพื่อเริ่มเช็คชื่อ</div>
 
+  <!-- ร. (ยังไม่จบหลักสูตร/ยังไม่มีผลการเรียน) -->
+  <div class="card" id="remark-card" style="display:none">
+    <div class="section-title" style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:10px">
+      ร. (ไม่จบหลักสูตร)
+    </div>
+    <div class="field-note" style="color:var(--muted); font-size:13px; margin-bottom:10px">
+      ติด ร. ให้นักเรียนที่ยังไม่จบหลักสูตร/ยังไม่มีผลการเรียนของวิชานี้ ต้องระบุเหตุผลเสมอ
+      ระบบจะแสดง "ร." แทนเกรด/มส. ของนักเรียนคนนี้ในวิชานี้ที่หน้าสรุปคะแนน จนกว่าจะถอดออก
+    </div>
+    <div id="remark-list"></div>
+    <div class="field" style="margin-top:10px">
+      <label for="sel-remark-student">นักเรียน</label>
+      <select id="sel-remark-student"></select>
+    </div>
+    <div class="field">
+      <label for="inp-remark-reason">เหตุผล</label>
+      <input type="text" id="inp-remark-reason" placeholder="เช่น ยังส่งงานไม่ครบ">
+    </div>
+    <button class="load" id="btn-add-remark">+ ติด ร.</button>
+  </div>
+
   <!-- ชั่วโมงชดเชย (เติมตัวเลขเข้าเรียนให้ถึงเกณฑ์ ไม่ใช่ข้ามเช็ค มส.) -->
   <div class="card" id="makeup-card" style="display:none">
     <div class="section-title" style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:10px">
@@ -294,6 +315,7 @@ elSubject.addEventListener("change", async () => {
   currentSubjectId = elSubject.value || null;
   hideStudents();
   await loadMakeupSection();
+  await loadRemarkSection();
 });
 
 // ---------- กดโหลดรายชื่อ: หาครั้งที่เช็คชื่อเดิม (ถ้ามี) แล้ววาดรายชื่อ ----------
@@ -522,6 +544,82 @@ async function removeMakeup(m) {
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบแล้ว", true);
   await loadMakeupSection();
+}
+
+// ---------- ร. (ยังไม่จบหลักสูตร) ----------
+const elRemarkCard = document.getElementById("remark-card");
+const elRemarkList = document.getElementById("remark-list");
+const elRemarkStudent = document.getElementById("sel-remark-student");
+let remarkRoster = [];
+let remarkRecords = [];
+
+async function loadRemarkSection() {
+  if (!currentSubjectId) { elRemarkCard.style.display = "none"; return; }
+  elRemarkCard.style.display = "block";
+
+  remarkRoster = await getRosterForSubject(currentSubjectId);
+
+  const { data, error } = await sb
+    .from("remarks")
+    .select("*, student:student_id(*)")
+    .eq("subject_id", currentSubjectId)
+    .eq("code", "ร.")
+    .order("created_at");
+  if (error) { showToast("โหลดข้อมูล ร. ไม่สำเร็จ: " + error.message, false); return; }
+  remarkRecords = (data || []).filter(r => r.student);
+
+  // ตัดคนที่ติด ร. อยู่แล้วออกจาก dropdown เพิ่ม (กันชนกับ constraint unique(student_id,subject_id,code))
+  const taggedIds = new Set(remarkRecords.map(r => r.student_id));
+  const available = remarkRoster.filter(s => !taggedIds.has(s.id));
+  fillSelect(elRemarkStudent, available, s => s.name + "  (เลขที่ " + s.student_no + ")", "— เลือกนักเรียน —");
+
+  renderRemarkList();
+}
+
+function renderRemarkList() {
+  elRemarkList.innerHTML = "";
+  if (remarkRecords.length === 0) {
+    elRemarkList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีใครติด ร. ในวิชานี้</div>";
+    return;
+  }
+  for (const r of remarkRecords) {
+    const row = document.createElement("div");
+    row.className = "student-row";
+    row.innerHTML =
+      "<div class='student-info'><div class='name'>" + escapeHtml(r.student.name) +
+      "  <span class='hint'>ร.</span></div>" +
+      "<div class='meta'>" + escapeHtml(r.reason) + "</div></div>";
+    const delBtn = document.createElement("button");
+    delBtn.className = "load";
+    delBtn.style.cssText = "width:auto; padding:6px 10px; font-size:13px; background:var(--danger); margin-top:0";
+    delBtn.textContent = "ถอด ร.";
+    delBtn.addEventListener("click", () => removeRemark(r));
+    row.appendChild(delBtn);
+    elRemarkList.appendChild(row);
+  }
+}
+
+document.getElementById("btn-add-remark").addEventListener("click", async () => {
+  const studentId = elRemarkStudent.value;
+  const reason = document.getElementById("inp-remark-reason").value.trim();
+  if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
+  if (!reason) { showToast("กรอกเหตุผลก่อน", false); return; }
+
+  const { error } = await sb.from("remarks").insert({
+    subject_id: currentSubjectId, student_id: studentId, code: "ร.", reason
+  });
+  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+  showToast("ติด ร. แล้ว", true);
+  document.getElementById("inp-remark-reason").value = "";
+  await loadRemarkSection();
+});
+
+async function removeRemark(r) {
+  if (!confirm("ยืนยันถอด ร. ของ \"" + r.student.name + "\" ?")) return;
+  const { error } = await sb.from("remarks").delete().eq("id", r.id);
+  if (error) { showToast("ถอดไม่สำเร็จ: " + error.message, false); return; }
+  showToast("ถอด ร. แล้ว", true);
+  await loadRemarkSection();
 }
 
 // เริ่มทำงาน
