@@ -617,3 +617,40 @@ alter table integration_members   enable row level security;
 -- alter table attendance_records    disable row level security;
 -- alter table remarks               disable row level security;
 -- alter table integration_members   disable row level security;
+
+
+-- ============================================================
+-- ส่วนจัดการนักเรียน + ผูกนักเรียนกับวิชา — รันได้เลยตอนนี้ (RLS เปิดอยู่แล้ว
+-- เพิ่มตาราง/policy ใหม่ครบในบล็อกเดียว ไม่กระทบตารางเดิมที่ใช้งานอยู่)
+-- ------------------------------------------------------------
+-- ตอนนี้ index.html/attendance.html/summary.html จะดึง "รายชื่อนักเรียนที่ลงทะเบียนในวิชานั้น"
+-- (ผ่าน enrollments) แทน "นักเรียนทั้งหมด" เหมือนเดิม — วิชาไหนยังไม่มีใครลงทะเบียน จะไม่เห็น
+-- รายชื่อเลยจนกว่าจะไปเพิ่มที่ manage.html (ดู CLAUDE.md วิธีเพิ่ม)
+-- ============================================================
+
+-- ชั้นปีของนักเรียน (เช่น 'ม.3') ใช้คู่กับ classroom ตอน bulk-add ทั้งห้องเข้าวิชา
+alter table students add column if not exists grade_level text;
+
+-- ------------------------------------------------------------
+-- 12) การลงทะเบียนนักเรียนต่อวิชา (many-to-many)
+-- ------------------------------------------------------------
+-- ค่าเริ่มต้นมาจากปุ่ม "เพิ่มทั้งห้อง" ใน manage.html (bulk insert ตาม grade_level+classroom
+-- ที่ตรงกัน) แต่เพิ่ม/ลบทีละคนได้อิสระ — รองรับเคสนักเรียนซ้ำชั้น/มส. ที่ต้องเรียนร่วมห้องอื่น
+create table if not exists enrollments (
+  id          uuid primary key default gen_random_uuid(),
+  subject_id  uuid not null references subjects(id) on delete cascade,
+  student_id  uuid not null references students(id) on delete cascade,
+  created_at  timestamptz default now(),
+
+  constraint enrollments_unique unique (subject_id, student_id)
+);
+create index if not exists enrollments_subject_idx on enrollments(subject_id);
+create index if not exists enrollments_student_idx on enrollments(student_id);
+
+alter table enrollments enable row level security;
+drop policy if exists enrollments_select on enrollments;
+create policy enrollments_select on enrollments for select using (auth.role() = 'authenticated');
+drop policy if exists enrollments_insert on enrollments;
+create policy enrollments_insert on enrollments for insert with check (can_edit_subject(subject_id));
+drop policy if exists enrollments_delete on enrollments;
+create policy enrollments_delete on enrollments for delete using (can_edit_subject(subject_id));
