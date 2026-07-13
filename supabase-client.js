@@ -33,6 +33,35 @@ export async function getProfile(userId) {
   return data;
 }
 
+// ============================================================
+// ปีการศึกษาที่ทำงานอยู่ (active year) — เก็บใน localStorage เพื่อให้ทุกหน้า "จำ" ปีเดียวกัน
+// (ผู้ใช้เลือกปีครั้งเดียว แล้วทุกหน้ากรอง dropdown วิชาด้วยปีนั้นเหมือนกันหมด) — ยืนยันแล้ว
+// สำคัญมาก: กันครูกรอกคะแนน/เช็คชื่อผิดปีเมื่อขึ้นปีการศึกษาใหม่แล้วมีวิชาชื่อซ้ำหลายปี
+// ============================================================
+const ACTIVE_YEAR_KEY = "crs_active_year";
+
+// อ่านปีที่เลือกไว้ (คืน "" ถ้ายังไม่เคยเลือก = โหมด "ทุกปี")
+export function getActiveYear() {
+  return localStorage.getItem(ACTIVE_YEAR_KEY) || "";
+}
+
+// บันทึกปีที่เลือก (ส่ง "" มา = ล้างค่า กลับไปโหมด "ทุกปี")
+export function setActiveYear(y) {
+  if (y) localStorage.setItem(ACTIVE_YEAR_KEY, y);
+  else localStorage.removeItem(ACTIVE_YEAR_KEY);
+}
+
+// รวบรวมปีการศึกษาที่มีจริงจากรายการวิชา (ไม่ซ้ำ เรียงจากใหม่ไปเก่า) — ใช้เติม dropdown ปี
+export function distinctYears(subjects) {
+  const years = [];
+  for (const s of (subjects || [])) {
+    if (s.year && years.indexOf(s.year) === -1) years.push(s.year);
+  }
+  years.sort();
+  years.reverse();
+  return years;
+}
+
 // รายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ผ่านตาราง enrollments) เรียงตามเลขที่
 // ใช้แทนการดึง "นักเรียนทั้งหมด" แบบเดิม — วิชาไหนยังไม่มีใครลงทะเบียนจะได้ [] เปล่าๆ
 export async function getRosterForSubject(subjectId) {

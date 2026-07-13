@@ -135,6 +135,10 @@
   </header>
 
   <div class="card">
+    <div class="field">
+      <label for="filter-year">ปีการศึกษา</label>
+      <select id="filter-year"><option value="">— ทุกปี —</option></select>
+    </div>
     <div class="field" style="display:flex; gap:12px;">
       <div style="flex:1">
         <label for="filter-grade">ชั้น</label>
@@ -185,7 +189,8 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, getRosterForSubject,
-  loadSubjectData, computeSubjectResult, computeIntegratedResult
+  loadSubjectData, computeSubjectResult, computeIntegratedResult,
+  getActiveYear, setActiveYear, distinctYears
 } from "./supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -194,6 +199,7 @@ if (!session) throw new Error("redirecting to login");
 document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
 
 // อ้างอิง element ที่ใช้บ่อย
+const elFilterYear  = document.getElementById("filter-year");
 const elFilterGrade = document.getElementById("filter-grade");
 const elFilterTerm  = document.getElementById("filter-term");
 const elSubject   = document.getElementById("sel-subject");
@@ -216,9 +222,11 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
+// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
+// โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
+  if (s.year) parts.push("ปี " + s.year);
   if (s.term) parts.push("เทอม " + s.term);
   if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
   return parts.join("  ·  ");
@@ -243,20 +251,39 @@ async function loadSubjects() {
   const { data, error } = await sb.from("subjects").select("*").order("created_at");
   if (error) { elResult.innerHTML = "<div class='card hint'>โหลดวิชาไม่สำเร็จ: " + error.message + "</div>"; return; }
   allSubjects = data || [];
+  fillYearOptions();
   applySubjectFilter();
 }
 
-// ---------- กรองรายชื่อวิชาตามชั้น/ภาคเรียนที่เลือก แล้วเติมลง dropdown ----------
+// ---------- เติมตัวเลือกปีการศึกษาจากวิชาที่มีจริง แล้วตั้งค่าเป็นปีที่เลือกไว้ (จำข้ามหน้า) ----------
+function fillYearOptions() {
+  const years = distinctYears(allSubjects);
+  elFilterYear.innerHTML = "<option value=''>— ทุกปี —</option>";
+  for (const y of years) {
+    const o = document.createElement("option");
+    o.value = y;
+    o.textContent = "ปีการศึกษา " + y;
+    elFilterYear.appendChild(o);
+  }
+  const saved = getActiveYear();
+  elFilterYear.value = years.indexOf(saved) !== -1 ? saved : "";
+}
+
+// ---------- กรองรายชื่อวิชาตามปี/ชั้น/ภาคเรียนที่เลือก แล้วเติมลง dropdown ----------
 function applySubjectFilter() {
+  const yearFilter = elFilterYear.value;
   const gradeFilter = elFilterGrade.value;
   const termFilter = elFilterTerm.value;
   const filtered = allSubjects.filter(s => {
+    if (yearFilter && s.year !== yearFilter) return false;
     if (gradeFilter && s.grade_level !== gradeFilter) return false;
     if (termFilter && s.term !== termFilter) return false;
     return true;
   });
   fillSelect(elSubject, filtered, subjectLabel, "— เลือกวิชา (" + filtered.length + " วิชา) —");
 }
+// เปลี่ยนปี = จำไว้ให้ทุกหน้าใช้ปีเดียวกัน (localStorage) แล้วกรองใหม่
+elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 elFilterGrade.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 
