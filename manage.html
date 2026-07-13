@@ -724,6 +724,8 @@ async function countScoresOfSubject(subjectId) {
 elDelSubject.addEventListener("click", async () => {
   if (!currentSubject) return;
 
+  let confirmMsg = "ยืนยันลบวิชา \"" + currentSubject.name + "\" ?";
+
   if (currentSubject.subject_type === "พื้นฐาน") {
     const scoreCount = countScoresInUnits(units);
     if (scoreCount > 0) {
@@ -741,9 +743,9 @@ elDelSubject.addEventListener("click", async () => {
       return;
     }
   } else if (currentSubject.subject_type === "บูรณาการ") {
-    // วิชาบูรณาการเองไม่มีคะแนนของตัวเอง (คะแนนอยู่ที่วิชาพื้นฐานสมาชิก) — เดิมลบได้เลยโดยไม่เช็ค
-    // อะไรเลย ทั้งที่ลบแล้ว integration_members จะ cascade หายหมด (การจัดกลุ่มหาย แม้คะแนนของ
-    // วิชาพื้นฐานสมาชิกจะไม่ถูกลบก็ตาม) เลยต้องเช็คก่อนว่ามีสมาชิกตัวไหนกรอกคะแนนไปแล้วบ้าง
+    // วิชาบูรณาการเองไม่มีคะแนนของตัวเอง (คะแนนอยู่ที่วิชาพื้นฐานสมาชิก) ลบวิชาบูรณาการจึง
+    // "ไม่เสียคะแนนจริง" เลย — เสียแค่การจัดกลุ่ม (integration_members cascade หาย) จึงไม่บล็อก
+    // แค่เตือนให้รู้ก่อนยืนยันว่ามีวิชาย่อยตัวไหนกรอกคะแนนไปแล้วบ้าง (ยืนยันกับผู้ใช้แล้ว 2026-07)
     const { data: memberLinks, error: memErr } = await sb
       .from("integration_members")
       .select("member:member_subject_id(id, name)")
@@ -758,12 +760,14 @@ elDelSubject.addEventListener("click", async () => {
       if (n > 0) membersWithScores.push(link.member.name + " (" + n + " ช่อง)");
     }
     if (membersWithScores.length > 0) {
-      showToast("ลบไม่ได้ วิชาย่อยของวิชาบูรณาการนี้มีคะแนนกรอกไว้แล้ว: " + membersWithScores.join(", "), false);
-      return;
+      confirmMsg =
+        "วิชาย่อยของวิชาบูรณาการนี้มีคะแนนกรอกไว้แล้ว: " + membersWithScores.join(", ") + "\n\n" +
+        "คะแนนของวิชาย่อยจะไม่ถูกลบ (ไม่ได้เก็บไว้ที่วิชาบูรณาการ) แต่การจัดกลุ่มเข้าวิชาบูรณาการนี้จะหายไป " +
+        "ต้องมาเพิ่มใหม่เองถ้าจะสร้างวิชาบูรณาการนี้อีก\n\nยืนยันลบวิชาบูรณาการ \"" + currentSubject.name + "\" ?";
     }
   }
 
-  if (!confirm("ยืนยันลบวิชา \"" + currentSubject.name + "\" ?")) return;
+  if (!confirm(confirmMsg)) return;
   const { error } = await sb.from("subjects").delete().eq("id", currentSubject.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบวิชาแล้ว", true);
