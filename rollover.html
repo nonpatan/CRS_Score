@@ -275,31 +275,33 @@ function onSourceYearChange() {
   renderSubjects();
 }
 
-// ---------- แผนเลื่อนชั้นของนักเรียน 1 คน ----------
-// คืน { action: 'promote'|'graduate', targetGrade, targetClassroom }
+// ---------- ปลายทางเมื่อ "เลื่อนตามแผน" ของนักเรียน 1 คน ----------
+// คืน { advance: 'promote'|'graduate', targetGrade, targetClassroom }
+// (advance = ทางหลักตามชั้น — ชั้นสูงสุด = จบ, ชั้นอื่น = เลื่อนขึ้น) ครูเลือกทับเป็น "ซ้ำชั้น/ย้ายออก" ได้
 function planFor(stu) {
   const target = nextGrade(stu.grade_level, highestGrade);
   if (target === null) {
-    return { action: "graduate", targetGrade: null, targetClassroom: stu.classroom };
+    return { advance: "graduate", targetGrade: null, targetClassroom: stu.classroom };
   }
-  return { action: "promote", targetGrade: target, targetClassroom: promoteClassroom(stu.classroom, stu.grade_level, target) };
+  return { advance: "promote", targetGrade: target, targetClassroom: promoteClassroom(stu.classroom, stu.grade_level, target) };
 }
 
-// ---------- วาดพรีวิวเลื่อนชั้น (จัดกลุ่มตามชั้น) ----------
+// ป้ายบอกปลายทางของแต่ละ action (ใช้ทั้งใน dropdown และตอนสรุป)
+function actionLabel(action, plan) {
+  if (action === "promote") return "เลื่อน → " + plan.targetGrade + (plan.targetClassroom ? "/" + plan.targetClassroom.split("/").slice(1).join("/") : "");
+  if (action === "graduate") return "จบการศึกษา";
+  if (action === "hold") return "คงชั้นเดิม (ซ้ำชั้น)";
+  if (action === "left") return "ย้ายออก/ไม่เรียนต่อ";
+  return action;
+}
+
+// ---------- วาดพรีวิวเลื่อนชั้น (จัดกลุ่มตามชั้น มี dropdown 3 ทางต่อคน) ----------
 function renderPromote() {
   if (activeStudents.length === 0) {
     elPromoteSummary.textContent = "ยังไม่มีนักเรียน active ในระบบ";
     elPromoteList.innerHTML = "";
     return;
   }
-  let promoteCount = 0, gradCount = 0;
-  for (const stu of activeStudents) {
-    if (planFor(stu).action === "graduate") gradCount++; else promoteCount++;
-  }
-  elPromoteSummary.innerHTML =
-    "<div class='summary-box'>นักเรียน active " + activeStudents.length + " คน · จะเลื่อนชั้น <b>" +
-    promoteCount + "</b> คน · จบการศึกษา <b>" + gradCount + "</b> คน<br>" +
-    "<span class='hint'>ติ๊กออก = คงชั้นเดิม (เช่น เด็กติดซ้ำชั้น) — ชั้นสูงสุดตอนนี้: " + escapeHtml(highestGrade) + "</span></div>";
 
   // จัดกลุ่มตามชั้น เรียงตามลำดับชั้น
   const byGrade = {};
@@ -312,22 +314,58 @@ function renderPromote() {
 
   let html = "";
   for (const g of grades) {
-    html += "<div class='group-head'>" + escapeHtml(g) + " (" + byGrade[g].length + " คน)</div>";
+    // ปุ่มตั้งทั้งกลุ่มเร็วๆ (เช่น ป.6 บางคนย้ายออก — ตั้งกลุ่มเป็นย้ายออกก่อน แล้วแก้รายคน)
+    html += "<div class='group-head'>" + escapeHtml(g) + " (" + byGrade[g].length + " คน) " +
+      "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='advance'>ตั้งกลุ่ม: เลื่อน/จบ</span> · " +
+      "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='hold'>ซ้ำชั้น</span> · " +
+      "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='left'>ย้ายออก</span></div>";
     for (const stu of byGrade[g]) {
       const p = planFor(stu);
-      const tag = p.action === "graduate"
-        ? "<span class='tag grad'>จบการศึกษา</span>"
-        : "<span class='tag up'>→ " + escapeHtml(p.targetGrade) + (p.targetClassroom ? "/" + escapeHtml(p.targetClassroom.split("/").slice(1).join("/")) : "") + "</span>";
+      const advanceLabel = p.advance === "graduate" ? "จบการศึกษา" : actionLabel("promote", p);
       html +=
-        "<label class='row'>" +
-          "<input type='checkbox' class='promote-cb' data-id='" + stu.id + "' checked>" +
+        "<div class='row'>" +
           "<span class='info'><span class='name'>" + escapeHtml(stu.name) + "</span>" +
           "<span class='meta'> เลขที่ " + escapeHtml(stu.student_no) + (stu.classroom ? " · " + escapeHtml(stu.classroom) : "") + "</span></span>" +
-          tag +
-        "</label>";
+          "<select class='promote-action' data-id='" + stu.id + "' data-grade='" + escapeHtml(g) + "' style='width:auto; font-size:14px; padding:6px 8px'>" +
+            "<option value='" + p.advance + "' selected>" + advanceLabel + "</option>" +
+            "<option value='hold'>ซ้ำชั้น</option>" +
+            "<option value='left'>ย้ายออก</option>" +
+          "</select>" +
+        "</div>";
     }
   }
   elPromoteList.innerHTML = html;
+
+  // ตั้งทั้งกลุ่ม
+  elPromoteList.querySelectorAll(".group-set").forEach(el => {
+    el.addEventListener("click", () => {
+      const grade = el.dataset.grade, act = el.dataset.action;
+      elPromoteList.querySelectorAll(".promote-action").forEach(sel => {
+        if (sel.dataset.grade !== grade) return;
+        // "advance" = เลือก option แรก (promote หรือ graduate ตามที่คำนวณไว้), อื่นๆ เลือกตรงค่า
+        sel.value = act === "advance" ? sel.options[0].value : act;
+      });
+      updatePromoteSummary();
+    });
+  });
+  elPromoteList.querySelectorAll(".promote-action").forEach(sel => sel.addEventListener("change", updatePromoteSummary));
+  updatePromoteSummary();
+}
+
+// ---------- นับสรุปสด จาก dropdown ที่เลือกอยู่ ----------
+function updatePromoteSummary() {
+  const sels = elPromoteList.querySelectorAll(".promote-action");
+  let promote = 0, grad = 0, hold = 0, left = 0;
+  sels.forEach(s => {
+    if (s.value === "promote") promote++;
+    else if (s.value === "graduate") grad++;
+    else if (s.value === "hold") hold++;
+    else if (s.value === "left") left++;
+  });
+  elPromoteSummary.innerHTML =
+    "<div class='summary-box'>นักเรียน active " + sels.length + " คน · เลื่อนชั้น <b>" + promote +
+    "</b> · จบ <b>" + grad + "</b> · ซ้ำชั้น <b>" + hold + "</b> · ย้ายออก <b>" + left + "</b><br>" +
+    "<span class='hint'>เลือกได้ 3 ทางต่อคน (เลื่อน/จบ · ซ้ำชั้น · ย้ายออก) — ชั้นสูงสุดตอนนี้: " + escapeHtml(highestGrade) + "</span></div>";
 }
 
 // ---------- วาดรายการวิชาที่จะยก ----------
@@ -437,18 +475,28 @@ btnRun.addEventListener("click", async () => {
     return;
   }
 
-  const promoteIds = checkedIds("promote-cb");
+  // อ่าน action ที่ครูเลือกของนักเรียนแต่ละคน (จาก dropdown 3 ทาง)
+  const actionById = {};
+  elPromoteList.querySelectorAll(".promote-action").forEach(sel => { actionById[sel.dataset.id] = sel.value; });
+
   const subjectIds = checkedIds("subject-cb");
-  const promoteStudents = activeStudents.filter(s => promoteIds.indexOf(s.id) !== -1);
   const subjectsToClone = sourceSubjects.filter(s => subjectIds.indexOf(s.id) !== -1);
 
-  let gradN = 0, upN = 0;
-  for (const s of promoteStudents) { if (planFor(s).action === "graduate") gradN++; else upN++; }
+  let upN = 0, gradN = 0, holdN = 0, leftN = 0;
+  for (const s of activeStudents) {
+    const a = actionById[s.id];
+    if (a === "promote") upN++;
+    else if (a === "graduate") gradN++;
+    else if (a === "left") leftN++;
+    else holdN++;
+  }
 
   const ok = confirm(
     "ยืนยันขึ้นปีการศึกษา " + newYear + " ?\n\n" +
     "• เลื่อนชั้นนักเรียน " + upN + " คน\n" +
     "• จบการศึกษา " + gradN + " คน\n" +
+    "• คงชั้นเดิม (ซ้ำชั้น) " + holdN + " คน\n" +
+    "• ย้ายออก/ไม่เรียนต่อ " + leftN + " คน\n" +
     "• ยกวิชา " + subjectsToClone.length + " วิชา ไปปี " + newYear + "\n" +
     "• ลงทะเบียนนักเรียนให้วิชาปีใหม่อัตโนมัติ\n\n" +
     "ทำแล้วย้อนกลับอัตโนมัติไม่ได้ — ตรวจให้ดีก่อนกดตกลง"
@@ -474,26 +522,32 @@ btnRun.addEventListener("click", async () => {
       roomsBySubject[s.id] = rooms;
     }
 
-    // 2) เลื่อนชั้นนักเรียน (คำนวณจากชั้นเดิมที่ snapshot ไว้ใน activeStudents แล้วค่อยเขียน)
-    addLog("• กำลังเลื่อนชั้นนักเรียน...");
-    for (const stu of promoteStudents) {
-      const p = planFor(stu);
-      if (p.action === "graduate") {
-        const { error } = await sb.from("students").update({ graduated: true }).eq("id", stu.id);
-        if (error) throw new Error("ทำเครื่องหมายจบ " + stu.name + " ไม่สำเร็จ: " + error.message);
-      } else {
+    // 2) จัดการนักเรียนตาม action ที่เลือก (คำนวณจากชั้นเดิมที่ snapshot ไว้ แล้วค่อยเขียน)
+    addLog("• กำลังจัดการนักเรียน (เลื่อน/จบ/ซ้ำ/ย้ายออก)...");
+    for (const stu of activeStudents) {
+      const a = actionById[stu.id];
+      if (a === "promote") {
+        const p = planFor(stu);
         const { error } = await sb.from("students").update({ grade_level: p.targetGrade, classroom: p.targetClassroom }).eq("id", stu.id);
         if (error) throw new Error("เลื่อนชั้น " + stu.name + " ไม่สำเร็จ: " + error.message);
+      } else if (a === "graduate") {
+        const { error } = await sb.from("students").update({ graduated: true }).eq("id", stu.id);
+        if (error) throw new Error("ทำเครื่องหมายจบ " + stu.name + " ไม่สำเร็จ: " + error.message);
+      } else if (a === "left") {
+        const { error } = await sb.from("students").update({ left_school: true }).eq("id", stu.id);
+        if (error) throw new Error("ทำเครื่องหมายย้ายออก " + stu.name + " ไม่สำเร็จ: " + error.message);
       }
+      // "hold" (ซ้ำชั้น) = ไม่แตะ ให้คงชั้นเดิม
     }
-    // อัปเดต state ในเครื่องให้ตรง (เด็กที่เลื่อน/จบ) เพื่อใช้ตอน auto-enroll ต่อ
-    for (const stu of promoteStudents) {
-      const p = planFor(stu);
-      if (p.action === "graduate") stu.graduated = true;
-      else { stu.grade_level = p.targetGrade; stu.classroom = p.targetClassroom; }
+    // อัปเดต state ในเครื่องให้ตรง เพื่อใช้ตอน auto-enroll ต่อ (คงเฉพาะคนที่ยัง active)
+    for (const stu of activeStudents) {
+      const a = actionById[stu.id];
+      if (a === "promote") { const p = planFor(stu); stu.grade_level = p.targetGrade; stu.classroom = p.targetClassroom; }
+      else if (a === "graduate") stu.graduated = true;
+      else if (a === "left") stu.left_school = true;
     }
-    activeStudents = activeStudents.filter(s => !s.graduated);
-    addLog("  เลื่อนชั้น " + upN + " คน · จบ " + gradN + " คน เรียบร้อย");
+    activeStudents = activeStudents.filter(s => !s.graduated && !s.left_school);
+    addLog("  เลื่อน " + upN + " · จบ " + gradN + " · ซ้ำชั้น " + holdN + " · ย้ายออก " + leftN + " เรียบร้อย");
 
     // 3) ก๊อปวิชา (พื้นฐานก่อน เพื่อให้ remap สมาชิกบูรณาการได้ถูก)
     addLog("• กำลังยกวิชาไปปี " + newYear + "...");

@@ -99,13 +99,15 @@ export function promoteClassroom(classroom, oldGrade, newGrade) {
   return classroom;
 }
 
-// รายชื่อนักเรียนที่ยัง active (ยังไม่จบ) ทั้งหมด เรียงตามชั้น+ห้อง+เลขที่
-// ใช้ที่หน้าจัดการนักเรียน + ตัวจับคู่ลงทะเบียน (คนที่ graduated=true ไม่โผล่ในรายชื่อใช้งาน)
+// รายชื่อนักเรียนที่ยัง active (ยังเรียนอยู่จริง) ทั้งหมด เรียงตามชั้น+ห้อง+เลขที่
+// active = ยังไม่จบ (graduated=false) และ ยังไม่ย้ายออก/เลิกเรียน (left_school=false)
+// ใช้ที่หน้าจัดการนักเรียน + ตัวจับคู่ลงทะเบียน (คนจบ/คนย้ายออกไม่โผล่ในรายชื่อใช้งาน)
 export async function getActiveStudents() {
   const { data, error } = await sb
     .from("students")
     .select("*")
     .eq("graduated", false)
+    .eq("left_school", false)
     .order("grade_level")
     .order("classroom")
     .order("student_no");

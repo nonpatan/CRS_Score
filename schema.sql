@@ -698,6 +698,10 @@ create policy makeup_hours_delete on makeup_hours for delete using (can_edit_sub
 --     active (ไม่ลบ ประวัติคะแนน/เช็คชื่อยังอยู่ครบผ่าน enrollments ของวิชาปีเก่า)
 alter table students add column if not exists graduated boolean not null default false;
 
+-- 14.1) ธงย้ายออก/เลิกเรียน — เด็กที่ไม่ได้เรียนต่อที่โรงเรียนนี้ (เช่น ป.6 ที่ไปเรียนมัธยมที่อื่น)
+--     ต่างจาก graduated (จบหลักสูตร) — ใช้ตอนเลื่อนชั้นเลือก "ย้ายออก" แยกออกจากรายชื่อ active เหมือนกัน
+alter table students add column if not exists left_school boolean not null default false;
+
 -- 15) ค่าตั้งค่าส่วนกลาง (key-value) — ตอนนี้เก็บ highest_grade = ชั้นสูงสุดที่โรงเรียนเปิดสอน
 --     ใช้ตัดสินว่าใครจบตอนเลื่อนชั้น (เช่น 'ม.3' สำหรับโรงเรียนขยายโอกาส)
 create table if not exists app_settings (
