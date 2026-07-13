@@ -708,6 +708,18 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
   }
 });
 
+// นับคะแนนที่กรอกไว้แล้วของวิชาใดๆ (ไม่ใช่แค่วิชาที่กำลังเปิดอยู่) — ใช้เช็คตอนจะลบวิชาบูรณาการ
+// ที่มีวิชาพื้นฐานสมาชิกอยู่ (คะแนนของสมาชิกไม่ได้อยู่ใน `units` ของ currentSubject)
+// คืน error แยกจาก 0 คะแนนจริง เพื่อไม่ให้ query พังแล้วเข้าใจผิดว่า "ไม่มีคะแนน" (จะปล่อยให้ลบทั้งที่เช็คไม่สำเร็จ)
+async function countScoresOfSubject(subjectId) {
+  const { data, error } = await sb
+    .from("units")
+    .select("indicators(collections(scores(id)))")
+    .eq("subject_id", subjectId);
+  if (error) return { count: null, error };
+  return { count: countScoresInUnits(data || []), error: null };
+}
+
 // ---------- ลบวิชา (กันไว้ถ้ามีคะแนน หรือยังเป็นสมาชิกของวิชาบูรณาการอื่นอยู่) ----------
 elDelSubject.addEventListener("click", async () => {
   if (!currentSubject) return;
@@ -726,6 +738,27 @@ elDelSubject.addEventListener("click", async () => {
     if (refs && refs.length > 0) {
       const names = refs.map(r => r.integrated.name).join(", ");
       showToast("ลบไม่ได้ วิชานี้เป็นสมาชิกของวิชาบูรณาการ: " + names, false);
+      return;
+    }
+  } else if (currentSubject.subject_type === "บูรณาการ") {
+    // วิชาบูรณาการเองไม่มีคะแนนของตัวเอง (คะแนนอยู่ที่วิชาพื้นฐานสมาชิก) — เดิมลบได้เลยโดยไม่เช็ค
+    // อะไรเลย ทั้งที่ลบแล้ว integration_members จะ cascade หายหมด (การจัดกลุ่มหาย แม้คะแนนของ
+    // วิชาพื้นฐานสมาชิกจะไม่ถูกลบก็ตาม) เลยต้องเช็คก่อนว่ามีสมาชิกตัวไหนกรอกคะแนนไปแล้วบ้าง
+    const { data: memberLinks, error: memErr } = await sb
+      .from("integration_members")
+      .select("member:member_subject_id(id, name)")
+      .eq("integrated_subject_id", currentSubject.id);
+    if (memErr) { showToast("ตรวจสอบวิชาย่อยไม่สำเร็จ: " + memErr.message, false); return; }
+
+    const membersWithScores = [];
+    for (const link of (memberLinks || [])) {
+      if (!link.member) continue;
+      const { count: n, error: cntErr } = await countScoresOfSubject(link.member.id);
+      if (cntErr) { showToast("ตรวจสอบคะแนนของ " + link.member.name + " ไม่สำเร็จ: " + cntErr.message, false); return; }
+      if (n > 0) membersWithScores.push(link.member.name + " (" + n + " ช่อง)");
+    }
+    if (membersWithScores.length > 0) {
+      showToast("ลบไม่ได้ วิชาย่อยของวิชาบูรณาการนี้มีคะแนนกรอกไว้แล้ว: " + membersWithScores.join(", "), false);
       return;
     }
   }
