@@ -193,7 +193,9 @@ export async function loadSubjectData(subjectId) {
 // สูตรบัญญัติไตรยางศ์ไล่ล่างขึ้นบน ตามที่กำหนดใน CLAUDE.md (ไม่เก็บค่าที่เทียบแล้วลง database)
 // รับพารามิเตอร์แยกจาก state กลาง เพื่อให้เรียกซ้ำได้ทั้งวิชาพื้นฐานเดี่ยว และวิชาพื้นฐาน
 // แต่ละตัวที่เป็นสมาชิกของวิชาบูรณาการ
-export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, sessionsArr, makeupArr) {
+// skipMs = true เมื่อวิชานี้เป็นสมาชิกของวิชาบูรณาการ — มส. ของวิชาย่อยไม่ตัดสินรายตัว
+// แต่ไปคิด "แบบรวม" ที่ระดับวิชาบูรณาการแทน (ยืนยันกับผู้ใช้แล้ว 2026-07 ดู computeIntegratedResult)
+export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, sessionsArr, makeupArr, skipMs) {
   const subjectUnits = [];
   const competencyUnits = [];
   let subjectRaw = 0, subjectCap = 0;
@@ -244,7 +246,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   //   ขาดสะสม > 20% ของคาบทั้งเทอม และ <= 40%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชย
   //     ลบยอดขาดสุทธิให้ไม่เกิน 20% ได้
   //   ขาดสะสม > 40% ของคาบทั้งเทอม             → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
-  if (subj.total_periods && sessionsArr.length > 0) {
+  if (!skipMs && subj.total_periods && sessionsArr.length > 0) {
     const rawMissed = computeMissedPeriods(studentId, sessionsArr);
     const maxMissedRetake = subj.total_periods * 0.40;
     const maxMissedMakeup = subj.total_periods * 0.20;
@@ -269,33 +271,64 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 }
 
 // ---------- คำนวณผลรวมวิชาบูรณาการของนักเรียน 1 คน ----------
-// ถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียน (total_periods) ของวิชาพื้นฐานแต่ละตัว (ยืนยันแล้ว)
-// ถ้าวิชาย่อยตัวไหนติด มส. → บูรณาการติด มส. ทันที (มส. ชนะ ร. เมื่อขัดแย้งกัน ยืนยันแล้ว)
-// ถ้าไม่มี มส. แต่มีวิชาย่อยติด ร. → บูรณาการติด ร.
+// คะแนน: ถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียน (total_periods) ของวิชาพื้นฐานแต่ละตัว (ยืนยันแล้ว)
+// มส.: คิด "แบบรวม" ที่ระดับวิชาบูรณาการ (ยืนยันกับผู้ใช้แล้ว 2026-07) — ไม่ใช่แยกรายวิชาย่อย:
+//   ฐานเวลาเรียนรวม = SUM(total_periods ของวิชาย่อยทุกตัว)  เช่น สังคม 20 + การงาน 20 = 40 คาบ
+//   คาบขาดสะสมรวม  = SUM(คาบขาดของนักเรียนคนนี้ในทุกวิชาย่อย)  (เช็คชื่อยังทำรายวิชาย่อย
+//                     เหมือนเดิม — ครูจะได้เห็นว่าเด็กขาดหนักที่วิชาไหน แล้วไปตามแก้ที่วิชานั้น)
+//   ชั่วโมงชดเชยรวม = SUM(makeup_hours ของทุกวิชาย่อย)
+//   เพดาน 20%/40% คิดจากฐานรวม — ตรรกะ 2 ระดับ (เรียนเพิ่ม/เรียนซ้ำ) เหมือนวิชาพื้นฐานทุกอย่าง
+// มส. (รวม) ชนะ ร. เมื่อขัดแย้งกัน (ยืนยันแล้ว) — ไม่มี มส. แต่มีวิชาย่อยติด ร. → บูรณาการติด ร.
 // รับ memberDataList = [{ subject, units, remarksData, sessions, makeupHours }, ...] จาก loadSubjectData
 export function computeIntegratedResult(studentId, memberDataList) {
   const memberResults = [];
-  let hasMs = false, hasR = false;
+  let hasR = false;
   let weightedSum = 0, weightSum = 0;
+  let totalBase = 0, rawMissed = 0, makeupTotal = 0, anySessions = false;
 
   for (const md of memberDataList) {
-    const r = computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions, md.makeupHours);
+    // skipMs = true: วิชาย่อยไม่ตัดสิน มส. รายตัว (คิดรวมข้างล่างแทน) — ผลรายวิชาจึงมีแค่ ร./เกรด
+    const r = computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions, md.makeupHours, true);
     const weight = md.subject.total_periods || 0;
+    const missed = computeMissedPeriods(studentId, md.sessions || []);
     // เก็บสมรรถนะหลักของวิชาย่อยนี้ไว้ด้วย (ถ้ามี) — แสดงแยกตามวิชาที่กรอกไว้จริง ไม่ถัวเฉลี่ยรวม
     // เพราะสมรรถนะหลักมักกรอกแค่บางวิชา ถัวเฉลี่ยรวมกับวิชาที่ไม่มีข้อมูลจะทำให้คะแนนต่ำลงผิดๆ
-    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits });
-    if (r.result.type === "มส.") hasMs = true;
-    else if (r.result.type === "ร.") hasR = true;
+    // missedPeriods เก็บไว้โชว์รายวิชา ให้ครูเห็นว่าเด็กขาดหนักที่วิชาย่อยไหน
+    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed });
+    if (r.result.type === "ร.") hasR = true;
     else { weightedSum += r.result.percentScore * weight; weightSum += weight; }
+
+    totalBase += weight;
+    rawMissed += missed;
+    if ((md.sessions || []).length > 0) anySessions = true;
+    makeupTotal += (md.makeupHours || [])
+      .filter(m => m.student_id === studentId)
+      .reduce((sum, m) => sum + Number(m.periods), 0);
   }
 
-  let overall;
-  if (hasMs) overall = { type: "มส." };
-  else if (hasR) overall = { type: "ร." };
-  else {
+  // 1) เช็ค มส. รวมก่อน (มส. ชนะ ร.) — ต้องมีฐานเวลากับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้งถึงเช็คได้
+  let overall = null;
+  if (totalBase > 0 && anySessions) {
+    const maxMissedRetake = totalBase * 0.40;
+    const maxMissedMakeup = totalBase * 0.20;
+    if (rawMissed > maxMissedRetake) {
+      overall = { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake, totalBase };
+    } else if (rawMissed > maxMissedMakeup) {
+      const netMissed = Math.max(0, rawMissed - makeupTotal);
+      if (netMissed > maxMissedMakeup) {
+        overall = { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal, totalBase };
+      }
+    }
+  }
+
+  // 2) ไม่มี มส. → เช็ค ร. ของวิชาย่อย
+  if (!overall && hasR) overall = { type: "ร." };
+
+  // 3) แปลงเป็นเกรด (ถัวเฉลี่ยถ่วงน้ำหนัก)
+  if (!overall) {
     const percentScore = weightSum > 0 ? weightedSum / weightSum : 0;
-    overall = { type: "grade", grade: percentToGrade(percentScore), percentScore, weightSum };
+    overall = { type: "grade", grade: percentToGrade(percentScore), percentScore, weightSum, makeupTotal };
   }
 
-  return { memberResults, overall };
+  return { memberResults, overall, totalBase, rawMissed, makeupTotal };
 }

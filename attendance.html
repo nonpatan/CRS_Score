@@ -42,7 +42,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
-  select, input[type="number"], input[type="date"] {
+  select, input[type="number"], input[type="date"], input[type="text"] {
     width: 100%;
     font-family: inherit;
     font-size: 16px;
@@ -52,6 +52,21 @@
     background: var(--white);
     color: var(--ink);
   }
+
+  /* ปุ่มเลือกครั้งเช็คชื่อของวันเดียวกัน (เช้า/บ่าย ฯลฯ) */
+  .chip {
+    display: inline-block;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--white);
+    color: var(--ink);
+    cursor: pointer;
+    margin: 0 6px 6px 0;
+  }
+  .chip.active { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); font-weight: 600; }
   select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .field { margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
@@ -152,6 +167,14 @@
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
+    <!-- วิชาบูรณาการ: เลือกวิชาย่อยที่จะเช็คชื่อ (เช็คลงวิชาย่อย เวลาเรียนไปรวมคิด มส. ที่วิชาบู) -->
+    <div class="field" id="member-pick" style="display:none">
+      <label for="sel-member">วิชาย่อย</label>
+      <select id="sel-member"><option value="">— เลือกวิชาย่อย —</option></select>
+      <div class="hint" style="font-size:13px; margin-top:4px">
+        เช็คชื่อบันทึกที่วิชาย่อยตัวนี้ — เวลาเรียนของทุกวิชาย่อยจะรวมกันคิด มส. ที่วิชาบูรณาการให้เอง
+      </div>
+    </div>
     <div class="field">
       <label for="inp-date">วันที่เช็คชื่อ</label>
       <input type="date" id="inp-date">
@@ -165,6 +188,8 @@
 
   <!-- รายชื่อนักเรียนให้ติ๊กสถานะ -->
   <div class="card" id="students-card" style="display:none">
+    <!-- ครั้งที่เช็คไปแล้วของวันนั้น (เช้า/บ่าย ฯลฯ) — กดสลับไปแก้ครั้งเดิม หรือเพิ่มครั้งใหม่ -->
+    <div id="day-sessions" style="display:none; margin-bottom:10px"></div>
     <div class="session-note" id="session-note"></div>
     <div id="student-list"></div>
     <button class="save" id="btn-save">บันทึกการเช็คชื่อ</button>
@@ -217,10 +242,13 @@ const elFilterYear   = document.getElementById("filter-year");
 const elFilterGrade  = document.getElementById("filter-grade");
 const elFilterTerm   = document.getElementById("filter-term");
 const elSubject      = document.getElementById("sel-subject");
+const elMemberPick   = document.getElementById("member-pick");
+const elMemberSelect = document.getElementById("sel-member");
 const elDate          = document.getElementById("inp-date");
 const elPeriods       = document.getElementById("inp-periods");
 const btnLoad         = document.getElementById("btn-load");
 const elStudentsCard  = document.getElementById("students-card");
+const elDaySessions   = document.getElementById("day-sessions");
 const elStudentList   = document.getElementById("student-list");
 const elSessionNote   = document.getElementById("session-note");
 const elEmptyHint     = document.getElementById("empty-hint");
@@ -228,17 +256,24 @@ const elToast         = document.getElementById("toast");
 const btnSave         = document.getElementById("btn-save");
 
 // เก็บ state ที่กำลังทำงานอยู่
+// currentSubjectId/currentSubject = วิชาที่ "บันทึกจริง" เสมอ (วิชาพื้นฐาน) — ถ้าเลือกวิชา
+// บูรณาการใน dropdown หลัก ต้องเลือกวิชาย่อยอีกชั้นก่อน แล้ววิชาย่อยนั้นจะมาเป็น current
 let currentSubjectId = null;
+let currentSubject = null;
 let currentSession = null;   // object ครั้งที่เช็คชื่อ ถ้ายังไม่เคยมี = null (จะสร้างใหม่ตอนบันทึก)
 let students = [];           // รายชื่อนักเรียนทั้งหมด
-let allSubjects = [];        // วิชาพื้นฐานทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
+let allSubjects = [];        // วิชาทั้งหมด (กรองด้วยปี/ชั้น/ภาคเรียนก่อนเติมลง dropdown)
+let memberIdSet = new Set(); // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown หลัก)
+let daySessions = [];        // ครั้งเช็คชื่อทั้งหมดของ วิชา+วันที่ ที่เลือกอยู่ (รองรับหลายครั้งต่อวัน)
+let memberSubjects = [];     // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
 
-// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี)
+// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
   if (s.year) parts.push("ปี " + s.year);
   if (s.term) parts.push("เทอม " + s.term);
+  if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
   return parts.join("  ·  ");
 }
 
@@ -274,14 +309,21 @@ elDate.value = todayStr();
 
 // ---------- โหลดวิชาทั้งหมด ----------
 async function loadSubjects() {
-  // เช็คชื่อได้เฉพาะวิชาพื้นฐาน — วิชาบูรณาการไม่มีคาบเรียนเป็นของตัวเอง
   const { data, error } = await sb
     .from("subjects")
     .select("*")
-    .eq("subject_type", "พื้นฐาน")
     .order("created_at");
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
   allSubjects = data || [];
+
+  // วิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ ไม่โชว์ใน dropdown หลัก (ยืนยันแล้ว 2026-07)
+  // — ให้เลือกวิชาบูรณาการก่อน แล้วค่อยเลือกวิชาย่อยจากในนั้น กันรายการวิชายาวและกันสับสน
+  const { data: memberRows, error: memErr } = await sb
+    .from("integration_members")
+    .select("member_subject_id");
+  if (memErr) { showToast("โหลดข้อมูลวิชาบูรณาการไม่สำเร็จ: " + memErr.message, false); return; }
+  memberIdSet = new Set((memberRows || []).map(r => r.member_subject_id));
+
   fillYearOptions();
   applySubjectFilter();
 }
@@ -306,6 +348,7 @@ function applySubjectFilter() {
   const gradeFilter = elFilterGrade.value;
   const termFilter = elFilterTerm.value;
   const filtered = allSubjects.filter(s => {
+    if (memberIdSet.has(s.id)) return false; // วิชาย่อยของบูรณาการ เลือกผ่านวิชาบูแทน
     if (yearFilter && s.year !== yearFilter) return false;
     if (gradeFilter && s.grade_level !== gradeFilter) return false;
     if (termFilter && s.term !== termFilter) return false;
@@ -319,54 +362,137 @@ elFilterGrade.addEventListener("change", () => { applySubjectFilter(); elSubject
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 
 elSubject.addEventListener("change", async () => {
-  currentSubjectId = elSubject.value || null;
   hideStudents();
+  const picked = elSubject.value ? allSubjects.find(s => s.id === elSubject.value) : null;
+
+  if (picked && picked.subject_type === "บูรณาการ") {
+    // วิชาบูรณาการ: ยังบันทึกอะไรไม่ได้จนกว่าจะเลือกวิชาย่อย (เช็คชื่อลงที่วิชาย่อยเสมอ)
+    currentSubjectId = null;
+    currentSubject = null;
+    elMemberPick.style.display = "block";
+    await loadMemberOptions(picked.id);
+  } else {
+    elMemberPick.style.display = "none";
+    currentSubjectId = picked ? picked.id : null;
+    currentSubject = picked || null;
+  }
   await loadMakeupSection();
 });
 
-// ---------- กดโหลดรายชื่อ: หาครั้งที่เช็คชื่อเดิม (ถ้ามี) แล้ววาดรายชื่อ ----------
+// ---------- เติมตัวเลือกวิชาย่อยของวิชาบูรณาการ ----------
+async function loadMemberOptions(integratedId) {
+  const { data: rows, error } = await sb
+    .from("integration_members")
+    .select("member:member_subject_id(*)")
+    .eq("integrated_subject_id", integratedId);
+  if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
+  memberSubjects = (rows || []).map(r => r.member).filter(Boolean);
+  const placeholder = memberSubjects.length > 0
+    ? "— เลือกวิชาย่อย —"
+    : "— วิชาบูรณาการนี้ยังไม่มีวิชาย่อย (เพิ่มที่หน้าจัดการโครงสร้าง) —";
+  fillSelect(elMemberSelect, memberSubjects, s => s.name + (s.teacher ? "  ·  " + s.teacher : ""), placeholder);
+}
+
+// เลือกวิชาย่อยแล้ว วิชาย่อยนั้นกลายเป็นวิชาที่บันทึกจริง ทุกอย่างทำงานเหมือนวิชาพื้นฐานปกติ
+elMemberSelect.addEventListener("change", async () => {
+  hideStudents();
+  const m = memberSubjects.find(x => x.id === elMemberSelect.value);
+  currentSubjectId = m ? m.id : null;
+  currentSubject = m || null;
+  await loadMakeupSection();
+});
+
+// ---------- กดโหลดรายชื่อ ----------
 btnLoad.addEventListener("click", async () => {
-  if (!currentSubjectId) { showToast("เลือกวิชาก่อน", false); return; }
+  if (!currentSubject) { showToast("เลือกวิชาก่อน (วิชาบูรณาการต้องเลือกวิชาย่อยด้วย)", false); return; }
   if (!elDate.value) { showToast("เลือกวันที่ก่อน", false); return; }
+
+  btnLoad.disabled = true;
+  try {
+    await loadPlainSubjectDay();
+  } finally {
+    btnLoad.disabled = false;
+  }
+});
+
+// ---------- วิชาพื้นฐาน: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน เช่น เช้า/บ่าย) ----------
+async function loadPlainSubjectDay() {
   const periods = Number(elPeriods.value);
   if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
 
-  btnLoad.disabled = true;
-
-  // โหลดรายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ตั้งค่าที่หน้าจัดการโครงสร้าง)
   students = await getRosterForSubject(currentSubjectId);
 
-  // เช็คว่าวิชานี้ วันนี้ เคยเช็คชื่อไปแล้วหรือยัง (ถ้ามี = โหมดแก้ไข)
-  const { data: existingSession, error: sessErr } = await sb
+  const ok = await refreshDaySessions();
+  if (!ok) return;
+
+  // มีครั้งเดิมของวันนี้ → เปิดครั้งแรกให้แก้ (สลับครั้ง/เพิ่มครั้งใหม่ได้จากปุ่มด้านบน)
+  if (daySessions.length > 0) await selectDaySession(daySessions[0]);
+  else startNewSession();
+}
+
+// โหลดรายการครั้งเช็คชื่อของ วิชา+วันที่ ที่เลือก แล้ววาดปุ่มสลับครั้ง — คืน false ถ้าโหลดพลาด
+async function refreshDaySessions() {
+  const { data, error } = await sb
     .from("attendance_sessions")
     .select("*")
     .eq("subject_id", currentSubjectId)
     .eq("session_date", elDate.value)
-    .maybeSingle();
-  if (sessErr) { showToast("ตรวจสอบครั้งที่เช็คชื่อไม่สำเร็จ: " + sessErr.message, false); btnLoad.disabled = false; return; }
+    .order("created_at");
+  if (error) { showToast("ตรวจสอบครั้งที่เช็คชื่อไม่สำเร็จ: " + error.message, false); return false; }
+  daySessions = data || [];
+  renderDaySessionChips();
+  return true;
+}
 
-  let scoreMap = {}; // student_id -> status เดิม (ถ้ามี)
-  if (existingSession) {
-    currentSession = existingSession;
-    elPeriods.value = existingSession.periods_covered; // ใช้ค่าที่เคยบันทึกไว้ก่อน แก้ต่อได้
-    const { data: records, error: recErr } = await sb
-      .from("attendance_records")
-      .select("student_id, status")
-      .eq("session_id", existingSession.id);
-    if (recErr) { showToast("โหลดผลเช็คชื่อเดิมไม่สำเร็จ", false); btnLoad.disabled = false; return; }
-    for (const r of (records || [])) scoreMap[r.student_id] = r.status;
-    elSessionNote.textContent = "พบข้อมูลเช็คชื่อของวันนี้แล้ว — กำลังแก้ไขของเดิม";
-  } else {
-    currentSession = null; // จะสร้างครั้งใหม่ตอนกดบันทึก
-    elSessionNote.textContent = "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
-  }
+// วาดปุ่มครั้งของวันนั้น + ปุ่มเพิ่มครั้งใหม่ (วันเดียวเช็คได้หลายครั้ง)
+function renderDaySessionChips() {
+  if (daySessions.length === 0) { elDaySessions.style.display = "none"; elDaySessions.innerHTML = ""; return; }
+  elDaySessions.style.display = "block";
+  elDaySessions.innerHTML = "<div class='hint' style='font-size:13px; margin-bottom:6px'>ครั้งที่เช็คแล้วในวันนี้ — กดเพื่อสลับไปแก้ หรือเพิ่มครั้งใหม่</div>";
+  daySessions.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (currentSession && currentSession.id === s.id ? " active" : "");
+    b.textContent = "ครั้งที่ " + (i + 1) + " · " + s.periods_covered + " คาบ";
+    b.addEventListener("click", () => selectDaySession(s));
+    elDaySessions.appendChild(b);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "chip" + (currentSession === null ? " active" : "");
+  add.textContent = "+ เพิ่มครั้งใหม่";
+  add.addEventListener("click", () => { startNewSession(); });
+  elDaySessions.appendChild(add);
+}
 
-  renderStudents(scoreMap, periods);
-  btnLoad.disabled = false;
-});
+// เปิดครั้งเดิมมาแก้
+async function selectDaySession(s) {
+  currentSession = s;
+  elPeriods.value = s.periods_covered;
+  const { data: records, error } = await sb
+    .from("attendance_records")
+    .select("student_id, status")
+    .eq("session_id", s.id);
+  if (error) { showToast("โหลดผลเช็คชื่อเดิมไม่สำเร็จ", false); return; }
+  const scoreMap = {};
+  for (const r of (records || [])) scoreMap[r.student_id] = r.status;
+  elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (daySessions.indexOf(s) + 1) + ") ของวันนี้";
+  renderStudents(scoreMap);
+  renderDaySessionChips();
+}
+
+// เริ่มครั้งใหม่ (ของวันเดียวกันก็ได้ เช่น วันนี้เรียน 2 รอบ เช็คแยกกันคนละครั้ง)
+function startNewSession() {
+  currentSession = null;
+  elSessionNote.textContent = daySessions.length > 0
+    ? "กำลังเพิ่มครั้งใหม่ของวันนี้ (วันนี้เช็คไปแล้ว " + daySessions.length + " ครั้ง) — ตั้งจำนวนคาบข้างบนก่อนบันทึก"
+    : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
+  renderStudents({});
+  renderDaySessionChips();
+}
 
 // วาดรายชื่อนักเรียน + ช่องเลือกสถานะ
-function renderStudents(scoreMap, periods) {
+function renderStudents(scoreMap) {
   elStudentList.innerHTML = "";
   for (const stu of students) {
     const row = document.createElement("div");
@@ -398,6 +524,14 @@ function renderStudents(scoreMap, periods) {
   elEmptyHint.style.display = "none";
 }
 
+// อ่านสถานะที่ติ๊กไว้ทั้งหมด — คืน [{student_id, status}, ...]
+function readTickedStatuses() {
+  const selects = elStudentList.querySelectorAll("select");
+  const rows = [];
+  for (const sel of selects) rows.push({ student_id: sel.dataset.studentId, status: sel.value });
+  return rows;
+}
+
 // ---------- บันทึก: สร้าง/แก้ไขครั้งที่เช็คชื่อ แล้ว upsert สถานะทุกคน ----------
 btnSave.addEventListener("click", async () => {
   const periods = Number(elPeriods.value);
@@ -415,7 +549,7 @@ btnSave.addEventListener("click", async () => {
     if (error) { showToast("แก้ไขครั้งที่เช็คชื่อไม่สำเร็จ: " + error.message, false); btnSave.disabled = false; return; }
     sessionId = currentSession.id;
   } else {
-    // ยังไม่เคยมี สร้างครั้งใหม่
+    // ยังไม่เคยมี สร้างครั้งใหม่ (วันเดียวกันมีหลายครั้งได้ เช่น วันนี้เรียน 2 รอบ)
     const { data, error } = await sb
       .from("attendance_sessions")
       .insert({ subject_id: currentSubjectId, session_date: elDate.value, periods_covered: periods })
@@ -426,15 +560,7 @@ btnSave.addEventListener("click", async () => {
     sessionId = data.id;
   }
 
-  const selects = elStudentList.querySelectorAll("select");
-  const rows = [];
-  for (const sel of selects) {
-    rows.push({
-      session_id: sessionId,
-      student_id: sel.dataset.studentId,
-      status: sel.value
-    });
-  }
+  const rows = readTickedStatuses().map(r => ({ session_id: sessionId, student_id: r.student_id, status: r.status }));
 
   // upsert อาศัย unique(session_id, student_id) กรอกซ้ำ = ทับค่าเดิม
   const { error } = await sb
@@ -442,14 +568,20 @@ btnSave.addEventListener("click", async () => {
     .upsert(rows, { onConflict: "session_id,student_id" });
   btnSave.disabled = false;
 
-  if (error) showToast("บันทึกไม่สำเร็จ: " + error.message, false);
-  else { showToast("บันทึกแล้ว " + rows.length + " คน", true); elSessionNote.textContent = "บันทึกล่าสุดแล้ว — แก้ต่อได้ถ้าจำเป็น"; }
+  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+
+  showToast("บันทึกแล้ว " + rows.length + " คน", true);
+  elSessionNote.textContent = "บันทึกล่าสุดแล้ว — แก้ต่อได้ถ้าจำเป็น";
+  await refreshDaySessions(); // ครั้งใหม่ที่เพิ่งสร้างจะโผล่เป็นปุ่มให้สลับได้
 });
 
 function hideStudents() {
   elStudentsCard.style.display = "none";
   elEmptyHint.style.display = "block";
   currentSession = null;
+  daySessions = [];
+  elDaySessions.style.display = "none";
+  elDaySessions.innerHTML = "";
 }
 
 function escapeHtml(s) {
@@ -464,7 +596,11 @@ let makeupRoster = [];
 let makeupRecords = [];
 
 async function loadMakeupSection() {
-  if (!currentSubjectId) { elMakeupCard.style.display = "none"; return; }
+  // ชั่วโมงชดเชยผูกกับวิชาพื้นฐานเท่านั้น (มส. คิดต่อวิชาพื้นฐาน) — เลือกวิชาบูรณาการอยู่ให้ซ่อน
+  if (!currentSubjectId || (currentSubject && currentSubject.subject_type === "บูรณาการ")) {
+    elMakeupCard.style.display = "none";
+    return;
+  }
   elMakeupCard.style.display = "block";
 
   makeupRoster = await getRosterForSubject(currentSubjectId);

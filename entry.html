@@ -152,6 +152,14 @@
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
+    <!-- วิชาบูรณาการ: เลือกวิชาย่อยที่จะกรอกคะแนน (คะแนน/ร. เก็บที่วิชาย่อยแต่ละตัว) -->
+    <div class="field" id="member-pick" style="display:none">
+      <label for="sel-member">วิชาย่อย</label>
+      <select id="sel-member"><option value="">— เลือกวิชาย่อย —</option></select>
+      <div class="hint" style="font-size:13px; margin-top:4px">
+        คะแนนเก็บที่วิชาย่อยแต่ละตัว — เลือกวิชาย่อยแล้วกรอกตามปกติ
+      </div>
+    </div>
     <div class="field">
       <label for="sel-kind">ประเภทคะแนน</label>
       <select id="sel-kind">
@@ -225,6 +233,8 @@ const elFilterYear  = document.getElementById("filter-year");
 const elFilterGrade = document.getElementById("filter-grade");
 const elFilterTerm  = document.getElementById("filter-term");
 const elSubject    = document.getElementById("sel-subject");
+const elMemberPick   = document.getElementById("member-pick");
+const elMemberSelect = document.getElementById("sel-member");
 const elKind       = document.getElementById("sel-kind");
 const elUnitLabel  = document.getElementById("lbl-unit");
 const elUnit       = document.getElementById("sel-unit");
@@ -238,17 +248,22 @@ const elToast      = document.getElementById("toast");
 const btnSave      = document.getElementById("btn-save");
 
 // เก็บ state ที่กำลังทำงานอยู่
-let currentSubject = null;      // object วิชาที่เลือก
+// currentSubject = วิชาที่ "กรอกจริง" เสมอ (วิชาพื้นฐาน) — ถ้าเลือกวิชาบูรณาการใน dropdown
+// หลัก ต้องเลือกวิชาย่อยอีกชั้นก่อน แล้ววิชาย่อยนั้นจะมาเป็น currentSubject
+let currentSubject = null;
 let currentCollection = null;   // object ครั้งที่ที่เลือก
 let students = [];              // รายชื่อนักเรียนของวิชานี้
-let allSubjects = [];           // วิชาพื้นฐานทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
+let allSubjects = [];           // วิชาทั้งหมด (กรองด้วยปี/ชั้น/ภาคเรียนก่อนเติมลง dropdown)
+let memberIdSet = new Set();    // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown หลัก)
+let memberSubjects = [];        // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
 
-// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี)
+// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
   if (s.year) parts.push("ปี " + s.year);
   if (s.term) parts.push("เทอม " + s.term);
+  if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
   return parts.join("  ·  ");
 }
 
@@ -275,14 +290,21 @@ function showToast(msg, ok) {
 
 // ---------- โหลดวิชาทั้งหมด ----------
 async function loadSubjects() {
-  // กรอกคะแนนได้เฉพาะวิชาพื้นฐาน — วิชาบูรณาการไม่มีหน่วยของตัวเอง คะแนนมาจากวิชาพื้นฐานที่ประกอบกัน
   const { data, error } = await sb
     .from("subjects")
     .select("*")
-    .eq("subject_type", "พื้นฐาน")
     .order("created_at");
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
   allSubjects = data || [];
+
+  // วิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ ไม่โชว์ใน dropdown หลัก (ยืนยันแล้ว 2026-07)
+  // — ให้เลือกวิชาบูรณาการก่อน แล้วค่อยเลือกวิชาย่อยจากในนั้น (คะแนนยังเก็บที่วิชาย่อยเหมือนเดิม)
+  const { data: memberRows, error: memErr } = await sb
+    .from("integration_members")
+    .select("member_subject_id");
+  if (memErr) { showToast("โหลดข้อมูลวิชาบูรณาการไม่สำเร็จ: " + memErr.message, false); return; }
+  memberIdSet = new Set((memberRows || []).map(r => r.member_subject_id));
+
   fillYearOptions();
   applySubjectFilter();
 }
@@ -308,6 +330,7 @@ function applySubjectFilter() {
   const gradeFilter = elFilterGrade.value;
   const termFilter = elFilterTerm.value;
   const filtered = allSubjects.filter(s => {
+    if (memberIdSet.has(s.id)) return false; // วิชาย่อยของบูรณาการ เลือกผ่านวิชาบูแทน
     if (yearFilter && s.year !== yearFilter) return false;
     if (gradeFilter && s.grade_level !== gradeFilter) return false;
     if (termFilter && s.term !== termFilter) return false;
@@ -323,18 +346,46 @@ elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.
 // ---------- เมื่อเลือกวิชา: โหลดหน่วยใหญ่ + นักเรียน ----------
 elSubject.addEventListener("change", async () => {
   resetBelow("unit");
-  const id = elSubject.value;
-  if (!id) { currentSubject = null; await loadUnits(); await loadRemarkSection(); return; }
+  const picked = elSubject.value ? allSubjects.find(s => s.id === elSubject.value) : null;
 
-  // เก็บ object วิชาไว้ใช้ label ตามระดับชั้น
-  const { data: subj } = await sb.from("subjects").select("*").eq("id", id).single();
-  currentSubject = subj;
+  if (picked && picked.subject_type === "บูรณาการ") {
+    // วิชาบูรณาการ: คะแนน/ร. เก็บที่วิชาย่อย — ต้องเลือกวิชาย่อยก่อนถึงกรอกได้
+    currentSubject = null;
+    elMemberPick.style.display = "block";
+    await loadMemberOptions(picked.id);
+    await loadUnits();          // เคลียร์ dropdown หน่วย (ยังไม่เลือกวิชาย่อย)
+    await loadRemarkSection();  // ซ่อนการ์ด ร. จนกว่าจะเลือกวิชาย่อย
+    return;
+  }
 
+  elMemberPick.style.display = "none";
+  currentSubject = picked || null;
   await loadUnits();
+  if (currentSubject) students = await getRosterForSubject(currentSubject.id);
+  await loadRemarkSection();
+});
 
-  // โหลดรายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ตั้งค่าที่หน้าจัดการโครงสร้าง)
-  students = await getRosterForSubject(id);
+// ---------- เติมตัวเลือกวิชาย่อยของวิชาบูรณาการ ----------
+async function loadMemberOptions(integratedId) {
+  const { data: rows, error } = await sb
+    .from("integration_members")
+    .select("member:member_subject_id(*)")
+    .eq("integrated_subject_id", integratedId);
+  if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
+  memberSubjects = (rows || []).map(r => r.member).filter(Boolean);
+  const placeholder = memberSubjects.length > 0
+    ? "— เลือกวิชาย่อย —"
+    : "— วิชาบูรณาการนี้ยังไม่มีวิชาย่อย (เพิ่มที่หน้าจัดการโครงสร้าง) —";
+  fillSelect(elMemberSelect, memberSubjects, s => s.name + (s.teacher ? "  ·  " + s.teacher : ""), placeholder);
+}
 
+// เลือกวิชาย่อยแล้ว วิชาย่อยนั้นกลายเป็นวิชาที่กรอกจริง ทุกอย่างทำงานเหมือนวิชาพื้นฐานปกติ
+elMemberSelect.addEventListener("change", async () => {
+  resetBelow("unit");
+  const m = memberSubjects.find(x => x.id === elMemberSelect.value);
+  currentSubject = m || null;
+  await loadUnits();
+  if (currentSubject) students = await getRosterForSubject(currentSubject.id);
   await loadRemarkSection();
 });
 

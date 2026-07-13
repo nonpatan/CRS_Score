@@ -716,3 +716,7 @@ create policy app_settings_write on app_settings for all using (is_admin()) with
 
 insert into app_settings (key, value) values ('highest_grade', 'ม.3')
   on conflict (key) do nothing;
+
+-- หมายเหตุ (2026-07): การเช็คชื่อหลายครั้งต่อวันไม่ต้องแก้ schema — attendance_sessions
+-- ตั้งใจไม่มี unique(subject_id, session_date) อยู่แล้ว (เคสจริง: วันเดียวเช็คหลายครั้งได้)
+-- ข้อจำกัดเดิมอยู่ที่ฝั่งหน้าเว็บ (แก้ที่ attendance.html แล้ว ไม่มี SQL ต้องรัน)
