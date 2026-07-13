@@ -62,8 +62,61 @@ export function distinctYears(subjects) {
   return years;
 }
 
+// ============================================================
+// ค่าตั้งค่าส่วนกลาง (app_settings) + ตรรกะลำดับชั้น/เลื่อนชั้น — ใช้ที่หน้า rollover (ขึ้นปีใหม่)
+// ============================================================
+
+// ลำดับชั้นเรียนมาตรฐาน ป.1 → ม.6 (ใช้หา "ชั้นถัดไป" ตอนเลื่อนชั้น)
+export const GRADE_ORDER = ["ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
+
+// อ่านค่าตั้งค่าส่วนกลาง 1 ตัว (เช่น highest_grade) — คืน null ถ้าไม่มี
+export async function getSetting(key) {
+  const { data, error } = await sb.from("app_settings").select("value").eq("key", key).maybeSingle();
+  if (error || !data) return null;
+  return data.value;
+}
+
+// บันทึกค่าตั้งค่าส่วนกลาง (upsert ตาม key) — admin เท่านั้น (บังคับด้วย RLS)
+export async function setSetting(key, value) {
+  const { error } = await sb.from("app_settings").upsert({ key, value }, { onConflict: "key" });
+  return !error;
+}
+
+// หาชั้นถัดไปตอนเลื่อนชั้น — คืน null ถ้าถึงชั้นสูงสุดที่เปิดสอนแล้ว (= จบการศึกษา)
+// highestGrade มาจากค่าตั้งค่า highest_grade (เช่น 'ม.3' สำหรับโรงเรียนขยายโอกาส)
+export function nextGrade(grade, highestGrade) {
+  if (grade === highestGrade) return null; // ชั้นสูงสุด = จบ ไม่มีชั้นถัดไป
+  const idx = GRADE_ORDER.indexOf(grade);
+  if (idx === -1 || idx + 1 >= GRADE_ORDER.length) return null;
+  return GRADE_ORDER[idx + 1];
+}
+
+// เลื่อน "ห้อง" ตามชั้นที่เลื่อนขึ้น เช่น 'ม.2/1' + เลื่อนเป็น 'ม.3' → 'ม.3/1'
+// (ถ้าห้องขึ้นต้นด้วยชื่อชั้นเดิม ก็แทนที่ส่วนหน้าด้วยชั้นใหม่ ไม่งั้นคืนห้องเดิมไปเลย)
+export function promoteClassroom(classroom, oldGrade, newGrade) {
+  if (!classroom) return classroom;
+  if (classroom.indexOf(oldGrade) === 0) return newGrade + classroom.slice(oldGrade.length);
+  return classroom;
+}
+
+// รายชื่อนักเรียนที่ยัง active (ยังไม่จบ) ทั้งหมด เรียงตามชั้น+ห้อง+เลขที่
+// ใช้ที่หน้าจัดการนักเรียน + ตัวจับคู่ลงทะเบียน (คนที่ graduated=true ไม่โผล่ในรายชื่อใช้งาน)
+export async function getActiveStudents() {
+  const { data, error } = await sb
+    .from("students")
+    .select("*")
+    .eq("graduated", false)
+    .order("grade_level")
+    .order("classroom")
+    .order("student_no");
+  if (error) return [];
+  return data || [];
+}
+
 // รายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ผ่านตาราง enrollments) เรียงตามเลขที่
 // ใช้แทนการดึง "นักเรียนทั้งหมด" แบบเดิม — วิชาไหนยังไม่มีใครลงทะเบียนจะได้ [] เปล่าๆ
+// หมายเหตุ: ไม่กรอง graduated ออก เพราะเป็น "รายชื่อในวิชานั้นๆ" (ผูกปีอยู่แล้ว) เด็กจบไปแล้ว
+// แต่ต้องยังเห็นในวิชาปีเก่าที่เคยเรียน เพื่อดูคะแนนย้อนหลังได้
 export async function getRosterForSubject(subjectId) {
   const { data, error } = await sb
     .from("enrollments")

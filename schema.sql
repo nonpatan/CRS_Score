@@ -686,3 +686,29 @@ drop policy if exists makeup_hours_insert on makeup_hours;
 create policy makeup_hours_insert on makeup_hours for insert with check (can_edit_subject(subject_id));
 drop policy if exists makeup_hours_delete on makeup_hours;
 create policy makeup_hours_delete on makeup_hours for delete using (can_edit_subject(subject_id));
+
+
+-- ============================================================
+-- ส่วนขึ้นปีการศึกษาใหม่ / เลื่อนชั้น (rollover.html) — รันได้เลย (เพิ่มใหม่ ไม่กระทบของเดิม)
+-- ------------------------------------------------------------
+-- ธงจบการศึกษา + ค่าตั้งค่าส่วนกลาง (ชั้นสูงสุดที่เปิดสอน) ตรรกะเลื่อนชั้นอยู่ฝั่ง JS (rollover.html)
+-- ============================================================
+
+-- 14) ธงจบการศึกษาของนักเรียน — เด็กที่จบ (ชั้นสูงสุด) ตอนเลื่อนชั้นจะถูกตั้ง true แยกออกจากรายชื่อ
+--     active (ไม่ลบ ประวัติคะแนน/เช็คชื่อยังอยู่ครบผ่าน enrollments ของวิชาปีเก่า)
+alter table students add column if not exists graduated boolean not null default false;
+
+-- 15) ค่าตั้งค่าส่วนกลาง (key-value) — ตอนนี้เก็บ highest_grade = ชั้นสูงสุดที่โรงเรียนเปิดสอน
+--     ใช้ตัดสินว่าใครจบตอนเลื่อนชั้น (เช่น 'ม.3' สำหรับโรงเรียนขยายโอกาส)
+create table if not exists app_settings (
+  key   text primary key,
+  value text
+);
+alter table app_settings enable row level security;
+drop policy if exists app_settings_select on app_settings;
+create policy app_settings_select on app_settings for select using (auth.role() = 'authenticated');
+drop policy if exists app_settings_write on app_settings;
+create policy app_settings_write on app_settings for all using (is_admin()) with check (is_admin());
+
+insert into app_settings (key, value) values ('highest_grade', 'ม.3')
+  on conflict (key) do nothing;

@@ -126,6 +126,7 @@
       <a href="summary.html">สรุปคะแนน</a>
       <a href="manage.html">จัดการโครงสร้าง</a>
       <a href="retention.html">เรียนซ้ำชั้น</a>
+      <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
   </header>
@@ -204,6 +205,10 @@
         <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
       </div>
     </div>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin:0">
+      <input type="checkbox" id="filter-show-graduated" style="width:18px; height:18px">
+      <span>แสดงนักเรียนที่จบการศึกษาแล้วด้วย</span>
+    </label>
   </div>
 
   <div class="card" id="list-card">
@@ -265,11 +270,15 @@ function fillFilterOptions() {
 }
 document.getElementById("filter-grade").addEventListener("change", renderList);
 document.getElementById("filter-classroom").addEventListener("change", renderList);
+document.getElementById("filter-show-graduated").addEventListener("change", renderList);
 
 function renderList() {
   const gradeFilter = document.getElementById("filter-grade").value;
   const roomFilter = document.getElementById("filter-classroom").value;
+  const showGraduated = document.getElementById("filter-show-graduated").checked;
   const filtered = allStudents.filter(s => {
+    // ปกติแสดงเฉพาะนักเรียนที่ยัง active (ยังไม่จบ) — ติ๊กช่องถึงจะเห็นคนที่จบแล้ว
+    if (!showGraduated && s.graduated) return false;
     if (gradeFilter && s.grade_level !== gradeFilter) return false;
     if (roomFilter && s.classroom !== roomFilter) return false;
     return true;
@@ -285,7 +294,8 @@ function renderList() {
     row.className = "student-row";
     const info = document.createElement("div");
     info.className = "info";
-    info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) + "</div>" +
+    info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) +
+      (stu.graduated ? " <span class='hint'>(จบแล้ว)</span>" : "") + "</div>" +
       "<div class='meta'>เลขที่ " + escapeHtml(stu.student_no) +
       (stu.grade_level ? " · " + escapeHtml(stu.grade_level) : "") +
       (stu.classroom ? "/" + escapeHtml(stu.classroom) : "") + "</div>";
