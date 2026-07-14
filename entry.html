@@ -304,14 +304,22 @@ function subjectLabel(s) {
 // ---------- อัปเดตตัวเลือกห้องตามชั้นที่เลือก ----------
 async function loadClassroomsByGrade(grade) {
   const currentVal = elClassroom.value;
-  elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  elClassroom.innerHTML = '<option value="">— กำลังโหลดห้อง... —</option>';
   
   let q = sb.from("students").select("classroom").not("classroom", "is", null).neq("classroom", "");
   if (grade) {
     q = q.like("classroom", grade + "%");
   }
   const { data, error } = await q;
-  if (error || !data) {
+  
+  if (error) {
+    elClassroom.innerHTML = `<option value="">— Error: ${error.message} —</option>`;
+    elClassroom.disabled = true;
+    return;
+  }
+  
+  if (!data) {
+    elClassroom.innerHTML = '<option value="">— No Data —</option>';
     elClassroom.disabled = true;
     return;
   }
@@ -320,10 +328,12 @@ async function loadClassroomsByGrade(grade) {
   const sortedRooms = [...cSet].sort();
   
   if (sortedRooms.length === 0) {
+    elClassroom.innerHTML = `<option value="">— ไม่มีห้องของ ${grade} (data: ${data.length}) —</option>`;
     elClassroom.disabled = true;
     return;
   }
   
+  elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
   elClassroom.disabled = false;
   sortedRooms.forEach(c => {
     const opt = document.createElement("option");
