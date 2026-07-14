@@ -200,12 +200,7 @@
         <option value="">— เลือกระดับชั้น —</option>
       </select>
     </div>
-    <div class="field">
-      <label for="filter-classroom">ห้อง</label>
-      <select id="filter-classroom">
-        <option value="">— เลือกห้อง —</option>
-      </select>
-    </div>
+
     <button id="btn-check" class="btn">ตรวจสอบความเสี่ยง</button>
   </div>
   
@@ -220,7 +215,6 @@
   const elYear = document.getElementById("filter-year");
   const elTerm = document.getElementById("filter-term");
   const elGrade = document.getElementById("filter-grade");
-  const elClassroom = document.getElementById("filter-classroom");
   const btnCheck = document.getElementById("btn-check");
   const elResults = document.getElementById("results");
   const toast = document.getElementById("toast");
@@ -269,10 +263,6 @@
 
     elGrade.addEventListener("change", () => {
       elResults.innerHTML = "";
-      updateClassroomDropdown();
-    });
-    elClassroom.addEventListener("change", () => {
-      elResults.innerHTML = "";
     });
 
     btnCheck.addEventListener("click", runCheck);
@@ -284,27 +274,14 @@
     });
   }
 
-  function updateClassroomDropdown() {
-    elClassroom.innerHTML = '<option value="">— เลือกห้อง —</option>';
-    const grade = elGrade.value;
-    if (!grade) return;
-    const studentsInGrade = allActiveStudents.filter(s => s.grade_level === grade);
-    const cSet = new Set(studentsInGrade.map(s => s.classroom).filter(Boolean));
-    const sortedRooms = [...cSet].sort();
-    sortedRooms.forEach(c => {
-      const opt = document.createElement("option");
-      opt.value = c; opt.textContent = c;
-      elClassroom.appendChild(opt);
-    });
-  }
+
 
   async function runCheck() {
     const year = elYear.value;
     const term = elTerm.value;
     const grade = elGrade.value;
-    const room = elClassroom.value;
-    if (!year || !grade || !room) {
-      showToast("กรุณาเลือก ปีการศึกษา ระดับชั้น และห้องให้ครบ", false);
+    if (!year || !grade) {
+      showToast("กรุณาเลือก ปีการศึกษา และระดับชั้นให้ครบ", false);
       return;
     }
 
@@ -313,9 +290,9 @@
     elResults.innerHTML = "<div class='card hint'>กำลังโหลดข้อมูลการเข้าเรียนทุกรายวิชา...</div>";
 
     try {
-      const targetStudents = allActiveStudents.filter(s => s.grade_level === grade && s.classroom === room);
+      const targetStudents = allActiveStudents.filter(s => s.grade_level === grade);
       if (targetStudents.length === 0) {
-        elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนในห้องนี้</div>";
+        elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนในชั้นนี้</div>";
         return;
       }
       const targetStudentIds = targetStudents.map(s => s.id);
@@ -465,7 +442,7 @@
       }
 
       if (flaggedStudents.length === 0) {
-        elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนที่มีความเสี่ยงติด มส. ในห้องนี้ (ทุกคนมีเปอร์เซ็นต์ขาดเรียนต่ำกว่า 10%)</div>";
+        elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนที่มีความเสี่ยงติด มส. ในชั้นนี้ (ทุกคนมีเปอร์เซ็นต์ขาดเรียนต่ำกว่า 10%)</div>";
       } else {
         flaggedStudents.sort((a,b) => b.maxPct - a.maxPct);
         
@@ -479,7 +456,7 @@
             <div class='card student-card ${type}'>
               <div class='student-head'>
                 <div>
-                  <div class='name'>${escapeHtml(f.stu.name)}</div>
+                  <div class='name'>${escapeHtml(f.stu.name)} ${f.stu.classroom ? `<span style='font-weight:400; font-size:14px;'>(${escapeHtml(f.stu.classroom)})</span>` : ''}</div>
                   <div class='meta'>เลขประจำตัว: ${escapeHtml(f.stu.student_no)}</div>
                 </div>
                 ${badgeHtml}
