@@ -195,13 +195,13 @@
         </select>
       </div>
     </div>
-    <div class="field">
-      <label for="sel-subject">วิชา</label>
-      <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
-    </div>
     <div class="field" id="classroom-pick">
       <label for="filter-classroom">ห้อง</label>
       <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
+    </div>
+    <div class="field">
+      <label for="sel-subject">วิชา</label>
+      <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
     <!-- วิชาบูรณาการ: ติ๊กวิชาย่อยที่ครั้งนี้ครอบคลุม (ครูที่รับผิดชอบหลายวิชาย่อย เช็คเด็ก
          รอบเดียว ระบบบันทึกแยกให้ทุกวิชาที่ติ๊ก — เวลาเรียนรวมกันคิด มส. ที่วิชาบู) -->
@@ -376,6 +376,7 @@ async function loadSubjects() {
 
   fillYearOptions();
   applySubjectFilter();
+  loadClassroomsByGrade(elFilterGrade.value);
 }
 
 // ---------- เติมตัวเลือกปีการศึกษาจากวิชาที่มีจริง แล้วตั้งค่าเป็นปีที่เลือกไว้ (จำข้ามหน้า) ----------
@@ -408,7 +409,11 @@ function applySubjectFilter() {
 }
 // เปลี่ยนปี = จำไว้ให้ทุกหน้าใช้ปีเดียวกัน (localStorage) แล้วกรองใหม่
 elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
-elFilterGrade.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
+elFilterGrade.addEventListener("change", () => { 
+  applySubjectFilter(); 
+  elSubject.dispatchEvent(new Event("change")); 
+  loadClassroomsByGrade(elFilterGrade.value);
+});
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 
 elSubject.addEventListener("change", async () => {
@@ -427,12 +432,6 @@ elSubject.addEventListener("change", async () => {
     elFieldPeriods.style.display = "block";
     currentSubjectId = pickedSubject ? pickedSubject.id : null;
     currentSubject = pickedSubject || null;
-    if (currentSubjectId) {
-      const roster = await getRosterForSubject(currentSubjectId);
-      updateClassroomDropdown(roster);
-    } else {
-      updateClassroomDropdown([]);
-    }
   }
   await loadMakeupSection();
 });
@@ -473,7 +472,6 @@ async function loadMemberOptions(integratedId) {
   for (const m of memberSubjects) {
     if (m.roster) combinedRoster.push(...m.roster);
   }
-  updateClassroomDropdown(combinedRoster);
 
   elMemberList.innerHTML = "";
   for (const m of memberSubjects) {
@@ -599,23 +597,36 @@ btnLoad.addEventListener("click", async () => {
   }
 });
 
-// ---------- อัปเดตรายชื่อห้อง ----------
-function updateClassroomDropdown(roster) {
+// ---------- อัปเดตตัวเลือกห้องตามชั้นที่เลือก ----------
+async function loadClassroomsByGrade(grade) {
   const currentVal = elClassroom.value;
   elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
-  if (!roster || roster.length === 0) {
+  
+  let q = sb.from("students").select("classroom").not("classroom", "is", null).neq("classroom", "");
+  if (grade) {
+    q = q.ilike("classroom", grade + "%");
+  }
+  const { data, error } = await q;
+  if (error || !data) {
     elClassroom.disabled = true;
     return;
   }
-  elClassroom.disabled = false;
-  const cSet = new Set(roster.map(s => s.classroom).filter(Boolean));
-
+  
+  const cSet = new Set(data.map(d => d.classroom));
   const sortedRooms = [...cSet].sort();
+  
+  if (sortedRooms.length === 0) {
+    elClassroom.disabled = true;
+    return;
+  }
+  
+  elClassroom.disabled = false;
   sortedRooms.forEach(c => {
     const opt = document.createElement("option");
     opt.value = c; opt.textContent = c;
     elClassroom.appendChild(opt);
   });
+  
   if (sortedRooms.includes(currentVal)) {
     elClassroom.value = currentVal;
   }
