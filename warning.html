@@ -187,6 +187,15 @@
       <select id="filter-year"></select>
     </div>
     <div class="field">
+      <label for="filter-term">ภาคเรียน</label>
+      <select id="filter-term">
+        <option value="">— ทุกภาคเรียน —</option>
+        <option value="1">ภาคเรียนที่ 1</option>
+        <option value="2">ภาคเรียนที่ 2</option>
+        <option value="3">ภาคเรียนที่ 3</option>
+      </select>
+    </div>
+    <div class="field">
       <label for="filter-grade">ระดับชั้น</label>
       <select id="filter-grade">
         <option value="">— เลือกระดับชั้น —</option>
@@ -210,6 +219,7 @@
 
   let allActiveStudents = [];
   const elYear = document.getElementById("filter-year");
+  const elTerm = document.getElementById("filter-term");
   const elGrade = document.getElementById("filter-grade");
   const elClassroom = document.getElementById("filter-classroom");
   const btnCheck = document.getElementById("btn-check");
@@ -254,6 +264,9 @@
       setActiveYear(elYear.value);
       elResults.innerHTML = "";
     });
+    elTerm.addEventListener("change", () => {
+      elResults.innerHTML = "";
+    });
 
     elGrade.addEventListener("change", () => {
       elResults.innerHTML = "";
@@ -288,6 +301,7 @@
 
   async function runCheck() {
     const year = elYear.value;
+    const term = elTerm.value;
     const grade = elGrade.value;
     const room = elClassroom.value;
     if (!year || !grade || !room) {
@@ -307,15 +321,19 @@
       }
       const targetStudentIds = targetStudents.map(s => s.id);
 
-      // ดึงวิชาทั้งหมดในปีและชั้นนี้
-      const { data: subjects, error: errSubj } = await sb.from("subjects")
+      // ดึงวิชาทั้งหมดในปีและชั้นนี้ (กรองตามภาคเรียนถ้ามีการเลือก)
+      let query = sb.from("subjects")
         .select("*")
         .eq("year", year)
         .eq("grade_level", grade);
+      if (term) {
+        query = query.eq("term", term);
+      }
+      const { data: subjects, error: errSubj } = await query;
         
       if (errSubj) throw errSubj;
       if (!subjects || subjects.length === 0) {
-        elResults.innerHTML = "<div class='card hint'>ไม่พบรายวิชาที่เปิดสอนในชั้น/ปีการศึกษานี้</div>";
+        elResults.innerHTML = "<div class='card hint'>ไม่พบรายวิชาที่เปิดสอนตามเงื่อนไขที่เลือก</div>";
         return;
       }
       const subjectIds = subjects.map(s => s.id);
