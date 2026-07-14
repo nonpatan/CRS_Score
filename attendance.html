@@ -427,6 +427,12 @@ elSubject.addEventListener("change", async () => {
     elFieldPeriods.style.display = "block";
     currentSubjectId = pickedSubject ? pickedSubject.id : null;
     currentSubject = pickedSubject || null;
+    if (currentSubjectId) {
+      const roster = await getRosterForSubject(currentSubjectId);
+      updateClassroomDropdown(roster);
+    } else {
+      updateClassroomDropdown([]);
+    }
   }
   await loadMakeupSection();
 });
@@ -458,8 +464,16 @@ async function loadMemberOptions(integratedId) {
 
     // ตรวจสอบจำนวนนักเรียนที่ลงทะเบียน
     const roster = await getRosterForSubject(m.id);
+    m.roster = roster;
     m.studentCount = roster.length;
   }
+
+  // เติมกล่อง "ห้อง" โดยรวมรายชื่อจากทุกวิชาย่อย
+  const combinedRoster = [];
+  for (const m of memberSubjects) {
+    if (m.roster) combinedRoster.push(...m.roster);
+  }
+  updateClassroomDropdown(combinedRoster);
 
   elMemberList.innerHTML = "";
   for (const m of memberSubjects) {
@@ -608,8 +622,8 @@ function updateClassroomDropdown(roster) {
 }
 
 elClassroom.addEventListener("change", () => {
-  const rows = elStudentList.querySelectorAll(".student-row");
   const selected = elClassroom.value;
+  const rows = elStudentList.querySelectorAll(".student-row");
   rows.forEach(row => {
     if (!selected || row.dataset.classroom === selected) {
       row.style.display = "flex"; // student-row is display:flex in CSS
@@ -617,6 +631,25 @@ elClassroom.addEventListener("change", () => {
       row.style.display = "none";
     }
   });
+
+  // อัปเดตเช็คบ็อกซ์วิชาย่อยสำหรับวิชาบูรณาการ
+  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
+    document.querySelectorAll(".member-cb").forEach(cb => {
+      const id = cb.dataset.id;
+      const m = memberSubjects.find(x => x.id === id);
+      if (m && m.roster) {
+        const hasStudentsInRoom = m.roster.some(s => !selected || s.classroom === selected);
+        cb.disabled = !hasStudentsInRoom;
+        if (!hasStudentsInRoom) cb.checked = false;
+        
+        const labelRow = cb.closest("label.student-row");
+        if (labelRow) {
+          labelRow.style.cursor = hasStudentsInRoom ? "pointer" : "not-allowed";
+          labelRow.style.opacity = hasStudentsInRoom ? "1" : "0.6";
+        }
+      }
+    });
+  }
 });
 
 // ---------- โหมดวิชาเดียว: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน) ----------
