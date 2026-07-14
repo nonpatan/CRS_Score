@@ -199,6 +199,10 @@
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
+    <div class="field" id="classroom-pick" style="display:none">
+      <label for="filter-classroom">ห้อง</label>
+      <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
+    </div>
     <!-- วิชาบูรณาการ: ติ๊กวิชาย่อยที่ครั้งนี้ครอบคลุม (ครูที่รับผิดชอบหลายวิชาย่อย เช็คเด็ก
          รอบเดียว ระบบบันทึกแยกให้ทุกวิชาที่ติ๊ก — เวลาเรียนรวมกันคิด มส. ที่วิชาบู) -->
     <div class="field" id="member-pick" style="display:none">
@@ -279,6 +283,8 @@ const elFilterYear   = document.getElementById("filter-year");
 const elFilterGrade  = document.getElementById("filter-grade");
 const elFilterTerm   = document.getElementById("filter-term");
 const elSubject      = document.getElementById("sel-subject");
+const elClassroomPick = document.getElementById("classroom-pick");
+const elClassroom    = document.getElementById("filter-classroom");
 const elMemberPick   = document.getElementById("member-pick");
 const elMemberList   = document.getElementById("member-list");
 const elFieldPeriods = document.getElementById("field-periods");
@@ -579,12 +585,50 @@ btnLoad.addEventListener("click", async () => {
   }
 });
 
+// ---------- อัปเดตรายชื่อห้อง ----------
+function updateClassroomDropdown(roster) {
+  const currentVal = elClassroom.value;
+  elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  if (!roster || roster.length === 0) {
+    elClassroomPick.style.display = "none";
+    return;
+  }
+  const cSet = new Set(roster.map(s => s.classroom).filter(Boolean));
+  if (cSet.size <= 1) {
+    elClassroomPick.style.display = "none";
+    return;
+  }
+  elClassroomPick.style.display = "block";
+  const sortedRooms = [...cSet].sort();
+  sortedRooms.forEach(c => {
+    const opt = document.createElement("option");
+    opt.value = c; opt.textContent = c;
+    elClassroom.appendChild(opt);
+  });
+  if (sortedRooms.includes(currentVal)) {
+    elClassroom.value = currentVal;
+  }
+}
+
+elClassroom.addEventListener("change", () => {
+  const rows = elStudentList.querySelectorAll(".student-row");
+  const selected = elClassroom.value;
+  rows.forEach(row => {
+    if (!selected || row.dataset.classroom === selected) {
+      row.style.display = "flex"; // student-row is display:flex in CSS
+    } else {
+      row.style.display = "none";
+    }
+  });
+});
+
 // ---------- โหมดวิชาเดียว: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน) ----------
 async function loadPlainSubjectDay() {
   const periods = readCurrentPeriods();
   if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
 
   students = await getRosterForSubject(currentSubjectId);
+  updateClassroomDropdown(students);
 
   const ok = await refreshDaySessions();
   if (!ok) return;
@@ -610,6 +654,8 @@ async function loadBlockRoster() {
   students = [...seen.values()].sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
 
   if (students.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
+
+  updateClassroomDropdown(students);
 
   currentSession = null;
   daySessions = [];
@@ -687,6 +733,10 @@ function renderStudents(scoreMap) {
   for (const stu of students) {
     const row = document.createElement("div");
     row.className = "student-row";
+    row.dataset.classroom = stu.classroom || "";
+    if (elClassroom.value && stu.classroom !== elClassroom.value) {
+      row.style.display = "none";
+    }
 
     const info = document.createElement("div");
     info.className = "student-info";

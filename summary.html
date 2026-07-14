@@ -200,6 +200,10 @@
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
+    <div class="field" id="classroom-pick" style="display:none">
+      <label for="filter-classroom">ห้อง</label>
+      <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
+    </div>
     <div class="field">
       <label for="sel-student">นักเรียน</label>
       <select id="sel-student"><option value="">— เลือกวิชาก่อน —</option></select>
@@ -227,8 +231,10 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 const elFilterYear  = document.getElementById("filter-year");
 const elFilterGrade = document.getElementById("filter-grade");
 const elFilterTerm  = document.getElementById("filter-term");
-const elSubject   = document.getElementById("sel-subject");
-const elStudent   = document.getElementById("sel-student");
+const elSubject     = document.getElementById("sel-subject");
+const elClassroomPick = document.getElementById("classroom-pick");
+const elClassroom   = document.getElementById("filter-classroom");
+const elStudent     = document.getElementById("sel-student");
 const elResult    = document.getElementById("result-area");
 const elEmptyHint = document.getElementById("empty-hint");
 
@@ -323,7 +329,45 @@ elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value
 elFilterGrade.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 
-// ---------- เมื่อเลือกวิชา: โหลดทุกอย่างที่ต้องใช้คำนวณครั้งเดียว ----------
+// ---------- อัปเดตรายชื่อห้อง ----------
+function updateClassroomDropdown(roster) {
+  const currentVal = elClassroom.value;
+  elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  if (!roster || roster.length === 0) {
+    elClassroomPick.style.display = "none";
+    return;
+  }
+  const cSet = new Set(roster.map(s => s.classroom).filter(Boolean));
+  if (cSet.size <= 1) {
+    elClassroomPick.style.display = "none";
+    return;
+  }
+  elClassroomPick.style.display = "block";
+  const sortedRooms = [...cSet].sort();
+  sortedRooms.forEach(c => {
+    const opt = document.createElement("option");
+    opt.value = c; opt.textContent = c;
+    elClassroom.appendChild(opt);
+  });
+  if (sortedRooms.includes(currentVal)) {
+    elClassroom.value = currentVal;
+  }
+}
+
+elClassroom.addEventListener("change", () => {
+  populateStudentDropdown();
+  render();
+});
+
+function populateStudentDropdown() {
+  let visibleStudents = students;
+  if (elClassroom.value) {
+    visibleStudents = students.filter(s => s.classroom === elClassroom.value);
+  }
+  fillSelect(elStudent, visibleStudents, s => s.name + " (เลขที่ " + s.student_no + ")", "— ทุกคนใน" + (elClassroom.value ? "ห้องที่เลือก" : "วิชา") + " —");
+}
+
+// ---------- เลือกวิชา: โหลดข้อมูลนักเรียนและคำนวณผล ----------
 elSubject.addEventListener("change", async () => {
   const id = elSubject.value;
   if (!id) { currentSubject = null; showEmpty("เลือกวิชาเพื่อดูสรุปคะแนน"); return; }
@@ -351,14 +395,22 @@ elSubject.addEventListener("change", async () => {
   } else {
     // วิชาพื้นฐาน: โหลดโครงสร้างคะแนน + ร. + เช็คชื่อของตัวเอง + รายชื่อที่ลงทะเบียน
     const data = await loadSubjectData(id);
+    if (!data.units || data.units.length === 0) {
+      elResult.innerHTML = "<div class='card hint'>วิชานี้ไม่มีหน่วยย่อย หรือยังไม่ได้ตั้งโครงสร้างคะแนน<br>ไปตั้งค่าที่หน้า 'จัดการโครงสร้าง' ก่อน</div>";
+      students = [];
+      updateClassroomDropdown([]);
+      populateStudentDropdown();
+      return;
+    }
     units = data.units;
     remarksData = data.remarksData;
     sessions = data.sessions;
     makeupHours = data.makeupHours;
-    students = await getRosterForSubject(id);
+    students = await getRosterForSubject(currentSubject.id);
   }
 
-  fillSelect(elStudent, students, s => s.name + "  (เลขที่ " + s.student_no + ")", "— ทั้งห้อง —");
+  updateClassroomDropdown(students);
+  populateStudentDropdown();
   render();
 });
 
@@ -385,9 +437,14 @@ function computeIntegratedStudent(studentId) {
 function render() {
   if (!currentSubject) return;
 
+  let visibleStudents = students;
+  if (elClassroom.value) {
+    visibleStudents = students.filter(s => s.classroom === elClassroom.value);
+  }
+
   const targetStudents = elStudent.value
     ? students.filter(s => s.id === elStudent.value)
-    : students;
+    : visibleStudents;
 
   if (targetStudents.length === 0) { showEmpty("ยังไม่มีนักเรียนในระบบ"); return; }
 
