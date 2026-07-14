@@ -602,29 +602,46 @@ async function loadClassroomsByGrade(grade) {
   const currentVal = elClassroom.value;
   elClassroom.innerHTML = '<option value="">— กำลังโหลดห้อง... —</option>';
   
-  let q = sb.from("students").select("classroom").not("classroom", "is", null).neq("classroom", "");
-  if (grade) {
-    q = q.like("classroom", grade + "%");
-  }
-  const { data, error } = await q;
+  let allRooms = new Set();
+  let page = 0;
+  const pageSize = 1000;
+  let hasError = false;
+  let errMsg = "";
   
-  if (error) {
-    elClassroom.innerHTML = `<option value="">— Error: ${error.message} —</option>`;
+  while (true) {
+    const { data, error } = await sb.from("students")
+      .select("classroom")
+      .not("classroom", "is", null)
+      .neq("classroom", "")
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+      
+    if (error) {
+      hasError = true;
+      errMsg = error.message;
+      break;
+    }
+    if (!data || data.length === 0) break;
+    
+    data.forEach(d => {
+      if (!grade || d.classroom.startsWith(grade)) {
+        allRooms.add(d.classroom);
+      }
+    });
+    
+    if (data.length < pageSize) break;
+    page++;
+  }
+  
+  if (hasError) {
+    elClassroom.innerHTML = `<option value="">— Error: ${errMsg} —</option>`;
     elClassroom.disabled = true;
     return;
   }
   
-  if (!data) {
-    elClassroom.innerHTML = '<option value="">— No Data —</option>';
-    elClassroom.disabled = true;
-    return;
-  }
-  
-  const cSet = new Set(data.map(d => d.classroom));
-  const sortedRooms = [...cSet].sort();
+  const sortedRooms = [...allRooms].sort();
   
   if (sortedRooms.length === 0) {
-    elClassroom.innerHTML = `<option value="">— ไม่มีห้องของ ${grade} (data: ${data.length}) —</option>`;
+    elClassroom.innerHTML = `<option value="">— ไม่มีห้องของ ${grade} (data: 0) —</option>`;
     elClassroom.disabled = true;
     return;
   }
