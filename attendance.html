@@ -31,8 +31,20 @@
   .wrap { max-width: 560px; margin: 0 auto; }
   header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
   header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
-  header .nav { font-size: 14px; margin: 0 0 16px; display: flex; gap: 16px; flex-wrap: wrap; }
-  header .nav a { color: var(--teal); text-decoration: none; font-weight: 500; }
+  header .nav { 
+    display: flex; gap: 8px; flex-wrap: wrap; 
+    background: var(--white); padding: 8px; 
+    border-radius: 99px; border: 1px solid var(--line); 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin: 0 0 24px; align-items: center; 
+  }
+  header .nav a { 
+    color: var(--muted); text-decoration: none; font-weight: 500; 
+    padding: 8px 16px; border-radius: 99px; transition: all 0.2s ease; font-size: 14px; 
+  }
+  header .nav a:hover { background: var(--teal-soft); color: var(--teal); }
+  header .nav a.active { background: var(--teal); color: var(--white); box-shadow: 0 2px 8px rgba(15, 110, 86, 0.3); }
+  header .nav #btn-signout { margin-left: auto; color: var(--danger); background: #fff0f0; }
+  header .nav #btn-signout:hover { background: #ffe0e0; }
 
   .card {
     background: var(--white);
@@ -122,7 +134,26 @@
   <header>
     <h1>เช็คชื่อ</h1>
     <p>เลือกวิชา วันที่ และจำนวนคาบ แล้วติ๊กสถานะรายคน</p>
-    <div class="nav"><a href="entry.html">กรอกคะแนน</a><a href="summary.html">สรุปคะแนน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="students.html">นักเรียน</a><a href="retention.html">เรียนซ้ำชั้น</a><a href="rollover.html">ขึ้นปีใหม่</a><a href="#" id="btn-signout">ออกจากระบบ</a></div>
+    <div class="nav">
+      <a href="entry.html">กรอกคะแนน</a>
+      <a href="attendance.html">เช็คชื่อ</a>
+      <a href="summary.html">สรุปคะแนน</a>
+      <a href="manage.html">จัดการโครงสร้าง</a>
+      <a href="students.html">นักเรียน</a>
+      <a href="retention.html">เรียนซ้ำชั้น</a>
+      <a href="rollover.html">ขึ้นปีใหม่</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script>
+      (function(){
+        var navLinks = document.querySelectorAll('.nav a');
+        var current = window.location.pathname.split('/').pop();
+        if(!current || current === '') current = 'entry.html';
+        navLinks.forEach(function(a) {
+          if(a.getAttribute('href') === current) a.classList.add('active');
+        });
+      })();
+    </script>
   </header>
 
   <!-- เลือกวิชา / วันที่ / จำนวนคาบ แล้วโหลดรายชื่อมาติ๊ก -->
@@ -228,12 +259,16 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears } from "./supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears } from "./supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
 if (!session) throw new Error("redirecting to login");
 document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
+
+// role ใช้ตัดสินค่าเริ่มต้นการติ๊กวิชาย่อยของวิชาบูรณาการ (admin = ติ๊กทุกตัว, ครู = เฉพาะที่เป็นเจ้าของ)
+const myProfile = await getProfile(session.user.id);
+const isAdminUser = myProfile && myProfile.role === "admin";
 
 // สถานะเช็คชื่อที่เลือกได้ทั้งหมด (ต้องตรงกับ check constraint ใน schema.sql)
 const STATUS_OPTIONS = ["มา", "ขาด", "ลาป่วย", "ลากิจ", "มาสาย"];
@@ -273,6 +308,7 @@ let daySessions = [];        // ครั้งเช็คชื่อทั้
 let memberSubjects = [];     // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
 let blockMode = false;       // true = กำลังเช็คแบบบล็อก (หลายวิชาย่อยพร้อมกัน สร้างใหม่เท่านั้น)
 let blockMembers = [];       // วิชาย่อยที่ติ๊กไว้ตอนโหลดรายชื่อในโหมดบล็อก [{id, name, periods}]
+let blockStudentSubjects = new Map(); // student_id -> Set of subject_id ที่ลงทะเบียนในโหมดบล็อก
 
 // ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
@@ -393,7 +429,7 @@ async function loadMemberOptions(integratedId) {
   elMemberList.innerHTML = "<div class='hint'>กำลังโหลดวิชาย่อย...</div>";
   const { data: rows, error } = await sb
     .from("integration_members")
-    .select("member:member_subject_id(*)")
+    .select("*, member:member_subject_id(*)")
     .eq("integrated_subject_id", integratedId);
   if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
   memberSubjects = (rows || []).map(r => r.member).filter(Boolean);
@@ -412,22 +448,29 @@ async function loadMemberOptions(integratedId) {
       .order("created_at", { ascending: false })
       .limit(1);
     m.lastPeriods = (last && last.length > 0) ? last[0].periods_covered : "";
+
+    // ตรวจสอบจำนวนนักเรียนที่ลงทะเบียน
+    const roster = await getRosterForSubject(m.id);
+    m.studentCount = roster.length;
   }
 
   elMemberList.innerHTML = "";
   for (const m of memberSubjects) {
+    const hasStudents = m.studentCount > 0;
     // ค่าเริ่มต้น: ติ๊กเฉพาะวิชาย่อยที่ครูคนนี้เป็นเจ้าของ (admin เห็นติ๊กทุกตัว) — ครูที่รับ
     // ผิดชอบหลายวิชาย่อยจะได้ติ๊กครบชุดของตัวเองมาเลย ปรับเอาออก/เพิ่มเองได้ก่อนโหลดรายชื่อ
-    const defaultChecked = isAdminUser || m.owner_id === session.user.id;
+    const defaultChecked = hasStudents && (isAdminUser || m.owner_id === session.user.id);
     const row = document.createElement("label");
     row.className = "student-row";
-    row.style.cursor = "pointer";
+    row.style.cursor = hasStudents ? "pointer" : "not-allowed";
+    if (!hasStudents) row.style.opacity = "0.6";
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.className = "member-cb";
     cb.dataset.id = m.id;
     cb.checked = defaultChecked;
+    cb.disabled = !hasStudents;
     cb.style.cssText = "width:18px; height:18px; flex:none";
     // ติ๊กเปลี่ยน = รายชื่อ/โหมดที่โหลดไว้ใช้ไม่ได้แล้ว ต้องกดโหลดรายชื่อใหม่ (การ์ดชดเชยก็ซ่อนรอ)
     cb.addEventListener("change", async () => {
@@ -440,6 +483,7 @@ async function loadMemberOptions(integratedId) {
     const info = document.createElement("span");
     info.className = "student-info";
     info.innerHTML = "<span class='name'>" + escapeHtml(m.name) + "</span>" +
+      (!hasStudents ? " <span class='hint'>(ไม่มีนักเรียน)</span>" : "") +
       (m.teacher ? "<div class='meta'>" + escapeHtml(m.teacher) + "</div>" : "");
 
     const num = document.createElement("input");
@@ -449,6 +493,7 @@ async function loadMemberOptions(integratedId) {
     num.min = "1"; num.step = "1";
     num.value = m.lastPeriods;
     num.placeholder = "คาบ";
+    num.disabled = !hasStudents;
     num.style.cssText = "width:80px; text-align:center; flex:none";
     // กันช่องกรอกคาบไปสั่งติ๊ก/เลิกติ๊ก checkbox (เพราะทั้งแถวเป็น <label>)
     num.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); num.focus(); });
@@ -552,7 +597,15 @@ async function loadPlainSubjectDay() {
 async function loadBlockRoster() {
   const rosters = await Promise.all(blockMembers.map(m => getRosterForSubject(m.id)));
   const seen = new Map();
-  for (const roster of rosters) for (const s of roster) seen.set(s.id, s);
+  blockStudentSubjects = new Map();
+  for (let i = 0; i < blockMembers.length; i++) {
+    const subjId = blockMembers[i].id;
+    for (const s of rosters[i]) {
+      seen.set(s.id, s);
+      if (!blockStudentSubjects.has(s.id)) blockStudentSubjects.set(s.id, new Set());
+      blockStudentSubjects.get(s.id).add(subjId);
+    }
+  }
   students = [...seen.values()].sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
 
   if (students.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
@@ -725,6 +778,12 @@ async function saveBlock() {
 
   let created = 0;
   for (const m of blockMembers) {
+    // กรองเฉพาะสถานะของนักเรียนที่มีรายชื่อลงทะเบียนในวิชาย่อยนี้
+    const validStatuses = statuses.filter(r => 
+      blockStudentSubjects.has(r.student_id) && blockStudentSubjects.get(r.student_id).has(m.id)
+    );
+    if (validStatuses.length === 0) continue; // ถ้าวิชานี้ไม่มีนักเรียนเลย ข้ามไปไม่ต้องสร้าง session
+
     const { data: sess, error } = await sb
       .from("attendance_sessions")
       .insert({ subject_id: m.id, session_date: elDate.value, periods_covered: m.periods })
@@ -735,7 +794,7 @@ async function saveBlock() {
         (created > 0 ? " (บันทึกสำเร็จไปแล้ว " + created + " วิชา — วิชาที่เหลือยังไม่ได้บันทึก)" : ""), false);
       return;
     }
-    const rows = statuses.map(r => ({ session_id: sess.id, student_id: r.student_id, status: r.status }));
+    const rows = validStatuses.map(r => ({ session_id: sess.id, student_id: r.student_id, status: r.status }));
     const { error: recErr } = await sb
       .from("attendance_records")
       .upsert(rows, { onConflict: "session_id,student_id" });
@@ -761,6 +820,7 @@ function hideStudents() {
   elDaySessions.innerHTML = "";
   blockMode = false;
   blockMembers = [];
+  blockStudentSubjects.clear();
 }
 
 function escapeHtml(s) {

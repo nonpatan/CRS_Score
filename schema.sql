@@ -496,11 +496,11 @@ create policy profiles_update on profiles for update using (is_admin()) with che
 drop policy if exists subjects_select on subjects;
 create policy subjects_select on subjects for select using (auth.role() = 'authenticated');
 drop policy if exists subjects_insert on subjects;
-create policy subjects_insert on subjects for insert with check (is_admin() or owner_id = auth.uid());
+create policy subjects_insert on subjects for insert with check (is_admin());
 drop policy if exists subjects_update on subjects;
 create policy subjects_update on subjects for update using (is_admin() or owner_id = auth.uid()) with check (is_admin() or owner_id = auth.uid());
 drop policy if exists subjects_delete on subjects;
-create policy subjects_delete on subjects for delete using (is_admin() or owner_id = auth.uid());
+create policy subjects_delete on subjects for delete using (is_admin());
 
 drop policy if exists units_select on units;
 create policy units_select on units for select using (auth.role() = 'authenticated');
