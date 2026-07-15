@@ -720,3 +720,256 @@ insert into app_settings (key, value) values ('highest_grade', 'ม.3')
 -- หมายเหตุ (2026-07): การเช็คชื่อหลายครั้งต่อวันไม่ต้องแก้ schema — attendance_sessions
 -- ตั้งใจไม่มี unique(subject_id, session_date) อยู่แล้ว (เคสจริง: วันเดียวเช็คหลายครั้งได้)
 -- ข้อจำกัดเดิมอยู่ที่ฝั่งหน้าเว็บ (แก้ที่ attendance.html แล้ว ไม่มี SQL ต้องรัน)
+
+
+-- ============================================================
+-- สมรรถนะหลักจากกิจกรรม + กิจวัตรประจำวัน (2026-07)
+-- ------------------------------------------------------------
+-- เพิ่มแบบ additive เท่านั้น: ไม่ย้าย/ลบตาราง units, indicators, collections, scores เดิม
+-- รายวิชายังคงใช้โครงสร้างเดิมทั้งหมด แต่เลือกชื่อสมรรถนะ/องค์ประกอบจากรายการกลางได้
+-- กิจกรรมและกิจวัตรใช้รายการกลางเดียวกัน แล้วเก็บคะแนนดิบแยกในตารางชุดนี้
+-- ============================================================
+
+-- 16) รายการกลางของสมรรถนะหลัก 6 ด้าน
+create table if not exists core_competencies (
+  id          uuid primary key default gen_random_uuid(),
+  code        text not null unique,
+  name        text not null,
+  seq         integer not null,
+  created_at  timestamptz default now(),
+  constraint core_competencies_seq_unique unique (seq)
+);
+
+-- องค์ประกอบมาตรฐานแยกตามช่วงชั้น เพราะบางช่วงชั้นมีรายการไม่เท่ากัน
+create table if not exists core_competency_elements (
+  id              uuid primary key default gen_random_uuid(),
+  competency_id   uuid not null references core_competencies(id) on delete cascade,
+  stage           text not null check (stage in ('ช่วงชั้น 1', 'ช่วงชั้น 2', 'ช่วงชั้น 3')),
+  name            text not null,
+  seq             integer not null,
+  created_at      timestamptz default now(),
+  constraint core_elements_unique unique (competency_id, stage, seq)
+);
+create index if not exists core_elements_competency_idx on core_competency_elements(competency_id, stage);
+
+-- ผูกโครงสร้างสมรรถนะที่อยู่ใต้รายวิชาเดิมกับรายการกลาง (nullable เพื่อไม่กระทบข้อมูลเก่า)
+alter table units add column if not exists core_competency_id uuid references core_competencies(id);
+alter table indicators add column if not exists core_competency_element_id uuid references core_competency_elements(id);
+create index if not exists units_core_competency_idx on units(core_competency_id);
+create index if not exists indicators_core_element_idx on indicators(core_competency_element_id);
+
+-- 17) รายการประเมินจากกิจกรรมหรือกิจวัตร (กิจวัตรใช้รายการเดิมสร้างหลายครั้งได้)
+create table if not exists competency_assessments (
+  id          uuid primary key default gen_random_uuid(),
+  source_type text not null check (source_type in ('กิจกรรม', 'กิจวัตรประจำวัน')),
+  name        text not null,
+  year        text not null,
+  owner_id    uuid not null references auth.users(id),
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now()
+);
+create index if not exists competency_assessments_year_idx on competency_assessments(year);
+create index if not exists competency_assessments_owner_idx on competency_assessments(owner_id);
+
+-- องค์ประกอบที่รายการนี้เลือกใช้ + คะแนนเต็มต่อครั้งประเมิน
+create table if not exists competency_assessment_targets (
+  id              uuid primary key default gen_random_uuid(),
+  assessment_id   uuid not null references competency_assessments(id) on delete cascade,
+  competency_id   uuid not null references core_competencies(id),
+  element_id      uuid not null references core_competency_elements(id),
+  max_score       numeric not null,
+  seq             integer not null default 1,
+  created_at      timestamptz default now(),
+  constraint competency_assessment_targets_unique unique (assessment_id, element_id),
+  constraint competency_assessment_targets_max_ok check (max_score > 0)
+);
+create index if not exists competency_targets_assessment_idx on competency_assessment_targets(assessment_id);
+
+-- รายชื่อผู้เข้าร่วมของรายการ/แม่แบบ: เลือกทั้งห้องแล้วปรับรายคนได้ และคละชั้น/ห้องได้
+create table if not exists competency_assessment_members (
+  id              uuid primary key default gen_random_uuid(),
+  assessment_id   uuid not null references competency_assessments(id) on delete cascade,
+  student_id      uuid not null references students(id) on delete cascade,
+  created_at      timestamptz default now(),
+  constraint competency_assessment_members_unique unique (assessment_id, student_id)
+);
+create index if not exists competency_members_assessment_idx on competency_assessment_members(assessment_id);
+
+-- แต่ละครั้งที่ลงคะแนน (กิจกรรม/กิจวัตรหนึ่งรายการมีได้หลายวัน/หลายครั้งต่อวัน)
+create table if not exists competency_assessment_sessions (
+  id              uuid primary key default gen_random_uuid(),
+  assessment_id   uuid not null references competency_assessments(id) on delete cascade,
+  session_date    date not null,
+  note            text,
+  created_at      timestamptz default now()
+);
+create index if not exists competency_sessions_assessment_idx on competency_assessment_sessions(assessment_id, session_date);
+
+-- snapshot รายชื่อ ณ วันที่ประเมิน: ประวัติไม่เปลี่ยนเมื่อครูแก้สมาชิกแม่แบบหรือเด็กเลื่อนชั้น
+create table if not exists competency_assessment_session_students (
+  id              uuid primary key default gen_random_uuid(),
+  session_id      uuid not null references competency_assessment_sessions(id) on delete cascade,
+  student_id      uuid not null references students(id) on delete cascade,
+  constraint competency_session_students_unique unique (session_id, student_id)
+);
+create index if not exists competency_session_students_session_idx on competency_assessment_session_students(session_id);
+
+-- คะแนนดิบเหมือนรายวิชา: ครูกำหนดคะแนนเต็มที่ target แล้วกรอกเลขจริงเอง ไม่มี rubric บังคับ
+create table if not exists competency_assessment_scores (
+  id              uuid primary key default gen_random_uuid(),
+  session_id      uuid not null references competency_assessment_sessions(id) on delete cascade,
+  target_id       uuid not null references competency_assessment_targets(id) on delete cascade,
+  student_id      uuid not null references students(id) on delete cascade,
+  raw_score       numeric not null default 0,
+  updated_at      timestamptz default now(),
+  constraint competency_assessment_scores_unique unique (session_id, target_id, student_id),
+  constraint competency_assessment_scores_nonneg check (raw_score >= 0)
+);
+create index if not exists competency_scores_session_idx on competency_assessment_scores(session_id);
+
+-- ข้อมูลมาตรฐานจากตารางสมรรถนะหลัก ช่วงชั้น 1–3 (เก็บเฉพาะชื่อสมรรถนะ/องค์ประกอบ ไม่เก็บ rubric)
+insert into core_competencies (code, name, seq) values
+  ('self_management', 'การจัดการตนเอง', 1),
+  ('higher_order_thinking', 'การคิดขั้นสูง', 2),
+  ('communication', 'การสื่อสาร', 3),
+  ('teamwork', 'การรวมพลังทำงานเป็นทีม', 4),
+  ('active_citizenship', 'การเป็นพลเมืองที่เข้มแข็ง', 5),
+  ('nature_science_technology', 'การอยู่ร่วมกับธรรมชาติและวิทยาการ', 6)
+on conflict (code) do update set name = excluded.name, seq = excluded.seq;
+
+-- ใช้ชื่อมาตรฐานเดียวกันในแต่ละช่วงชั้นเมื่อชื่อในเอกสารต่างกันเพียงคำเชื่อม/การเว้นวรรค
+insert into core_competency_elements (competency_id, stage, name, seq)
+select c.id, v.stage, v.name, v.seq
+from core_competencies c
+join (values
+  ('self_management','ช่วงชั้น 1','การเห็นคุณค่าในตนเอง',1),
+  ('self_management','ช่วงชั้น 1','การมีเป้าหมายในชีวิต',2),
+  ('self_management','ช่วงชั้น 1','การจัดการอารมณ์และความเครียด',3),
+  ('self_management','ช่วงชั้น 1','การจัดการปัญหาและภาวะวิกฤต',4),
+  ('self_management','ช่วงชั้น 2','การเห็นคุณค่าในตนเอง',1),
+  ('self_management','ช่วงชั้น 2','การมีเป้าหมายในชีวิต',2),
+  ('self_management','ช่วงชั้น 2','การจัดการอารมณ์และความเครียด',3),
+  ('self_management','ช่วงชั้น 2','การจัดการปัญหาและภาวะวิกฤต',4),
+  ('self_management','ช่วงชั้น 3','การเห็นคุณค่าในตนเอง',1),
+  ('self_management','ช่วงชั้น 3','การมีเป้าหมายในชีวิต',2),
+  ('self_management','ช่วงชั้น 3','การจัดการอารมณ์และความเครียด',3),
+  ('self_management','ช่วงชั้น 3','การจัดการปัญหาและภาวะวิกฤต',4),
+  ('higher_order_thinking','ช่วงชั้น 1','การคิดอย่างมีวิจารณญาณ',1),
+  ('higher_order_thinking','ช่วงชั้น 1','การคิดเชิงระบบ',2),
+  ('higher_order_thinking','ช่วงชั้น 1','การคิดสร้างสรรค์',3),
+  ('higher_order_thinking','ช่วงชั้น 1','การคิดแก้ปัญหา',4),
+  ('higher_order_thinking','ช่วงชั้น 2','การคิดอย่างมีวิจารณญาณ',1),
+  ('higher_order_thinking','ช่วงชั้น 2','การคิดเชิงระบบ',2),
+  ('higher_order_thinking','ช่วงชั้น 2','การคิดสร้างสรรค์',3),
+  ('higher_order_thinking','ช่วงชั้น 2','การคิดแก้ปัญหา',4),
+  ('higher_order_thinking','ช่วงชั้น 3','การคิดอย่างมีวิจารณญาณ',1),
+  ('higher_order_thinking','ช่วงชั้น 3','การคิดเชิงระบบ',2),
+  ('higher_order_thinking','ช่วงชั้น 3','การคิดสร้างสรรค์',3),
+  ('higher_order_thinking','ช่วงชั้น 3','การคิดแก้ปัญหา',4),
+  ('communication','ช่วงชั้น 1','การรับสารอย่างมีสติและถอดรหัสเพื่อให้เกิดความเข้าใจ',1),
+  ('communication','ช่วงชั้น 1','การรับส่งสารบนพื้นฐานความเข้าใจและความเคารพในความคิดเห็นและวัฒนธรรมที่แตกต่าง',2),
+  ('communication','ช่วงชั้น 1','การเลือกใช้กลวิธีการสื่อสารอย่างเหมาะสมโดยคำนึงถึงความรับผิดชอบต่อสังคมเพื่อบรรลุวัตถุประสงค์ในการสื่อสาร',3),
+  ('communication','ช่วงชั้น 2','การรับสารอย่างมีสติและถอดรหัสเพื่อให้เกิดความเข้าใจ',1),
+  ('communication','ช่วงชั้น 2','การรับส่งสารบนพื้นฐานความเข้าใจและความเคารพในความคิดเห็นและวัฒนธรรมที่แตกต่าง',2),
+  ('communication','ช่วงชั้น 2','การเลือกใช้กลวิธีการสื่อสารอย่างเหมาะสมโดยคำนึงถึงความรับผิดชอบต่อสังคมเพื่อบรรลุวัตถุประสงค์ในการสื่อสาร',3),
+  ('communication','ช่วงชั้น 3','การรับสารอย่างมีสติและถอดรหัสเพื่อให้เกิดความเข้าใจ',1),
+  ('communication','ช่วงชั้น 3','การรับส่งสารบนพื้นฐานความเข้าใจและความเคารพในความคิดเห็นและวัฒนธรรมที่แตกต่าง',2),
+  ('communication','ช่วงชั้น 3','การเลือกใช้กลวิธีการสื่อสารอย่างเหมาะสมโดยคำนึงถึงความรับผิดชอบต่อสังคมเพื่อบรรลุวัตถุประสงค์ในการสื่อสาร',3),
+  ('teamwork','ช่วงชั้น 1','การเป็นสมาชิกทีมที่ดีและมีภาวะผู้นำ',1),
+  ('teamwork','ช่วงชั้น 1','กระบวนการทำงานแบบร่วมมือรวมพลัง',2),
+  ('teamwork','ช่วงชั้น 1','การสร้างความสัมพันธ์และจัดการความขัดแย้ง',3),
+  ('teamwork','ช่วงชั้น 2','การเป็นสมาชิกทีมที่ดีและมีภาวะผู้นำ',1),
+  ('teamwork','ช่วงชั้น 2','กระบวนการทำงานแบบร่วมมือรวมพลัง',2),
+  ('teamwork','ช่วงชั้น 2','การสร้างความสัมพันธ์และจัดการความขัดแย้ง',3),
+  ('teamwork','ช่วงชั้น 3','การเป็นสมาชิกทีมที่ดีและมีภาวะผู้นำ',1),
+  ('teamwork','ช่วงชั้น 3','กระบวนการทำงานแบบร่วมมือรวมพลัง',2),
+  ('teamwork','ช่วงชั้น 3','การสร้างความสัมพันธ์และจัดการความขัดแย้ง',3),
+  ('active_citizenship','ช่วงชั้น 1','พลเมืองรู้เคารพสิทธิ',1),
+  ('active_citizenship','ช่วงชั้น 1','พลเมืองรับผิดชอบต่อบทบาทหน้าที่',2),
+  ('active_citizenship','ช่วงชั้น 1','พลเมืองมีส่วนร่วมอย่างมีวิจารณญาณ',3),
+  ('active_citizenship','ช่วงชั้น 2','พลเมืองรู้เคารพสิทธิ',1),
+  ('active_citizenship','ช่วงชั้น 2','พลเมืองรับผิดชอบต่อบทบาทหน้าที่',2),
+  ('active_citizenship','ช่วงชั้น 2','พลเมืองมีส่วนร่วมอย่างมีวิจารณญาณ',3),
+  ('active_citizenship','ช่วงชั้น 2','พลเมืองผู้สร้างการเปลี่ยนแปลง',4),
+  ('active_citizenship','ช่วงชั้น 3','พลเมืองรู้เคารพสิทธิ',1),
+  ('active_citizenship','ช่วงชั้น 3','พลเมืองรับผิดชอบต่อบทบาทหน้าที่',2),
+  ('active_citizenship','ช่วงชั้น 3','พลเมืองมีส่วนร่วมอย่างมีวิจารณญาณ',3),
+  ('active_citizenship','ช่วงชั้น 3','พลเมืองผู้สร้างการเปลี่ยนแปลง',4),
+  ('nature_science_technology','ช่วงชั้น 1','การเข้าใจปรากฏการณ์ที่เกิดขึ้นบนโลกและในเอกภพ',1),
+  ('nature_science_technology','ช่วงชั้น 1','การเชื่อมโยงความสัมพันธ์ของคณิตศาสตร์ วิทยาศาสตร์ และเทคโนโลยีเพื่อการอยู่ร่วมกันกับธรรมชาติอย่างยั่งยืน',2),
+  ('nature_science_technology','ช่วงชั้น 1','การสร้าง ใช้ และรู้เท่าทันวิทยาการเทคโนโลยี',3),
+  ('nature_science_technology','ช่วงชั้น 1','การมีคุณลักษณะทางคณิตศาสตร์และวิทยาศาสตร์สำหรับการอยู่ร่วมกับธรรมชาติอย่างยั่งยืน',4),
+  ('nature_science_technology','ช่วงชั้น 2','การเข้าใจปรากฏการณ์ที่เกิดขึ้นบนโลกและในเอกภพ',1),
+  ('nature_science_technology','ช่วงชั้น 2','การเชื่อมโยงความสัมพันธ์ของคณิตศาสตร์ วิทยาศาสตร์ และเทคโนโลยีเพื่อการอยู่ร่วมกันกับธรรมชาติอย่างยั่งยืน',2),
+  ('nature_science_technology','ช่วงชั้น 2','การสร้าง ใช้ และรู้เท่าทันวิทยาการเทคโนโลยี',3),
+  ('nature_science_technology','ช่วงชั้น 2','การมีคุณลักษณะทางคณิตศาสตร์และวิทยาศาสตร์สำหรับการอยู่ร่วมกับธรรมชาติอย่างยั่งยืน',4),
+  ('nature_science_technology','ช่วงชั้น 3','การเข้าใจปรากฏการณ์ที่เกิดขึ้นบนโลกและในเอกภพ',1),
+  ('nature_science_technology','ช่วงชั้น 3','การเชื่อมโยงความสัมพันธ์ของคณิตศาสตร์ วิทยาศาสตร์ และเทคโนโลยีเพื่อการอยู่ร่วมกันกับธรรมชาติอย่างยั่งยืน',2),
+  ('nature_science_technology','ช่วงชั้น 3','การสร้าง ใช้ และรู้เท่าทันวิทยาการเทคโนโลยี',3),
+  ('nature_science_technology','ช่วงชั้น 3','การมีคุณลักษณะทางคณิตศาสตร์และวิทยาศาสตร์สำหรับการอยู่ร่วมกับธรรมชาติอย่างยั่งยืน',4)
+) as v(competency_code, stage, name, seq) on v.competency_code = c.code
+on conflict (competency_id, stage, seq) do update set name = excluded.name;
+
+-- สิทธิ์: รายการกลางอ่านได้ทุกคนที่ล็อกอิน, แก้ข้อมูลกลางเฉพาะ admin
+alter table core_competencies enable row level security;
+alter table core_competency_elements enable row level security;
+drop policy if exists core_competencies_select on core_competencies;
+create policy core_competencies_select on core_competencies for select using (auth.role() = 'authenticated');
+drop policy if exists core_competencies_write on core_competencies;
+create policy core_competencies_write on core_competencies for all using (is_admin()) with check (is_admin());
+drop policy if exists core_elements_select on core_competency_elements;
+create policy core_elements_select on core_competency_elements for select using (auth.role() = 'authenticated');
+drop policy if exists core_elements_write on core_competency_elements;
+create policy core_elements_write on core_competency_elements for all using (is_admin()) with check (is_admin());
+
+-- helper ฝั่ง RLS สำหรับกิจกรรม/กิจวัตร (owner หรือ admin)
+create or replace function can_edit_competency_assessment(p_assessment_id uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select is_admin() or exists (
+    select 1 from competency_assessments where id = p_assessment_id and owner_id = auth.uid()
+  );
+$$;
+create or replace function can_edit_competency_session(p_session_id uuid)
+returns boolean language sql security definer stable set search_path = public as $$
+  select exists (
+    select 1 from competency_assessment_sessions s
+    where s.id = p_session_id and can_edit_competency_assessment(s.assessment_id)
+  );
+$$;
+
+alter table competency_assessments enable row level security;
+alter table competency_assessment_targets enable row level security;
+alter table competency_assessment_members enable row level security;
+alter table competency_assessment_sessions enable row level security;
+alter table competency_assessment_session_students enable row level security;
+alter table competency_assessment_scores enable row level security;
+
+drop policy if exists competency_assessments_select on competency_assessments;
+create policy competency_assessments_select on competency_assessments for select using (auth.role() = 'authenticated');
+drop policy if exists competency_assessments_insert on competency_assessments;
+create policy competency_assessments_insert on competency_assessments for insert with check (owner_id = auth.uid() or is_admin());
+drop policy if exists competency_assessments_update on competency_assessments;
+create policy competency_assessments_update on competency_assessments for update using (can_edit_competency_assessment(id)) with check (can_edit_competency_assessment(id));
+drop policy if exists competency_assessments_delete on competency_assessments;
+create policy competency_assessments_delete on competency_assessments for delete using (can_edit_competency_assessment(id));
+
+drop policy if exists competency_targets_select on competency_assessment_targets;
+create policy competency_targets_select on competency_assessment_targets for select using (auth.role() = 'authenticated');
+drop policy if exists competency_targets_write on competency_assessment_targets;
+create policy competency_targets_write on competency_assessment_targets for all using (can_edit_competency_assessment(assessment_id)) with check (can_edit_competency_assessment(assessment_id));
+drop policy if exists competency_members_select on competency_assessment_members;
+create policy competency_members_select on competency_assessment_members for select using (auth.role() = 'authenticated');
+drop policy if exists competency_members_write on competency_assessment_members;
+create policy competency_members_write on competency_assessment_members for all using (can_edit_competency_assessment(assessment_id)) with check (can_edit_competency_assessment(assessment_id));
+drop policy if exists competency_sessions_select on competency_assessment_sessions;
+create policy competency_sessions_select on competency_assessment_sessions for select using (auth.role() = 'authenticated');
+drop policy if exists competency_sessions_write on competency_assessment_sessions;
+create policy competency_sessions_write on competency_assessment_sessions for all using (can_edit_competency_assessment(assessment_id)) with check (can_edit_competency_assessment(assessment_id));
+drop policy if exists competency_session_students_select on competency_assessment_session_students;
+create policy competency_session_students_select on competency_assessment_session_students for select using (auth.role() = 'authenticated');
+drop policy if exists competency_session_students_write on competency_assessment_session_students;
+create policy competency_session_students_write on competency_assessment_session_students for all using (can_edit_competency_session(session_id)) with check (can_edit_competency_session(session_id));
+drop policy if exists competency_scores_select on competency_assessment_scores;
+create policy competency_scores_select on competency_assessment_scores for select using (auth.role() = 'authenticated');
+drop policy if exists competency_scores_write on competency_assessment_scores;
+create policy competency_scores_write on competency_assessment_scores for all using (can_edit_competency_session(session_id)) with check (can_edit_competency_session(session_id));

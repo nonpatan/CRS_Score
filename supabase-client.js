@@ -69,6 +69,16 @@ export function distinctYears(subjects) {
 // ลำดับชั้นเรียนมาตรฐาน ป.1 → ม.6 (ใช้หา "ชั้นถัดไป" ตอนเลื่อนชั้น)
 export const GRADE_ORDER = ["ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
 
+// ช่วงชั้นของนักเรียน ใช้เลือกองค์ประกอบสมรรถนะหลักมาตรฐาน
+// โรงเรียนปัจจุบันเปิดถึง ม.3 แต่รองรับชั้นสูงกว่านี้ไว้เผื่อใช้ข้อมูลในอนาคต
+export function competencyStageForGrade(grade) {
+  const i = GRADE_ORDER.indexOf(grade);
+  if (i >= 0 && i <= 2) return "ช่วงชั้น 1";
+  if (i >= 3 && i <= 5) return "ช่วงชั้น 2";
+  if (i >= 6) return "ช่วงชั้น 3";
+  return "";
+}
+
 // อ่านค่าตั้งค่าส่วนกลาง 1 ตัว (เช่น highest_grade) — คืน null ถ้าไม่มี
 export async function getSetting(key) {
   const { data, error } = await sb.from("app_settings").select("value").eq("key", key).maybeSingle();

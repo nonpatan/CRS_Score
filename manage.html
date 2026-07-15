@@ -153,6 +153,8 @@
     <p>สร้าง/แก้ไข/ลบ วิชา หน่วยใหญ่ หน่วยย่อย และครั้งที่ ได้เอง</p>
     <div class="nav">
       <a href="entry.html">กรอกคะแนน</a>
+      <a href="competency-manage.html">กำหนดสมรรถนะ</a>
+      <a href="competency-entry.html">ลงคะแนนสมรรถนะ</a>
       <a href="attendance.html">เช็คชื่อ</a>
       <a href="summary.html">สรุปคะแนน</a>
       <a href="manage.html">จัดการโครงสร้าง</a>
@@ -353,6 +355,10 @@
       <label for="m-name" id="m-name-label">ชื่อ</label>
       <input type="text" id="m-name">
     </div>
+    <div class="field" id="modal-core-field" style="display:none">
+      <label for="m-core-select" id="m-core-label">เลือกจากรายการกลาง</label>
+      <select id="m-core-select"><option value="">— เลือก —</option></select>
+    </div>
     <div class="row2">
       <div class="field" id="modal-seq-field">
         <label for="m-seq">ลำดับ</label>
@@ -372,7 +378,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears } from "./supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade } from "./supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -403,6 +409,9 @@ const elUnitsComp    = document.getElementById("units-competency");
 const elDelSubject   = document.getElementById("btn-del-subject");
 const elMemberList   = document.getElementById("member-list");
 const elSelAddMember = document.getElementById("sel-add-member");
+const mCoreField     = document.getElementById("modal-core-field");
+const mCoreLabel     = document.getElementById("m-core-label");
+const mCoreSelect    = document.getElementById("m-core-select");
 
 // ฟิลด์ในฟอร์มวิชา
 const fType = document.getElementById("f-type");
@@ -440,6 +449,19 @@ if (isAdminUser) {
     fOwner.appendChild(o);
   }
 }
+
+// รายการกลางของสมรรถนะ/องค์ประกอบ — ใช้เลือกตอนจัดโครงสร้างรายวิชาเท่านั้น
+let coreCompetencies = [];
+let coreElements = [];
+async function loadCoreCatalog() {
+  const [competenciesRes, elementsRes] = await Promise.all([
+    sb.from("core_competencies").select("*").order("seq"),
+    sb.from("core_competency_elements").select("*").order("stage").order("seq")
+  ]);
+  coreCompetencies = competenciesRes.data || [];
+  coreElements = elementsRes.data || [];
+}
+await loadCoreCatalog();
 
 // เช็คว่าคนที่ล็อกอินอยู่ตอนนี้ แก้ไข/ลบวิชาที่กำลังเปิดอยู่ได้ไหม (admin หรือเจ้าของวิชา)
 function canEditCurrentSubject() {
@@ -943,6 +965,7 @@ document.getElementById("btn-add-unit-competency").addEventListener("click", () 
 function openNodeModal(type, mode, ref) {
   modalContext = { type, mode };
   mNote.style.display = "none";
+  mCoreField.style.display = "none";
 
   // collection ไม่มีชื่อ ซ่อนฟิลด์ชื่อ
   mNameField.style.display = (type === "collection") ? "none" : "block";
@@ -970,13 +993,60 @@ function openNodeModal(type, mode, ref) {
     mMax.value = 100;
     mMax.disabled = true;
     mNote.style.display = "block";
-    mNote.textContent = "สมรรถนะหลักคะแนนเต็ม 100 ตายตัว";
+    mNote.textContent = "เลือกชื่อสมรรถนะจากรายการกลาง · คะแนนเต็ม 100 ตายตัว";
   } else {
     mMax.disabled = false;
   }
 
+  configureCorePicker(type, mode, ref, isCompUnit);
+
   elOverlay.classList.add("show");
-  (type === "collection" ? mSeq : mName).focus();
+  (mCoreField.style.display !== "none" ? mCoreSelect : (type === "collection" ? mSeq : mName)).focus();
+}
+
+function parentUnitOfIndicator(indicatorId) {
+  return units.find(u => (u.indicators || []).some(i => i.id === indicatorId)) || null;
+}
+
+function fillCorePicker(items, selectedId, placeholder) {
+  mCoreSelect.innerHTML = "<option value=''>" + placeholder + "</option>";
+  for (const item of items) {
+    const o = document.createElement("option");
+    o.value = item.id;
+    o.textContent = item.name + (item.stage ? " · " + item.stage : "");
+    mCoreSelect.appendChild(o);
+  }
+  mCoreSelect.value = selectedId || "";
+}
+
+function configureCorePicker(type, mode, ref, isCompUnit) {
+  let coreUnit = null;
+  if (type === "unit" && isCompUnit) coreUnit = mode === "edit" ? ref : null;
+  if (type === "indicator") coreUnit = mode === "edit" ? parentUnitOfIndicator(ref.id) : ref;
+
+  if (type === "unit" && isCompUnit) {
+    mNameField.style.display = "none";
+    mCoreField.style.display = "block";
+    mCoreLabel.textContent = "ด้านสมรรถนะหลัก";
+    const used = new Set(units.filter(u => u.kind === "สมรรถนะหลัก" && u.id !== (ref.id || "")).map(u => u.core_competency_id).filter(Boolean));
+    fillCorePicker(coreCompetencies.filter(c => !used.has(c.id) || c.id === ref.core_competency_id), ref.core_competency_id, "— เลือกด้านสมรรถนะหลัก —");
+    return;
+  }
+
+  if (type === "indicator" && coreUnit && coreUnit.kind === "สมรรถนะหลัก") {
+    mNameField.style.display = "none";
+    mCoreField.style.display = "block";
+    mCoreLabel.textContent = "องค์ประกอบสมรรถนะหลัก";
+    const stage = competencyStageForGrade(currentSubject && currentSubject.grade_level);
+    const elements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id && (!stage || e.stage === stage));
+    if (!coreUnit.core_competency_id || elements.length === 0) {
+      mCoreSelect.innerHTML = "<option value=''>— ยังไม่ได้ผูกด้านสมรรถนะหลักหรือไม่มีองค์ประกอบช่วงชั้นนี้ —</option>";
+      mNote.style.display = "block";
+      mNote.textContent = "กรุณาเลือกด้านสมรรถนะหลักก่อน แล้วจึงเพิ่มองค์ประกอบ";
+    } else {
+      fillCorePicker(elements, mode === "edit" ? ref.core_competency_element_id : "", "— เลือกองค์ประกอบ —");
+    }
+  }
 }
 
 // ลำดับถัดไป (มากสุด + 1) เพื่อความสะดวก
@@ -1007,16 +1077,38 @@ async function saveNode() {
   if (isNaN(seq) || seq < 1) { showToast("ลำดับต้องเป็นเลข 1 ขึ้นไป", false); return; }
   if (isNaN(max) || max <= 0) { showToast("คะแนนเต็มต้องมากกว่า 0", false); return; }
   let name = mName.value.trim();
+  let selectedCore = null;
+  let selectedElement = null;
+  const isCompUnit = type === "unit" &&
+    ((mode === "edit" && modalContext.node.kind === "สมรรถนะหลัก") || (mode === "add" && modalContext.parent.kind === "สมรรถนะหลัก"));
+  const unitForIndicator = type === "indicator"
+    ? (mode === "edit" ? parentUnitOfIndicator(modalContext.node.id) : modalContext.parent)
+    : null;
+
+  if (isCompUnit) {
+    selectedCore = coreCompetencies.find(c => c.id === mCoreSelect.value);
+    if (!selectedCore) { showToast("เลือกด้านสมรรถนะหลักก่อน", false); return; }
+    if (mode === "add" && units.some(u => u.kind === "สมรรถนะหลัก" && u.core_competency_id === selectedCore.id)) {
+      showToast("วิชานี้มีสมรรถนะด้านนี้แล้ว", false); return;
+    }
+    name = selectedCore.name;
+  } else if (type === "indicator" && unitForIndicator && unitForIndicator.kind === "สมรรถนะหลัก") {
+    selectedElement = coreElements.find(e => e.id === mCoreSelect.value);
+    if (!selectedElement) { showToast("เลือกองค์ประกอบก่อน", false); return; }
+    name = selectedElement.name;
+  }
   if (type !== "collection" && !name) { showToast("กรุณากรอกชื่อ", false); return; }
 
   let table, payload;
   if (type === "unit") {
     table = "units";
     payload = { name, max_score: max, seq };
+    if (selectedCore) payload.core_competency_id = selectedCore.id;
     if (mode === "add") { payload.subject_id = currentSubject.id; payload.kind = modalContext.parent.kind; }
   } else if (type === "indicator") {
     table = "indicators";
     payload = { name, max_score: max, seq };
+    if (selectedElement) payload.core_competency_element_id = selectedElement.id;
     if (mode === "add") payload.unit_id = modalContext.parent.id;
   } else {
     table = "collections";
