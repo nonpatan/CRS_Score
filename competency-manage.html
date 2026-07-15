@@ -64,8 +64,8 @@
   .primary { background:var(--teal); color:var(--white); width:100%; }
   .ghost { background:var(--teal-soft); color:var(--teal); }
   .danger { color:var(--danger); background:var(--danger-soft); }
-  .assessment-row,.member-row,.target-row,.student-row { display:flex; gap:9px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:9px 10px; margin-bottom:7px; } .assessment-row { cursor:pointer; } .assessment-row.selected { border-color:var(--teal); background:var(--teal-soft); } .grow { flex:1; min-width:0; } .title { font-weight:600; } .meta { color:var(--muted); font-size:13px; margin-top:1px; }
-  .target-row .stage { display:inline-block; padding:1px 6px; border-radius:999px; background:var(--teal-soft); color:var(--teal); font-size:12px; } .score { width:82px; flex:none; } .icon { min-height:32px; padding:3px 8px; }
+  .assessment-row,.member-row,.student-row { display:flex; gap:9px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:9px 10px; margin-bottom:7px; } .assessment-row { cursor:pointer; } .assessment-row.selected { border-color:var(--teal); background:var(--teal-soft); } .grow { flex:1; min-width:0; } .title { font-weight:600; } .meta { color:var(--muted); font-size:13px; margin-top:1px; }
+  .competency-target-group { border:1px solid var(--line); border-radius:10px; overflow:hidden; margin-bottom:10px; background:var(--white); } .competency-target-title { padding:10px 12px; font-weight:600; color:var(--teal); background:var(--teal-soft); } .target-row { display:flex; gap:9px; align-items:center; padding:9px 12px; border-top:1px solid var(--line); } .target-row .stage { display:inline-block; padding:1px 6px; border-radius:999px; background:var(--teal-soft); color:var(--teal); font-size:12px; } .score { width:82px; flex:none; } .icon { min-height:32px; padding:3px 8px; }
   .element-group { border:1px solid var(--line); border-radius:8px; padding:9px; margin-top:9px; } .element-group h4 { margin:0 0 6px; font-size:14px; color:var(--teal); } .element-option { display:grid; grid-template-columns:22px 1fr 80px; gap:6px; align-items:center; padding:5px 0; border-top:1px solid #edf1f2; } .element-option:first-of-type { border-top:0; } .element-option input[type=checkbox] { width:18px; height:18px; } .element-option input[type=number] { min-height:34px; }
   .member-tools { display:grid; grid-template-columns:1fr 1fr; gap:9px; align-items:end; } .student-picker { max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin-top:9px; } .student-row { border:0; border-bottom:1px solid #edf1f2; border-radius:0; margin:0; } .student-row:last-child { border-bottom:0; } .student-row input { width:18px; height:18px; flex:none; } .empty { color:var(--muted); font-size:14px; padding:8px 0; } .readonly { color:var(--danger); background:var(--danger-soft); border-radius:8px; padding:9px; font-size:14px; margin-bottom:10px; }
   .toast { position:sticky; bottom:12px; display:none; padding:10px; border-radius:8px; text-align:center; margin-top:12px; font-size:14px; } .toast.ok { display:block; background:var(--teal-soft); color:var(--teal); } .toast.err { display:block; background:var(--danger-soft); color:var(--danger); }
@@ -197,8 +197,29 @@ async function selectAssessment(id) {
 }
 function renderTargets() {
   const el=$("target-list"); el.innerHTML="";
-  if(!targets.length)el.innerHTML="<div class='empty'>ยังไม่ได้เลือกองค์ประกอบ</div>";
-  for(const t of targets){const row=document.createElement("div");row.className="target-row";row.innerHTML="<div class='grow'><div class='title'>"+esc(t.competency&&t.competency.name)+"</div><div class='meta'><span class='stage'>"+esc(t.element&&t.element.stage)+"</span> "+esc(t.element&&t.element.name)+"</div></div><div class='score'>เต็ม "+esc(t.max_score)+"</div>";if(canEdit()){const b=document.createElement("button");b.className="danger icon";b.textContent="ลบ";b.onclick=()=>removeTarget(t);row.appendChild(b);}el.appendChild(row);}
+  if(!targets.length){el.innerHTML="<div class='empty'>ยังไม่ได้เลือกองค์ประกอบ</div>";return;}
+  const groups=new Map();
+  for(const t of targets){
+    const id=t.competency_id;
+    if(!groups.has(id))groups.set(id,{name:t.competency&&t.competency.name,items:[]});
+    groups.get(id).items.push(t);
+  }
+  for(const group of groups.values()){
+    const container=document.createElement("div");
+    container.className="competency-target-group";
+    const heading=document.createElement("div");
+    heading.className="competency-target-title";
+    heading.textContent=group.name||"สมรรถนะหลัก";
+    container.appendChild(heading);
+    for(const t of group.items){
+      const row=document.createElement("div");
+      row.className="target-row";
+      row.innerHTML="<div class='grow'><div class='meta'><span class='stage'>"+esc(t.element&&t.element.stage)+"</span> "+esc(t.element&&t.element.name)+"</div></div><div class='score'>เต็ม "+esc(t.max_score)+"</div>";
+      if(canEdit()){const b=document.createElement("button");b.className="danger icon";b.textContent="ลบ";b.onclick=()=>removeTarget(t);row.appendChild(b);}
+      container.appendChild(row);
+    }
+    el.appendChild(container);
+  }
 }
 function renderMembers() {
   const el=$("member-list");el.innerHTML="";if(!members.length)el.innerHTML="<div class='empty'>ยังไม่มีผู้เข้าร่วม</div>";
