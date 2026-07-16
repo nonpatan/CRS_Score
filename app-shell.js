@@ -24,7 +24,7 @@
     {
       label: "รายงาน",
       items: [
-        ["summary.html", "สรุปคะแนน"],
+        ["summary.html", "สรุปผลการเรียน"],
         ["warning.html", "เฝ้าระวัง มส."],
         ["retention.html", "เรียนซ้ำชั้น"]
       ]

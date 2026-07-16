@@ -1049,3 +1049,90 @@ create unique index if not exists competency_sessions_target_attempt_unique_idx
 drop index if exists competency_sessions_assessment_idx;
 create index competency_sessions_assessment_idx
   on competency_assessment_sessions(assessment_id, target_id, attempt_no);
+
+-- ============================================================
+-- Migration: น้ำหนักรวมสมรรถนะ 3 แหล่ง + เกณฑ์แปลผลกลาง
+-- และภาคเรียนของกิจกรรม/กิจวัตร (2026-07-16)
+-- ------------------------------------------------------------
+-- รันบล็อกนี้ก่อนใช้หน้ากำหนดสมรรถนะ/หน้าสรุปคะแนนรุ่นที่รวม 3 แหล่ง
+-- term = null หมายถึงรายการทั้งปี (ข้อมูลเดิมทั้งหมดจะยังใช้ได้)
+-- ============================================================
+
+alter table competency_assessments
+  add column if not exists term text;
+alter table competency_assessments
+  drop constraint if exists competency_assessments_term_ok;
+alter table competency_assessments
+  add constraint competency_assessments_term_ok check (term is null or term in ('1', '2'));
+create index if not exists competency_assessments_year_term_idx
+  on competency_assessments(year, term);
+
+-- น้ำหนักรายวิชา/กิจกรรม/กิจวัตร กำหนดแยกต่อสมรรถนะหลักแต่ละด้าน
+-- ไม่ seed ตัวเลขแทนโรงเรียน: admin ต้องกำหนดเอง และแต่ละแถวต้องรวมเป็น 100%
+create table if not exists competency_source_weights (
+  competency_id  uuid primary key references core_competencies(id) on delete cascade,
+  subject_weight numeric not null,
+  activity_weight numeric not null,
+  routine_weight numeric not null,
+  updated_at     timestamptz not null default now(),
+  constraint competency_source_weights_range_ok check (
+    subject_weight >= 0 and subject_weight <= 100 and
+    activity_weight >= 0 and activity_weight <= 100 and
+    routine_weight >= 0 and routine_weight <= 100
+  ),
+  constraint competency_source_weights_sum_ok check (
+    abs((subject_weight + activity_weight + routine_weight) - 100) < 0.000001
+  )
+);
+
+-- เกณฑ์แปลผลกลาง ใช้ร่วมกันทั้ง 6 ด้าน แก้ค่าได้จากหน้ากำหนดสมรรถนะ
+create table if not exists competency_interpretation_levels (
+  code       text primary key,
+  label      text not null,
+  min_score  numeric not null,
+  max_score  numeric not null,
+  seq        integer not null unique,
+  updated_at timestamptz not null default now(),
+  constraint competency_levels_range_ok check (
+    min_score >= 0 and max_score <= 100 and min_score <= max_score
+  )
+);
+
+insert into competency_interpretation_levels (code, label, min_score, max_score, seq) values
+  ('beginning',  'เริ่มต้น',             1,  59, 1),
+  ('developing', 'กำลังพัฒนา',          60,  69, 2),
+  ('capable',    'สามารถ',              70,  79, 3),
+  ('beyond',     'เหนือความคาดหวัง',    80, 100, 4)
+on conflict (code) do nothing;
+
+alter table competency_source_weights enable row level security;
+alter table competency_interpretation_levels enable row level security;
+
+drop policy if exists competency_source_weights_select on competency_source_weights;
+create policy competency_source_weights_select on competency_source_weights
+  for select using (auth.role() = 'authenticated');
+drop policy if exists competency_source_weights_write on competency_source_weights;
+create policy competency_source_weights_write on competency_source_weights
+  for all using (is_admin()) with check (is_admin());
+
+drop policy if exists competency_levels_select on competency_interpretation_levels;
+create policy competency_levels_select on competency_interpretation_levels
+  for select using (auth.role() = 'authenticated');
+drop policy if exists competency_levels_write on competency_interpretation_levels;
+create policy competency_levels_write on competency_interpretation_levels
+  for all using (is_admin()) with check (is_admin());
+
+-- ============================================================
+-- Migration: อนุญาตน้ำหนักแหล่งคะแนนเป็น 0% (2026-07-16)
+-- ------------------------------------------------------------
+-- แหล่งที่น้ำหนัก 0% ไม่จำเป็นต้องมีคะแนนของสมรรถนะด้านนั้น
+-- แต่ผลรวมรายวิชา + กิจกรรม + กิจวัตรยังต้องเท่ากับ 100% เสมอ
+-- ============================================================
+alter table competency_source_weights
+  drop constraint if exists competency_source_weights_range_ok;
+alter table competency_source_weights
+  add constraint competency_source_weights_range_ok check (
+    subject_weight >= 0 and subject_weight <= 100 and
+    activity_weight >= 0 and activity_weight <= 100 and
+    routine_weight >= 0 and routine_weight <= 100
+  );

@@ -79,6 +79,100 @@ export function competencyStageForGrade(grade) {
   return "";
 }
 
+// ============================================================
+// ตรรกะสรุปสมรรถนะ 3 แหล่ง ใช้ร่วมกันจากหน้ารายงาน
+// แยกไว้ที่ไฟล์กลางเพื่อไม่ให้สูตรถ่วงน้ำหนัก/การเช็คข้อมูลครบกระจายหลายหน้า
+// ============================================================
+
+// สรุปคะแนนสมรรถนะจากรายวิชา 1 ด้าน:
+// unitsTree ต้องเป็นหน่วย kind='สมรรถนะหลัก' พร้อม indicators > collections
+// และ scoreRows เป็นคะแนนของนักเรียนคนเดียวเท่านั้น
+export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRows) {
+  const units = (unitsTree || []).filter(u => u.core_competency_id === competencyId);
+  const scoreByCollection = new Map((scoreRows || []).map(s => [s.collection_id, Number(s.raw_score)]));
+  let expectedCount = 0, scoredCount = 0, scaledSum = 0, maxSum = 0;
+  let structureComplete = units.length > 0;
+
+  for (const unit of units) {
+    const indicators = unit.indicators || [];
+    if (!indicators.length) structureComplete = false;
+    let unitRaw = 0, unitCap = 0;
+    for (const indicator of indicators) {
+      const collections = indicator.collections || [];
+      if (!collections.length) structureComplete = false;
+      let indicatorRaw = 0, indicatorCap = 0;
+      for (const collection of collections) {
+        expectedCount++;
+        indicatorCap += Number(collection.max_score) || 0;
+        if (scoreByCollection.has(collection.id)) {
+          scoredCount++;
+          indicatorRaw += scoreByCollection.get(collection.id);
+        }
+      }
+      const indicatorScaled = indicatorCap > 0
+        ? (indicatorRaw / indicatorCap) * Number(indicator.max_score)
+        : 0;
+      unitRaw += indicatorScaled;
+      unitCap += Number(indicator.max_score) || 0;
+    }
+    const unitMax = Number(unit.max_score) || 0;
+    const unitScaled = unitCap > 0 ? (unitRaw / unitCap) * unitMax : 0;
+    scaledSum += unitScaled;
+    maxSum += unitMax;
+  }
+
+  const complete = structureComplete && expectedCount > 0 && scoredCount === expectedCount && maxSum > 0;
+  return {
+    complete,
+    percent: complete ? (scaledSum / maxSum) * 100 : null,
+    expectedCount,
+    scoredCount
+  };
+}
+
+// สรุปคะแนนจากกิจกรรมหรือกิจวัตร 1 ด้าน รายการหนึ่งแทนหนึ่งครั้งประเมินที่นักเรียนอยู่ใน snapshot
+// raw_score=null แปลว่ายังไม่ได้กรอก (ต่างจาก 0 ซึ่งเป็นคะแนนจริงและถือว่ากรอกแล้ว)
+export function computeAssessmentCompetencySource(competencyId, expectedItems) {
+  const items = (expectedItems || []).filter(i => i.competency_id === competencyId);
+  const scored = items.filter(i => i.raw_score !== null && i.raw_score !== undefined);
+  const maxSum = items.reduce((sum, i) => sum + (Number(i.max_score) || 0), 0);
+  const rawSum = scored.reduce((sum, i) => sum + Number(i.raw_score), 0);
+  const complete = items.length > 0 && scored.length === items.length && maxSum > 0;
+  return {
+    complete,
+    percent: complete ? (rawSum / maxSum) * 100 : null,
+    expectedCount: items.length,
+    scoredCount: scored.length
+  };
+}
+
+// รวมแหล่งคะแนนตามน้ำหนักของสมรรถนะด้านนั้น โดยตรวจความครบเฉพาะแหล่งที่น้ำหนักมากกว่า 0
+// (แหล่งน้ำหนัก 0% ไม่จำเป็นต้องมีคะแนน) จากนั้นเทียบช่วงคะแนนกับเกณฑ์กลางที่ตั้งไว้
+export function computeCombinedCompetencyResult(weight, sources, levels) {
+  if (!weight) return { complete: false, reason: "ยังไม่ได้กำหนดน้ำหนัก" };
+  const weightedSources = [
+    { source: sources.subject, weight: Number(weight.subject_weight) },
+    { source: sources.activity, weight: Number(weight.activity_weight) },
+    { source: sources.routine, weight: Number(weight.routine_weight) }
+  ];
+  const totalWeight = weightedSources.reduce((sum, item) => sum + item.weight, 0);
+  if (!Number.isFinite(totalWeight) || Math.abs(totalWeight - 100) > 0.000001) {
+    return { complete: false, reason: "น้ำหนักรวมไม่เท่ากับ 100%" };
+  }
+  const required = weightedSources.filter(item => item.weight > 0);
+  if (required.some(item => !item.source || !item.source.complete)) {
+    return { complete: false, reason: "ข้อมูลยังไม่ครบ — ไม่สามารถสรุปคะแนนได้" };
+  }
+  const score = required.reduce((sum, item) => sum + item.source.percent * item.weight / 100, 0);
+  const level = (levels || []).find(l => score >= Number(l.min_score) && score <= Number(l.max_score));
+  return {
+    complete: true,
+    score,
+    level: level ? level.label : null,
+    reason: level ? "" : "คะแนนไม่อยู่ในช่วงเกณฑ์แปลผลที่กำหนด"
+  };
+}
+
 // อ่านค่าตั้งค่าส่วนกลาง 1 ตัว (เช่น highest_grade) — คืน null ถ้าไม่มี
 export async function getSetting(key) {
   const { data, error } = await sb.from("app_settings").select("value").eq("key", key).maybeSingle();
