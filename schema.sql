@@ -795,17 +795,21 @@ create table if not exists competency_assessment_members (
 );
 create index if not exists competency_members_assessment_idx on competency_assessment_members(assessment_id);
 
--- แต่ละครั้งที่ลงคะแนน (กิจกรรม/กิจวัตรหนึ่งรายการมีได้หลายวัน/หลายครั้งต่อวัน)
+-- แต่ละครั้งที่ลงคะแนน แยกตามองค์ประกอบ (แต่ละองค์ประกอบมีครั้งที่ 1, 2, 3... ของตัวเอง)
 create table if not exists competency_assessment_sessions (
   id              uuid primary key default gen_random_uuid(),
   assessment_id   uuid not null references competency_assessments(id) on delete cascade,
-  session_date    date not null,
+  target_id       uuid not null references competency_assessment_targets(id) on delete cascade,
+  attempt_no      integer not null,
+  session_date    date, -- เก็บไว้รองรับข้อมูลรุ่นเก่าเท่านั้น หน้าเว็บใหม่ไม่ใช้วันที่
   note            text,
-  created_at      timestamptz default now()
+  created_at      timestamptz default now(),
+  constraint competency_sessions_attempt_ok check (attempt_no > 0),
+  constraint competency_sessions_target_attempt_unique unique (target_id, attempt_no)
 );
-create index if not exists competency_sessions_assessment_idx on competency_assessment_sessions(assessment_id, session_date);
+create index if not exists competency_sessions_assessment_idx on competency_assessment_sessions(assessment_id, target_id, attempt_no);
 
--- snapshot รายชื่อ ณ วันที่ประเมิน: ประวัติไม่เปลี่ยนเมื่อครูแก้สมาชิกแม่แบบหรือเด็กเลื่อนชั้น
+-- snapshot รายชื่อ ณ ครั้งประเมิน: ประวัติไม่เปลี่ยนเมื่อครูแก้สมาชิกแม่แบบหรือเด็กเลื่อนชั้น
 create table if not exists competency_assessment_session_students (
   id              uuid primary key default gen_random_uuid(),
   session_id      uuid not null references competency_assessment_sessions(id) on delete cascade,
@@ -973,3 +977,75 @@ drop policy if exists competency_scores_select on competency_assessment_scores;
 create policy competency_scores_select on competency_assessment_scores for select using (auth.role() = 'authenticated');
 drop policy if exists competency_scores_write on competency_assessment_scores;
 create policy competency_scores_write on competency_assessment_scores for all using (can_edit_competency_session(session_id)) with check (can_edit_competency_session(session_id));
+
+-- ============================================================
+-- Migration: เปลี่ยนครั้งประเมินกิจกรรม/กิจวัตรจาก “ตามวันที่”
+-- เป็น “แยกครั้งที่ของแต่ละองค์ประกอบ” (2026-07-16)
+-- รันบล็อกนี้กับฐานข้อมูลเดิมก่อน deploy competency-entry.html รุ่นใหม่
+-- ข้อมูลคะแนนเดิมจะถูกแยกไปเป็นครั้งที่ของแต่ละองค์ประกอบโดยไม่ลบคะแนน
+-- ============================================================
+alter table competency_assessment_sessions
+  add column if not exists target_id uuid references competency_assessment_targets(id) on delete cascade;
+alter table competency_assessment_sessions
+  add column if not exists attempt_no integer;
+
+do $$
+declare
+  old_session record;
+  target_row record;
+  new_session_id uuid;
+  next_attempt integer;
+begin
+  -- แถวรุ่นเก่าหนึ่งแถวเคยครอบทุกองค์ประกอบ จึงแตกเป็นหนึ่งแถวต่อองค์ประกอบ
+  for old_session in
+    select * from competency_assessment_sessions
+    where target_id is null
+    order by created_at, id
+  loop
+    for target_row in
+      select id from competency_assessment_targets
+      where assessment_id = old_session.assessment_id
+      order by seq, id
+    loop
+      select coalesce(max(attempt_no), 0) + 1 into next_attempt
+      from competency_assessment_sessions
+      where target_id = target_row.id;
+
+      insert into competency_assessment_sessions
+        (assessment_id, target_id, attempt_no, session_date, note, created_at)
+      values
+        (old_session.assessment_id, target_row.id, next_attempt,
+         old_session.session_date, old_session.note, old_session.created_at)
+      returning id into new_session_id;
+
+      insert into competency_assessment_session_students (session_id, student_id)
+      select new_session_id, student_id
+      from competency_assessment_session_students
+      where session_id = old_session.id
+      on conflict (session_id, student_id) do nothing;
+
+      update competency_assessment_scores
+      set session_id = new_session_id
+      where session_id = old_session.id and target_id = target_row.id;
+    end loop;
+
+    delete from competency_assessment_sessions where id = old_session.id;
+  end loop;
+end $$;
+
+alter table competency_assessment_sessions
+  alter column target_id set not null,
+  alter column attempt_no set not null;
+alter table competency_assessment_sessions
+  alter column session_date drop not null;
+
+alter table competency_assessment_sessions
+  drop constraint if exists competency_sessions_attempt_ok;
+alter table competency_assessment_sessions
+  add constraint competency_sessions_attempt_ok check (attempt_no > 0);
+
+create unique index if not exists competency_sessions_target_attempt_unique_idx
+  on competency_assessment_sessions(target_id, attempt_no);
+drop index if exists competency_sessions_assessment_idx;
+create index competency_sessions_assessment_idx
+  on competency_assessment_sessions(assessment_id, target_id, attempt_no);
