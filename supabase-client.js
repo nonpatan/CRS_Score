@@ -219,6 +219,26 @@ export async function getActiveStudents() {
   return data || [];
 }
 
+// ประวัติชั้น/ห้องของนักเรียนในปีการศึกษาที่ระบุ
+// ไม่กรอง graduated/left_school เพราะรายงานย้อนหลังต้องเห็นรายชื่อในปีนั้นครบ
+// studentIds ส่งมาเฉพาะเมื่ออยากอ่าน placement ของรายชื่อบางกลุ่ม (เช่น roster ของรายวิชา)
+export async function getStudentPlacements(year, studentIds = null) {
+  if (!year) return { data: [], error: null };
+
+  let query = sb.from("student_year_placements")
+    .select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school)")
+    .eq("year", year)
+    .order("grade_level")
+    .order("classroom");
+  if (Array.isArray(studentIds)) {
+    if (studentIds.length === 0) return { data: [], error: null };
+    query = query.in("student_id", studentIds);
+  }
+
+  const { data, error } = await query;
+  return { data: data || [], error };
+}
+
 // รายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ผ่านตาราง enrollments) เรียงตามเลขที่
 // ใช้แทนการดึง "นักเรียนทั้งหมด" แบบเดิม — วิชาไหนยังไม่มีใครลงทะเบียนจะได้ [] เปล่าๆ
 // หมายเหตุ: ไม่กรอง graduated ออก เพราะเป็น "รายชื่อในวิชานั้นๆ" (ผูกปีอยู่แล้ว) เด็กจบไปแล้ว

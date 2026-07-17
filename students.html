@@ -163,6 +163,15 @@
     คุณไม่ใช่ admin — ดูรายชื่อนักเรียนได้อย่างเดียว เพิ่ม/แก้/ลบไม่ได้
   </div>
 
+  <div class="card" id="placement-year-card" style="display:none">
+    <div class="section-title">ปีการศึกษาของชั้นและห้อง</div>
+    <div class="field">
+      <label for="placement-year">ปีการศึกษา</label>
+      <input type="text" id="placement-year" inputmode="numeric" placeholder="เช่น 2569">
+    </div>
+    <div class="field-note">ใช้ปีนี้กับนักเรียนที่เพิ่มทั้งแบบทีละคนและจาก Excel เพื่อเก็บประวัติชั้น/ห้องสำหรับรายงานย้อนหลัง</div>
+  </div>
+
   <!-- วางจาก Excel -->
   <div class="card" id="import-card" style="display:none">
     <div class="section-title">วางจาก Excel (เพิ่มทีละหลายคน)</div>
@@ -248,10 +257,12 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile } from "./supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear } from "./supabase-client.js";
 
 const session = await requireAuth();
-if (!session) throw new Error("redirecting to login");
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
+} else {
 document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
 
 const myProfile = await getProfile(session.user.id);
@@ -267,9 +278,14 @@ function showToast(msg, ok) {
 if (!isAdminUser) {
   document.getElementById("readonly-note").style.display = "block";
 } else {
+  document.getElementById("placement-year-card").style.display = "block";
   document.getElementById("import-card").style.display = "block";
   document.getElementById("add-card").style.display = "block";
 }
+
+const elPlacementYear = document.getElementById("placement-year");
+elPlacementYear.value = getActiveYear();
+elPlacementYear.addEventListener("change", () => setActiveYear(elPlacementYear.value.trim()));
 
 let allStudents = [];
 
@@ -344,6 +360,47 @@ function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function placementYear() {
+  const year = elPlacementYear.value.trim();
+  if (!year) {
+    showToast("กรอกปีการศึกษาก่อนเพิ่มนักเรียน เพื่อเก็บประวัติชั้นและห้อง", false);
+    return "";
+  }
+  return year;
+}
+
+// สร้างนักเรียนและประวัติชั้น/ห้องของปีเดียวกัน
+// ถ้าบันทึก placement ไม่สำเร็จ จะลบนักเรียนที่เพิ่งสร้างกลับทันที เพื่อไม่ให้ข้อมูลค้างคนละตาราง
+async function insertStudentsWithPlacements(rows, year) {
+  const payload = rows.map(row => ({
+    grade_level: row.grade,
+    classroom: row.classroom,
+    student_no: row.studentNo,
+    name: row.name
+  }));
+  const { data: created, error: studentError } = await sb.from("students")
+    .insert(payload)
+    .select("id,grade_level,classroom");
+  if (studentError) return { error: studentError };
+
+  const placementRows = (created || []).map(student => ({
+    student_id: student.id,
+    year,
+    grade_level: student.grade_level,
+    classroom: student.classroom
+  }));
+  const { error: placementError } = await sb.from("student_year_placements").insert(placementRows);
+  if (!placementError) return { count: placementRows.length, error: null };
+
+  // นักเรียนกลุ่มนี้เพิ่งสร้างและยังไม่มีคะแนน/การลงทะเบียน จึงลบย้อนกลับได้อย่างปลอดภัย
+  const ids = (created || []).map(student => student.id);
+  const { error: cleanupError } = ids.length
+    ? await sb.from("students").delete().in("id", ids)
+    : { error: null };
+  const cleanupText = cleanupError ? " และลบข้อมูลนักเรียนที่ค้างไม่สำเร็จ: " + cleanupError.message : " (ยกเลิกการเพิ่มนักเรียนกลับแล้ว)";
+  return { error: new Error("บันทึกประวัติชั้น/ห้องไม่สำเร็จ: " + placementError.message + cleanupText) };
+}
+
 // ---------- ลบนักเรียน (กันไว้ถ้ามีคะแนน/เช็คชื่อ/ร./ลงทะเบียนวิชาอยู่) ----------
 async function deleteStudent(stu) {
   const [{ count: scoreCount }, { count: attCount }, { count: remarkCount }, { count: enrollCount }] = await Promise.all([
@@ -368,6 +425,8 @@ async function deleteStudent(stu) {
 
 // ---------- เพิ่มทีละคน ----------
 document.getElementById("btn-add-one").addEventListener("click", async () => {
+  const year = placementYear();
+  if (!year) return;
   const grade = document.getElementById("f-grade").value;
   const classroom = document.getElementById("f-classroom").value.trim();
   const studentNo = document.getElementById("f-studentno").value.trim();
@@ -378,10 +437,9 @@ document.getElementById("btn-add-one").addEventListener("click", async () => {
   if (!studentNo) { showToast("กรอกรหัสประจำตัวก่อน", false); return; }
   if (!first) { showToast("กรอกชื่อก่อน", false); return; }
 
-  const { error } = await sb.from("students").insert({
-    grade_level: grade, classroom, student_no: studentNo,
-    name: (first + " " + last).trim()
-  });
+  const { error } = await insertStudentsWithPlacements([{
+    grade, classroom, studentNo, name: (first + " " + last).trim()
+  }], year);
   if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
   showToast("เพิ่มนักเรียนแล้ว", true);
   document.getElementById("f-studentno").value = "";
@@ -432,20 +490,22 @@ function renderPreview() {
 }
 
 document.getElementById("btn-import-save").addEventListener("click", async () => {
+  const year = placementYear();
+  if (!year) return;
   const validRows = parsedRows.filter(r => r.errors.length === 0);
   if (validRows.length === 0) { showToast("ไม่มีแถวที่ถูกต้องให้บันทึก", false); return; }
 
   const payload = validRows.map(r => ({
-    grade_level: r.grade, classroom: r.classroom, student_no: r.studentNo,
+    grade: r.grade, classroom: r.classroom, studentNo: r.studentNo,
     name: (r.first + " " + r.last).trim()
   }));
 
   const btn = document.getElementById("btn-import-save");
   btn.disabled = true;
-  const { error } = await sb.from("students").insert(payload);
+  const { count, error } = await insertStudentsWithPlacements(payload, year);
   btn.disabled = false;
   if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
-  showToast("เพิ่มนักเรียนแล้ว " + validRows.length + " คน", true);
+  showToast("เพิ่มนักเรียนแล้ว " + count + " คน", true);
   document.getElementById("import-text").value = "";
   parsedRows = [];
   renderPreview();
@@ -454,6 +514,7 @@ document.getElementById("btn-import-save").addEventListener("click", async () =>
 
 // เริ่มทำงาน
 loadStudents();
+}
 </script>
 </body>
 </html>

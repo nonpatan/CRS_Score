@@ -212,12 +212,14 @@
 import {
   sb, requireAuth, signOut, getProfile,
   getActiveYear, setActiveYear, distinctYears,
-  getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents
+  getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
 } from "./supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
-if (!session) throw new Error("redirecting to login");
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
+} else {
 document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
 
 const elToast = document.getElementById("toast");
@@ -233,7 +235,8 @@ function escapeHtml(s) {
 // ---------- state ----------
 let highestGrade = "ม.3";
 let allSubjects = [];       // วิชาทั้งหมด (ใช้หาปีต้นทาง + วิชาที่จะยก)
-let activeStudents = [];    // นักเรียนที่ยัง active (ยังไม่จบ)
+let allActiveStudents = []; // นักเรียน active ปัจจุบัน ใช้ตรวจว่าใครยังเรียนต่ออยู่
+let activeStudents = [];    // นักเรียน active พร้อมชั้น/ห้องของ "ปีต้นทางที่เลือก"
 let sourceSubjects = [];    // วิชาของปีต้นทางที่เลือก
 
 const elHighest = document.getElementById("sel-highest");
@@ -269,7 +272,7 @@ async function init() {
 
   const { data: subjData } = await sb.from("subjects").select("*").order("created_at");
   allSubjects = subjData || [];
-  activeStudents = await getActiveStudents();
+  allActiveStudents = await getActiveStudents();
 
   // เติมปีต้นทาง = ปีที่มีวิชาจริง (ตั้งค่าเริ่มต้นเป็นปีที่ทำงานอยู่)
   const years = distinctYears(allSubjects);
@@ -280,7 +283,7 @@ async function init() {
     elSourceYear.appendChild(o);
   }
   const activeYear = getActiveYear();
-  if (years.indexOf(activeYear) !== -1) { elSourceYear.value = activeYear; onSourceYearChange(); }
+  if (years.indexOf(activeYear) !== -1) { elSourceYear.value = activeYear; await onSourceYearChange(); }
 }
 
 // ---------- บันทึกชั้นสูงสุด ----------
@@ -295,10 +298,27 @@ document.getElementById("btn-save-highest").addEventListener("click", async () =
 
 // ---------- ปีใหม่ default = ปีต้นทาง + 1 ----------
 elSourceYear.addEventListener("change", onSourceYearChange);
-function onSourceYearChange() {
+async function onSourceYearChange() {
   const src = elSourceYear.value;
   if (src && /^\d+$/.test(src) && !elNewYear.value) elNewYear.value = String(Number(src) + 1);
   sourceSubjects = allSubjects.filter(s => s.year === src);
+
+  // ใช้ชั้น/ห้องของปีต้นทางจริง ไม่อ่านค่าปัจจุบันจาก students ซึ่งอาจถูกเลื่อนชั้นทับแล้ว
+  activeStudents = [];
+  if (src) {
+    const { data, error } = await getStudentPlacements(src, allActiveStudents.map(student => student.id));
+    if (error) {
+      showToast("โหลดประวัติชั้น/ห้องของปี " + src + " ไม่สำเร็จ: " + error.message, false);
+    } else {
+      const byStudentId = new Map((data || []).map(placement => [placement.student_id, placement]));
+      activeStudents = allActiveStudents
+        .filter(student => byStudentId.has(student.id))
+        .map(student => {
+          const placement = byStudentId.get(student.id);
+          return { ...student, grade_level: placement.grade_level, classroom: placement.classroom };
+        });
+    }
+  }
   renderPromote();
   renderSubjects();
 }
@@ -536,21 +556,36 @@ btnRun.addEventListener("click", async () => {
   function addLog(line) { log.push(line); elRunLog.textContent = log.join("\n"); }
 
   try {
-    // 1) เก็บ "ห้องที่วิชาต้นทางเคยมี" ไว้ก่อน (ต้องเก็บก่อนเลื่อนชั้น เพราะเลื่อนแล้วห้องเด็กจะเปลี่ยน)
+    // 1) ยืนยันว่าปีต้นทางมีประวัติชั้น/ห้องครบก่อน
+    // ห้ามเดาจาก students ปัจจุบัน เพราะถ้าเลือกปีเก่า ค่านั้นอาจถูกเลื่อนชั้นทับไปแล้ว
+    addLog("• กำลังตรวจประวัติชั้น/ห้องของปีต้นทาง...");
+    const activeStudentIds = activeStudents.map(student => student.id);
+    const { data: sourcePlacements, error: sourcePlacementError } = activeStudentIds.length
+      ? await sb.from("student_year_placements").select("student_id").eq("year", src).in("student_id", activeStudentIds)
+      : { data: [], error: null };
+    if (sourcePlacementError) throw new Error("อ่านประวัติชั้น/ห้องไม่สำเร็จ: " + sourcePlacementError.message);
+    const placedStudentIds = new Set((sourcePlacements || []).map(row => row.student_id));
+    const missingPlacementCount = activeStudentIds.filter(id => !placedStudentIds.has(id)).length;
+    if (missingPlacementCount > 0) {
+      throw new Error("ปี " + src + " ยังไม่มีประวัติชั้น/ห้องของนักเรียน " + missingPlacementCount + " คน — กรุณารัน SQL ย้ายข้อมูลปีปัจจุบันก่อนขึ้นปีใหม่");
+    }
+
+    // 2) เก็บ "ห้องที่วิชาต้นทางเคยมี" ไว้ก่อน (ต้องเก็บก่อนเลื่อนชั้น เพราะเลื่อนแล้วห้องเด็กจะเปลี่ยน)
     addLog("• กำลังอ่านห้องเรียนของวิชาต้นทาง...");
     const roomsBySubject = {};
+    const sourceClassroomByStudentId = new Map(activeStudents.map(student => [student.id, student.classroom]));
     for (const s of subjectsToClone) {
       if (s.subject_type !== "พื้นฐาน") continue;
-      const { data: enr } = await sb.from("enrollments").select("student:student_id(classroom)").eq("subject_id", s.id);
+      const { data: enr } = await sb.from("enrollments").select("student_id").eq("subject_id", s.id);
       const rooms = [];
       for (const e of (enr || [])) {
-        const c = e.student && e.student.classroom;
+        const c = sourceClassroomByStudentId.get(e.student_id);
         if (c && rooms.indexOf(c) === -1) rooms.push(c);
       }
       roomsBySubject[s.id] = rooms;
     }
 
-    // 2) จัดการนักเรียนตาม action ที่เลือก (คำนวณจากชั้นเดิมที่ snapshot ไว้ แล้วค่อยเขียน)
+    // 3) จัดการนักเรียนตาม action ที่เลือก (คำนวณจากชั้นเดิมที่ snapshot ไว้ แล้วค่อยเขียน)
     addLog("• กำลังจัดการนักเรียน (เลื่อน/จบ/ซ้ำ/ย้ายออก)...");
     for (const stu of activeStudents) {
       const a = actionById[stu.id];
@@ -577,7 +612,22 @@ btnRun.addEventListener("click", async () => {
     activeStudents = activeStudents.filter(s => !s.graduated && !s.left_school);
     addLog("  เลื่อน " + upN + " · จบ " + gradN + " · ซ้ำชั้น " + holdN + " · ย้ายออก " + leftN + " เรียบร้อย");
 
-    // 3) ก๊อปวิชา (พื้นฐานก่อน เพื่อให้ remap สมาชิกบูรณาการได้ถูก)
+    // 4) บันทึกชั้น/ห้องของปีใหม่สำหรับคนที่ยังเรียนต่อ
+    // promote ใช้ชั้นใหม่ ส่วน hold ใช้ชั้นเดิม; คนจบ/ย้ายออกไม่มี placement ของปีใหม่
+    addLog("• กำลังบันทึกประวัติชั้น/ห้องของปี " + newYear + "...");
+    const targetPlacementRows = activeStudents.map(student => ({
+      student_id: student.id,
+      year: newYear,
+      grade_level: student.grade_level,
+      classroom: student.classroom
+    }));
+    if (targetPlacementRows.length) {
+      const { error: targetPlacementError } = await sb.from("student_year_placements")
+        .upsert(targetPlacementRows, { onConflict: "student_id,year" });
+      if (targetPlacementError) throw new Error("บันทึกประวัติชั้น/ห้องปีใหม่ไม่สำเร็จ: " + targetPlacementError.message);
+    }
+
+    // 5) ก๊อปวิชา (พื้นฐานก่อน เพื่อให้ remap สมาชิกบูรณาการได้ถูก)
     addLog("• กำลังยกวิชาไปปี " + newYear + "...");
     const idMap = {}; // old subject id -> new subject id
     const plains = subjectsToClone.filter(s => s.subject_type === "พื้นฐาน");
@@ -591,7 +641,7 @@ btnRun.addEventListener("click", async () => {
       addLog("  ✓ " + s.name + " (บูรณาการ)");
     }
 
-    // 4) ลงทะเบียนอัตโนมัติให้วิชาพื้นฐานปีใหม่
+    // 6) ลงทะเบียนอัตโนมัติให้วิชาพื้นฐานปีใหม่
     addLog("• กำลังลงทะเบียนนักเรียนให้วิชาปีใหม่...");
     let enrollTotal = 0;
     for (const s of plains) {
@@ -600,7 +650,7 @@ btnRun.addEventListener("click", async () => {
     }
     addLog("  ลงทะเบียนรวม " + enrollTotal + " รายการ");
 
-    // 5) ก๊อปสมาชิกวิชาบูรณาการ (remap ไปชี้วิชาพื้นฐานที่ก๊อปใหม่)
+    // 7) ก๊อปสมาชิกวิชาบูรณาการ (remap ไปชี้วิชาพื้นฐานที่ก๊อปใหม่)
     if (integrated.length > 0) {
       addLog("• กำลังผูกวิชาย่อยของวิชาบูรณาการ...");
       for (const s of integrated) {
@@ -631,6 +681,7 @@ btnRun.addEventListener("click", async () => {
 });
 
 init();
+}
 </script>
 </body>
 </html>

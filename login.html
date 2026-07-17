@@ -229,11 +229,35 @@ function showToast(msg, ok) {
   elToast.className = "toast " + (ok ? "ok" : "err");
 }
 
+// รับ next ได้เฉพาะหน้าภายในระบบที่ระบุไว้ ป้องกันลิงก์ login.html?next=https://เว็บปลอม
+// ซึ่งอาจใช้ส่งครูต่อไปยังหน้า phishing หลังล็อกอินสำเร็จ
+const ALLOWED_NEXT_PAGES = new Set([
+  "entry.html", "attendance.html", "summary.html", "manage.html", "students.html",
+  "retention.html", "warning.html", "rollover.html", "competency-manage.html",
+  "competency-entry.html"
+]);
+
+function getSafeNextPage() {
+  const raw = new URLSearchParams(location.search).get("next");
+  if (!raw) return "entry.html";
+
+  try {
+    const target = new URL(raw, location.href);
+    const appPath = location.pathname.replace(/[^/]*$/, "");
+    const page = target.pathname.split("/").pop();
+    if (target.origin !== location.origin || !target.pathname.startsWith(appPath) || !ALLOWED_NEXT_PAGES.has(page)) {
+      return "entry.html";
+    }
+    return page + target.search;
+  } catch {
+    return "entry.html";
+  }
+}
+
 // ถ้าล็อกอินอยู่แล้ว ข้ามหน้านี้ไปเลย
 const { data: { session } } = await sb.auth.getSession();
 if (session) {
-  const params = new URLSearchParams(location.search);
-  location.href = params.get("next") || "entry.html";
+  location.href = getSafeNextPage();
 }
 
 async function doLogin() {
@@ -248,8 +272,7 @@ async function doLogin() {
   if (error) { showToast("เข้าสู่ระบบไม่สำเร็จ: " + error.message, false); return; }
 
   showToast("เข้าสู่ระบบสำเร็จ กำลังพาไป...", true);
-  const params = new URLSearchParams(location.search);
-  location.href = params.get("next") || "entry.html";
+  location.href = getSafeNextPage();
 }
 
 btnLogin.addEventListener("click", doLogin);

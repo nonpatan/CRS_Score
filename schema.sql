@@ -1136,3 +1136,48 @@ alter table competency_source_weights
     activity_weight >= 0 and activity_weight <= 100 and
     routine_weight >= 0 and routine_weight <= 100
   );
+
+-- ============================================================
+-- Migration: ประวัติชั้นและห้องของนักเรียนแยกตามปีการศึกษา (2026-07-17)
+-- ------------------------------------------------------------
+-- students.grade_level / students.classroom คงไว้เป็น "ข้อมูลปีปัจจุบัน" เพื่อให้หน้าเดิม
+-- ทำงานต่อได้ แต่รายงานย้อนหลังต้องอ้างอิงตารางนี้แทน จึงไม่ถูกเขียนทับเมื่อเลื่อนชั้น
+-- ============================================================
+create table if not exists student_year_placements (
+  id          uuid primary key default gen_random_uuid(),
+  student_id  uuid not null references students(id) on delete cascade,
+  year        text not null,
+  grade_level text not null,
+  classroom   text not null,
+  created_at  timestamptz not null default now(),
+
+  -- นักเรียนอยู่ได้ห้องเดียวต่อหนึ่งปีการศึกษา
+  constraint student_year_placements_unique unique (student_id, year),
+  constraint student_year_placements_year_not_blank check (btrim(year) <> ''),
+  constraint student_year_placements_grade_not_blank check (btrim(grade_level) <> ''),
+  constraint student_year_placements_classroom_not_blank check (btrim(classroom) <> '')
+);
+create index if not exists student_year_placements_year_class_idx
+  on student_year_placements(year, grade_level, classroom);
+create index if not exists student_year_placements_student_idx
+  on student_year_placements(student_id);
+
+alter table student_year_placements enable row level security;
+drop policy if exists student_year_placements_select on student_year_placements;
+create policy student_year_placements_select on student_year_placements
+  for select using (auth.role() = 'authenticated');
+drop policy if exists student_year_placements_write on student_year_placements;
+create policy student_year_placements_write on student_year_placements
+  for all using (is_admin()) with check (is_admin());
+
+-- หลังรัน migration ด้านบน ให้ตรวจข้อมูล students ก่อน แล้วรันคำสั่งนี้เพียงครั้งเดียว
+-- โดยแทน '2569' ด้วย "ปีการศึกษาปัจจุบันจริง" ของโรงเรียนเท่านั้น
+-- ห้ามเดาปีหรือใช้คำสั่งนี้เพื่อสร้างประวัติปีเก่า เพราะ classroom เก่าอาจถูกเขียนทับแล้ว
+--
+-- insert into student_year_placements (student_id, year, grade_level, classroom)
+-- select id, '2569', grade_level, classroom
+-- from students
+-- where coalesce(graduated, false) = false and coalesce(left_school, false) = false
+--   and grade_level is not null and btrim(grade_level) <> ''
+--   and classroom is not null and btrim(classroom) <> ''
+-- on conflict (student_id, year) do nothing;

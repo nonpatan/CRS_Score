@@ -102,8 +102,12 @@
   <div id="toast" class="toast"></div>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade } from "./supabase-client.js";
-const session=await requireAuth();if(!session)throw new Error("redirecting to login");document.getElementById("btn-signout").addEventListener("click",e=>{e.preventDefault();signOut();});
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, getStudentPlacements } from "./supabase-client.js";
+const session=await requireAuth();
+if(!session){
+  // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
+}else{
+document.getElementById("btn-signout").addEventListener("click",e=>{e.preventDefault();signOut();});
 const profile = await getProfile(session.user.id);
 const isAdmin = profile && profile.role === "admin";
 let assessments = [];
@@ -145,6 +149,59 @@ const STAGE_LABELS = {
   "ช่วงชั้น 3": "ช่วงชั้นที่ 3 (ม.1–ม.3)"
 };
 
+// ใส่ชั้น/ห้องของปีรายการประเมินให้รายชื่อ โดยไม่ใช้ข้อมูลชั้นปัจจุบันแทนปีเก่า
+// หาก placement ขาดไป ก็ยังคืนรายชื่อนักเรียนไว้ครบ เพราะ snapshot คือความจริงของครั้งประเมิน
+function applyYearPlacements(students, placements) {
+  const byStudentId = new Map((placements || []).map(placement => [placement.student_id, placement]));
+  return (students || []).filter(Boolean).map(student => {
+    const placement = byStudentId.get(student.id);
+    return {
+      ...student,
+      grade_level: placement ? placement.grade_level : "",
+      classroom: placement ? placement.classroom : "",
+      placementMissing: !placement
+    };
+  });
+}
+
+// รายชื่อสมาชิกกิจกรรมต้องอ่านชั้น/ห้องตามปีของรายการ ไม่ใช่ students.grade_level ปัจจุบัน
+async function loadAssessmentMembersForYear(assessmentId, year) {
+  const { data, error } = await sb.from("competency_assessment_members")
+    .select("student_id, student:student_id(id,student_no,name,grade_level,classroom)")
+    .eq("assessment_id", assessmentId);
+  if (error) return { data: [], error };
+
+  const studentIds = (data || []).map(member => member.student_id).filter(Boolean);
+  const placementResult = await getStudentPlacements(year, studentIds);
+  if (placementResult.error) return { data: [], error: placementResult.error };
+
+  const historicalStudents = applyYearPlacements(
+    (data || []).map(member => member.student),
+    placementResult.data
+  );
+  const byStudentId = new Map(historicalStudents.map(student => [student.id, student]));
+  return {
+    data: (data || []).map(member => ({ ...member, student: byStudentId.get(member.student_id) || null })),
+    error: null
+  };
+}
+
+function availableStagesForAssessment(memberRows, targetRows, sessionRows) {
+  const memberStages = new Set((memberRows || [])
+    .map(member => member.student && competencyStageForGrade(member.student.grade_level))
+    .filter(Boolean));
+  const targetStages = new Set((targetRows || [])
+    .map(target => target.element && target.element.stage)
+    .filter(Boolean));
+  const targetStageById = new Map((targetRows || []).map(target => [target.id, target.element && target.element.stage]));
+  // ครั้งประเมินที่มีอยู่แล้วต้องยังเข้าถึงได้ แม้นักเรียนเลื่อนชั้นหรือ placement ของปีนั้นขาด
+  const sessionStages = new Set((sessionRows || [])
+    .map(session => targetStageById.get(session.target_id))
+    .filter(Boolean));
+  return ["ช่วงชั้น 1", "ช่วงชั้น 2", "ช่วงชั้น 3"]
+    .filter(stage => targetStages.has(stage) && (memberStages.has(stage) || sessionStages.has(stage)));
+}
+
 // แสดงเฉพาะช่วงชั้นที่มีทั้งนักเรียนผู้เข้าร่วมและองค์ประกอบให้ประเมินจริง
 function renderStageOptions() {
   const select = $("f-stage");
@@ -154,14 +211,7 @@ function renderStageOptions() {
     select.disabled = true;
     return;
   }
-  const memberStages = new Set((assessmentMembers || [])
-    .map(member => member.student && competencyStageForGrade(member.student.grade_level))
-    .filter(Boolean));
-  const targetStages = new Set((targets || [])
-    .map(target => target.element && target.element.stage)
-    .filter(Boolean));
-  const available = ["ช่วงชั้น 1", "ช่วงชั้น 2", "ช่วงชั้น 3"]
-    .filter(stage => memberStages.has(stage) && targetStages.has(stage));
+  const available = availableStagesForAssessment(assessmentMembers, targets, sessions);
   select.innerHTML = "<option value=''>" + (available.length ? "— เลือกช่วงชั้น —" : "— ไม่มีช่วงชั้นที่ลงคะแนนได้ —") + "</option>";
   for (const stage of available) {
     const option = document.createElement("option");
@@ -210,22 +260,25 @@ async function selectAssessment() {
     $("targets-wrap").style.display = "none";
     return;
   }
-  const [t, s, m] = await Promise.all([
+  const [t, s] = await Promise.all([
     sb.from("competency_assessment_targets")
       .select("*, competency:competency_id(*), element:element_id(*)")
       .eq("assessment_id", id).order("seq"),
     sb.from("competency_assessment_sessions")
-      .select("*").eq("assessment_id", id).order("attempt_no"),
-    sb.from("competency_assessment_members")
-      .select("student:student_id(id, grade_level)").eq("assessment_id", id)
+      .select("*").eq("assessment_id", id).order("attempt_no")
   ]);
-  if (t.error || s.error || m.error) {
-    toast("โหลดองค์ประกอบ ผู้เข้าร่วม หรือครั้งประเมินไม่สำเร็จ: " + (t.error || s.error || m.error).message, false);
+  if (t.error || s.error) {
+    toast("โหลดองค์ประกอบหรือครั้งประเมินไม่สำเร็จ: " + (t.error || s.error).message, false);
     return;
   }
   targets = t.data || [];
   sessions = s.data || [];
-  assessmentMembers = m.data || [];
+  const membersResult = await loadAssessmentMembersForYear(current.id, current.year);
+  if (membersResult.error) {
+    toast("โหลดผู้เข้าร่วมตามปีการศึกษาไม่สำเร็จ: " + membersResult.error.message, false);
+    return;
+  }
+  assessmentMembers = membersResult.data;
   renderStageOptions();
   $("targets-wrap").style.display = "block";
   renderTargets();
@@ -294,13 +347,13 @@ async function createSession(target) {
     toast("คุณไม่มีสิทธิ์เพิ่มครั้งประเมิน", false);
     return;
   }
-  const { data:members, error:memErr } = await sb.from("competency_assessment_members")
-    .select("student:student_id(id, grade_level)").eq("assessment_id", current.id);
-  if (memErr) {
-    toast("โหลดผู้เข้าร่วมไม่สำเร็จ: " + memErr.message, false);
+  const membersResult = await loadAssessmentMembersForYear(current.id, current.year);
+  if (membersResult.error) {
+    toast("โหลดผู้เข้าร่วมตามปีการศึกษาไม่สำเร็จ: " + membersResult.error.message, false);
     return;
   }
-  const matching = (members || []).map(m => m.student).filter(student =>
+  assessmentMembers = membersResult.data;
+  const matching = assessmentMembers.map(member => member.student).filter(student =>
     student && competencyStageForGrade(student.grade_level) === target.element.stage
   );
   if (!matching.length) {
@@ -344,9 +397,12 @@ async function loadSession(id) {
     toast("โหลดคะแนนไม่สำเร็จ: " + (stu.error || sc.error).message, false);
     return;
   }
-  sessionStudents = (stu.data || []).map(x => x.student).filter(student =>
-    student && competencyStageForGrade(student.grade_level) === currentTarget.element.stage
-  );
+  const snapshotStudents = (stu.data || []).map(row => row.student).filter(Boolean);
+  const placementResult = await getStudentPlacements(current.year, snapshotStudents.map(student => student.id));
+  sessionStudents = applyYearPlacements(snapshotStudents, placementResult.data);
+  if (placementResult.error) {
+    toast("โหลดชั้น/ห้องของปี " + current.year + " ไม่สำเร็จ แต่ยังแสดงรายชื่อในครั้งประเมินครบ", false);
+  }
   scoreMap = new Map((sc.data || []).map(x => [x.student_id, x.raw_score]));
   $("score-heading").textContent = (currentTarget.competency && currentTarget.competency.name || "สมรรถนะหลัก") + " · ครั้งที่ " + currentSession.attempt_no;
   $("score-subheading").textContent = (currentTarget.element && currentTarget.element.name || "องค์ประกอบ") + " · " + (currentTarget.element && currentTarget.element.stage || "") + " · เต็ม " + currentTarget.max_score;
@@ -374,7 +430,7 @@ function renderScores() {
     row.className = "score-row";
     row.innerHTML =
       "<div><div class='student'>" + esc(student.name) + "</div>" +
-      "<div class='meta'>" + esc(student.grade_level) + "/" + esc(student.classroom) +
+      "<div class='meta'>" + esc(student.placementMissing ? "ไม่พบชั้น/ห้อง ปี " + current.year : student.grade_level + "/" + student.classroom) +
       " · " + esc(student.student_no) + "</div></div>" +
       "<div class='score-control'><span class='score-value'>" + (value === "" ? "—" : esc(value)) + "</span></div>";
     if (canEdit()) {
@@ -400,6 +456,7 @@ $("f-type").onchange=()=>{renderAssessments();if(!$("sel-assessment").value)sele
 $("f-stage").onchange=()=>{currentSession=null;currentTarget=null;$("scores-card").style.display="none";renderTargets();};
 $("sel-assessment").onchange=selectAssessment;
 init();
+}
 </script>
 </body>
 </html>
