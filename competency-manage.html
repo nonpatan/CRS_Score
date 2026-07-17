@@ -183,7 +183,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, getActiveStudents } from "./supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, getStudentPlacements } from "./supabase-client.js";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -200,16 +200,43 @@ function toast(msg, ok=true) { const el=$("toast"); el.textContent=msg; el.class
 function canEdit() { return current && (isAdmin || current.owner_id === session.user.id); }
 function fill(sel, rows, label, placeholder) { sel.innerHTML="<option value=''>"+placeholder+"</option>"; for(const r of rows){ const o=document.createElement("option"); o.value=r.id || r; o.textContent=label(r); sel.appendChild(o); } }
 
+// ชั้น/ห้องในหน้ากิจกรรมต้องอ้างอิงปีของรายการ ไม่ใช่ข้อมูลปัจจุบันใน students
+function applyYearPlacement(student, placement) {
+  return {
+    ...student,
+    grade_level: placement ? placement.grade_level : "",
+    classroom: placement ? placement.classroom : "",
+    placementMissing: !placement
+  };
+}
+function membersAtAssessmentYear(memberRows, placementRows) {
+  const byStudentId = new Map((placementRows || []).map(placement => [placement.student_id, placement]));
+  return (memberRows || []).map(member => ({
+    ...member,
+    student: member.student ? applyYearPlacement(member.student, byStudentId.get(member.student_id)) : null,
+    placementMissing: !byStudentId.has(member.student_id)
+  }));
+}
+function studentsAtAssessmentYear(placementRows) {
+  return (placementRows || []).filter(placement => placement.student).map(placement =>
+    applyYearPlacement(placement.student, placement)
+  );
+}
+function resetMemberFilters() {
+  const grades = [...new Set(students.map(student => student.grade_level).filter(Boolean))].sort();
+  fill($("filter-grade"), grades, grade => grade, "— ทุกชั้น —");
+  fill($("filter-room"), [], room => room, "— ทุกห้อง —");
+}
+
 async function init() {
-  const [a,c,e,s,w,l] = await Promise.all([
+  const [a,c,e,w,l] = await Promise.all([
     sb.from("competency_assessments").select("*").order("created_at",{ascending:false}),
     sb.from("core_competencies").select("*").order("seq"),
     sb.from("core_competency_elements").select("*").order("stage").order("seq"),
-    getActiveStudents(),
     sb.from("competency_source_weights").select("*"),
     sb.from("competency_interpretation_levels").select("*").order("seq")
   ]);
-  assessments=a.data||[]; competencies=c.data||[]; elements=e.data||[]; students=s||[];
+  assessments=a.data||[]; competencies=c.data||[]; elements=e.data||[];
   sourceWeights=w.data||[]; interpretationLevels=l.data||[];
   settingsLoadError=(w.error&&w.error.message)||(l.error&&l.error.message)||"";
   const years=distinctYears((await sb.from("subjects").select("year")).data||[]);
@@ -218,8 +245,8 @@ async function init() {
   fill($("f-year"), years, y=>y, "— เลือกปี —");
   $("f-year").value=getActiveYear() || years[0] || "";
   fill($("sel-competency"),competencies,c=>c.name,"— เลือกสมรรถนะ —");
-  fill($("filter-grade"),[...new Set(students.map(s=>s.grade_level).filter(Boolean))].sort(),x=>x,"— ทุกชั้น —");
-  renderSettings(); renderAssessments(); renderStudents();
+  resetMemberFilters();
+  renderSettings(); renderAssessments();
 }
 function renderSettings(){
   const weightEl=$("weight-settings"),levelEl=$("level-settings");
@@ -259,11 +286,18 @@ function renderAssessments() {
 }
 async function selectAssessment(id) {
   current=assessments.find(a=>a.id===id); if(!current)return;
-  const [t,m]=await Promise.all([
+  const [t,m,placementResult]=await Promise.all([
     sb.from("competency_assessment_targets").select("*, competency:competency_id(*), element:element_id(*)").eq("assessment_id",id).order("seq"),
-    sb.from("competency_assessment_members").select("*, student:student_id(*)").eq("assessment_id",id)
+    sb.from("competency_assessment_members").select("*, student:student_id(*)").eq("assessment_id",id),
+    getStudentPlacements(current.year)
   ]);
-  targets=t.data||[]; members=m.data||[]; $("detail").style.display="block";
+  if(t.error||m.error||placementResult.error){toast("โหลดองค์ประกอบ ผู้เข้าร่วม หรือชั้น/ห้องตามปีการศึกษาไม่สำเร็จ: "+(t.error||m.error||placementResult.error).message,false);return;}
+  const placements=placementResult.data||[];
+  targets=t.data||[];
+  members=membersAtAssessmentYear(m.data,placements);
+  students=studentsAtAssessmentYear(placements);
+  resetMemberFilters();
+  $("detail").style.display="block";
   $("readonly").style.display=canEdit()?"none":"block"; $("target-form").style.display=canEdit()?"block":"none"; $("member-form").style.display=canEdit()?"block":"none";
   renderAssessments(); renderTargets(); renderMembers(); renderStudents();
 }
@@ -306,10 +340,10 @@ function renderTargets() {
 }
 function renderMembers() {
   const el=$("member-list");el.innerHTML="";if(!members.length)el.innerHTML="<div class='empty'>ยังไม่มีผู้เข้าร่วม</div>";
-  for(const m of members.sort((a,b)=>(a.student.grade_level||"").localeCompare(b.student.grade_level||"")||(a.student.classroom||"").localeCompare(b.student.classroom||"")||(a.student.student_no||"").localeCompare(b.student.student_no||""))){const row=document.createElement("div");row.className="member-row";row.innerHTML="<div class='grow'><div class='title'>"+esc(m.student.name)+"</div><div class='meta'>"+esc(m.student.grade_level)+"/"+esc(m.student.classroom)+" · "+esc(m.student.student_no)+"</div></div>";if(canEdit()){const b=document.createElement("button");b.className="icon-btn del";b.textContent="🗑";b.title="เอานักเรียนออก";b.setAttribute("aria-label","เอานักเรียนออก");b.onclick=()=>removeMember(m);row.appendChild(b);}el.appendChild(row);}
+  for(const m of [...members].sort((a,b)=>((a.student&&a.student.grade_level)||"").localeCompare((b.student&&b.student.grade_level)||"")||((a.student&&a.student.classroom)||"").localeCompare((b.student&&b.student.classroom)||"")||((a.student&&a.student.student_no)||"").localeCompare((b.student&&b.student.student_no)||""))){const student=m.student||{};const gradeRoom=m.placementMissing?"ไม่พบชั้น/ห้อง ปี "+current.year:(student.grade_level||"")+"/"+(student.classroom||"");const row=document.createElement("div");row.className="member-row";row.innerHTML="<div class='grow'><div class='title'>"+esc(student.name||"ไม่พบข้อมูลนักเรียน")+"</div><div class='meta'>"+esc(gradeRoom)+" · "+esc(student.student_no)+"</div></div>";if(canEdit()){const b=document.createElement("button");b.className="icon-btn del";b.textContent="🗑";b.title="เอานักเรียนออก";b.setAttribute("aria-label","เอานักเรียนออก");b.onclick=()=>removeMember(m);row.appendChild(b);}el.appendChild(row);}
 }
 function renderElements(){const id=$("sel-competency").value;const rows=elements.filter(e=>e.competency_id===id);const el=$("element-options");if(!rows.length){el.textContent="ไม่มีองค์ประกอบให้เลือก";return;}let html="";for(const stage of ["ช่วงชั้น 1","ช่วงชั้น 2","ช่วงชั้น 3"]){const list=rows.filter(e=>e.stage===stage);if(!list.length)continue;html+="<div class='element-group'><h4>"+stage+"</h4>";for(const e of list){if(targets.some(t=>t.element_id===e.id))continue;html+="<label class='element-option'><input type='checkbox' data-element='"+e.id+"'><span>"+esc(e.name)+"</span><input type='number' min='0.01' step='0.01' value='10' data-score='"+e.id+"' disabled></label>";}html+="</div>";}el.innerHTML=html||"<div class='empty'>เลือกองค์ประกอบของสมรรถนะนี้ครบแล้ว</div>";el.querySelectorAll("input[type=checkbox]").forEach(c=>c.addEventListener("change",()=>{el.querySelector("[data-score='"+c.dataset.element+"']").disabled=!c.checked;}));}
-function renderStudents(){const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";for(const s of rows){const label=document.createElement("label");label.className="student-row";label.innerHTML="<input type='checkbox' value='"+s.id+"'><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div></div>";el.appendChild(label);}}
+function renderStudents(){if(!current)return;const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";for(const s of rows){const label=document.createElement("label");label.className="student-row";label.innerHTML="<input type='checkbox' value='"+s.id+"'><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div></div>";el.appendChild(label);}}
 
 $("btn-save-weights").onclick=async()=>{if(!isAdmin)return;const rows=[...$("weight-settings").querySelectorAll(".weight-row")].map(row=>({competency_id:row.dataset.competency,subject_weight:Number(row.querySelector("[data-source=subject]").value),activity_weight:Number(row.querySelector("[data-source=activity]").value),routine_weight:Number(row.querySelector("[data-source=routine]").value),updated_at:new Date().toISOString()}));if(rows.length!==6||rows.some(r=>![r.subject_weight,r.activity_weight,r.routine_weight].every(v=>Number.isFinite(v)&&v>=0&&v<=100)||Math.abs(r.subject_weight+r.activity_weight+r.routine_weight-100)>0.000001)){toast("น้ำหนักแต่ละแหล่งใส่ได้ตั้งแต่ 0–100% และต้องรวมกันเป็น 100%",false);return;}const button=$("btn-save-weights");button.disabled=true;const {error}=await sb.from("competency_source_weights").upsert(rows,{onConflict:"competency_id"});button.disabled=false;if(error){toast("บันทึกน้ำหนักไม่สำเร็จ: "+error.message,false);return;}sourceWeights=rows;toast("บันทึกน้ำหนักทั้ง 6 ด้านแล้ว");};
 $("btn-save-levels").onclick=async()=>{if(!isAdmin)return;const rows=[...$("level-settings").querySelectorAll(".level-row")].map(row=>({code:row.dataset.code,seq:Number(row.dataset.seq),label:row.querySelector("[data-field=label]").value.trim(),min_score:Number(row.querySelector("[data-field=min]").value),max_score:Number(row.querySelector("[data-field=max]").value),updated_at:new Date().toISOString()})).sort((a,b)=>a.min_score-b.min_score);if(rows.length!==4||rows.some(r=>!r.label||!Number.isInteger(r.min_score)||!Number.isInteger(r.max_score)||r.min_score<0||r.max_score>100||r.min_score>r.max_score)){toast("กรอกชื่อระดับและช่วงคะแนนจำนวนเต็ม 0–100 ให้ครบ",false);return;}if(rows[0].min_score!==1||rows[rows.length-1].max_score!==100||rows.some((r,i)=>i>0&&r.min_score!==rows[i-1].max_score+1)){toast("ช่วงคะแนนต้องต่อกันตั้งแต่ 1 ถึง 100 โดยไม่ซ้อนหรือเว้นช่วง",false);return;}const button=$("btn-save-levels");button.disabled=true;const {error}=await sb.from("competency_interpretation_levels").upsert(rows,{onConflict:"code"});button.disabled=false;if(error){toast("บันทึกเกณฑ์ไม่สำเร็จ: "+error.message,false);return;}interpretationLevels=rows;renderSettings();toast("บันทึกเกณฑ์แปลผลแล้ว");};
