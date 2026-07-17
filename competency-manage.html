@@ -81,7 +81,7 @@
   .level-row input { min-width:0; padding:8px 7px; }
   .settings-divider { border:0; border-top:1px solid var(--line); margin:18px 0; }
   .toast { position:sticky; bottom:12px; display:none; padding:10px; border-radius:8px; text-align:center; margin-top:12px; font-size:14px; } .toast.ok { display:block; background:var(--teal-soft); color:var(--teal); } .toast.err { display:block; background:var(--danger-soft); color:var(--danger); }
-  .overlay { position:fixed; inset:0; z-index:10; display:none; align-items:center; justify-content:center; padding:16px; background:rgba(20,45,44,.38); } .overlay.show { display:flex; } .modal { width:100%; max-width:400px; padding:20px; background:var(--white); } .modal h3 { margin:0 0 14px; font-size:18px; } .modal-actions { display:flex; gap:10px; margin-top:16px; } .modal-actions button { flex:1; width:auto; }
+  .overlay { position:fixed; inset:0; z-index:10; display:none; align-items:center; justify-content:center; padding:16px; background:rgba(20,45,44,.38); } .overlay.show { display:flex; } .modal { width:100%; max-width:400px; padding:20px; background:var(--white); } .modal h3 { margin:0 0 14px; font-size:18px; } .modal-note { color:var(--muted); font-size:13px; margin:-4px 0 12px; } .modal-warning { color:var(--danger); background:var(--danger-soft); border-radius:8px; padding:9px; font-size:13px; margin:0 0 12px; } .modal-actions { display:flex; gap:10px; margin-top:16px; } .modal-actions button { flex:1; width:auto; }
   @media (max-width:480px) { .member-tools { grid-template-columns:1fr; } .target-row { align-items:flex-start; } .target-actions { flex-wrap:wrap; justify-content:flex-end; } .weight-head,.weight-row { grid-template-columns:minmax(105px,1.5fr) repeat(3,minmax(55px,1fr)); gap:4px; } .weight-row input { padding:8px 2px; } .level-row { grid-template-columns:1fr 62px 10px 62px; gap:4px; } }
 </style>
 <link rel="stylesheet" href="app-shell.css">
@@ -179,6 +179,19 @@
       <div class="modal-actions"><button class="ghost" id="target-modal-cancel">ยกเลิก</button><button class="primary" id="target-modal-save">บันทึก</button></div>
     </div>
   </div>
+  <div class="overlay" id="assessment-overlay">
+    <div class="modal">
+      <h3>แก้ไขรายการ</h3>
+      <div id="assessment-edit-lock-note" class="modal-warning" style="display:none">รายการนี้มีครั้งประเมินแล้ว จึงแก้ได้เฉพาะชื่อ เพื่อไม่ให้ประวัติและการสรุปคะแนนคลาดเคลื่อน</div>
+      <div class="row2">
+        <div class="field"><label for="assessment-edit-year">ปีการศึกษา</label><select id="assessment-edit-year"></select></div>
+        <div class="field"><label for="assessment-edit-type">ประเภท</label><select id="assessment-edit-type"><option value="กิจกรรม">กิจกรรม</option><option value="กิจวัตรประจำวัน">กิจวัตรประจำวัน</option></select></div>
+      </div>
+      <div class="field"><label for="assessment-edit-term">ภาคเรียน</label><select id="assessment-edit-term"><option value="">— เลือกภาคเรียน —</option><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select></div>
+      <div class="field"><label for="assessment-edit-name">ชื่อกิจกรรม / ชื่อแม่แบบกิจวัตร</label><input id="assessment-edit-name" type="text"></div>
+      <div class="modal-actions"><button class="ghost" id="assessment-edit-cancel">ยกเลิก</button><button class="primary" id="assessment-edit-save">บันทึก</button></div>
+    </div>
+  </div>
   <div id="toast" class="toast"></div>
 </div>
 
@@ -188,16 +201,23 @@ const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
 } else {
-document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
-
 const profile = await getProfile(session.user.id);
 const isAdmin = profile && profile.role === "admin";
-let assessments = [], current = null, targets = [], members = [], students = [], competencies = [], elements = [];
+document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
+
+let assessments = [], assessmentYears = [], current = null, targets = [], members = [], students = [], competencies = [], elements = [];
 let sourceWeights = [], interpretationLevels = [], settingsLoadError = "";
+let profilesById = new Map();
 const $ = id => document.getElementById(id);
 function esc(v) { return String(v || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function toast(msg, ok=true) { const el=$("toast"); el.textContent=msg; el.className="toast "+(ok?"ok":"err"); setTimeout(()=>{el.className="toast";},4500); }
-function canEdit() { return current && (isAdmin || current.owner_id === session.user.id); }
+function canManageAssessment(assessment) { return !!(assessment && (isAdmin || assessment.owner_id === session.user.id)); }
+function canEdit() { return canManageAssessment(current); }
+function ownerLabel(assessment) {
+  if (assessment.owner_id === session.user.id) return "ผู้กำหนด: คุณ";
+  const owner = profilesById.get(assessment.owner_id);
+  return "ผู้กำหนด: " + (owner && (owner.name || owner.email) || "ไม่ระบุ");
+}
 function fill(sel, rows, label, placeholder) { sel.innerHTML="<option value=''>"+placeholder+"</option>"; for(const r of rows){ const o=document.createElement("option"); o.value=r.id || r; o.textContent=label(r); sel.appendChild(o); } }
 
 // ชั้น/ห้องในหน้ากิจกรรมต้องอ้างอิงปีของรายการ ไม่ใช่ข้อมูลปัจจุบันใน students
@@ -229,19 +249,22 @@ function resetMemberFilters() {
 }
 
 async function init() {
-  const [a,c,e,w,l] = await Promise.all([
+  const [a,c,e,w,l,p] = await Promise.all([
     sb.from("competency_assessments").select("*").order("created_at",{ascending:false}),
     sb.from("core_competencies").select("*").order("seq"),
     sb.from("core_competency_elements").select("*").order("stage").order("seq"),
     sb.from("competency_source_weights").select("*"),
-    sb.from("competency_interpretation_levels").select("*").order("seq")
+    sb.from("competency_interpretation_levels").select("*").order("seq"),
+    sb.from("profiles").select("id,name,email")
   ]);
   assessments=a.data||[]; competencies=c.data||[]; elements=e.data||[];
   sourceWeights=w.data||[]; interpretationLevels=l.data||[];
+  profilesById = new Map((p.data||[]).map(person => [person.id, person]));
   settingsLoadError=(w.error&&w.error.message)||(l.error&&l.error.message)||"";
-  const years=distinctYears((await sb.from("subjects").select("year")).data||[]);
+  const years=[...new Set([...distinctYears((await sb.from("subjects").select("year")).data||[]), ...assessments.map(assessment=>assessment.year).filter(Boolean)])];
   const currentThaiYear=String(new Date().getFullYear()+543);
   if(!years.includes(currentThaiYear)) years.unshift(currentThaiYear);
+  assessmentYears=years;
   fill($("f-year"), years, y=>y, "— เลือกปี —");
   $("f-year").value=getActiveYear() || years[0] || "";
   fill($("sel-competency"),competencies,c=>c.name,"— เลือกสมรรถนะ —");
@@ -282,7 +305,21 @@ function renderSettings(){
 function renderAssessments() {
   const el=$("assessment-list"); el.innerHTML="";
   if(!assessments.length){el.textContent="ยังไม่มีรายการ — สร้างกิจกรรมหรือแม่แบบกิจวัตรด้านบน";return;}
-  for(const a of assessments){ const row=document.createElement("div"); row.className="assessment-row"+(current&&current.id===a.id?" selected":""); row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+"</div><div class='meta'>"+esc(a.source_type)+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ยังไม่ระบุภาคเรียน")+(a.owner_id===session.user.id?" · ของฉัน":"")+"</div></div>"; row.addEventListener("click",()=>selectAssessment(a.id)); el.appendChild(row); }
+  for(const a of assessments){
+    const row=document.createElement("div");
+    row.className="assessment-row"+(current&&current.id===a.id?" selected":"");
+    row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+"</div><div class='meta'>"+esc(a.source_type)+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ยังไม่ระบุภาคเรียน")+" · "+esc(ownerLabel(a))+"</div></div>";
+    row.addEventListener("click",()=>selectAssessment(a.id));
+    if(canManageAssessment(a)){
+      const actions=document.createElement("div"); actions.className="target-actions";
+      const edit=document.createElement("button"); edit.className="icon-btn edit"; edit.textContent="✎"; edit.title="แก้ไขรายการ"; edit.setAttribute("aria-label","แก้ไขรายการ "+a.name);
+      edit.onclick=event=>{event.stopPropagation();openAssessmentModal(a);};
+      const remove=document.createElement("button"); remove.className="icon-btn del"; remove.textContent="🗑"; remove.title="ลบรายการ"; remove.setAttribute("aria-label","ลบรายการ "+a.name);
+      remove.onclick=event=>{event.stopPropagation();removeAssessment(a);};
+      actions.append(edit,remove); row.appendChild(actions);
+    }
+    el.appendChild(row);
+  }
 }
 async function selectAssessment(id) {
   current=assessments.find(a=>a.id===id); if(!current)return;
@@ -347,7 +384,7 @@ function renderStudents(){if(!current)return;const grade=$("filter-grade").value
 
 $("btn-save-weights").onclick=async()=>{if(!isAdmin)return;const rows=[...$("weight-settings").querySelectorAll(".weight-row")].map(row=>({competency_id:row.dataset.competency,subject_weight:Number(row.querySelector("[data-source=subject]").value),activity_weight:Number(row.querySelector("[data-source=activity]").value),routine_weight:Number(row.querySelector("[data-source=routine]").value),updated_at:new Date().toISOString()}));if(rows.length!==6||rows.some(r=>![r.subject_weight,r.activity_weight,r.routine_weight].every(v=>Number.isFinite(v)&&v>=0&&v<=100)||Math.abs(r.subject_weight+r.activity_weight+r.routine_weight-100)>0.000001)){toast("น้ำหนักแต่ละแหล่งใส่ได้ตั้งแต่ 0–100% และต้องรวมกันเป็น 100%",false);return;}const button=$("btn-save-weights");button.disabled=true;const {error}=await sb.from("competency_source_weights").upsert(rows,{onConflict:"competency_id"});button.disabled=false;if(error){toast("บันทึกน้ำหนักไม่สำเร็จ: "+error.message,false);return;}sourceWeights=rows;toast("บันทึกน้ำหนักทั้ง 6 ด้านแล้ว");};
 $("btn-save-levels").onclick=async()=>{if(!isAdmin)return;const rows=[...$("level-settings").querySelectorAll(".level-row")].map(row=>({code:row.dataset.code,seq:Number(row.dataset.seq),label:row.querySelector("[data-field=label]").value.trim(),min_score:Number(row.querySelector("[data-field=min]").value),max_score:Number(row.querySelector("[data-field=max]").value),updated_at:new Date().toISOString()})).sort((a,b)=>a.min_score-b.min_score);if(rows.length!==4||rows.some(r=>!r.label||!Number.isInteger(r.min_score)||!Number.isInteger(r.max_score)||r.min_score<0||r.max_score>100||r.min_score>r.max_score)){toast("กรอกชื่อระดับและช่วงคะแนนจำนวนเต็ม 0–100 ให้ครบ",false);return;}if(rows[0].min_score!==1||rows[rows.length-1].max_score!==100||rows.some((r,i)=>i>0&&r.min_score!==rows[i-1].max_score+1)){toast("ช่วงคะแนนต้องต่อกันตั้งแต่ 1 ถึง 100 โดยไม่ซ้อนหรือเว้นช่วง",false);return;}const button=$("btn-save-levels");button.disabled=true;const {error}=await sb.from("competency_interpretation_levels").upsert(rows,{onConflict:"code"});button.disabled=false;if(error){toast("บันทึกเกณฑ์ไม่สำเร็จ: "+error.message,false);return;}interpretationLevels=rows;renderSettings();toast("บันทึกเกณฑ์แปลผลแล้ว");};
-$("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,term=$("f-term").value;if(!name||!year||!term){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const {data,error}=await sb.from("competency_assessments").insert({name,year,term,source_type:$("f-type").value,owner_id:session.user.id}).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);$("f-name").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
+$("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,term=$("f-term").value;if(!name||!year||!term){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const {data,error}=await sb.from("competency_assessments").insert({name,year,term,source_type:$("f-type").value,owner_id:session.user.id}).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year))assessmentYears.push(year);$("f-name").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
 $("sel-competency").onchange=renderElements;
 $("btn-add-target").onclick=async()=>{if(!canEdit())return;const chosen=[...$("element-options").querySelectorAll("[data-element]:checked")];if(!chosen.length){toast("เลือกองค์ประกอบก่อน",false);return;}const start=targets.length+1;const rows=chosen.map((c,i)=>({assessment_id:current.id,competency_id:$("sel-competency").value,element_id:c.dataset.element,max_score:Number($("element-options").querySelector("[data-score='"+c.dataset.element+"']").value),seq:start+i}));if(rows.some(r=>!r.max_score||r.max_score<=0)){toast("คะแนนเต็มต้องมากกว่า 0",false);return;}const {error}=await sb.from("competency_assessment_targets").insert(rows);if(error){toast("บันทึกไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มองค์ประกอบแล้ว");};
 async function removeTarget(t){if(!confirm("ลบองค์ประกอบนี้? คะแนนที่เคยกรอกขององค์ประกอบนี้จะหายด้วย"))return;const {error}=await sb.from("competency_assessment_targets").delete().eq("id",t.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("ลบแล้ว");}
@@ -356,6 +393,81 @@ function openTargetModal(target){editingTarget=target;$("target-modal-label").te
 function closeTargetModal(){$("target-overlay").classList.remove("show");editingTarget=null;}
 $("target-modal-cancel").onclick=closeTargetModal;$("target-overlay").addEventListener("click",event=>{if(event.target===$("target-overlay"))closeTargetModal();});
 $("target-modal-save").onclick=async()=>{if(!editingTarget)return;const maxScore=Number($("target-modal-max").value);if(!maxScore||maxScore<=0){toast("คะแนนเต็มต้องมากกว่า 0",false);$("target-modal-max").focus();return;}const button=$("target-modal-save");button.disabled=true;const {error}=await sb.from("competency_assessment_targets").update({max_score:maxScore}).eq("id",editingTarget.id);button.disabled=false;if(error){toast("บันทึกคะแนนเต็มไม่สำเร็จ: "+error.message,false);return;}closeTargetModal();await selectAssessment(current.id);toast("บันทึกคะแนนเต็มแล้ว");}
+let editingAssessment=null, editingAssessmentHasSessions=false;
+async function openAssessmentModal(assessment){
+  editingAssessment=assessment;
+  $("assessment-edit-name").value=assessment.name;
+  fill($("assessment-edit-year"),assessmentYears,year=>year,"— เลือกปี —");
+  $("assessment-edit-year").value=assessment.year;
+  $("assessment-edit-type").value=assessment.source_type;
+  $("assessment-edit-term").value=assessment.term||"";
+  $("assessment-edit-lock-note").style.display="none";
+  $("assessment-overlay").classList.add("show");
+  const {count,error}=await sb.from("competency_assessment_sessions").select("id",{count:"exact",head:true}).eq("assessment_id",assessment.id);
+  if(error){closeAssessmentModal();toast("ตรวจสอบรายการไม่สำเร็จ: "+error.message,false);return;}
+  if(editingAssessment!==assessment)return;
+  editingAssessmentHasSessions=(count||0)>0;
+  for(const id of ["assessment-edit-year","assessment-edit-type","assessment-edit-term"])$(id).disabled=editingAssessmentHasSessions;
+  $("assessment-edit-lock-note").style.display=editingAssessmentHasSessions?"block":"none";
+  setTimeout(()=>$("assessment-edit-name").focus(),0);
+}
+function closeAssessmentModal(){
+  $("assessment-overlay").classList.remove("show");
+  editingAssessment=null; editingAssessmentHasSessions=false;
+  for(const id of ["assessment-edit-year","assessment-edit-type","assessment-edit-term"])$(id).disabled=false;
+}
+$("assessment-edit-cancel").onclick=closeAssessmentModal;
+$("assessment-overlay").addEventListener("click",event=>{if(event.target===$("assessment-overlay"))closeAssessmentModal();});
+$("assessment-edit-save").onclick=async()=>{
+  if(!canManageAssessment(editingAssessment))return;
+  const name=$("assessment-edit-name").value.trim();
+  const year=$("assessment-edit-year").value;
+  const term=$("assessment-edit-term").value;
+  if(!name||(!editingAssessmentHasSessions&&(!year||!term))){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}
+  const updates=editingAssessmentHasSessions ? {name,updated_at:new Date().toISOString()} : {name,year,term,source_type:$("assessment-edit-type").value,updated_at:new Date().toISOString()};
+  const button=$("assessment-edit-save"); button.disabled=true;
+  const {data,error}=await sb.from("competency_assessments").update(updates).eq("id",editingAssessment.id).select().single();
+  button.disabled=false;
+  if(error){toast("บันทึกรายการไม่สำเร็จ: "+error.message,false);return;}
+  const index=assessments.findIndex(assessment=>assessment.id===data.id); if(index>=0)assessments[index]=data;
+  if(!assessmentYears.includes(data.year))assessmentYears.push(data.year);
+  const selectedId=current&&current.id;
+  closeAssessmentModal(); renderAssessments();
+  if(selectedId===data.id)await selectAssessment(data.id);
+  toast("บันทึกรายการแล้ว");
+};
+async function getAssessmentImpact(assessment){
+  const [targetResult,memberResult,sessionResult]=await Promise.all([
+    sb.from("competency_assessment_targets").select("id",{count:"exact",head:true}).eq("assessment_id",assessment.id),
+    sb.from("competency_assessment_members").select("id",{count:"exact",head:true}).eq("assessment_id",assessment.id),
+    sb.from("competency_assessment_sessions").select("id").eq("assessment_id",assessment.id)
+  ]);
+  const error=targetResult.error||memberResult.error||sessionResult.error;
+  if(error)throw error;
+  const sessionIds=(sessionResult.data||[]).map(session=>session.id);
+  if(!sessionIds.length)return {targets:targetResult.count||0,members:memberResult.count||0,sessions:0,snapshots:0,scores:0};
+  const [snapshotResult,scoreResult]=await Promise.all([
+    sb.from("competency_assessment_session_students").select("id",{count:"exact",head:true}).in("session_id",sessionIds),
+    sb.from("competency_assessment_scores").select("id",{count:"exact",head:true}).in("session_id",sessionIds)
+  ]);
+  if(snapshotResult.error||scoreResult.error)throw snapshotResult.error||scoreResult.error;
+  return {targets:targetResult.count||0,members:memberResult.count||0,sessions:sessionIds.length,snapshots:snapshotResult.count||0,scores:scoreResult.count||0};
+}
+async function removeAssessment(assessment){
+  if(!canManageAssessment(assessment))return;
+  let impact;
+  try { impact=await getAssessmentImpact(assessment); } catch(error) { toast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: "+error.message,false); return; }
+  const detail="องค์ประกอบ "+impact.targets+" รายการ · ผู้เข้าร่วม "+impact.members+" คน · ครั้งประเมิน "+impact.sessions+" ครั้ง · snapshot "+impact.snapshots+" คน · คะแนน "+impact.scores+" ช่อง";
+  if(impact.sessions||impact.scores){
+    const typed=prompt("การลบ “"+assessment.name+"” จะลบข้อมูลทั้งหมดนี้ถาวร:\n"+detail+"\n\nพิมพ์ชื่อรายการให้ตรงกันเพื่อยืนยัน","");
+    if(typed!==assessment.name){toast("ยกเลิกการลบรายการ");return;}
+  } else if(!confirm("ลบ “"+assessment.name+"”?\n"+detail)) return;
+  const {error}=await sb.from("competency_assessments").delete().eq("id",assessment.id);
+  if(error){toast("ลบรายการไม่สำเร็จ: "+error.message,false);return;}
+  assessments=assessments.filter(item=>item.id!==assessment.id);
+  if(current&&current.id===assessment.id){current=null;targets=[];members=[];students=[];$("detail").style.display="none";}
+  renderAssessments(); toast("ลบรายการและข้อมูลที่เกี่ยวข้องแล้ว");
+}
 $("filter-grade").onchange=renderStudents;$("filter-room").onchange=renderStudents;
 async function addMembers(ids){if(!ids.length){toast("เลือกรายชื่อนักเรียนก่อน",false);return;}const {error}=await sb.from("competency_assessment_members").insert(ids.map(student_id=>({assessment_id:current.id,student_id})));if(error){toast("เพิ่มไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มผู้เข้าร่วมแล้ว");}
 $("btn-add-selected").onclick=()=>addMembers([...$("student-picker").querySelectorAll("input:checked")].map(i=>i.value));

@@ -1181,3 +1181,27 @@ create policy student_year_placements_write on student_year_placements
 --   and grade_level is not null and btrim(grade_level) <> ''
 --   and classroom is not null and btrim(classroom) <> ''
 -- on conflict (student_id, year) do nothing;
+
+-- ============================================================
+-- Migration: สิทธิ์จัดการรายการสมรรถนะตามเจ้าของ (2026-07-17)
+-- ------------------------------------------------------------
+-- รันบล็อกนี้ทับ policy รุ่นที่จำกัดเฉพาะ admin
+-- ครูสร้างและจัดการได้เฉพาะรายการของตนเอง; admin จัดการได้ทุกรายการ
+-- น้ำหนัก 3 แหล่งและเกณฑ์แปลผลกลางยังมี policy admin-only แยกต่างหาก
+-- ============================================================
+drop policy if exists competency_assessments_insert on competency_assessments;
+create policy competency_assessments_insert on competency_assessments
+  for insert with check (owner_id = auth.uid() or is_admin());
+drop policy if exists competency_assessments_update on competency_assessments;
+create policy competency_assessments_update on competency_assessments
+  for update using (can_edit_competency_assessment(id)) with check (can_edit_competency_assessment(id));
+drop policy if exists competency_assessments_delete on competency_assessments;
+create policy competency_assessments_delete on competency_assessments
+  for delete using (can_edit_competency_assessment(id));
+
+drop policy if exists competency_targets_write on competency_assessment_targets;
+create policy competency_targets_write on competency_assessment_targets
+  for all using (can_edit_competency_assessment(assessment_id)) with check (can_edit_competency_assessment(assessment_id));
+drop policy if exists competency_members_write on competency_assessment_members;
+create policy competency_members_write on competency_assessment_members
+  for all using (can_edit_competency_assessment(assessment_id)) with check (can_edit_competency_assessment(assessment_id));
