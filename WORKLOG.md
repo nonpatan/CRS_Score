@@ -949,3 +949,57 @@
 - bump cache asset ในทุกหน้าวิชาการเป็น 20260718-6; ตรวจผ่าน node --check และ screenshot local
   ของ rollover.html ยืนยันว่าการ์ดแสดงตามปกติ
 - **ยังไม่ deploy** — ผู้ใช้กำลังตรวจ local preview
+
+## 2026-07-18 — เพิ่มการแสดงผลแบบนุ่มนวลในฝ่ายวิชาการ
+
+- เพิ่ม motion แบบ fade-up ระยะสั้นให้ header และการ์ดที่แสดงทันทีในทั้ง 10 หน้าฝ่ายวิชาการ
+  เพื่อให้การเข้าหน้าดูค่อยเป็นค่อยไป โดยไม่แตะข้อมูล ฟอร์ม หรือ logic การทำงานเดิม
+- กรณีหน้า `rollover.html` ที่เปิดเนื้อหาหลังตรวจสิทธิ์ ให้การ์ดใน `#main` เริ่มแสดงหลังกล่องถูก
+  เปิดจริง จึงไม่เกิดอาการกระพริบหรือค้างซ่อน
+- รองรับการตั้งค่า `prefers-reduced-motion`: หากผู้ใช้เลือกให้ลดการเคลื่อนไหว ระบบจะแสดงเนื้อหา
+  ทันทีตามปกติ
+- bump cache ของ `app-shell.css`/`app-shell.js` ในทั้ง 10 หน้าเป็น `20260718-7`; ตรวจผ่าน
+  `node --check app-shell.js`, `node --check supabase-client.js` และยืนยันว่าไม่มีหน้าใดอ้าง asset
+  รุ่นก่อนค้างอยู่
+- **ยังไม่ deploy** — รอผู้ใช้ดูผลบน local preview ก่อน
+
+## 2026-07-18 — เพิ่ม motion ให้ Dashboard
+
+- ผู้ใช้ทักว่าต้องการจังหวะแสดงผลใน Dashboard ด้วย จึงเพิ่ม fade-up แบบเดียวกับฝ่ายวิชาการให้
+  แถบบน หัวเรื่อง การ์ดตัวเลข แผงรายชื่อ และแถบเมนู โดยเรียงหน่วงเวลาเล็กน้อยเพื่อให้ดูเป็นธรรมชาติ
+- แถวรายชื่อนักเรียนที่โหลดจากฐานข้อมูลภายหลังจะค่อย ๆ ปรากฏเมื่อ render เสร็จ ไม่กระทบสูตร
+  การคำนวณหรือข้อมูลที่แสดง
+- ใช้ `prefers-reduced-motion` เช่นเดียวกับหน้าวิชาการ: ผู้ใช้ที่ลดการเคลื่อนไหวจะเห็นเนื้อหาทันที
+- **ยังไม่ deploy** — รอตรวจ local Dashboard ก่อน
+
+## 2026-07-18 — ออกแบบหน้า login ใหม่ (โมเดิร์น+สมูท) + ปรับ dashboard/หน้าวิชาการให้เข้าชุดกัน
+
+> ผู้ใช้แยกงานให้ agent นี้ทำเรื่อง "หน้าตา" ให้ทั้งแอปสอดคล้องกัน และให้ agent นี้เป็นผู้ deploy
+> (อีก agent ที่ทำ dashboard/academic/profile หยุดแล้ว และจะไม่ deploy เอง)
+
+- **`login.html` — ออกแบบใหม่ทั้งหน้า (deploy แล้ว commit `561ca18`)**: ธีมสว่างเดิมที่ผู้ใช้ชอบ
+  (ไม่กลับไปเข้มแบบที่เคย revert) + aurora พื้นหลังไหลช้า (orb 3 ก้อน blur) + เส้นตาราง blueprint
+  จาง + entrance stagger + การ์ดกระจก + แถบ gradient teal→mint บนสุด + ช่อง input มีไอคอน (SVG)
+  focus ring ลื่น + ปุ่มมีแสงกวาด (sheen) + ลูกศรเลื่อน + เคารพ `prefers-reduced-motion` ·
+  **คง logic auth เดิมเป๊ะ** (getSafeNextPage รองรับ academic/ + dashboard/profile, allowlist,
+  session redirect) — ตรวจแล้ว script ส่วน `<script type="module">` เหมือนเดิมทุกบรรทัด · ลบ CSS
+  archive (ดีไซน์เข้มที่เคย revert) ที่ตายแล้วออก · ทดสอบ desktop+mobile + console ไม่มี error ·
+  deploy เฉพาะ login.html ไฟล์เดียว (ตอนนั้น dev↔deploy ยัง out of sync หลายไฟล์จากงานอีก agent
+  จึงจงใจไม่แตะไฟล์อื่น)
+- **`dashboard.html` — polish หน้าตาให้เข้าชุดกับ login (แตะแค่ CSS)**: ยึด dev version (ใหม่กว่า
+  deploy = งานล่าสุดอีก agent) เป็นฐาน · palette teal ตรงกับ login (`#0f6e56`/`#0a5644`/cyan/mint) ·
+  พื้นหลัง gradient + aurora จาง (subtle เพราะเป็นหน้าข้อมูล) · metric cards เป็นกระจก + แถบ gradient
+  บนสุดแยกสีตามความหมาย (teal/amber/แดง) + hover เงา · panels กระจก · student-row/dept-tab hover
+  ลื่น · sidebar gradient teal ใหม่ · **ไม่แตะ HTML structure / module script (loadRiskData คำนวณ
+  เสี่ยง มส. จริง) / motion hooks เดิม** — จัดการ specificity ไม่ให้ hover ชนกับ motion system เดิม ·
+  ตรวจ id ครบ 7, brace balance OK, ทดสอบด้วย mock (auth-stripped) desktop+mobile console ไม่มี error
+- **`app-shell.css` — align สีให้ทุกหน้าวิชาการตรงกับ login/dashboard เป๊ะ (แก้ที่เดียว กระทบ 10 หน้า)**:
+  หน้าวิชาการของอีก agent ทำมาดีและ modern อยู่แล้ว (aurora, การ์ดกระจก, header gradient มี eyebrow
+  "CRS SCORE / ACADEMIC", ปุ่ม gradient, motion) และใช้ `var(--teal)=#0f6e56` เหมือนกันอยู่แล้ว —
+  ไม่รื้อโครง แก้แค่ค่าสีที่ยังไม่ตรง: `--shell-teal-deep #075e5a→#0a5644`, `--shell-teal
+  #0b887e→#129a7f`, aurora พื้นหลัง (`rgba(70,190,184)/rgba(111,197,220)/linear 155deg` →
+  `rgba(63,182,198)/rgba(15,110,86)/linear 165deg` ตรงกับ dashboard), ปุ่ม gradient `#159586→#129a7f`
+  (2 จุด) · bump cache `?v=20260718-7→-8` ทั้ง 10 หน้าวิชาการ (deploy ปัจจุบันยังเป็น -6) ·
+  ทดสอบ preview academic/entry.html (mock) ดูดี เข้าชุดกัน
+- **ไม่แตะ `app-shell.js`** (งานอีก agent) แต่จะ deploy ไปด้วย (dev ต่าง deploy 35 บรรทัด — งาน
+  workflow/motion ที่ยังไม่ push) — verify `node --check` ผ่านก่อน deploy เพราะกระทบทุกหน้าวิชาการ

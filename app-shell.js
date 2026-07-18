@@ -52,6 +52,33 @@
   const active = nav.querySelector("a.active");
   if (active) requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "nearest" }));
 
+  // ให้หน้าเริ่มแสดงอย่างนุ่มนวล โดยข้ามทันทีหากผู้ใช้ตั้งค่าให้ลดการเคลื่อนไหว
+  const preparePageReveal = () => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    document.body.classList.add("academic-motion");
+    const revealItems = Array.from(document.querySelectorAll(".wrap > header, .wrap > .card"));
+    revealItems.forEach((element, index) => {
+      element.classList.add("shell-reveal");
+      element.style.setProperty("--shell-reveal-delay", `${Math.min(index * 55, 280)}ms`);
+    });
+
+    requestAnimationFrame(() => document.body.classList.add("academic-motion-ready"));
+
+    // rollover.html และบางหน้าจะแสดง #main หลังตรวจสิทธิ์ จึงเริ่ม reveal หลังกล่องถูกเปิดจริง
+    const deferredMain = document.querySelector("#main");
+    if (!deferredMain) return;
+    Array.from(deferredMain.querySelectorAll(":scope > .card")).forEach((element, index) => {
+      element.style.setProperty("--shell-reveal-delay", `${Math.min(index * 55, 280)}ms`);
+    });
+    const revealMain = () => {
+      if (deferredMain.classList.contains("shell-main-revealed") || getComputedStyle(deferredMain).display === "none") return;
+      requestAnimationFrame(() => requestAnimationFrame(() => deferredMain.classList.add("shell-main-revealed")));
+    };
+    new MutationObserver(revealMain).observe(deferredMain, { attributes: true, attributeFilter: ["style", "class"] });
+    revealMain();
+  };
+
   // เติมบริบทการทำงานให้การ์ดแรกของแต่ละหน้า โดยไม่ยุ่งกับ form, id หรือ event เดิม
   const workflows = {
     "entry.html": {
@@ -121,10 +148,14 @@
       steps + '</div></div>'
     );
   };
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", decorateWorkspace, { once: true });
-  } else {
+  const initializeWorkspace = () => {
     decorateWorkspace();
+    preparePageReveal();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeWorkspace, { once: true });
+  } else {
+    initializeWorkspace();
   }
 
 })();
