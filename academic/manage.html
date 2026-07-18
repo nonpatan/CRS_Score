@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จัดการโครงสร้าง — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+    --danger-soft: #fceaea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
+  header .nav {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    background: var(--white); padding: 8px;
+    border-radius: 99px; border: 1px solid var(--line);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin: 0 0 24px; align-items: center;
+  }
+  header .nav a {
+    color: var(--muted); text-decoration: none; font-weight: 500;
+    padding: 8px 16px; border-radius: 99px; transition: all 0.2s ease; font-size: 14px;
+  }
+  header .nav a:hover { background: var(--teal-soft); color: var(--teal); }
+  header .nav a.active { background: var(--teal); color: var(--white); box-shadow: 0 2px 8px rgba(15, 110, 86, 0.3); }
+  header .nav #btn-signout { margin-left: auto; color: var(--danger); background: #fff0f0; }
+  header .nav #btn-signout:hover { background: #ffe0e0; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  select, input[type="number"], input[type="text"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+  }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field-note { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .row2 { display: flex; gap: 12px; }
+  .row2 > * { flex: 1; }
+
+  button {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--teal); color: var(--white); width: 100%; margin-top: 8px; }
+  button.ghost { background: var(--teal-soft); color: var(--teal); }
+  button.danger { background: var(--danger-soft); color: var(--danger); }
+  button.small { font-size: 13px; padding: 6px 10px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .section-title {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.03em; margin: 4px 0 10px;
+  }
+
+  /* ต้นไม้โครงสร้าง 3 ชั้น: หน่วยใหญ่ > หน่วยย่อย > ครั้งที่ */
+  .unit-block { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .unit-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; background: var(--teal-soft);
+  }
+  .unit-head .title { flex: 1; font-weight: 600; font-size: 15px; }
+  .node-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-top: 1px solid var(--line);
+  }
+  .node-row .title { flex: 1; font-size: 14px; }
+  .node-row.indicator { padding-left: 20px; }
+  .node-row.collection { padding-left: 36px; color: var(--muted); }
+  .node-row .cap { color: var(--muted); font-size: 13px; margin-right: 4px; }
+  .add-row { padding: 8px 12px; border-top: 1px dashed var(--line); }
+  .add-row.indicator { padding-left: 20px; }
+  .add-row.collection { padding-left: 36px; }
+  .icon-btn {
+    background: none; border: none; cursor: pointer; font-size: 15px;
+    padding: 4px 6px; color: var(--muted); border-radius: 6px;
+  }
+  .icon-btn:hover { background: var(--bg); }
+  .icon-btn.del:hover { background: var(--danger-soft); color: var(--danger); }
+
+  .hint { color: var(--muted); font-size: 14px; }
+
+  .member-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+  }
+  .member-row .title { flex: 1; font-size: 14px; }
+  .member-row .weight { color: var(--muted); font-size: 13px; }
+  .member-row .weight.zero { color: var(--danger); }
+
+  /* กล่อง popup สำหรับเพิ่ม/แก้ node */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10;
+  }
+  .overlay.show { display: flex; }
+  .modal { background: var(--white); border-radius: 12px; padding: 20px; width: 100%; max-width: 400px; }
+  .modal h3 { margin: 0 0 14px; font-size: 17px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+  .modal-actions button { flex: 1; }
+
+  .toast {
+    position: sticky; bottom: 12px; text-align: center; font-size: 14px;
+    padding: 10px; border-radius: 8px; margin-top: 12px; display: none;
+  }
+  .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
+  .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260718-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>จัดการโครงสร้าง</h1>
+    <p>สร้าง/แก้ไข/ลบ วิชา หน่วยใหญ่ หน่วยย่อย และครั้งที่ ได้เอง</p>
+    <div class="nav">
+      <a href="entry.html">กรอกคะแนน</a>
+      <a href="competency-manage.html">กำหนดสมรรถนะ</a>
+      <a href="competency-entry.html">ลงคะแนนสมรรถนะ</a>
+      <a href="attendance.html">เช็คชื่อ</a>
+      <a href="summary.html">สรุปผลการเรียน</a>
+      <a href="manage.html">จัดการโครงสร้าง</a>
+      <a href="students.html">นักเรียน</a>
+      <a href="retention.html">เรียนซ้ำชั้น</a>
+      <a href="warning.html">เฝ้าระวัง มส.</a>
+      <a href="rollover.html">ขึ้นปีใหม่</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260718-2"></script>
+    <script>
+      (function(){
+        var navLinks = document.querySelectorAll('.nav a');
+        var current = window.location.pathname.split('/').pop();
+        if(!current || current === '') current = 'entry.html';
+        navLinks.forEach(function(a) {
+          if(a.getAttribute('href') === current) a.classList.add('active');
+        });
+      })();
+    </script>
+  </header>
+
+  <!-- เลือกวิชาที่จะจัดการ หรือสร้างวิชาใหม่ -->
+  <div class="card">
+    <div class="field">
+      <label for="filter-year">ปีการศึกษา</label>
+      <select id="filter-year"><option value="">— ทุกปี —</option></select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="filter-grade">ชั้น</label>
+        <select id="filter-grade">
+          <option value="">— ทุกชั้น —</option>
+          <optgroup label="ประถม">
+            <option value="ป.1">ป.1</option>
+            <option value="ป.2">ป.2</option>
+            <option value="ป.3">ป.3</option>
+            <option value="ป.4">ป.4</option>
+            <option value="ป.5">ป.5</option>
+            <option value="ป.6">ป.6</option>
+          </optgroup>
+          <optgroup label="มัธยม">
+            <option value="ม.1">ม.1</option>
+            <option value="ม.2">ม.2</option>
+            <option value="ม.3">ม.3</option>
+            <option value="ม.4">ม.4</option>
+            <option value="ม.5">ม.5</option>
+            <option value="ม.6">ม.6</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="field">
+        <label for="filter-term">ภาคเรียน</label>
+        <select id="filter-term">
+          <option value="">— ทุกภาคเรียน —</option>
+          <option value="1">ภาคเรียน 1</option>
+          <option value="2">ภาคเรียน 2</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="sel-subject">วิชา</label>
+      <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
+    </div>
+    <button class="ghost" id="btn-new-subject" style="width:100%">+ สร้างวิชาใหม่</button>
+  </div>
+
+  <!-- ฟอร์มข้อมูลวิชา (โผล่เมื่อเลือกวิชา หรือกดสร้างใหม่) -->
+  <div class="card" id="subject-form" style="display:none">
+    <div id="readonly-banner" style="display:none; background:var(--danger-soft); color:var(--danger); padding:8px 12px; border-radius:8px; margin-bottom:14px; font-size:13px;">
+      คุณไม่ใช่เจ้าของวิชานี้ — ดูได้อย่างเดียว แก้ไข/ลบไม่ได้ (ให้ admin ตั้งเป็นเจ้าของก่อน)
+    </div>
+    <div class="section-title" id="subject-form-title">ข้อมูลวิชา</div>
+    <div class="field">
+      <label for="f-type">ประเภทวิชา</label>
+      <select id="f-type">
+        <option value="พื้นฐาน">วิชาพื้นฐาน (กรอกคะแนนตรง)</option>
+        <option value="บูรณาการ">วิชาบูรณาการ (รวมจากวิชาพื้นฐานหลายวิชา)</option>
+      </select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-name">ชื่อวิชา</label>
+        <input type="text" id="f-name" placeholder="เช่น วิทยาการคำนวณ">
+      </div>
+      <div class="field">
+        <label for="f-code">รหัสวิชา</label>
+        <input type="text" id="f-code" placeholder="เช่น ว21101">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-level">ระดับชั้น</label>
+        <select id="f-level">
+          <option value="ประถม">ประถม</option>
+          <option value="มัธยม">มัธยม</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-grade">ชั้น</label>
+        <select id="f-grade"></select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-max">คะแนนเต็มวิชา</label>
+        <input type="number" id="f-max" min="1" step="1" value="100">
+      </div>
+      <div class="field" id="field-credits">
+        <label for="f-credits">หน่วยกิต</label>
+        <input type="number" id="f-credits" min="0.5" step="0.5" placeholder="เช่น 1.0">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-year">ปีการศึกษา</label>
+        <input type="text" id="f-year" placeholder="เช่น 2568">
+      </div>
+      <div class="field" id="field-term">
+        <label for="f-term">ภาคเรียน</label>
+        <select id="f-term">
+          <option value="1">1</option>
+          <option value="2">2</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="field-teacher">
+      <label for="f-teacher">ครูผู้สอน</label>
+      <input type="text" id="f-teacher" placeholder="ชื่อหรืออีเมลครู">
+    </div>
+    <div class="field" id="field-owner" style="display:none">
+      <label for="f-owner">เจ้าของวิชา (แก้ไขวิชานี้ได้)</label>
+      <select id="f-owner"></select>
+      <div class="field-note">เห็นเฉพาะ admin — ใช้กำหนดว่าครูบัญชีไหนแก้ไขวิชานี้ได้ (การลบวิชาสงวนสำหรับ admin)</div>
+    </div>
+    <div class="field" id="field-periods">
+      <label for="f-periods">จำนวนคาบเรียนทั้งเทอม</label>
+      <input type="number" id="f-periods" min="1" step="1" placeholder="เว้นว่างได้ (ใช้คำนวณ มส.)">
+      <div class="field-note" id="periods-note">ใช้เป็นตัวหารคำนวณเปอร์เซ็นต์เวลาเรียนสำหรับ มส. — ถ้าไม่กรอก จะเช็ค มส. ไม่ได้</div>
+    </div>
+    <button class="primary" id="btn-save-subject">บันทึกข้อมูลวิชา</button>
+    <button class="danger" id="btn-del-subject" style="width:100%; margin-top:8px; display:none">ลบวิชานี้</button>
+  </div>
+
+  <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
+  <div class="card" id="structure-card" style="display:none">
+    <div class="section-title">คะแนนวิชา</div>
+    <div id="units-vicha"></div>
+    <button class="ghost small" id="btn-add-unit-vicha">+ เพิ่มหน่วยใหญ่ (คะแนนวิชา)</button>
+
+    <div class="section-title" style="margin-top:20px">สมรรถนะหลัก 6 ด้าน</div>
+    <div id="units-competency"></div>
+    <button class="ghost small" id="btn-add-unit-competency">+ เพิ่มด้านสมรรถนะหลัก</button>
+  </div>
+
+  <!-- ลงทะเบียน (เฉพาะวิชาพื้นฐาน) -->
+  <div class="card" id="enroll-card" style="display:none">
+    <div class="section-title">ลงทะเบียน</div>
+    <div class="field-note" style="margin-bottom:10px">
+      รายชื่อตรงนี้คือคนที่จะเห็นให้กรอกคะแนน/เช็คชื่อ/สรุปผลของวิชานี้ — เพิ่มทั้งห้องได้ทีเดียว
+      หรือเพิ่มทีละคน (เผื่อนักเรียนซ้ำชั้น/ติด มส. ที่ต้องเรียนร่วมห้องอื่น)
+    </div>
+    <div class="row2" style="margin-bottom:10px">
+      <select id="sel-bulk-classroom"></select>
+      <button class="ghost" id="btn-bulk-add-classroom">+ เพิ่มทั้งห้อง</button>
+    </div>
+    <div id="enroll-list"></div>
+    <div class="row2" style="margin-top:10px">
+      <select id="sel-add-student"></select>
+      <button class="ghost" id="btn-add-student">+ เพิ่มทีละคน</button>
+    </div>
+  </div>
+
+  <!-- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) -->
+  <div class="card" id="members-card" style="display:none">
+    <div class="section-title">วิชาพื้นฐานที่ประกอบกันเป็นวิชานี้</div>
+    <div class="field-note" style="margin-bottom:10px">
+      คะแนนของแต่ละวิชายังกรอกแยกตามปกติที่หน้า "กรอกคะแนน" หน้านี้แค่กำหนดว่าวิชาไหน
+      ประกอบกันเป็นวิชาบูรณาการนี้บ้าง — หน้าสรุปจะถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียน
+      (จำนวนคาบเรียนทั้งเทอม) ของแต่ละวิชาให้เอง ถ้าวิชาไหนติด ร./มส. วิชาบูรณาการนี้จะติดตามด้วย
+    </div>
+    <div id="member-list"></div>
+    <div class="row2" style="margin-top:10px">
+      <select id="sel-add-member"></select>
+      <button class="ghost" id="btn-add-member">+ เพิ่ม</button>
+    </div>
+  </div>
+
+  <div class="card hint" id="empty-hint">เลือกวิชาเพื่อจัดการโครงสร้าง หรือกด "สร้างวิชาใหม่"</div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<!-- popup เพิ่ม/แก้ node (หน่วยใหญ่ / หน่วยย่อย / ครั้งที่) -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="modal-title">เพิ่ม</h3>
+    <div class="field" id="modal-name-field">
+      <label for="m-name" id="m-name-label">ชื่อ</label>
+      <input type="text" id="m-name">
+    </div>
+    <div class="field" id="modal-core-field" style="display:none">
+      <label for="m-core-select" id="m-core-label">เลือกจากรายการกลาง</label>
+      <select id="m-core-select"><option value="">— เลือก —</option></select>
+    </div>
+    <div class="row2">
+      <div class="field" id="modal-seq-field">
+        <label for="m-seq">ลำดับ</label>
+        <input type="number" id="m-seq" min="1" step="1" value="1">
+      </div>
+      <div class="field">
+        <label for="m-max" id="m-max-label">คะแนนเต็ม</label>
+        <input type="number" id="m-max" min="1" step="1" value="10">
+      </div>
+    </div>
+    <div class="field-note" id="modal-note" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="m-cancel">ยกเลิก</button>
+      <button class="primary" id="m-save" style="margin-top:0">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade } from "../supabase-client.js";
+
+// ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
+} else {
+document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
+
+const myProfile = await getProfile(session.user.id);
+const isAdminUser = !!myProfile && myProfile.role === "admin";
+const myUserId = session.user.id;
+
+// อ้างอิง element ที่ใช้บ่อย
+const elFilterYear   = document.getElementById("filter-year");
+const elFilterGrade  = document.getElementById("filter-grade");
+const elFilterTerm   = document.getElementById("filter-term");
+const elSubject      = document.getElementById("sel-subject");
+const elSubjectForm  = document.getElementById("subject-form");
+const elSubjectFormTitle = document.getElementById("subject-form-title");
+const elStructure    = document.getElementById("structure-card");
+const elEnrollCard   = document.getElementById("enroll-card");
+const elEnrollList   = document.getElementById("enroll-list");
+const elSelBulkClassroom = document.getElementById("sel-bulk-classroom");
+const elSelAddStudent = document.getElementById("sel-add-student");
+const elMembersCard  = document.getElementById("members-card");
+const elEmptyHint    = document.getElementById("empty-hint");
+const elToast        = document.getElementById("toast");
+const elUnitsVicha   = document.getElementById("units-vicha");
+const elUnitsComp    = document.getElementById("units-competency");
+const elDelSubject   = document.getElementById("btn-del-subject");
+const elMemberList   = document.getElementById("member-list");
+const elSelAddMember = document.getElementById("sel-add-member");
+const mCoreField     = document.getElementById("modal-core-field");
+const mCoreLabel     = document.getElementById("m-core-label");
+const mCoreSelect    = document.getElementById("m-core-select");
+
+// ฟิลด์ในฟอร์มวิชา
+const fType = document.getElementById("f-type");
+const fName = document.getElementById("f-name");
+const fCode = document.getElementById("f-code");
+const fLevel = document.getElementById("f-level");
+const fGrade = document.getElementById("f-grade");
+const fMax = document.getElementById("f-max");
+const fCredits = document.getElementById("f-credits");
+const fYear = document.getElementById("f-year");
+const fTerm = document.getElementById("f-term");
+const fTeacher = document.getElementById("f-teacher");
+const fPeriods = document.getElementById("f-periods");
+const fOwner = document.getElementById("f-owner");
+const fieldCredits = document.getElementById("field-credits");
+const fieldTerm = document.getElementById("field-term");
+const fieldOwner = document.getElementById("field-owner");
+
+// การสร้างวิชาใหม่ทำได้เฉพาะ admin
+if (!isAdminUser) {
+  document.getElementById("btn-new-subject").style.display = "none";
+}
+
+// admin เท่านั้นที่เห็น/แก้ "เจ้าของวิชา" ได้ — โหลดรายชื่อครูทั้งหมดไว้เติม dropdown
+let allProfiles = [];
+if (isAdminUser) {
+  const { data } = await sb.from("profiles").select("*").order("email");
+  allProfiles = data || [];
+  fieldOwner.style.display = "block";
+  fOwner.innerHTML = "<option value=''>— ไม่มีเจ้าของ (admin แก้ได้อย่างเดียว) —</option>";
+  for (const p of allProfiles) {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = (p.name || p.email || p.id) + (p.role === "admin" ? " (admin)" : "");
+    fOwner.appendChild(o);
+  }
+}
+
+// รายการกลางของสมรรถนะ/องค์ประกอบ — ใช้เลือกตอนจัดโครงสร้างรายวิชาเท่านั้น
+let coreCompetencies = [];
+let coreElements = [];
+async function loadCoreCatalog() {
+  const [competenciesRes, elementsRes] = await Promise.all([
+    sb.from("core_competencies").select("*").order("seq"),
+    sb.from("core_competency_elements").select("*").order("stage").order("seq")
+  ]);
+  coreCompetencies = competenciesRes.data || [];
+  coreElements = elementsRes.data || [];
+}
+await loadCoreCatalog();
+
+// เช็คว่าคนที่ล็อกอินอยู่ตอนนี้ แก้ไข/ลบวิชาที่กำลังเปิดอยู่ได้ไหม (admin หรือเจ้าของวิชา)
+function canEditCurrentSubject() {
+  if (isAdminUser) return true;
+  if (!currentSubject) return true; // ยังไม่ได้เลือกวิชา (โหมดสร้างใหม่) แก้ได้แน่นอน
+  return currentSubject.owner_id === myUserId;
+}
+
+// ซ่อน/ปิดปุ่มแก้ไขทั้งหมด ถ้าไม่ใช่เจ้าของวิชานี้ (RLS เป็นตัวกันจริงอยู่แล้ว
+// อันนี้แค่กันสับสน ไม่ให้กดแล้วเจอ error "บันทึกไม่สำเร็จ" เฉยๆ)
+function applyEditPermissionUI() {
+  const canEdit = canEditCurrentSubject();
+  document.getElementById("readonly-banner").style.display = canEdit ? "none" : "block";
+  document.getElementById("btn-save-subject").style.display = canEdit ? "block" : "none";
+  elDelSubject.style.display = (isAdminUser && currentSubject) ? "block" : "none"; // ลบได้เฉพาะ admin
+  document.getElementById("btn-add-unit-vicha").style.display = canEdit ? "inline-block" : "none";
+  document.getElementById("btn-add-unit-competency").style.display = canEdit ? "inline-block" : "none";
+  document.getElementById("btn-add-member").style.display = canEdit ? "inline-block" : "none";
+  elSelAddMember.style.display = canEdit ? "block" : "none";
+}
+
+// ตัวเลือกชั้นเรียนตามระดับ
+const GRADE_OPTIONS = {
+  "ประถม": ["ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6"],
+  "มัธยม": ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"]
+};
+
+function updateGradeOptions(keepValue) {
+  const opts = GRADE_OPTIONS[fLevel.value] || [];
+  fGrade.innerHTML = "";
+  for (const g of opts) {
+    const o = document.createElement("option");
+    o.value = g; o.textContent = g;
+    fGrade.appendChild(o);
+  }
+  if (keepValue && opts.includes(keepValue)) fGrade.value = keepValue;
+}
+
+// หน่วยกิต/ภาคเรียน (แบบเลือก) ใช้เฉพาะมัธยม — ประถมไม่มีหน่วยกิต และไม่ต้องเลือกภาคเรียน
+function updateLevelDependentFields() {
+  const isMatthayom = fLevel.value === "มัธยม";
+  fieldCredits.style.display = isMatthayom ? "block" : "none";
+  fieldTerm.style.display = isMatthayom ? "block" : "none";
+  if (!isMatthayom) { fCredits.value = ""; }
+}
+fLevel.addEventListener("change", () => { updateGradeOptions(); updateLevelDependentFields(); });
+
+// วิชาบูรณาการไม่มีหน่วยใหญ่/สมรรถนะหลักเป็นของตัวเอง แต่มีวิชาพื้นฐานสมาชิกแทน
+// ครูผู้สอนก็ไม่ต้องมี เพราะซ้ำกับครูของวิชาพื้นฐานแต่ละตัวที่ประกอบกันอยู่แล้ว
+function updateTypeDependentUI() {
+  const isIntegrated = fType.value === "บูรณาการ";
+  document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
+  document.getElementById("field-teacher").style.display = isIntegrated ? "none" : "block";
+  if (isIntegrated) fTeacher.value = "";
+  if (currentSubject) {
+    elStructure.style.display = isIntegrated ? "none" : "block";
+    elEnrollCard.style.display = isIntegrated ? "none" : "block";
+    elMembersCard.style.display = isIntegrated ? "block" : "none";
+    if (isIntegrated) loadMembers();
+    else loadEnrollments();
+  }
+}
+fType.addEventListener("change", updateTypeDependentUI);
+
+// popup
+const elOverlay = document.getElementById("overlay");
+const mTitle = document.getElementById("modal-title");
+const mName = document.getElementById("m-name");
+const mNameLabel = document.getElementById("m-name-label");
+const mNameField = document.getElementById("modal-name-field");
+const mSeq = document.getElementById("m-seq");
+const mMax = document.getElementById("m-max");
+const mMaxLabel = document.getElementById("m-max-label");
+const mMaxField = mMax.closest(".field");
+const mNote = document.getElementById("modal-note");
+
+// state
+let currentSubject = null;    // object วิชาที่เลือกอยู่ (null = โหมดสร้างใหม่)
+let units = [];               // ต้นไม้โครงสร้างของวิชานี้ (units > indicators > collections > scores)
+let modalContext = null;      // เก็บว่ากำลังเพิ่ม/แก้ node ประเภทอะไร ของใคร
+let allSubjects = [];         // วิชาทั้งหมด (ใช้เลือกวิชาพื้นฐานมาเป็นสมาชิกวิชาบูรณาการ)
+let members = [];             // แถว integration_members ของวิชาบูรณาการที่กำลังดูอยู่
+
+function showToast(msg, ok) {
+  elToast.textContent = msg;
+  elToast.className = "toast " + (ok ? "ok" : "err");
+  setTimeout(() => { elToast.className = "toast"; }, 3000);
+}
+
+function fillSelect(el, items, getLabel, placeholder) {
+  el.innerHTML = "";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholder;
+  el.appendChild(opt0);
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it.id;
+    o.textContent = getLabel(it);
+    el.appendChild(o);
+  }
+}
+
+// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
+// โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
+function subjectLabel(s) {
+  const parts = [s.code || "(ไม่มีรหัส)", s.name];
+  if (s.year) parts.push("ปี " + s.year);
+  if (s.term) parts.push("เทอม " + s.term);
+  if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
+  return parts.join("  ·  ");
+}
+
+// ---------- เติมตัวเลือกปีการศึกษาจากวิชาที่มีจริง แล้วตั้งค่าเป็นปีที่เลือกไว้ (จำข้ามหน้า) ----------
+function fillYearOptions() {
+  const years = distinctYears(allSubjects);
+  elFilterYear.innerHTML = "<option value=''>— ทุกปี —</option>";
+  for (const y of years) {
+    const o = document.createElement("option");
+    o.value = y;
+    o.textContent = "ปีการศึกษา " + y;
+    elFilterYear.appendChild(o);
+  }
+  const saved = getActiveYear();
+  elFilterYear.value = years.indexOf(saved) !== -1 ? saved : "";
+}
+
+// ---------- โหลดวิชาทั้งหมด ----------
+async function loadSubjects(selectId) {
+  const { data, error } = await sb.from("subjects").select("*").order("created_at");
+  if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
+  allSubjects = data || [];
+  fillYearOptions();
+  if (selectId) {
+    // เพิ่ง สร้าง/แก้ไข วิชานี้มา — ตั้งตัวกรองให้ตรงกับวิชานี้ จะได้ไม่หายไปจากลิสต์
+    const target = allSubjects.find(s => s.id === selectId);
+    if (target) {
+      // ปีของวิชาที่เพิ่งบันทึก = ปีที่ทำงานอยู่ตอนนี้ (จำไว้ให้หน้าอื่นใช้ต่อ)
+      if (target.year) { elFilterYear.value = target.year; setActiveYear(target.year); }
+      elFilterGrade.value = target.grade_level || "";
+      elFilterTerm.value = target.term || "";
+    }
+  }
+  applySubjectFilter();
+  if (selectId) elSubject.value = selectId;
+}
+
+// ---------- กรองรายชื่อวิชาตามปี/ชั้น/ภาคเรียนที่เลือก แล้วเติมลง dropdown ----------
+function applySubjectFilter() {
+  const yearFilter = elFilterYear.value;
+  const gradeFilter = elFilterGrade.value;
+  const termFilter = elFilterTerm.value;
+  const filtered = allSubjects.filter(s => {
+    if (yearFilter && s.year !== yearFilter) return false;
+    if (gradeFilter && s.grade_level !== gradeFilter) return false;
+    if (termFilter && s.term !== termFilter) return false;
+    return true;
+  });
+  fillSelect(elSubject, filtered, subjectLabel, "— เลือกวิชา (" + filtered.length + " วิชา) —");
+}
+// เปลี่ยนปี = จำไว้ให้ทุกหน้าใช้ปีเดียวกัน (localStorage) แล้วกรองใหม่
+elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); hideAll(); });
+elFilterGrade.addEventListener("change", () => { applySubjectFilter(); hideAll(); });
+elFilterTerm.addEventListener("change", () => { applySubjectFilter(); hideAll(); });
+
+// ---------- เลือกวิชา ----------
+elSubject.addEventListener("change", async () => {
+  const id = elSubject.value;
+  if (!id) { hideAll(); return; }
+  const { data: subj, error } = await sb.from("subjects").select("*").eq("id", id).single();
+  if (error) { showToast("โหลดวิชาไม่สำเร็จ", false); return; }
+  currentSubject = subj;
+  fillSubjectForm(subj);
+  elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
+  elEmptyHint.style.display = "none";
+  updateTypeDependentUI();
+  applyEditPermissionUI();
+  if (subj.subject_type === "พื้นฐาน") {
+    await loadStructure();
+    elStructure.style.display = "block";
+  }
+});
+
+// ---------- กดสร้างวิชาใหม่ ----------
+document.getElementById("btn-new-subject").addEventListener("click", () => {
+  currentSubject = null;
+  elSubject.value = "";
+  fillSubjectForm(null);
+  // เติมชั้น/ภาคเรียนตามตัวกรองที่เลือกอยู่ให้อัตโนมัติ (สะดวกเวลาไล่เพิ่มวิชาทีละชั้น)
+  if (elFilterGrade.value) {
+    fLevel.value = elFilterGrade.value.startsWith("ป.") ? "ประถม" : "มัธยม";
+    updateGradeOptions(elFilterGrade.value);
+    updateLevelDependentFields();
+  }
+  if (elFilterTerm.value) fTerm.value = elFilterTerm.value;
+  elSubjectForm.style.display = "block";
+  elSubjectFormTitle.textContent = "สร้างวิชาใหม่";
+  elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วย/นักเรียน/วิชาย่อยได้
+  elEnrollCard.style.display = "none";
+  elMembersCard.style.display = "none";
+  elEmptyHint.style.display = "none";
+  applyEditPermissionUI();
+  fName.focus();
+});
+
+function fillSubjectForm(subj) {
+  elSubjectForm.style.display = "block";
+  fType.value = subj ? subj.subject_type : "พื้นฐาน";
+  fName.value = subj ? subj.name : "";
+  fCode.value = subj && subj.code ? subj.code : "";
+  fLevel.value = subj ? subj.level : "ประถม";
+  updateGradeOptions(subj ? subj.grade_level : null);
+  updateLevelDependentFields();
+  fMax.value = subj ? subj.max_score : 100;
+  fCredits.value = subj && subj.credits ? subj.credits : "";
+  // สร้างวิชาใหม่: เติมปีการศึกษาที่ทำงานอยู่ให้อัตโนมัติ (ครูไม่ต้องพิมพ์ซ้ำ แก้ได้)
+  fYear.value = subj && subj.year ? subj.year : getActiveYear();
+  fTerm.value = subj && subj.term ? subj.term : "1";
+  fTeacher.value = subj && subj.teacher ? subj.teacher : "";
+  fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
+  if (isAdminUser) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
+  const isIntegratedSubj = subj && subj.subject_type === "บูรณาการ";
+  document.getElementById("field-periods").style.display = isIntegratedSubj ? "none" : "block";
+  document.getElementById("field-teacher").style.display = isIntegratedSubj ? "none" : "block";
+}
+
+// ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
+document.getElementById("btn-save-subject").addEventListener("click", async () => {
+  const name = fName.value.trim();
+  if (!name) { showToast("กรุณากรอกชื่อวิชา", false); return; }
+  const code = fCode.value.trim();
+  if (!code) { showToast("กรุณากรอกรหัสวิชา", false); return; }
+  const gradeLevel = fGrade.value;
+  if (!gradeLevel) { showToast("กรุณาเลือกชั้น", false); return; }
+  const year = fYear.value.trim();
+  if (!year) { showToast("กรุณากรอกปีการศึกษา (บังคับ เพื่อกันข้อมูลปนกันข้ามปี)", false); return; }
+  const maxScore = Number(fMax.value);
+  if (isNaN(maxScore) || maxScore <= 0) { showToast("คะแนนเต็มวิชาต้องมากกว่า 0", false); return; }
+
+  const isMatthayom = fLevel.value === "มัธยม";
+  const isIntegrated = fType.value === "บูรณาการ";
+
+  let credits = null;
+  if (isMatthayom && fCredits.value.trim() !== "") {
+    credits = Number(fCredits.value);
+    if (isNaN(credits) || credits <= 0) { showToast("หน่วยกิตต้องมากกว่า 0", false); return; }
+  }
+
+  let periods = null;
+  if (!isIntegrated && fPeriods.value.trim() !== "") {
+    periods = Number(fPeriods.value);
+    if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+  }
+
+  const payload = {
+    subject_type: fType.value,
+    name: name,
+    code: code,
+    level: fLevel.value,
+    grade_level: gradeLevel,
+    max_score: maxScore,
+    credits: credits,
+    year: year,
+    term: isMatthayom ? fTerm.value : null,
+    teacher: isIntegrated ? null : (fTeacher.value.trim() || null),
+    total_periods: periods
+  };
+  // เจ้าของวิชา: admin เลือกเองได้ (รวมถึงเปลี่ยนเจ้าของทีหลัง) ส่วนครูทั่วไปตอนสร้างวิชาใหม่
+  // จะได้เป็นเจ้าของอัตโนมัติ — ตอนแก้ไขวิชาเดิมไม่ต้องส่ง owner_id ไปทับ (ไม่มีสิทธิ์เปลี่ยนอยู่แล้ว)
+  if (isAdminUser) payload.owner_id = fOwner.value || null;
+  else if (!currentSubject) payload.owner_id = myUserId;
+
+  if (currentSubject) {
+    const { error } = await sb.from("subjects").update(payload).eq("id", currentSubject.id);
+    if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+    showToast("บันทึกข้อมูลวิชาแล้ว", true);
+    await loadSubjects(currentSubject.id);
+    currentSubject = { ...currentSubject, ...payload };
+    updateTypeDependentUI();
+    applyEditPermissionUI();
+  } else {
+    const { data, error } = await sb.from("subjects").insert(payload).select().single();
+    if (error) { showToast("สร้างวิชาไม่สำเร็จ: " + error.message, false); return; }
+    currentSubject = data;
+    showToast("สร้างวิชาแล้ว " + (isIntegrated ? "เพิ่มวิชาย่อยได้เลย" : "เพิ่มหน่วยใหญ่ได้เลย"), true);
+    await loadSubjects(data.id);
+    elSubject.value = data.id;
+    elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
+    updateTypeDependentUI();
+    applyEditPermissionUI();
+    if (!isIntegrated) {
+      await loadStructure();
+      elStructure.style.display = "block";
+    }
+  }
+});
+
+// นับคะแนนที่กรอกไว้แล้วของวิชาใดๆ (ไม่ใช่แค่วิชาที่กำลังเปิดอยู่) — ใช้เช็คตอนจะลบวิชาบูรณาการ
+// ที่มีวิชาพื้นฐานสมาชิกอยู่ (คะแนนของสมาชิกไม่ได้อยู่ใน `units` ของ currentSubject)
+// คืน error แยกจาก 0 คะแนนจริง เพื่อไม่ให้ query พังแล้วเข้าใจผิดว่า "ไม่มีคะแนน" (จะปล่อยให้ลบทั้งที่เช็คไม่สำเร็จ)
+async function countScoresOfSubject(subjectId) {
+  const { data, error } = await sb
+    .from("units")
+    .select("indicators(collections(scores(id)))")
+    .eq("subject_id", subjectId);
+  if (error) return { count: null, error };
+  return { count: countScoresInUnits(data || []), error: null };
+}
+
+// ---------- ลบวิชา (กันไว้ถ้ามีคะแนน หรือยังเป็นสมาชิกของวิชาบูรณาการอื่นอยู่) ----------
+elDelSubject.addEventListener("click", async () => {
+  if (!currentSubject) return;
+
+  let confirmMsg = "ยืนยันลบวิชา \"" + currentSubject.name + "\" ?";
+
+  if (currentSubject.subject_type === "พื้นฐาน") {
+    const scoreCount = countScoresInUnits(units);
+    if (scoreCount > 0) {
+      showToast("ลบไม่ได้ วิชานี้มีคะแนนนักเรียนกรอกไว้แล้ว " + scoreCount + " ช่อง", false);
+      return;
+    }
+    const { data: refs, error: refErr } = await sb
+      .from("integration_members")
+      .select("integrated:integrated_subject_id(name)")
+      .eq("member_subject_id", currentSubject.id);
+    if (refErr) { showToast("ตรวจสอบวิชาบูรณาการที่อ้างถึงไม่สำเร็จ: " + refErr.message, false); return; }
+    if (refs && refs.length > 0) {
+      const names = refs.map(r => r.integrated.name).join(", ");
+      showToast("ลบไม่ได้ วิชานี้เป็นสมาชิกของวิชาบูรณาการ: " + names, false);
+      return;
+    }
+  } else if (currentSubject.subject_type === "บูรณาการ") {
+    // วิชาบูรณาการเองไม่มีคะแนนของตัวเอง (คะแนนอยู่ที่วิชาพื้นฐานสมาชิก) ลบวิชาบูรณาการจึง
+    // "ไม่เสียคะแนนจริง" เลย — เสียแค่การจัดกลุ่ม (integration_members cascade หาย) จึงไม่บล็อก
+    // แค่เตือนให้รู้ก่อนยืนยันว่ามีวิชาย่อยตัวไหนกรอกคะแนนไปแล้วบ้าง (ยืนยันกับผู้ใช้แล้ว 2026-07)
+    const { data: memberLinks, error: memErr } = await sb
+      .from("integration_members")
+      .select("member:member_subject_id(id, name)")
+      .eq("integrated_subject_id", currentSubject.id);
+    if (memErr) { showToast("ตรวจสอบวิชาย่อยไม่สำเร็จ: " + memErr.message, false); return; }
+
+    const membersWithScores = [];
+    for (const link of (memberLinks || [])) {
+      if (!link.member) continue;
+      const { count: n, error: cntErr } = await countScoresOfSubject(link.member.id);
+      if (cntErr) { showToast("ตรวจสอบคะแนนของ " + link.member.name + " ไม่สำเร็จ: " + cntErr.message, false); return; }
+      if (n > 0) membersWithScores.push(link.member.name + " (" + n + " ช่อง)");
+    }
+    if (membersWithScores.length > 0) {
+      confirmMsg =
+        "วิชาย่อยของวิชาบูรณาการนี้มีคะแนนกรอกไว้แล้ว: " + membersWithScores.join(", ") + "\n\n" +
+        "คะแนนของวิชาย่อยจะไม่ถูกลบ (ไม่ได้เก็บไว้ที่วิชาบูรณาการ) แต่การจัดกลุ่มเข้าวิชาบูรณาการนี้จะหายไป " +
+        "ต้องมาเพิ่มใหม่เองถ้าจะสร้างวิชาบูรณาการนี้อีก\n\nยืนยันลบวิชาบูรณาการ \"" + currentSubject.name + "\" ?";
+    }
+  }
+
+  if (!confirm(confirmMsg)) return;
+  const { error } = await sb.from("subjects").delete().eq("id", currentSubject.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("ลบวิชาแล้ว", true);
+  currentSubject = null;
+  hideAll();
+  await loadSubjects();
+});
+
+// ---------- โหลดต้นไม้โครงสร้างของวิชา ----------
+async function loadStructure() {
+  const { data, error } = await sb
+    .from("units")
+    .select("*, indicators(*, collections(*, scores(id)))")
+    .eq("subject_id", currentSubject.id)
+    .order("seq");
+  if (error) { showToast("โหลดโครงสร้างไม่สำเร็จ: " + error.message, false); return; }
+  units = data || [];
+  // เรียงลำดับชั้นล่างให้เป็นระเบียบ (PostgREST ไม่การันตีลำดับ nested)
+  for (const u of units) {
+    u.indicators = (u.indicators || []).sort((a, b) => a.seq - b.seq);
+    for (const ind of u.indicators) {
+      ind.collections = (ind.collections || []).sort((a, b) => a.seq - b.seq);
+    }
+  }
+  renderStructure();
+}
+
+// นับจำนวนช่องคะแนนที่มีอยู่ใต้ node ต่างๆ (ใช้กันการลบ)
+function countScoresInCollection(coll) { return (coll.scores || []).length; }
+function countScoresInIndicator(ind) {
+  let n = 0;
+  for (const c of (ind.collections || [])) n += countScoresInCollection(c);
+  return n;
+}
+function countScoresInUnit(unit) {
+  let n = 0;
+  for (const ind of (unit.indicators || [])) n += countScoresInIndicator(ind);
+  return n;
+}
+function countScoresInUnits(unitList) {
+  let n = 0;
+  for (const u of unitList) n += countScoresInUnit(u);
+  return n;
+}
+
+// ---------- วาดต้นไม้โครงสร้าง ----------
+function renderStructure() {
+  elUnitsVicha.innerHTML = "";
+  elUnitsComp.innerHTML = "";
+  const vicha = units.filter(u => u.kind === "วิชา");
+  const comp = units.filter(u => u.kind === "สมรรถนะหลัก");
+
+  if (vicha.length === 0) elUnitsVicha.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีหน่วยใหญ่</div>";
+  for (const u of vicha) elUnitsVicha.appendChild(renderUnit(u));
+
+  if (comp.length === 0) elUnitsComp.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีด้านสมรรถนะหลัก</div>";
+  for (const u of comp) elUnitsComp.appendChild(renderUnit(u));
+}
+
+function renderUnit(unit) {
+  const canEdit = canEditCurrentSubject();
+  const block = document.createElement("div");
+  block.className = "unit-block";
+
+  const head = document.createElement("div");
+  head.className = "unit-head";
+  head.innerHTML =
+    "<span class='title'>" + escapeHtml(unit.name) + "</span>" +
+    "<span class='cap'>เต็ม " + unit.max_score + "</span>";
+  if (canEdit) {
+    head.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("unit", "edit", unit)));
+    head.appendChild(makeIconBtn("🗑", "del", () => deleteUnit(unit)));
+  }
+  block.appendChild(head);
+
+  for (const ind of (unit.indicators || [])) {
+    const row = document.createElement("div");
+    row.className = "node-row indicator";
+    row.innerHTML =
+      "<span class='title'>" + escapeHtml(ind.name) + "</span>" +
+      "<span class='cap'>เต็ม " + ind.max_score + "</span>";
+    if (canEdit) {
+      row.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("indicator", "edit", ind)));
+      row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
+    }
+    block.appendChild(row);
+
+    for (const coll of (ind.collections || [])) {
+      const crow = document.createElement("div");
+      crow.className = "node-row collection";
+      crow.innerHTML =
+        "<span class='title'>ครั้งที่ " + coll.seq + "</span>" +
+        "<span class='cap'>เต็ม " + coll.max_score + "</span>";
+      if (canEdit) {
+        crow.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("collection", "edit", coll)));
+        crow.appendChild(makeIconBtn("🗑", "del", () => deleteCollection(coll)));
+      }
+      block.appendChild(crow);
+    }
+
+    if (canEdit) {
+      const addColl = document.createElement("div");
+      addColl.className = "add-row collection";
+      addColl.appendChild(makeAddBtn("+ เพิ่มครั้งที่", () => openNodeModal("collection", "add", ind)));
+      block.appendChild(addColl);
+    }
+  }
+
+  if (canEdit) {
+    const addInd = document.createElement("div");
+    addInd.className = "add-row indicator";
+    addInd.appendChild(makeAddBtn("+ เพิ่มหน่วยย่อย", () => openNodeModal("indicator", "add", unit)));
+    block.appendChild(addInd);
+  }
+
+  return block;
+}
+
+function makeIconBtn(label, kind, onClick) {
+  const b = document.createElement("button");
+  b.className = "icon-btn " + kind;
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+function makeAddBtn(label, onClick) {
+  const b = document.createElement("button");
+  b.className = "ghost small";
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ---------- ปุ่มเพิ่มหน่วยใหญ่ ----------
+document.getElementById("btn-add-unit-vicha").addEventListener("click", () => openNodeModal("unit", "add", { kind: "วิชา" }));
+document.getElementById("btn-add-unit-competency").addEventListener("click", () => openNodeModal("unit", "add", { kind: "สมรรถนะหลัก" }));
+
+// ---------- popup เพิ่ม/แก้ node ----------
+// context เก็บ: type (unit/indicator/collection), mode (add/edit), node (ตอนแก้), parent/kind (ตอนเพิ่ม)
+function openNodeModal(type, mode, ref) {
+  modalContext = { type, mode };
+  mNote.style.display = "none";
+  mCoreField.style.display = "none";
+
+  // collection ไม่มีชื่อ ซ่อนฟิลด์ชื่อ
+  mNameField.style.display = (type === "collection") ? "none" : "block";
+
+  const typeLabel = { unit: "หน่วยใหญ่", indicator: "หน่วยย่อย", collection: "ครั้งที่" }[type];
+  mTitle.textContent = (mode === "add" ? "เพิ่ม" : "แก้ไข") + typeLabel;
+
+  if (mode === "edit") {
+    modalContext.node = ref;
+    mName.value = ref.name || "";
+    mSeq.value = ref.seq;
+    mMax.value = ref.max_score;
+  } else {
+    // โหมดเพิ่ม: ref = parent (indicator/unit) หรือ {kind} สำหรับ unit
+    modalContext.parent = ref;
+    mName.value = "";
+    mSeq.value = nextSeq(type, ref);
+    mMax.value = defaultMax(type, ref);
+  }
+
+  // สมรรถนะหลัก: คะแนนเต็มหน่วยใหญ่ = 100 ตายตัว ล็อกไม่ให้แก้
+  const isCompUnit = type === "unit" &&
+    ((mode === "edit" && ref.kind === "สมรรถนะหลัก") || (mode === "add" && ref.kind === "สมรรถนะหลัก"));
+  if (isCompUnit) {
+    mMax.value = 100;
+    mMax.disabled = true;
+    mNote.style.display = "block";
+    mNote.textContent = "เลือกชื่อสมรรถนะจากรายการกลาง · คะแนนเต็ม 100 ตายตัว";
+  } else {
+    mMax.disabled = false;
+  }
+
+  configureCorePicker(type, mode, ref, isCompUnit);
+
+  elOverlay.classList.add("show");
+  (mCoreField.style.display !== "none" ? mCoreSelect : (type === "collection" ? mSeq : mName)).focus();
+}
+
+function parentUnitOfIndicator(indicatorId) {
+  return units.find(u => (u.indicators || []).some(i => i.id === indicatorId)) || null;
+}
+
+function fillCorePicker(items, selectedId, placeholder) {
+  mCoreSelect.innerHTML = "<option value=''>" + placeholder + "</option>";
+  for (const item of items) {
+    const o = document.createElement("option");
+    o.value = item.id;
+    o.textContent = item.name + (item.stage ? " · " + item.stage : "");
+    mCoreSelect.appendChild(o);
+  }
+  mCoreSelect.value = selectedId || "";
+}
+
+function configureCorePicker(type, mode, ref, isCompUnit) {
+  let coreUnit = null;
+  if (type === "unit" && isCompUnit) coreUnit = mode === "edit" ? ref : null;
+  if (type === "indicator") coreUnit = mode === "edit" ? parentUnitOfIndicator(ref.id) : ref;
+
+  if (type === "unit" && isCompUnit) {
+    mNameField.style.display = "none";
+    mCoreField.style.display = "block";
+    mCoreLabel.textContent = "ด้านสมรรถนะหลัก";
+    const used = new Set(units.filter(u => u.kind === "สมรรถนะหลัก" && u.id !== (ref.id || "")).map(u => u.core_competency_id).filter(Boolean));
+    fillCorePicker(coreCompetencies.filter(c => !used.has(c.id) || c.id === ref.core_competency_id), ref.core_competency_id, "— เลือกด้านสมรรถนะหลัก —");
+    return;
+  }
+
+  if (type === "indicator" && coreUnit && coreUnit.kind === "สมรรถนะหลัก") {
+    mNameField.style.display = "none";
+    mCoreField.style.display = "block";
+    mCoreLabel.textContent = "องค์ประกอบสมรรถนะหลัก";
+    const stage = competencyStageForGrade(currentSubject && currentSubject.grade_level);
+    const elements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id && (!stage || e.stage === stage));
+    if (!coreUnit.core_competency_id || elements.length === 0) {
+      mCoreSelect.innerHTML = "<option value=''>— ยังไม่ได้ผูกด้านสมรรถนะหลักหรือไม่มีองค์ประกอบช่วงชั้นนี้ —</option>";
+      mNote.style.display = "block";
+      mNote.textContent = "กรุณาเลือกด้านสมรรถนะหลักก่อน แล้วจึงเพิ่มองค์ประกอบ";
+    } else {
+      fillCorePicker(elements, mode === "edit" ? ref.core_competency_element_id : "", "— เลือกองค์ประกอบ —");
+    }
+  }
+}
+
+// ลำดับถัดไป (มากสุด + 1) เพื่อความสะดวก
+function nextSeq(type, ref) {
+  let list = [];
+  if (type === "unit") list = units.filter(u => u.kind === ref.kind);
+  else if (type === "indicator") list = ref.indicators || [];
+  else if (type === "collection") list = ref.collections || [];
+  let max = 0;
+  for (const it of list) if (it.seq > max) max = it.seq;
+  return max + 1;
+}
+function defaultMax(type, ref) {
+  if (type === "unit") return ref.kind === "สมรรถนะหลัก" ? 100 : 100;
+  if (type === "indicator") return 25;
+  return 10; // collection
+}
+
+document.getElementById("m-cancel").addEventListener("click", () => elOverlay.classList.remove("show"));
+elOverlay.addEventListener("click", (e) => { if (e.target === elOverlay) elOverlay.classList.remove("show"); });
+
+document.getElementById("m-save").addEventListener("click", saveNode);
+
+async function saveNode() {
+  const { type, mode } = modalContext;
+  const seq = Number(mSeq.value);
+  const max = Number(mMax.value);
+  if (isNaN(seq) || seq < 1) { showToast("ลำดับต้องเป็นเลข 1 ขึ้นไป", false); return; }
+  if (isNaN(max) || max <= 0) { showToast("คะแนนเต็มต้องมากกว่า 0", false); return; }
+  let name = mName.value.trim();
+  let selectedCore = null;
+  let selectedElement = null;
+  const isCompUnit = type === "unit" &&
+    ((mode === "edit" && modalContext.node.kind === "สมรรถนะหลัก") || (mode === "add" && modalContext.parent.kind === "สมรรถนะหลัก"));
+  const unitForIndicator = type === "indicator"
+    ? (mode === "edit" ? parentUnitOfIndicator(modalContext.node.id) : modalContext.parent)
+    : null;
+
+  if (isCompUnit) {
+    selectedCore = coreCompetencies.find(c => c.id === mCoreSelect.value);
+    if (!selectedCore) { showToast("เลือกด้านสมรรถนะหลักก่อน", false); return; }
+    if (mode === "add" && units.some(u => u.kind === "สมรรถนะหลัก" && u.core_competency_id === selectedCore.id)) {
+      showToast("วิชานี้มีสมรรถนะด้านนี้แล้ว", false); return;
+    }
+    name = selectedCore.name;
+  } else if (type === "indicator" && unitForIndicator && unitForIndicator.kind === "สมรรถนะหลัก") {
+    selectedElement = coreElements.find(e => e.id === mCoreSelect.value);
+    if (!selectedElement) { showToast("เลือกองค์ประกอบก่อน", false); return; }
+    name = selectedElement.name;
+  }
+  if (type !== "collection" && !name) { showToast("กรุณากรอกชื่อ", false); return; }
+
+  let table, payload;
+  if (type === "unit") {
+    table = "units";
+    payload = { name, max_score: max, seq };
+    if (selectedCore) payload.core_competency_id = selectedCore.id;
+    if (mode === "add") { payload.subject_id = currentSubject.id; payload.kind = modalContext.parent.kind; }
+  } else if (type === "indicator") {
+    table = "indicators";
+    payload = { name, max_score: max, seq };
+    if (selectedElement) payload.core_competency_element_id = selectedElement.id;
+    if (mode === "add") payload.unit_id = modalContext.parent.id;
+  } else {
+    table = "collections";
+    payload = { max_score: max, seq };
+    if (mode === "add") payload.indicator_id = modalContext.parent.id;
+  }
+
+  let error;
+  if (mode === "add") {
+    ({ error } = await sb.from(table).insert(payload));
+  } else {
+    ({ error } = await sb.from(table).update(payload).eq("id", modalContext.node.id));
+  }
+  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+
+  elOverlay.classList.remove("show");
+  showToast("บันทึกแล้ว", true);
+  await loadStructure();
+}
+
+// ---------- ลบ node (กันไว้ถ้ามีคะแนน) ----------
+async function deleteUnit(unit) {
+  const n = countScoresInUnit(unit);
+  if (n > 0) { showToast("ลบไม่ได้ หน่วยนี้มีคะแนนกรอกไว้แล้ว " + n + " ช่อง", false); return; }
+  if (!confirm("ยืนยันลบ \"" + unit.name + "\" ? หน่วยย่อยและครั้งที่ข้างในจะถูกลบด้วย")) return;
+  await doDelete("units", unit.id);
+}
+async function deleteIndicator(ind) {
+  const n = countScoresInIndicator(ind);
+  if (n > 0) { showToast("ลบไม่ได้ หน่วยย่อยนี้มีคะแนนกรอกไว้แล้ว " + n + " ช่อง", false); return; }
+  if (!confirm("ยืนยันลบ \"" + ind.name + "\" ? ครั้งที่ข้างในจะถูกลบด้วย")) return;
+  await doDelete("indicators", ind.id);
+}
+async function deleteCollection(coll) {
+  const n = countScoresInCollection(coll);
+  if (n > 0) { showToast("ลบไม่ได้ ครั้งที่นี้มีคะแนนกรอกไว้แล้ว " + n + " ช่อง", false); return; }
+  if (!confirm("ยืนยันลบ ครั้งที่ " + coll.seq + " ?")) return;
+  await doDelete("collections", coll.id);
+}
+async function doDelete(table, id) {
+  const { error } = await sb.from(table).delete().eq("id", id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("ลบแล้ว", true);
+  await loadStructure();
+}
+
+// ---------- ลงทะเบียน (เฉพาะวิชาพื้นฐาน) ----------
+let allStudentsForEnroll = [];
+let currentEnrollments = [];
+
+async function loadEnrollments() {
+  // ดึงเฉพาะนักเรียนที่ยัง active (ยังไม่จบ) มาเป็น "รายชื่อให้เพิ่มเข้าวิชา" — เด็กจบแล้วไม่ต้องเสนอให้ลงทะเบียนใหม่
+  // (รายชื่อที่ลงทะเบียนอยู่แล้วแสดงจาก currentEnrollments ต่างหาก เด็กจบที่เคยลงไว้ยังเห็นได้)
+  const { data: students, error: stuErr } = await sb.from("students").select("*").eq("graduated", false).eq("left_school", false).order("grade_level").order("classroom").order("student_no");
+  if (stuErr) { showToast("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + stuErr.message, false); return; }
+  allStudentsForEnroll = students || [];
+
+  const { data: enrollRows, error } = await sb
+    .from("enrollments")
+    .select("id, student:student_id(*)")
+    .eq("subject_id", currentSubject.id);
+  if (error) { showToast("โหลดรายชื่อลงทะเบียนไม่สำเร็จ: " + error.message, false); return; }
+  currentEnrollments = (enrollRows || [])
+    .filter(e => e.student)
+    .sort((a, b) => (a.student.student_no || "").localeCompare(b.student.student_no || ""));
+  renderEnrollments();
+}
+
+function renderEnrollments() {
+  const canEdit = canEditCurrentSubject();
+
+  // dropdown "เพิ่มทั้งห้อง" — เฉพาะห้องที่ชั้นปีตรงกับวิชานี้
+  const classroomsForGrade = [...new Set(
+    allStudentsForEnroll.filter(s => s.grade_level === currentSubject.grade_level).map(s => s.classroom).filter(Boolean)
+  )].sort();
+  elSelBulkClassroom.innerHTML = "";
+  if (classroomsForGrade.length === 0) {
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "— ไม่มีห้อง " + (currentSubject.grade_level || "-") + " ในระบบ —";
+    elSelBulkClassroom.appendChild(o);
+  } else {
+    for (const c of classroomsForGrade) {
+      const o = document.createElement("option");
+      o.value = c; o.textContent = currentSubject.grade_level + "/" + c;
+      elSelBulkClassroom.appendChild(o);
+    }
+  }
+  document.getElementById("btn-bulk-add-classroom").style.display = canEdit ? "inline-block" : "none";
+  elSelBulkClassroom.style.display = canEdit ? "block" : "none";
+
+  // รายชื่อที่ลงทะเบียนแล้ว
+  elEnrollList.innerHTML = "";
+  if (currentEnrollments.length === 0) {
+    elEnrollList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีนักเรียนลงทะเบียน</div>";
+  }
+  const enrolledIds = new Set(currentEnrollments.map(e => e.student.id));
+  for (const e of currentEnrollments) {
+    const row = document.createElement("div");
+    row.className = "member-row";
+    row.innerHTML = "<span class='title'>" + escapeHtml(e.student.name) +
+      " <span class='hint'>(เลขที่ " + escapeHtml(e.student.student_no) +
+      (e.student.classroom ? " · " + escapeHtml(e.student.grade_level || "") + "/" + escapeHtml(e.student.classroom) : "") +
+      ")</span></span>";
+    if (canEdit) row.appendChild(makeIconBtn("🗑", "del", () => removeEnrollment(e)));
+    elEnrollList.appendChild(row);
+  }
+
+  // dropdown เพิ่มทีละคน — ทุกคนที่ยังไม่ได้ลงทะเบียน ไม่จำกัดชั้น/ห้อง (เผื่อนักเรียนซ้ำชั้น)
+  const candidates = allStudentsForEnroll.filter(s => !enrolledIds.has(s.id));
+  const label = s => s.name + "  (เลขที่ " + s.student_no + (s.classroom ? " · " + (s.grade_level || "") + "/" + s.classroom : "") + ")";
+  fillSelect(elSelAddStudent, candidates, label, "— เลือกนักเรียน —");
+  document.getElementById("btn-add-student").style.display = canEdit ? "inline-block" : "none";
+  elSelAddStudent.style.display = canEdit ? "block" : "none";
+}
+
+document.getElementById("btn-bulk-add-classroom").addEventListener("click", async () => {
+  const classroom = elSelBulkClassroom.value;
+  if (!classroom) { showToast("ไม่มีห้องให้เพิ่ม", false); return; }
+  const enrolledIds = new Set(currentEnrollments.map(e => e.student.id));
+  const toAdd = allStudentsForEnroll.filter(s =>
+    s.grade_level === currentSubject.grade_level && s.classroom === classroom && !enrolledIds.has(s.id)
+  );
+  if (toAdd.length === 0) { showToast("ทุกคนในห้องนี้อยู่ในวิชาแล้ว", false); return; }
+  const payload = toAdd.map(s => ({ subject_id: currentSubject.id, student_id: s.id }));
+  const { error } = await sb.from("enrollments").insert(payload);
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มแล้ว " + toAdd.length + " คน", true);
+  await loadEnrollments();
+});
+
+document.getElementById("btn-add-student").addEventListener("click", async () => {
+  const studentId = elSelAddStudent.value;
+  if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
+  const { error } = await sb.from("enrollments").insert({ subject_id: currentSubject.id, student_id: studentId });
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มแล้ว", true);
+  await loadEnrollments();
+});
+
+async function removeEnrollment(e) {
+  if (!confirm("เอา \"" + e.student.name + "\" ออกจากวิชานี้?")) return;
+  const { error } = await sb.from("enrollments").delete().eq("id", e.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เอาออกแล้ว", true);
+  await loadEnrollments();
+}
+
+// ---------- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) ----------
+async function loadMembers() {
+  const { data, error } = await sb
+    .from("integration_members")
+    .select("*, member:member_subject_id(*)")
+    .eq("integrated_subject_id", currentSubject.id);
+  if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
+  members = data || [];
+  renderMembers();
+}
+
+function renderMembers() {
+  elMemberList.innerHTML = "";
+  if (members.length === 0) {
+    elMemberList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีวิชาพื้นฐานในวิชาบูรณาการนี้</div>";
+  }
+  const canEdit = canEditCurrentSubject();
+  for (const m of members) {
+    const row = document.createElement("div");
+    row.className = "member-row";
+    const weight = m.member.total_periods;
+    const weightText = weight ? weight + " คาบ" : "ยังไม่ตั้งจำนวนคาบ (น้ำหนัก 0)";
+    row.innerHTML =
+      "<span class='title'>" + escapeHtml(m.member.name) +
+      " <span class='hint'>(" + m.member.level + (m.member.grade_level ? " " + m.member.grade_level : "") + ")</span></span>" +
+      "<span class='weight" + (weight ? "" : " zero") + "'>" + weightText + "</span>";
+    if (canEdit) row.appendChild(makeIconBtn("🗑", "del", () => removeMember(m)));
+    elMemberList.appendChild(row);
+  }
+
+  // เติม dropdown เลือกวิชาพื้นฐานที่ยังไม่ได้เป็นสมาชิก (ไม่รวมตัวเอง)
+  // กรองเฉพาะปีการศึกษา/ชั้นปี/ภาคเรียนเดียวกับวิชาบูรณาการนี้ กันเลือกผิดปี/ผิดชั้น/ผิดเทอมโดยไม่ตั้งใจ
+  const memberIds = new Set(members.map(m => m.member_subject_id));
+  const candidates = allSubjects.filter(s =>
+    s.subject_type === "พื้นฐาน" &&
+    s.id !== currentSubject.id &&
+    !memberIds.has(s.id) &&
+    s.year === currentSubject.year &&
+    s.grade_level === currentSubject.grade_level &&
+    s.term === currentSubject.term
+  );
+  const memberPlaceholder = candidates.length > 0
+    ? "— เลือกวิชาพื้นฐาน —"
+    : "— ไม่มีวิชาพื้นฐานปี " + (currentSubject.year || "-") + " ชั้น " + (currentSubject.grade_level || "-") +
+      (currentSubject.term ? " เทอม " + currentSubject.term : "") + " ให้เลือก —";
+  fillSelect(elSelAddMember, candidates, subjectLabel, memberPlaceholder);
+}
+
+document.getElementById("btn-add-member").addEventListener("click", async () => {
+  const memberId = elSelAddMember.value;
+  if (!memberId) { showToast("เลือกวิชาพื้นฐานก่อน", false); return; }
+  const { error } = await sb.from("integration_members").insert({
+    integrated_subject_id: currentSubject.id,
+    member_subject_id: memberId
+  });
+  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เพิ่มวิชาแล้ว", true);
+  await loadMembers();
+});
+
+async function removeMember(m) {
+  if (!confirm("ยืนยันเอา \"" + m.member.name + "\" ออกจากวิชาบูรณาการนี้? (ไม่ลบคะแนนของวิชานั้น)")) return;
+  const { error } = await sb.from("integration_members").delete().eq("id", m.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("เอาออกแล้ว", true);
+  await loadMembers();
+}
+
+function hideAll() {
+  currentSubject = null;
+  elSubjectForm.style.display = "none";
+  elStructure.style.display = "none";
+  elEnrollCard.style.display = "none";
+  elMembersCard.style.display = "none";
+  elEmptyHint.style.display = "block";
+}
+
+// เริ่มทำงาน
+loadSubjects();
+}
+</script>
+</body>
+</html>

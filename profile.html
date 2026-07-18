@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ข้อมูลส่วนตัว — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --teal:#075e5a; --teal-2:#0b8d86; --teal-soft:#e5f5f3; --ink:#183638; --muted:#657778; --line:#dce7e6; --bg:#f4f8f8; --white:#fff; --danger:#c52e35; --danger-soft:#fff0f1; --shadow:0 14px 36px rgba(16,69,69,.09),0 2px 7px rgba(16,69,69,.04); }
+  * { box-sizing:border-box; } html { -webkit-text-size-adjust:100%; } body { min-width:320px; min-height:100svh; margin:0; color:var(--ink); background:var(--bg); font:16px/1.5 "Sarabun",sans-serif; }
+  .topbar { display:flex; align-items:center; min-height:68px; padding:10px 16px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.94); }
+  .back-link { display:inline-flex; align-items:center; gap:8px; min-height:44px; color:var(--teal); font-weight:700; text-decoration:none; }
+  .back-link:focus-visible, button:focus-visible, .avatar-input:focus-within, input:focus-visible { outline:3px solid rgba(11,141,134,.25); outline-offset:2px; }
+  main { max-width:650px; margin:0 auto; padding:26px 16px 42px; }
+  h1 { margin:0; font-size:clamp(25px,6vw,32px); line-height:1.25; letter-spacing:-.02em; } .intro { margin:4px 0 22px; color:var(--muted); }
+  .card { padding:19px; border:1px solid var(--line); border-radius:19px; background:var(--white); box-shadow:var(--shadow); }
+  .identity { display:flex; align-items:center; gap:16px; margin-bottom:20px; padding-bottom:20px; border-bottom:1px solid var(--line); }
+  .avatar-input { position:relative; display:grid; place-items:center; flex:0 0 90px; width:90px; height:90px; overflow:hidden; border:2px solid var(--teal-soft); border-radius:50%; color:white; background:linear-gradient(135deg,var(--teal),var(--teal-2)); font-size:25px; font-weight:700; cursor:pointer; }
+  .avatar-input > #avatar-preview, .avatar-input > img { position:absolute; inset:0; display:grid; place-items:center; }
+  .avatar-input > img { width:100%; height:100%; object-fit:cover; } .avatar-input input { position:absolute; z-index:2; inset:0; opacity:0; cursor:pointer; }
+  .identity h2 { margin:0; font-size:19px; } .identity p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .avatar-help { margin:6px 0 0; color:var(--teal); font-size:12px; font-weight:600; }
+  .crop-dialog[hidden] { display:none; }
+  .crop-dialog { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:16px; background:rgba(10,42,42,.56); }
+  .crop-panel { width:min(100%,430px); max-height:calc(100svh - 32px); overflow:auto; padding:20px; border-radius:20px; background:var(--white); box-shadow:0 22px 60px rgba(0,35,35,.28); }
+  .crop-panel h2 { margin:0; font-size:21px; } .crop-panel > p { margin:3px 0 16px; color:var(--muted); font-size:13px; }
+  .crop-stage { position:relative; width:min(100%,320px); aspect-ratio:1; margin:0 auto; overflow:hidden; border-radius:14px; background:#d8e5e3; touch-action:none; cursor:grab; user-select:none; }
+  .crop-stage.dragging { cursor:grabbing; }
+  .crop-stage img { position:absolute; max-width:none; max-height:none; transform:translate(-50%,-50%) scale(1); transform-origin:center; pointer-events:none; }
+  .crop-guide { position:absolute; inset:7%; border:2px solid rgba(255,255,255,.95); border-radius:50%; box-shadow:0 0 0 999px rgba(0,28,28,.32); pointer-events:none; }
+  .crop-zoom { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; margin:16px 0 0; color:var(--ink); font-size:14px; font-weight:700; }
+  .crop-zoom input { width:100%; accent-color:var(--teal); } .crop-zoom output { min-width:39px; color:var(--teal); font-variant-numeric:tabular-nums; font-size:12px; text-align:right; }
+  .crop-help { margin:9px 0 0 !important; text-align:center; }
+  .crop-actions { display:grid; grid-template-columns:1fr 1.25fr; gap:10px; margin-top:18px; }
+  .crop-cancel { color:var(--ink); background:#edf3f2; } .crop-apply { color:#fff; background:linear-gradient(135deg,var(--teal),var(--teal-2)); }
+  label { display:block; margin:0 0 6px; font-size:14px; font-weight:700; } input[type="text"], input[readonly] { width:100%; min-height:48px; padding:0 13px; border:1px solid var(--line); border-radius:11px; color:var(--ink); background:#fcfefe; font:inherit; }
+  input[type="text"]:focus { outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(11,141,134,.12); } input[readonly] { color:var(--muted); background:#f5f8f8; }
+  .field { margin-top:16px; } .field small { display:block; margin-top:5px; color:var(--muted); font-size:12px; }
+  .role { display:inline-flex; margin-top:7px; padding:3px 9px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:12px; font-weight:700; }
+  .migration-note { display:none; margin:18px 0 0; padding:11px 12px; border-radius:11px; color:#805e11; background:#fff5df; font-size:13px; }
+  .actions { display:flex; gap:10px; margin-top:22px; } button { min-height:48px; border:0; border-radius:11px; padding:0 18px; font:inherit; font-weight:700; } .save { flex:1; color:white; background:linear-gradient(135deg,var(--teal),var(--teal-2)); box-shadow:0 8px 18px rgba(7,94,90,.18); } .signout { color:var(--danger); background:var(--danger-soft); } button:disabled { opacity:.6; cursor:wait; }
+  #toast { position:fixed; bottom:22px; left:50%; z-index:10; max-width:calc(100% - 30px); padding:11px 15px; border-radius:999px; color:white; background:var(--ink); box-shadow:0 12px 28px rgba(16,69,69,.18); font-size:14px; opacity:0; pointer-events:none; transform:translate(-50%,12px); transition:opacity .2s,transform .2s; } #toast.show { opacity:1; transform:translate(-50%,0); }
+  @media (min-width:700px) { main { padding-top:38px; } .card { padding:25px; } .crop-panel { padding:24px; } }
+</style>
+</head>
+<body>
+<header class="topbar"><a class="back-link" href="dashboard.html">← กลับหน้า Dashboard</a></header>
+<main>
+  <h1>ข้อมูลส่วนตัว</h1>
+  <p class="intro">ตั้งชื่อที่ต้องการให้แสดงในระบบ และรูปย่อของบัญชีนี้</p>
+  <section class="card">
+    <div class="identity">
+      <label class="avatar-input" aria-label="เลือกรูปโปรไฟล์"><span id="avatar-preview">…</span><input id="avatar-file" type="file" accept="image/jpeg,image/png,image/webp"><img id="avatar-image" alt="รูปโปรไฟล์" hidden></label>
+      <div><h2 id="preview-name">บัญชีผู้ใช้</h2><p id="profile-email">กำลังโหลดอีเมล…</p><div class="role" id="profile-role">ผู้ใช้งาน</div><p class="avatar-help">แตะรูปเพื่อเลือกและจัดตำแหน่งรูป</p></div>
+    </div>
+    <div class="field"><label for="display-name">ชื่อที่แสดงในระบบ</label><input id="display-name" type="text" maxlength="80" autocomplete="name" placeholder="เช่น ครูอามีนา"><small>ชื่อนี้จะแสดงข้างรูปโปรไฟล์ในทุกหน้าที่ล็อกอิน</small></div>
+    <div class="field"><label for="email">อีเมลบัญชี</label><input id="email" type="text" readonly></div>
+    <div class="migration-note" id="migration-note">หน้านี้ต้องรัน migration “ข้อมูลส่วนตัวและรูปโปรไฟล์ของผู้ใช้” ใน schema.sql ก่อน จึงจะบันทึกชื่อและรูปได้</div>
+    <div class="actions"><button class="save" id="save-profile">บันทึกข้อมูลส่วนตัว</button><button class="signout" id="signout" type="button">ออกจากระบบ</button></div>
+  </section>
+</main>
+<div class="crop-dialog" id="avatar-crop-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="avatar-crop-title">
+  <section class="crop-panel">
+    <h2 id="avatar-crop-title">จัดตำแหน่งรูปโปรไฟล์</h2>
+    <p>ส่วนที่อยู่ในวงกลมจะเห็นเป็นรูปย่อในระบบ</p>
+    <div class="crop-stage" id="avatar-crop-stage" aria-label="ลากรูปเพื่อจัดตำแหน่ง">
+      <img id="avatar-crop-source" alt="ตัวอย่างรูปที่กำลังจัดตำแหน่ง">
+      <div class="crop-guide" aria-hidden="true"></div>
+    </div>
+    <label class="crop-zoom" for="avatar-zoom"><span>ซูมรูป</span><input id="avatar-zoom" type="range" min="1" max="3" step="0.01" value="1"><output id="avatar-zoom-value" for="avatar-zoom">100%</output></label>
+    <p class="crop-help">ลากรูปด้วยนิ้วหรือเมาส์ แล้วใช้แถบซูมเพื่อเล็งตำแหน่ง</p>
+    <div class="crop-actions"><button class="crop-cancel" id="cancel-avatar-crop" type="button">ยกเลิก</button><button class="crop-apply" id="apply-avatar-crop" type="button">ใช้รูปนี้</button></div>
+  </section>
+</div>
+<div id="toast"></div>
+<script type="module">
+  import { sb, requireAuth, signOut, getMyProfilePresentation, getMyProfileDetails, profileInitials } from "./supabase-client.js";
+
+  const fileInput = document.getElementById("avatar-file");
+  const previewText = document.getElementById("avatar-preview");
+  const previewImage = document.getElementById("avatar-image");
+  const displayName = document.getElementById("display-name");
+  const previewName = document.getElementById("preview-name");
+  const email = document.getElementById("email");
+  const role = document.getElementById("profile-role");
+  const migrationNote = document.getElementById("migration-note");
+  const saveButton = document.getElementById("save-profile");
+  const toast = document.getElementById("toast");
+  const cropDialog = document.getElementById("avatar-crop-dialog");
+  const cropStage = document.getElementById("avatar-crop-stage");
+  const cropSource = document.getElementById("avatar-crop-source");
+  const cropZoom = document.getElementById("avatar-zoom");
+  const cropZoomValue = document.getElementById("avatar-zoom-value");
+  const cancelCropButton = document.getElementById("cancel-avatar-crop");
+  const applyCropButton = document.getElementById("apply-avatar-crop");
+  let currentSession = null;
+  let currentDetails = null;
+  let objectUrl = "";
+  let cropSourceUrl = "";
+  let pendingAvatarFile = null;
+  let dragState = null;
+  const cropState = { baseScale: 1, zoom: 1, x: 0, y: 0, stageSize: 0 };
+
+  function showToast(message, ok = true) {
+    toast.textContent = message;
+    toast.style.background = ok ? "var(--teal)" : "var(--danger)";
+    toast.classList.add("show");
+    setTimeout(() => toast.classList.remove("show"), 3200);
+  }
+
+  function showAvatar(url, initials) {
+    previewText.textContent = url ? "" : initials;
+    previewImage.hidden = !url;
+    if (url) previewImage.src = url;
+  }
+
+  function profileTableMissing(error) {
+    return error && (error.code === "42P01" || error.code === "PGRST205");
+  }
+
+  function clearCropSource() {
+    cropSource.removeAttribute("src");
+    if (cropSourceUrl) URL.revokeObjectURL(cropSourceUrl);
+    cropSourceUrl = "";
+    dragState = null;
+  }
+
+  function closeCropDialog(resetFile = true) {
+    cropDialog.hidden = true;
+    cropStage.classList.remove("dragging");
+    clearCropSource();
+    if (resetFile) fileInput.value = "";
+  }
+
+  function clampCropPosition() {
+    const imageWidth = cropSource.naturalWidth * cropState.baseScale * cropState.zoom;
+    const imageHeight = cropSource.naturalHeight * cropState.baseScale * cropState.zoom;
+    const maxX = Math.max(0, (imageWidth - cropState.stageSize) / 2);
+    const maxY = Math.max(0, (imageHeight - cropState.stageSize) / 2);
+    cropState.x = Math.min(maxX, Math.max(-maxX, cropState.x));
+    cropState.y = Math.min(maxY, Math.max(-maxY, cropState.y));
+  }
+
+  function renderCrop() {
+    if (!cropSource.naturalWidth || cropDialog.hidden) return;
+    cropState.stageSize = cropStage.clientWidth;
+    if (!cropState.stageSize) return;
+    clampCropPosition();
+    cropSource.style.width = (cropSource.naturalWidth * cropState.baseScale) + "px";
+    cropSource.style.height = (cropSource.naturalHeight * cropState.baseScale) + "px";
+    cropSource.style.left = (cropState.stageSize / 2 + cropState.x) + "px";
+    cropSource.style.top = (cropState.stageSize / 2 + cropState.y) + "px";
+    cropSource.style.transform = "translate(-50%,-50%) scale(" + cropState.zoom + ")";
+    cropZoom.value = String(cropState.zoom);
+    cropZoomValue.value = Math.round(cropState.zoom * 100) + "%";
+    cropZoomValue.textContent = cropZoomValue.value;
+  }
+
+  function openCropDialog(file) {
+    clearCropSource();
+    cropState.zoom = 1;
+    cropState.x = 0;
+    cropState.y = 0;
+    cropDialog.hidden = false;
+    cropSourceUrl = URL.createObjectURL(file);
+    cropSource.onload = () => {
+      const size = cropStage.clientWidth;
+      cropState.stageSize = size;
+      cropState.baseScale = Math.max(size / cropSource.naturalWidth, size / cropSource.naturalHeight);
+      requestAnimationFrame(renderCrop);
+    };
+    cropSource.onerror = () => {
+      closeCropDialog();
+      showToast("เปิดรูปนี้ไม่สำเร็จ กรุณาเลือกรูปอื่น", false);
+    };
+    cropSource.src = cropSourceUrl;
+  }
+
+  function avatarCanvas() {
+    const sourceSize = cropState.stageSize;
+    const outputSize = 512;
+    const factor = outputSize / sourceSize;
+    const canvas = document.createElement("canvas");
+    canvas.width = outputSize;
+    canvas.height = outputSize;
+    const context = canvas.getContext("2d");
+    const imageWidth = cropSource.naturalWidth * cropState.baseScale * cropState.zoom * factor;
+    const imageHeight = cropSource.naturalHeight * cropState.baseScale * cropState.zoom * factor;
+    const left = outputSize / 2 + cropState.x * factor - imageWidth / 2;
+    const top = outputSize / 2 + cropState.y * factor - imageHeight / 2;
+    context.drawImage(cropSource, left, top, imageWidth, imageHeight);
+    return canvas;
+  }
+
+  function canvasToAvatarFile(canvas) {
+    return new Promise(resolve => {
+      canvas.toBlob(blob => {
+        if (blob) { resolve(new File([blob], "avatar.webp", { type: blob.type || "image/webp" })); return; }
+        canvas.toBlob(fallback => resolve(fallback ? new File([fallback], "avatar.jpg", { type: fallback.type || "image/jpeg" }) : null), "image/jpeg", .92);
+      }, "image/webp", .92);
+    });
+  }
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 2 * 1024 * 1024) {
+      fileInput.value = "";
+      showToast("ใช้ได้เฉพาะ JPG, PNG หรือ WebP ขนาดไม่เกิน 2 MB", false);
+      return;
+    }
+    openCropDialog(file);
+  });
+
+  cropZoom.addEventListener("input", () => {
+    cropState.zoom = Number(cropZoom.value);
+    renderCrop();
+  });
+
+  cropStage.addEventListener("pointerdown", event => {
+    if (!cropSource.naturalWidth) return;
+    dragState = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, imageX: cropState.x, imageY: cropState.y };
+    cropStage.setPointerCapture(event.pointerId);
+    cropStage.classList.add("dragging");
+    event.preventDefault();
+  });
+
+  cropStage.addEventListener("pointermove", event => {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    cropState.x = dragState.imageX + event.clientX - dragState.startX;
+    cropState.y = dragState.imageY + event.clientY - dragState.startY;
+    renderCrop();
+  });
+
+  function finishCropDrag(event) {
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    if (cropStage.hasPointerCapture(event.pointerId)) cropStage.releasePointerCapture(event.pointerId);
+    dragState = null;
+    cropStage.classList.remove("dragging");
+  }
+  cropStage.addEventListener("pointerup", finishCropDrag);
+  cropStage.addEventListener("pointercancel", finishCropDrag);
+
+  cancelCropButton.addEventListener("click", () => closeCropDialog());
+  applyCropButton.addEventListener("click", async () => {
+    if (!cropSource.naturalWidth) return;
+    applyCropButton.disabled = true;
+    applyCropButton.textContent = "กำลังเตรียมรูป…";
+    try {
+      const avatarFile = await canvasToAvatarFile(avatarCanvas());
+      if (!avatarFile) throw new Error("สร้างรูปที่ครอบแล้วไม่สำเร็จ");
+      pendingAvatarFile = avatarFile;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(avatarFile);
+      showAvatar(objectUrl, "");
+      closeCropDialog(false);
+      fileInput.value = "";
+    } catch (error) {
+      showToast(error.message || "เตรียมรูปไม่สำเร็จ", false);
+    } finally {
+      applyCropButton.disabled = false;
+      applyCropButton.textContent = "ใช้รูปนี้";
+    }
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !cropDialog.hidden) closeCropDialog();
+  });
+
+  displayName.addEventListener("input", () => {
+    previewName.textContent = displayName.value.trim() || "บัญชีผู้ใช้";
+    if (!previewImage.src || previewImage.hidden) previewText.textContent = profileInitials(displayName.value);
+  });
+
+  async function saveProfile() {
+    const name = displayName.value.trim();
+    if (!name) { showToast("กรอกชื่อที่ต้องการแสดงก่อน", false); return; }
+    if (migrationNote.style.display === "block") { showToast("กรุณารัน migration ใน schema.sql ก่อน", false); return; }
+    saveButton.disabled = true;
+    saveButton.textContent = "กำลังบันทึก…";
+    try {
+      let avatarPath = currentDetails && currentDetails.avatar_path;
+      const file = pendingAvatarFile || (fileInput.files && fileInput.files[0]);
+      if (file) {
+        avatarPath = currentSession.user.id + "/avatar";
+        const { error: uploadError } = await sb.storage.from("profile-avatars").upload(avatarPath, file, {
+          upsert: true, contentType: file.type, cacheControl: "3600"
+        });
+        if (uploadError) throw uploadError;
+      }
+      const { error } = await sb.from("user_profile_details").upsert({
+        user_id: currentSession.user.id,
+        display_name: name,
+        avatar_path: avatarPath || null,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "user_id" });
+      if (error) throw error;
+      const detailsResult = await getMyProfileDetails(currentSession.user.id);
+      currentDetails = detailsResult.data;
+      pendingAvatarFile = null;
+      fileInput.value = "";
+      showToast("บันทึกข้อมูลส่วนตัวแล้ว");
+    } catch (error) {
+      showToast("บันทึกไม่สำเร็จ: " + (error.message || "ไม่ทราบสาเหตุ"), false);
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = "บันทึกข้อมูลส่วนตัว";
+    }
+  }
+
+  async function init() {
+    const session = await requireAuth();
+    if (!session) return;
+    currentSession = session;
+    const presentation = await getMyProfilePresentation(session.user);
+    currentDetails = presentation.details;
+    displayName.value = presentation.displayName;
+    previewName.textContent = presentation.displayName;
+    email.value = session.user.email || "";
+    document.getElementById("profile-email").textContent = session.user.email || "";
+    role.textContent = presentation.profile && presentation.profile.role === "admin" ? "ผู้ดูแลระบบ" : "ครูผู้สอน";
+    showAvatar(presentation.avatarUrl, presentation.initials);
+    if (profileTableMissing(presentation.detailsError)) migrationNote.style.display = "block";
+  }
+
+  document.getElementById("save-profile").addEventListener("click", saveProfile);
+  document.getElementById("signout").addEventListener("click", signOut);
+  init().catch(error => showToast("โหลดข้อมูลส่วนตัวไม่สำเร็จ: " + (error.message || "ไม่ทราบสาเหตุ"), false));
+</script>
+</body>
+</html>

@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เช็คชื่อ — หลักสูตรสมรรถนะ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
+  header .nav {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    background: var(--white); padding: 8px;
+    border-radius: 99px; border: 1px solid var(--line);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin: 0 0 24px; align-items: center;
+  }
+  header .nav a {
+    color: var(--muted); text-decoration: none; font-weight: 500;
+    padding: 8px 16px; border-radius: 99px; transition: all 0.2s ease; font-size: 14px;
+  }
+  header .nav a:hover { background: var(--teal-soft); color: var(--teal); }
+  header .nav a.active { background: var(--teal); color: var(--white); box-shadow: 0 2px 8px rgba(15, 110, 86, 0.3); }
+  header .nav #btn-signout { margin-left: auto; color: var(--danger); background: #fff0f0; }
+  header .nav #btn-signout:hover { background: #ffe0e0; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  select, input[type="number"], input[type="date"], input[type="text"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--white);
+    color: var(--ink);
+  }
+
+  /* ปุ่มเลือกครั้งเช็คชื่อของวันเดียวกัน (เช้า/บ่าย ฯลฯ) */
+  .chip {
+    display: inline-block;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--white);
+    color: var(--ink);
+    cursor: pointer;
+    margin: 0 6px 6px 0;
+  }
+  .chip.active { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); font-weight: 600; }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+
+  button.load, button.save {
+    width: 100%;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--teal);
+    color: var(--white);
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  button.load:disabled, button.save:disabled { opacity: 0.5; cursor: default; }
+
+  .session-note { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+
+  .student-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .student-row:last-child { border-bottom: none; }
+  .student-info { flex: 1; min-width: 0; }
+  .student-info .name { font-weight: 500; }
+  .student-info .meta { color: var(--muted); font-size: 13px; }
+  .student-row select { width: 120px; }
+
+  .toast {
+    position: sticky;
+    bottom: 12px;
+    text-align: center;
+    font-size: 14px;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 12px;
+    display: none;
+  }
+  .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
+  .toast.err { display: block; background: #fceaea; color: var(--danger); }
+
+  .hint { color: var(--muted); font-size: 14px; }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260718-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>เช็คชื่อ</h1>
+    <p>เลือกวิชา วันที่ และจำนวนคาบ แล้วติ๊กสถานะรายคน</p>
+    <div class="nav">
+      <a href="entry.html">กรอกคะแนน</a>
+      <a href="competency-manage.html">กำหนดสมรรถนะ</a>
+      <a href="competency-entry.html">ลงคะแนนสมรรถนะ</a>
+      <a href="attendance.html">เช็คชื่อ</a>
+      <a href="summary.html">สรุปผลการเรียน</a>
+      <a href="manage.html">จัดการโครงสร้าง</a>
+      <a href="students.html">นักเรียน</a>
+      <a href="retention.html">เรียนซ้ำชั้น</a>
+      <a href="warning.html">เฝ้าระวัง มส.</a>
+      <a href="rollover.html">ขึ้นปีใหม่</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260718-2"></script>
+    <script>
+      (function(){
+        var navLinks = document.querySelectorAll('.nav a');
+        var current = window.location.pathname.split('/').pop();
+        if(!current || current === '') current = 'entry.html';
+        navLinks.forEach(function(a) {
+          if(a.getAttribute('href') === current) a.classList.add('active');
+        });
+      })();
+    </script>
+  </header>
+
+  <!-- เลือกวิชา / วันที่ / จำนวนคาบ แล้วโหลดรายชื่อมาติ๊ก -->
+  <div class="card">
+    <div class="field">
+      <label for="filter-year">ปีการศึกษา</label>
+      <select id="filter-year"><option value="">— ทุกปี —</option></select>
+    </div>
+    <div class="field" style="display:flex; gap:12px;">
+      <div style="flex:1">
+        <label for="filter-grade">ชั้น</label>
+        <select id="filter-grade">
+          <option value="">— ทุกชั้น —</option>
+          <optgroup label="ประถม">
+            <option value="ป.1">ป.1</option>
+            <option value="ป.2">ป.2</option>
+            <option value="ป.3">ป.3</option>
+            <option value="ป.4">ป.4</option>
+            <option value="ป.5">ป.5</option>
+            <option value="ป.6">ป.6</option>
+          </optgroup>
+          <optgroup label="มัธยม">
+            <option value="ม.1">ม.1</option>
+            <option value="ม.2">ม.2</option>
+            <option value="ม.3">ม.3</option>
+            <option value="ม.4">ม.4</option>
+            <option value="ม.5">ม.5</option>
+            <option value="ม.6">ม.6</option>
+          </optgroup>
+        </select>
+      </div>
+      <div style="flex:1">
+        <label for="filter-term">ภาคเรียน</label>
+        <select id="filter-term">
+          <option value="">— ทุกภาคเรียน —</option>
+          <option value="1">ภาคเรียน 1</option>
+          <option value="2">ภาคเรียน 2</option>
+        </select>
+      </div>
+    </div>
+    <div class="field" id="classroom-pick">
+      <label for="filter-classroom">ห้อง</label>
+      <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
+    </div>
+    <div class="field">
+      <label for="sel-subject">วิชา</label>
+      <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
+    </div>
+    <!-- วิชาบูรณาการ: ติ๊กวิชาย่อยที่ครั้งนี้ครอบคลุม (ครูที่รับผิดชอบหลายวิชาย่อย เช็คเด็ก
+         รอบเดียว ระบบบันทึกแยกให้ทุกวิชาที่ติ๊ก — เวลาเรียนรวมกันคิด มส. ที่วิชาบู) -->
+    <div class="field" id="member-pick" style="display:none">
+      <label>วิชาย่อยที่เช็คครั้งนี้ (ติ๊กได้หลายวิชา + จำนวนคาบของแต่ละวิชา)</label>
+      <div id="member-list"></div>
+      <div class="hint" style="font-size:13px; margin-top:4px">
+        ติ๊กหลายวิชา = เช็คเด็กรอบเดียว บันทึกแยกให้ทุกวิชาที่ติ๊ก · ติ๊กวิชาเดียว = เปิดครั้งเดิมของวิชานั้นมาแก้ได้
+      </div>
+    </div>
+    <div class="field">
+      <label for="inp-date">วันที่เช็คชื่อ</label>
+      <input type="date" id="inp-date">
+    </div>
+    <div class="field" id="field-periods">
+      <label for="inp-periods">จำนวนคาบที่ครั้งนี้ครอบคลุม</label>
+      <input type="number" id="inp-periods" min="1" step="1" value="1">
+    </div>
+    <button class="load" id="btn-load">โหลดรายชื่อ</button>
+  </div>
+
+  <!-- รายชื่อนักเรียนให้ติ๊กสถานะ -->
+  <div class="card" id="students-card" style="display:none">
+    <!-- ครั้งที่เช็คไปแล้วของวันนั้น (เช้า/บ่าย ฯลฯ) — กดสลับไปแก้ครั้งเดิม หรือเพิ่มครั้งใหม่ -->
+    <div id="day-sessions" style="display:none; margin-bottom:10px"></div>
+    <div class="session-note" id="session-note"></div>
+    <div id="student-list"></div>
+    <button class="save" id="btn-save">บันทึกการเช็คชื่อ</button>
+  </div>
+
+  <div class="card hint" id="empty-hint">เลือกวิชาและวันที่ แล้วกด "โหลดรายชื่อ" เพื่อเริ่มเช็คชื่อ</div>
+
+  <!-- ชั่วโมงชดเชย (เติมตัวเลขเข้าเรียนให้ถึงเกณฑ์ ไม่ใช่ข้ามเช็ค มส.) -->
+  <div class="card" id="makeup-card" style="display:none">
+    <div class="section-title" style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:10px">
+      ชั่วโมงชดเชย
+    </div>
+    <div class="field-note" style="color:var(--muted); font-size:13px; margin-bottom:10px">
+      ให้นักเรียนที่เข้าเรียนไม่ครบ 80% ชดเชยเวลา (ทำงาน/เรียนเสริม ฯลฯ) แล้วบันทึกจำนวนคาบตรงนี้
+      ระบบจะบวกเข้ายอดเข้าเรียนตอนคำนวณ มส. ที่หน้าสรุปคะแนนให้เอง
+    </div>
+    <div id="makeup-list"></div>
+    <div class="field" style="margin-top:10px">
+      <label for="sel-makeup-student">นักเรียน</label>
+      <select id="sel-makeup-student"></select>
+    </div>
+    <div class="field">
+      <label for="inp-makeup-periods">จำนวนคาบที่ชดเชยได้</label>
+      <input type="number" id="inp-makeup-periods" min="0.5" step="0.5">
+    </div>
+    <div class="field">
+      <label for="inp-makeup-reason">เหตุผล/รายละเอียด</label>
+      <input type="text" id="inp-makeup-reason" placeholder="เช่น ทำการบ้านชดเชย วันที่ 12/8">
+    </div>
+    <button class="load" id="btn-add-makeup">+ บันทึกชั่วโมงชดเชย</button>
+  </div>
+
+  <!-- toast อยู่นอกการ์ดอื่นทั้งหมด เห็นได้เสมอไม่ว่าการ์ดไหนจะซ่อนอยู่ -->
+  <div class="toast" id="toast"></div>
+</div>
+
+<script type="module">
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears } from "../supabase-client.js";
+
+// ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
+} else {
+document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
+
+// role ใช้ตัดสินค่าเริ่มต้นการติ๊กวิชาย่อยของวิชาบูรณาการ (admin = ติ๊กทุกตัว, ครู = เฉพาะที่เป็นเจ้าของ)
+const myProfile = await getProfile(session.user.id);
+const isAdminUser = myProfile && myProfile.role === "admin";
+
+// สถานะเช็คชื่อที่เลือกได้ทั้งหมด (ต้องตรงกับ check constraint ใน schema.sql)
+const STATUS_OPTIONS = ["มา", "ขาด", "ลาป่วย", "ลากิจ", "มาสาย"];
+
+// อ้างอิง element ที่ใช้บ่อย
+const elFilterYear   = document.getElementById("filter-year");
+const elFilterGrade  = document.getElementById("filter-grade");
+const elFilterTerm   = document.getElementById("filter-term");
+const elSubject      = document.getElementById("sel-subject");
+const elClassroomPick = document.getElementById("classroom-pick");
+const elClassroom    = document.getElementById("filter-classroom");
+const elMemberPick   = document.getElementById("member-pick");
+const elMemberList   = document.getElementById("member-list");
+const elFieldPeriods = document.getElementById("field-periods");
+const elDate          = document.getElementById("inp-date");
+const elPeriods       = document.getElementById("inp-periods");
+const btnLoad         = document.getElementById("btn-load");
+const elStudentsCard  = document.getElementById("students-card");
+const elDaySessions   = document.getElementById("day-sessions");
+const elStudentList   = document.getElementById("student-list");
+const elSessionNote   = document.getElementById("session-note");
+const elEmptyHint     = document.getElementById("empty-hint");
+const elToast         = document.getElementById("toast");
+const btnSave         = document.getElementById("btn-save");
+
+// เก็บ state ที่กำลังทำงานอยู่
+// pickedSubject = วิชาที่เลือกใน dropdown หลัก (พื้นฐานหรือบูรณาการ)
+// currentSubjectId/currentSubject = วิชาที่ "บันทึกจริง" (วิชาพื้นฐานเสมอ) — วิชาบูรณาการ
+// ต้องติ๊กวิชาย่อยก่อน: ติ๊กตัวเดียว → วิชาย่อยนั้นเป็น current (แก้ครั้งเดิมได้เหมือนวิชาปกติ)
+// ติ๊กหลายตัว → โหมดบล็อก (blockMode) เช็คเด็กรอบเดียว บันทึกแยกให้ทุกวิชาที่ติ๊ก
+let pickedSubject = null;
+let currentSubjectId = null;
+let currentSubject = null;
+let currentSession = null;   // object ครั้งที่เช็คชื่อ ถ้ายังไม่เคยมี = null (จะสร้างใหม่ตอนบันทึก)
+let students = [];           // รายชื่อนักเรียนทั้งหมด
+let allSubjects = [];        // วิชาทั้งหมด (กรองด้วยปี/ชั้น/ภาคเรียนก่อนเติมลง dropdown)
+let memberIdSet = new Set(); // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown หลัก)
+let daySessions = [];        // ครั้งเช็คชื่อทั้งหมดของ วิชา+วันที่ ที่เลือกอยู่ (รองรับหลายครั้งต่อวัน)
+let memberSubjects = [];     // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
+let blockMode = false;       // true = กำลังเช็คแบบบล็อก (หลายวิชาย่อยพร้อมกัน สร้างใหม่เท่านั้น)
+let blockMembers = [];       // วิชาย่อยที่ติ๊กไว้ตอนโหลดรายชื่อในโหมดบล็อก [{id, name, periods}]
+let blockStudentSubjects = new Map(); // student_id -> Set of subject_id ที่ลงทะเบียนในโหมดบล็อก
+
+// ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
+// โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
+function subjectLabel(s) {
+  const parts = [s.code || "(ไม่มีรหัส)", s.name];
+  if (s.year) parts.push("ปี " + s.year);
+  if (s.term) parts.push("เทอม " + s.term);
+  if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
+  return parts.join("  ·  ");
+}
+
+// helper: ใส่ options ลง select
+function fillSelect(el, items, getLabel, placeholder) {
+  el.innerHTML = "";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholder;
+  el.appendChild(opt0);
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = it.id;
+    o.textContent = getLabel(it);
+    el.appendChild(o);
+  }
+}
+
+function showToast(msg, ok) {
+  elToast.textContent = msg;
+  elToast.className = "toast " + (ok ? "ok" : "err");
+  setTimeout(() => { elToast.className = "toast"; }, 2500);
+}
+
+// ตั้งวันที่เริ่มต้นเป็นวันนี้ (ตามเวลาเครื่อง ไม่ใช้ toISOString เพราะจะเพี้ยนเรื่อง timezone)
+function todayStr() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mm + "-" + dd;
+}
+elDate.value = todayStr();
+
+// ---------- โหลดวิชาทั้งหมด ----------
+async function loadSubjects() {
+  const { data, error } = await sb
+    .from("subjects")
+    .select("*")
+    .order("created_at");
+  if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
+  allSubjects = data || [];
+
+  // วิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ ไม่โชว์ใน dropdown หลัก (ยืนยันแล้ว 2026-07)
+  // — ให้เลือกวิชาบูรณาการก่อน แล้วค่อยเลือกวิชาย่อยจากในนั้น กันรายการวิชายาวและกันสับสน
+  const { data: memberRows, error: memErr } = await sb
+    .from("integration_members")
+    .select("member_subject_id");
+  if (memErr) { showToast("โหลดข้อมูลวิชาบูรณาการไม่สำเร็จ: " + memErr.message, false); return; }
+  memberIdSet = new Set((memberRows || []).map(r => r.member_subject_id));
+
+  fillYearOptions();
+  applySubjectFilter();
+  loadClassroomsByGrade(elFilterGrade.value);
+}
+
+// ---------- เติมตัวเลือกปีการศึกษาจากวิชาที่มีจริง แล้วตั้งค่าเป็นปีที่เลือกไว้ (จำข้ามหน้า) ----------
+function fillYearOptions() {
+  const years = distinctYears(allSubjects);
+  elFilterYear.innerHTML = "<option value=''>— ทุกปี —</option>";
+  for (const y of years) {
+    const o = document.createElement("option");
+    o.value = y;
+    o.textContent = "ปีการศึกษา " + y;
+    elFilterYear.appendChild(o);
+  }
+  const saved = getActiveYear();
+  elFilterYear.value = years.indexOf(saved) !== -1 ? saved : "";
+}
+
+// ---------- กรองรายชื่อวิชาตามปี/ชั้น/ภาคเรียนที่เลือก แล้วเติมลง dropdown ----------
+function applySubjectFilter() {
+  const yearFilter = elFilterYear.value;
+  const gradeFilter = elFilterGrade.value;
+  const termFilter = elFilterTerm.value;
+  const filtered = allSubjects.filter(s => {
+    if (memberIdSet.has(s.id)) return false; // วิชาย่อยของบูรณาการ เลือกผ่านวิชาบูแทน
+    if (yearFilter && s.year !== yearFilter) return false;
+    if (gradeFilter && s.grade_level !== gradeFilter) return false;
+    if (termFilter && s.term !== termFilter) return false;
+    return true;
+  });
+  fillSelect(elSubject, filtered, subjectLabel, "— เลือกวิชา (" + filtered.length + " วิชา) —");
+}
+// เปลี่ยนปี = จำไว้ให้ทุกหน้าใช้ปีเดียวกัน (localStorage) แล้วกรองใหม่
+elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
+elFilterGrade.addEventListener("change", () => {
+  applySubjectFilter();
+  elSubject.dispatchEvent(new Event("change"));
+  loadClassroomsByGrade(elFilterGrade.value);
+});
+elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
+
+elSubject.addEventListener("change", async () => {
+  hideStudents();
+  pickedSubject = elSubject.value ? allSubjects.find(s => s.id === elSubject.value) || null : null;
+  currentSubjectId = null;
+  currentSubject = null;
+
+  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
+    // วิชาบูรณาการ: จำนวนคาบกรอกรายวิชาย่อย (ซ่อนช่องกลาง) — ติ๊กวิชาย่อยก่อนถึงโหลดรายชื่อได้
+    elMemberPick.style.display = "block";
+    elFieldPeriods.style.display = "none";
+    await loadMemberOptions(pickedSubject.id);
+  } else {
+    elMemberPick.style.display = "none";
+    elFieldPeriods.style.display = "block";
+    currentSubjectId = pickedSubject ? pickedSubject.id : null;
+    currentSubject = pickedSubject || null;
+  }
+  await loadMakeupSection();
+});
+
+// ---------- เติมรายการวิชาย่อยของวิชาบูรณาการ (ติ๊กได้หลายวิชา + คาบรายวิชา) ----------
+async function loadMemberOptions(integratedId) {
+  elMemberList.innerHTML = "<div class='hint'>กำลังโหลดวิชาย่อย...</div>";
+  const { data: rows, error } = await sb
+    .from("integration_members")
+    .select("*, member:member_subject_id(*)")
+    .eq("integrated_subject_id", integratedId);
+  if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
+  memberSubjects = (rows || []).map(r => r.member).filter(Boolean);
+  if (memberSubjects.length === 0) {
+    elMemberList.innerHTML = "<div class='hint'>วิชาบูรณาการนี้ยังไม่มีวิชาย่อย — ไปเพิ่มที่หน้า \"จัดการโครงสร้าง\" ก่อน</div>";
+    return;
+  }
+
+  // เติมจำนวนคาบจาก "ครั้งล่าสุดที่เคยเช็ค" ของแต่ละวิชาย่อย — ครั้งแรกปล่อยว่างให้กรอกเอง
+  for (const m of memberSubjects) {
+    const { data: last } = await sb
+      .from("attendance_sessions")
+      .select("periods_covered")
+      .eq("subject_id", m.id)
+      .order("session_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+    m.lastPeriods = (last && last.length > 0) ? last[0].periods_covered : "";
+
+    // ตรวจสอบจำนวนนักเรียนที่ลงทะเบียน
+    const roster = await getRosterForSubject(m.id);
+    m.roster = roster;
+    m.studentCount = roster.length;
+  }
+
+  // เติมกล่อง "ห้อง" โดยรวมรายชื่อจากทุกวิชาย่อย
+  const combinedRoster = [];
+  for (const m of memberSubjects) {
+    if (m.roster) combinedRoster.push(...m.roster);
+  }
+
+  elMemberList.innerHTML = "";
+  for (const m of memberSubjects) {
+    const hasStudents = m.studentCount > 0;
+    // ค่าเริ่มต้น: ติ๊กเฉพาะวิชาย่อยที่ครูคนนี้เป็นเจ้าของ (admin เห็นติ๊กทุกตัว) — ครูที่รับ
+    // ผิดชอบหลายวิชาย่อยจะได้ติ๊กครบชุดของตัวเองมาเลย ปรับเอาออก/เพิ่มเองได้ก่อนโหลดรายชื่อ
+    const defaultChecked = hasStudents && (isAdminUser || m.owner_id === session.user.id);
+    const row = document.createElement("label");
+    row.className = "student-row";
+    row.style.cursor = hasStudents ? "pointer" : "not-allowed";
+    if (!hasStudents) row.style.opacity = "0.6";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "member-cb";
+    cb.dataset.id = m.id;
+    cb.checked = defaultChecked;
+    cb.disabled = !hasStudents;
+    cb.style.cssText = "width:18px; height:18px; flex:none";
+    // ติ๊กเปลี่ยน = รายชื่อ/โหมดที่โหลดไว้ใช้ไม่ได้แล้ว ต้องกดโหลดรายชื่อใหม่ (การ์ดชดเชยก็ซ่อนรอ)
+    cb.addEventListener("change", async () => {
+      hideStudents();
+      currentSubjectId = null;
+      currentSubject = null;
+      await loadMakeupSection();
+    });
+
+    const info = document.createElement("span");
+    info.className = "student-info";
+    info.innerHTML = "<span class='name'>" + escapeHtml(m.name) + "</span>" +
+      (!hasStudents ? " <span class='hint'>(ไม่มีนักเรียน)</span>" : "") +
+      (m.teacher ? "<div class='meta'>" + escapeHtml(m.teacher) + "</div>" : "");
+
+    const num = document.createElement("input");
+    num.type = "number";
+    num.className = "member-periods";
+    num.dataset.id = m.id;
+    num.min = "1"; num.step = "1";
+    num.value = m.lastPeriods;
+    num.placeholder = "คาบ";
+    num.disabled = !hasStudents;
+    num.style.cssText = "width:80px; text-align:center; flex:none";
+    // กันช่องกรอกคาบไปสั่งติ๊ก/เลิกติ๊ก checkbox (เพราะทั้งแถวเป็น <label>)
+    num.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); num.focus(); });
+
+    row.appendChild(cb);
+    row.appendChild(info);
+    row.appendChild(num);
+    elMemberList.appendChild(row);
+  }
+}
+
+// อ่านวิชาย่อยที่ติ๊ก + จำนวนคาบของแต่ละตัว — คืน null ถ้ากรอกไม่ถูก (แจ้งเตือนแล้ว)
+function getTickedMembers() {
+  const result = [];
+  const cbs = elMemberList.querySelectorAll(".member-cb");
+  for (const cb of cbs) {
+    if (!cb.checked) continue;
+    const m = memberSubjects.find(x => x.id === cb.dataset.id);
+    if (!m) continue;
+    const num = elMemberList.querySelector(".member-periods[data-id='" + m.id + "']");
+    const periods = Number(num && num.value);
+    if (isNaN(periods) || periods <= 0) {
+      showToast("กรอกจำนวนคาบของ \"" + m.name + "\" ให้ถูกต้องก่อน (ต้องมากกว่า 0)", false);
+      return null;
+    }
+    result.push({ id: m.id, name: m.name, periods: periods });
+  }
+  return result;
+}
+
+// อ่าน/เขียนจำนวนคาบของวิชาที่บันทึกจริง — วิชาบูรณาการใช้ช่องคาบรายวิชาย่อยแทนช่องกลาง
+function readCurrentPeriods() {
+  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
+    const num = elMemberList.querySelector(".member-periods[data-id='" + currentSubjectId + "']");
+    return Number(num && num.value);
+  }
+  return Number(elPeriods.value);
+}
+function writeCurrentPeriods(v) {
+  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
+    const num = elMemberList.querySelector(".member-periods[data-id='" + currentSubjectId + "']");
+    if (num) num.value = v;
+  } else {
+    elPeriods.value = v;
+  }
+}
+
+// ---------- กดโหลดรายชื่อ ----------
+btnLoad.addEventListener("click", async () => {
+  if (!pickedSubject) { showToast("เลือกวิชาก่อน", false); return; }
+  if (!elDate.value) { showToast("เลือกวันที่ก่อน", false); return; }
+
+  btnLoad.disabled = true;
+  try {
+    if (pickedSubject.subject_type === "บูรณาการ") {
+      const ticked = getTickedMembers();
+      if (ticked === null) return; // จำนวนคาบไม่ถูก แจ้งเตือนแล้ว
+      if (ticked.length === 0) { showToast("ติ๊กวิชาย่อยที่เช็คครั้งนี้อย่างน้อย 1 วิชา", false); return; }
+
+      if (ticked.length === 1) {
+        // ติ๊กวิชาเดียว = ทำงานเหมือนวิชาพื้นฐาน (เปิดครั้งเดิมของวันนั้นมาแก้ได้)
+        blockMode = false;
+        currentSubjectId = ticked[0].id;
+        currentSubject = memberSubjects.find(x => x.id === ticked[0].id) || null;
+        await loadMakeupSection();
+        await loadPlainSubjectDay();
+      } else {
+        // ติ๊กหลายวิชา = โหมดบล็อก เช็คเด็กรอบเดียว บันทึกแยกให้ทุกวิชา (สร้างใหม่เท่านั้น)
+        blockMode = true;
+        blockMembers = ticked;
+        currentSubjectId = null;
+        currentSubject = null;
+        await loadMakeupSection();
+        await loadBlockRoster();
+      }
+    } else {
+      blockMode = false;
+      await loadPlainSubjectDay();
+    }
+  } finally {
+    btnLoad.disabled = false;
+  }
+});
+
+// ---------- อัปเดตตัวเลือกห้องตามชั้นที่เลือก ----------
+async function loadClassroomsByGrade(grade) {
+  const currentVal = elClassroom.value;
+  elClassroom.innerHTML = '<option value="">— กำลังโหลดห้อง... —</option>';
+
+  let allRooms = new Set();
+  let page = 0;
+  const pageSize = 1000;
+  let hasError = false;
+  let errMsg = "";
+  let totalDataFetched = 0;
+
+  while (true) {
+    const { data, error } = await sb.from("students")
+      .select("classroom, grade_level")
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) {
+      hasError = true;
+      errMsg = error.message;
+      break;
+    }
+    if (!data || data.length === 0) break;
+
+    totalDataFetched += data.length;
+    data.forEach(d => {
+      if (d.classroom && d.classroom.trim() !== "") {
+        if (!grade) {
+          allRooms.add(d.classroom);
+        } else {
+          if (d.grade_level && d.grade_level.trim() === grade) {
+            allRooms.add(d.classroom);
+          } else {
+            const normClass = d.classroom.replace(/\s+/g, "");
+            const normGrade = grade.replace(/\s+/g, "");
+            const justNumber = normGrade.replace("ม.", "").replace("ป.", "");
+            if (normClass.includes(normGrade) || normClass.includes(justNumber + "/")) {
+              allRooms.add(d.classroom);
+            }
+          }
+        }
+      }
+    });
+
+    if (data.length < pageSize) break;
+    page++;
+  }
+
+  if (hasError) {
+    elClassroom.innerHTML = `<option value="">— Error: ${errMsg} —</option>`;
+    elClassroom.disabled = true;
+    return;
+  }
+
+  const sortedRooms = [...allRooms].sort();
+
+  if (sortedRooms.length === 0) {
+    elClassroom.innerHTML = `<option value="">— ไม่มีห้องของ ${grade} (หาจาก ${totalDataFetched} คน) —</option>`;
+    elClassroom.disabled = true;
+    return;
+  }
+
+  elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  elClassroom.disabled = false;
+  sortedRooms.forEach(c => {
+    const opt = document.createElement("option");
+    opt.value = c; opt.textContent = c;
+    elClassroom.appendChild(opt);
+  });
+
+  if (sortedRooms.includes(currentVal)) {
+    elClassroom.value = currentVal;
+  }
+}
+
+elClassroom.addEventListener("change", () => {
+  const selected = elClassroom.value;
+  const rows = elStudentList.querySelectorAll(".student-row");
+  rows.forEach(row => {
+    if (!selected || row.dataset.classroom === selected) {
+      row.style.display = "flex"; // student-row is display:flex in CSS
+    } else {
+      row.style.display = "none";
+    }
+  });
+
+  // อัปเดตเช็คบ็อกซ์วิชาย่อยสำหรับวิชาบูรณาการ
+  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
+    document.querySelectorAll(".member-cb").forEach(cb => {
+      const id = cb.dataset.id;
+      const m = memberSubjects.find(x => x.id === id);
+      if (m && m.roster) {
+        const hasStudentsInRoom = m.roster.some(s => !selected || s.classroom === selected);
+        cb.disabled = !hasStudentsInRoom;
+        if (!hasStudentsInRoom) cb.checked = false;
+
+        const labelRow = cb.closest("label.student-row");
+        if (labelRow) {
+          labelRow.style.cursor = hasStudentsInRoom ? "pointer" : "not-allowed";
+          labelRow.style.opacity = hasStudentsInRoom ? "1" : "0.6";
+        }
+      }
+    });
+  }
+});
+
+// ---------- โหมดวิชาเดียว: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน) ----------
+async function loadPlainSubjectDay() {
+  const periods = readCurrentPeriods();
+  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+
+  students = await getRosterForSubject(currentSubjectId);
+
+
+  const ok = await refreshDaySessions();
+  if (!ok) return;
+
+  // มีครั้งเดิมของวันนี้ → เปิดครั้งแรกให้แก้ (สลับครั้ง/เพิ่มครั้งใหม่ได้จากปุ่มด้านบน)
+  if (daySessions.length > 0) await selectDaySession(daySessions[0]);
+  else startNewSession();
+}
+
+// ---------- โหมดบล็อก: รวมรายชื่อจากวิชาย่อยที่ติ๊กทั้งหมด (เช็คครั้งเดียว) ----------
+async function loadBlockRoster() {
+  const rosters = await Promise.all(blockMembers.map(m => getRosterForSubject(m.id)));
+  const seen = new Map();
+  blockStudentSubjects = new Map();
+  for (let i = 0; i < blockMembers.length; i++) {
+    const subjId = blockMembers[i].id;
+    for (const s of rosters[i]) {
+      seen.set(s.id, s);
+      if (!blockStudentSubjects.has(s.id)) blockStudentSubjects.set(s.id, new Set());
+      blockStudentSubjects.get(s.id).add(subjId);
+    }
+  }
+  students = [...seen.values()].sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
+
+  if (students.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
+
+
+
+  currentSession = null;
+  daySessions = [];
+  elDaySessions.style.display = "none";
+  elDaySessions.innerHTML = "";
+  elSessionNote.textContent = "เช็ครอบเดียวให้ " + blockMembers.map(m => m.name + " (" + m.periods + " คาบ)").join(" + ") +
+    " — บันทึกแล้วจะสร้างครั้งแยกให้ทุกวิชา · ถ้าจะแก้ย้อนหลัง ให้ติ๊กวิชาเดียวแล้วโหลดใหม่";
+  renderStudents({});
+}
+
+// โหลดรายการครั้งเช็คชื่อของ วิชา+วันที่ ที่เลือก แล้ววาดปุ่มสลับครั้ง — คืน false ถ้าโหลดพลาด
+async function refreshDaySessions() {
+  const { data, error } = await sb
+    .from("attendance_sessions")
+    .select("*")
+    .eq("subject_id", currentSubjectId)
+    .eq("session_date", elDate.value)
+    .order("created_at");
+  if (error) { showToast("ตรวจสอบครั้งที่เช็คชื่อไม่สำเร็จ: " + error.message, false); return false; }
+  daySessions = data || [];
+  renderDaySessionChips();
+  return true;
+}
+
+// วาดปุ่มครั้งของวันนั้น + ปุ่มเพิ่มครั้งใหม่ (วันเดียวเช็คได้หลายครั้ง)
+function renderDaySessionChips() {
+  if (daySessions.length === 0) { elDaySessions.style.display = "none"; elDaySessions.innerHTML = ""; return; }
+  elDaySessions.style.display = "block";
+  elDaySessions.innerHTML = "<div class='hint' style='font-size:13px; margin-bottom:6px'>ครั้งที่เช็คแล้วในวันนี้ — กดเพื่อสลับไปแก้ หรือเพิ่มครั้งใหม่</div>";
+  daySessions.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (currentSession && currentSession.id === s.id ? " active" : "");
+    b.textContent = "ครั้งที่ " + (i + 1) + " · " + s.periods_covered + " คาบ";
+    b.addEventListener("click", () => selectDaySession(s));
+    elDaySessions.appendChild(b);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "chip" + (currentSession === null ? " active" : "");
+  add.textContent = "+ เพิ่มครั้งใหม่";
+  add.addEventListener("click", () => { startNewSession(); });
+  elDaySessions.appendChild(add);
+}
+
+// เปิดครั้งเดิมมาแก้
+async function selectDaySession(s) {
+  currentSession = s;
+  writeCurrentPeriods(s.periods_covered);
+  const { data: records, error } = await sb
+    .from("attendance_records")
+    .select("student_id, status")
+    .eq("session_id", s.id);
+  if (error) { showToast("โหลดผลเช็คชื่อเดิมไม่สำเร็จ", false); return; }
+  const scoreMap = {};
+  for (const r of (records || [])) scoreMap[r.student_id] = r.status;
+  elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (daySessions.indexOf(s) + 1) + ") ของวันนี้";
+  renderStudents(scoreMap);
+  renderDaySessionChips();
+}
+
+// เริ่มครั้งใหม่ (ของวันเดียวกันก็ได้ เช่น วันนี้เรียน 2 รอบ เช็คแยกกันคนละครั้ง)
+function startNewSession() {
+  currentSession = null;
+  elSessionNote.textContent = daySessions.length > 0
+    ? "กำลังเพิ่มครั้งใหม่ของวันนี้ (วันนี้เช็คไปแล้ว " + daySessions.length + " ครั้ง) — ตั้งจำนวนคาบข้างบนก่อนบันทึก"
+    : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
+  renderStudents({});
+  renderDaySessionChips();
+}
+
+// วาดรายชื่อนักเรียน + ช่องเลือกสถานะ
+function renderStudents(scoreMap) {
+  elStudentList.innerHTML = "";
+  for (const stu of students) {
+    const row = document.createElement("div");
+    row.className = "student-row";
+    row.dataset.classroom = stu.classroom || "";
+    if (elClassroom.value && stu.classroom !== elClassroom.value) {
+      row.style.display = "none";
+    }
+
+    const info = document.createElement("div");
+    info.className = "student-info";
+    info.innerHTML =
+      "<div class='name'>" + stu.name + "</div>" +
+      "<div class='meta'>เลขที่ " + stu.student_no +
+      (stu.classroom ? " · " + stu.classroom : "") + "</div>";
+
+    const sel = document.createElement("select");
+    sel.dataset.studentId = stu.id;
+    for (const status of STATUS_OPTIONS) {
+      const o = document.createElement("option");
+      o.value = status;
+      o.textContent = status;
+      sel.appendChild(o);
+    }
+    sel.value = scoreMap[stu.id] || "มา"; // ค่าเริ่มต้น = มา ถ้าไม่มีข้อมูลเดิม
+
+    row.appendChild(info);
+    row.appendChild(sel);
+    elStudentList.appendChild(row);
+  }
+
+  elStudentsCard.style.display = "block";
+  elEmptyHint.style.display = "none";
+}
+
+// อ่านสถานะที่ติ๊กไว้ทั้งหมด — คืน [{student_id, status}, ...]
+function readTickedStatuses() {
+  const selects = elStudentList.querySelectorAll("select");
+  const rows = [];
+  for (const sel of selects) rows.push({ student_id: sel.dataset.studentId, status: sel.value });
+  return rows;
+}
+
+// ---------- บันทึก ----------
+btnSave.addEventListener("click", async () => {
+  btnSave.disabled = true;
+  try {
+    if (blockMode) await saveBlock();
+    else await saveSingleSubject();
+  } finally {
+    btnSave.disabled = false;
+  }
+});
+
+// โหมดวิชาเดียว: สร้าง/แก้ไขครั้งที่เช็คชื่อ แล้ว upsert สถานะทุกคน
+async function saveSingleSubject() {
+  const periods = readCurrentPeriods();
+  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+
+  let sessionId;
+  if (currentSession) {
+    // เคยมีครั้งนี้อยู่แล้ว แก้ไขจำนวนคาบได้ (เผื่อครูกรอกผิดตอนแรก)
+    const { error } = await sb
+      .from("attendance_sessions")
+      .update({ periods_covered: periods })
+      .eq("id", currentSession.id);
+    if (error) { showToast("แก้ไขครั้งที่เช็คชื่อไม่สำเร็จ: " + error.message, false); return; }
+    sessionId = currentSession.id;
+  } else {
+    // ยังไม่เคยมี สร้างครั้งใหม่ (วันเดียวกันมีหลายครั้งได้ เช่น วันนี้เรียน 2 รอบ)
+    const { data, error } = await sb
+      .from("attendance_sessions")
+      .insert({ subject_id: currentSubjectId, session_date: elDate.value, periods_covered: periods })
+      .select()
+      .single();
+    if (error) { showToast("สร้างครั้งเช็คชื่อไม่สำเร็จ: " + error.message, false); return; }
+    currentSession = data;
+    sessionId = data.id;
+  }
+
+  const rows = readTickedStatuses().map(r => ({ session_id: sessionId, student_id: r.student_id, status: r.status }));
+
+  // upsert อาศัย unique(session_id, student_id) กรอกซ้ำ = ทับค่าเดิม
+  const { error } = await sb
+    .from("attendance_records")
+    .upsert(rows, { onConflict: "session_id,student_id" });
+  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+
+  showToast("บันทึกแล้ว " + rows.length + " คน", true);
+  elSessionNote.textContent = "บันทึกล่าสุดแล้ว — แก้ต่อได้ถ้าจำเป็น";
+  await refreshDaySessions(); // ครั้งใหม่ที่เพิ่งสร้างจะโผล่เป็นปุ่มให้สลับได้
+}
+
+// โหมดบล็อก: สร้างครั้งเช็คชื่อแยกให้วิชาย่อยทุกตัวที่ติ๊ก สถานะเด็กชุดเดียวกัน
+async function saveBlock() {
+  const statuses = readTickedStatuses();
+  if (statuses.length === 0) { showToast("ยังไม่มีรายชื่อให้บันทึก กดโหลดรายชื่อก่อน", false); return; }
+
+  let created = 0;
+  for (const m of blockMembers) {
+    // กรองเฉพาะสถานะของนักเรียนที่มีรายชื่อลงทะเบียนในวิชาย่อยนี้
+    const validStatuses = statuses.filter(r =>
+      blockStudentSubjects.has(r.student_id) && blockStudentSubjects.get(r.student_id).has(m.id)
+    );
+    if (validStatuses.length === 0) continue; // ถ้าวิชานี้ไม่มีนักเรียนเลย ข้ามไปไม่ต้องสร้าง session
+
+    const { data: sess, error } = await sb
+      .from("attendance_sessions")
+      .insert({ subject_id: m.id, session_date: elDate.value, periods_covered: m.periods })
+      .select()
+      .single();
+    if (error) {
+      showToast("สร้างครั้งเช็คชื่อของ \"" + m.name + "\" ไม่สำเร็จ: " + error.message +
+        (created > 0 ? " (บันทึกสำเร็จไปแล้ว " + created + " วิชา — วิชาที่เหลือยังไม่ได้บันทึก)" : ""), false);
+      return;
+    }
+    const rows = validStatuses.map(r => ({ session_id: sess.id, student_id: r.student_id, status: r.status }));
+    const { error: recErr } = await sb
+      .from("attendance_records")
+      .upsert(rows, { onConflict: "session_id,student_id" });
+    if (recErr) {
+      showToast("บันทึกสถานะของ \"" + m.name + "\" ไม่สำเร็จ: " + recErr.message +
+        (created > 0 ? " (บันทึกสำเร็จไปแล้ว " + created + " วิชา)" : ""), false);
+      return;
+    }
+    created++;
+  }
+
+  showToast("บันทึกแล้ว " + statuses.length + " คน ใน " + created + " วิชาย่อย", true);
+  // ซ่อนรายชื่อกันกดบันทึกซ้ำ (จะกลายเป็นสร้างครั้งใหม่ซ้ำอีกชุด) — แก้ย้อนหลังให้ติ๊กทีละวิชา
+  hideStudents();
+}
+
+function hideStudents() {
+  elStudentsCard.style.display = "none";
+  elEmptyHint.style.display = "block";
+  currentSession = null;
+  daySessions = [];
+  elDaySessions.style.display = "none";
+  elDaySessions.innerHTML = "";
+  blockMode = false;
+  blockMembers = [];
+  blockStudentSubjects.clear();
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ---------- ชั่วโมงชดเชย (เติมยอดเข้าเรียนให้ถึงเกณฑ์ ไม่ใช่ข้ามเช็ค มส.) ----------
+const elMakeupCard = document.getElementById("makeup-card");
+const elMakeupList = document.getElementById("makeup-list");
+const elMakeupStudent = document.getElementById("sel-makeup-student");
+let makeupRoster = [];
+let makeupRecords = [];
+
+async function loadMakeupSection() {
+  // ชั่วโมงชดเชยผูกกับวิชาพื้นฐานเท่านั้น (มส. คิดต่อวิชาพื้นฐาน) — เลือกวิชาบูรณาการอยู่ให้ซ่อน
+  if (!currentSubjectId || (currentSubject && currentSubject.subject_type === "บูรณาการ")) {
+    elMakeupCard.style.display = "none";
+    return;
+  }
+  elMakeupCard.style.display = "block";
+
+  makeupRoster = await getRosterForSubject(currentSubjectId);
+  fillSelect(elMakeupStudent, makeupRoster, s => s.name + "  (เลขที่ " + s.student_no + ")", "— เลือกนักเรียน —");
+
+  const { data, error } = await sb
+    .from("makeup_hours")
+    .select("*, student:student_id(*)")
+    .eq("subject_id", currentSubjectId)
+    .order("created_at");
+  if (error) { showToast("โหลดชั่วโมงชดเชยไม่สำเร็จ: " + error.message, false); return; }
+  makeupRecords = (data || []).filter(m => m.student);
+  renderMakeupList();
+}
+
+function renderMakeupList() {
+  elMakeupList.innerHTML = "";
+  if (makeupRecords.length === 0) {
+    elMakeupList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีการบันทึกชั่วโมงชดเชยในวิชานี้</div>";
+    return;
+  }
+  for (const m of makeupRecords) {
+    const row = document.createElement("div");
+    row.className = "student-row";
+    row.innerHTML =
+      "<div class='student-info'><div class='name'>" + escapeHtml(m.student.name) +
+      "  <span class='hint'>+" + m.periods + " คาบ</span></div>" +
+      "<div class='meta'>" + escapeHtml(m.reason) + "</div></div>";
+    const delBtn = document.createElement("button");
+    delBtn.className = "load";
+    delBtn.style.cssText = "width:auto; padding:6px 10px; font-size:13px; background:var(--danger); margin-top:0";
+    delBtn.textContent = "ลบ";
+    delBtn.addEventListener("click", () => removeMakeup(m));
+    row.appendChild(delBtn);
+    elMakeupList.appendChild(row);
+  }
+}
+
+// เช็คคาบขาดสะสมดิบ (ก่อนชดเชย) ของนักเรียนคนหนึ่งในวิชานี้ เทียบกับเพดานเรียนซ้ำ (40% ของ
+// คาบทั้งเทอม) — คืน null ถ้าเช็คไม่ได้ (ยังไม่ตั้งจำนวนคาบทั้งเทอม หรือยังไม่เคยเช็คชื่อเลย)
+// ใช้ computeMissedPeriods() ตัวเดียวกับที่ summary.html/retention.html ใช้ กันแก้สูตรที่หนึ่ง
+// แล้วลืมอีกที่ (เคยพลาดมาก่อน — ดู CLAUDE.md)
+async function getRawMissedInfo(subjectId, studentId) {
+  const { data: subj } = await sb.from("subjects").select("total_periods").eq("id", subjectId).single();
+  if (!subj || !subj.total_periods) return null;
+  const { data: sessionsData } = await sb
+    .from("attendance_sessions")
+    .select("periods_covered, attendance_records(status, student_id)")
+    .eq("subject_id", subjectId);
+  if (!sessionsData || sessionsData.length === 0) return null;
+  const missed = computeMissedPeriods(studentId, sessionsData);
+  return { missed, maxMissedRetake: subj.total_periods * 0.40 };
+}
+
+document.getElementById("btn-add-makeup").addEventListener("click", async () => {
+  const studentId = elMakeupStudent.value;
+  const periods = Number(document.getElementById("inp-makeup-periods").value);
+  const reason = document.getElementById("inp-makeup-reason").value.trim();
+  if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
+  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+  if (!reason) { showToast("กรอกเหตุผล/รายละเอียดก่อน", false); return; }
+
+  // ขาดสะสมเกินเพดานเรียนซ้ำแล้ว (40% ของคาบทั้งเทอม) = ต้องเรียนซ้ำรายวิชา ชดเชยชั่วโมงช่วยไม่ได้แล้ว (ยืนยันแล้ว)
+  const missedInfo = await getRawMissedInfo(currentSubjectId, studentId);
+  if (missedInfo !== null && missedInfo.missed > missedInfo.maxMissedRetake) {
+    showToast("นักเรียนคนนี้ขาดไปแล้ว " + missedInfo.missed + " คาบ (เกินเพดาน " + missedInfo.maxMissedRetake.toFixed(1) + " คาบ) ต้องเรียนซ้ำรายวิชา บันทึกชั่วโมงชดเชยไม่ได้แล้ว", false);
+    return;
+  }
+
+  const { error } = await sb.from("makeup_hours").insert({
+    subject_id: currentSubjectId, student_id: studentId, periods, reason
+  });
+  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
+  showToast("บันทึกชั่วโมงชดเชยแล้ว", true);
+  document.getElementById("inp-makeup-periods").value = "";
+  document.getElementById("inp-makeup-reason").value = "";
+  await loadMakeupSection();
+});
+
+async function removeMakeup(m) {
+  if (!confirm("ยืนยันลบชั่วโมงชดเชยของ \"" + m.student.name + "\" (" + m.periods + " คาบ) ?")) return;
+  const { error } = await sb.from("makeup_hours").delete().eq("id", m.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  showToast("ลบแล้ว", true);
+  await loadMakeupSection();
+}
+
+// เริ่มทำงาน
+loadSubjects();
+}
+</script>
+</body>
+</html>

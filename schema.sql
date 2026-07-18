@@ -1205,3 +1205,50 @@ create policy competency_targets_write on competency_assessment_targets
 drop policy if exists competency_members_write on competency_assessment_members;
 create policy competency_members_write on competency_assessment_members
   for all using (can_edit_competency_assessment(assessment_id)) with check (can_edit_competency_assessment(assessment_id));
+
+-- ============================================================
+-- Migration: ข้อมูลส่วนตัวและรูปโปรไฟล์ของผู้ใช้ (2026-07-18)
+-- ------------------------------------------------------------
+-- แยกจาก profiles เดิมเพื่อให้ครูแก้ชื่อ/รูปของตนได้ แต่ไม่แตะ role หรือ email
+-- รูปเก็บใน private bucket และเจ้าของบัญชีเท่านั้นที่อ่าน/เขียนไฟล์ของตนเองได้
+-- ============================================================
+create table if not exists user_profile_details (
+  user_id       uuid primary key references auth.users(id) on delete cascade,
+  display_name  text,
+  avatar_path   text,
+  updated_at    timestamptz not null default now(),
+  constraint user_profile_details_name_length check (display_name is null or char_length(btrim(display_name)) between 1 and 80)
+);
+
+alter table user_profile_details enable row level security;
+drop policy if exists user_profile_details_select_own on user_profile_details;
+create policy user_profile_details_select_own on user_profile_details
+  for select using (user_id = auth.uid());
+drop policy if exists user_profile_details_insert_own on user_profile_details;
+create policy user_profile_details_insert_own on user_profile_details
+  for insert with check (user_id = auth.uid());
+drop policy if exists user_profile_details_update_own on user_profile_details;
+create policy user_profile_details_update_own on user_profile_details
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+insert into storage.buckets (id, name, public)
+values ('profile-avatars', 'profile-avatars', false)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists profile_avatars_select_own on storage.objects;
+create policy profile_avatars_select_own on storage.objects
+  for select to authenticated using (
+    bucket_id = 'profile-avatars' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+drop policy if exists profile_avatars_insert_own on storage.objects;
+create policy profile_avatars_insert_own on storage.objects
+  for insert to authenticated with check (
+    bucket_id = 'profile-avatars' and (storage.foldername(name))[1] = auth.uid()::text
+  );
+drop policy if exists profile_avatars_update_own on storage.objects;
+create policy profile_avatars_update_own on storage.objects
+  for update to authenticated using (
+    bucket_id = 'profile-avatars' and (storage.foldername(name))[1] = auth.uid()::text
+  ) with check (
+    bucket_id = 'profile-avatars' and (storage.foldername(name))[1] = auth.uid()::text
+  );

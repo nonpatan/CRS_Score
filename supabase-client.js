@@ -8,13 +8,26 @@ const SUPABASE_ANON_KEY = "sb_publishable_EEGLPPMa3fIX1aRR6GA3Xw_mF4mh5X0";
 
 export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// ไฟล์กลางนี้อยู่รากเว็บเสมอ ใช้เป็นฐาน URL เพื่อให้หน้าที่อยู่ในโฟลเดอร์ย่อย
+// เด้งกลับ login ที่รากเว็บได้ถูกต้องทั้งบน GitHub Pages และ local server
+const APP_ROOT_URL = new URL("./", import.meta.url);
+
+function appRelativeLocation() {
+  const rootPath = APP_ROOT_URL.pathname;
+  if (location.pathname.startsWith(rootPath)) {
+    return location.pathname.slice(rootPath.length) + location.search;
+  }
+  return location.pathname.split("/").pop() + location.search;
+}
+
 // เช็คว่าล็อกอินอยู่ไหม ถ้าไม่ได้ล็อกอิน เด้งไปหน้า login (จำหน้าปัจจุบันไว้ กลับมาได้หลังล็อกอิน)
 // เรียกตอนต้นสคริปต์ของทุกหน้าที่ต้องล็อกอินก่อนใช้งาน
 export async function requireAuth() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) {
-    const here = location.pathname.split("/").pop() + location.search;
-    location.href = "login.html?next=" + encodeURIComponent(here);
+    const loginUrl = new URL("login.html", APP_ROOT_URL);
+    loginUrl.searchParams.set("next", appRelativeLocation());
+    location.href = loginUrl.href;
     return null;
   }
   return session;
@@ -23,7 +36,7 @@ export async function requireAuth() {
 // ออกจากระบบ แล้วเด้งกลับไปหน้า login
 export async function signOut() {
   await sb.auth.signOut();
-  location.href = "login.html";
+  location.href = new URL("login.html", APP_ROOT_URL).href;
 }
 
 // โปรไฟล์ของผู้ใช้ที่ล็อกอินอยู่ (มี role: admin/teacher)
@@ -31,6 +44,50 @@ export async function getProfile(userId) {
   const { data, error } = await sb.from("profiles").select("*").eq("id", userId).single();
   if (error) return null;
   return data;
+}
+
+// ข้อมูลส่วนตัวที่เจ้าของบัญชีแก้ได้เอง แยกจาก profiles เพื่อไม่ให้ครูแก้ role/email ได้
+// ตารางนี้จะมีหลังรัน migration "ข้อมูลส่วนตัวและรูปโปรไฟล์" ท้าย schema.sql
+export async function getMyProfileDetails(userId) {
+  const { data, error } = await sb
+    .from("user_profile_details")
+    .select("user_id,display_name,avatar_path,updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return { data: data || null, error };
+}
+
+export function profileInitials(nameOrEmail) {
+  const text = String(nameOrEmail || "ผู้ใช้").trim();
+  if (!text) return "ผ";
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return text.slice(0, 2).toUpperCase();
+}
+
+// รูปใน Storage เป็น private เสมอ จึงต้องสร้าง signed URL ก่อนแสดง และใช้เฉพาะของบัญชีที่ล็อกอิน
+export async function getMyProfilePresentation(user) {
+  const profile = await getProfile(user.id);
+  const detailResult = await getMyProfileDetails(user.id);
+  const details = detailResult.data;
+  const displayName = (details && details.display_name) || (profile && profile.name) ||
+    (user.user_metadata && user.user_metadata.full_name) || (user.email || "ผู้ใช้");
+  let avatarUrl = "";
+
+  if (details && details.avatar_path) {
+    const { data } = await sb.storage.from("profile-avatars")
+      .createSignedUrl(details.avatar_path, 60 * 60);
+    avatarUrl = (data && data.signedUrl) || "";
+  }
+
+  return {
+    profile,
+    details,
+    detailsError: detailResult.error,
+    displayName,
+    initials: profileInitials(displayName),
+    avatarUrl
+  };
 }
 
 // ============================================================
