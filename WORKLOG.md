@@ -1032,3 +1032,28 @@
   ช่องวันที่จึงกว้างพอดีค่าวันที่+ไอคอนปฏิทิน ชิดซ้ายในคอลัมน์ ไม่ยืดเต็ม (แก้เฉพาะช่องวันที่
   ช่องอื่นคงเดิม) · ทดสอบด้วย mock ที่ iPad 1024px แล้วดูเรียบร้อย
 - ไม่แตะ app-shell.css จึงไม่ต้อง bump version — deploy แค่ `attendance.html`
+
+## 2026-07-18 — แยกสิทธิ์: แก้ "ข้อมูลวิชา" ให้ admin เท่านั้น (โครงสร้าง/คะแนนคงเดิม owner-or-admin)
+
+- ผู้ใช้ขอแยกสิทธิ์ 2 ระดับในหน้า `manage.html`: **ข้อมูลวิชา** (ชื่อ/รหัส/คาบ/หน่วยกิต/เจ้าของ)
+  = admin เท่านั้น · **โครงสร้าง/คะแนน** (units/indicators/collections/scores/attendance/remarks/
+  makeup/enrollments/integration_members) = admin หรือเจ้าของวิชา (คงเดิม) — คือ `owner_id` ที่
+  admin ตั้งให้ = สิทธิ์แก้โครงสร้าง/คะแนนเท่านั้น ไม่ใช่แก้นิยามวิชา
+- **RLS (ต้องรันบน Supabase)**: เพิ่ม migration ท้าย `schema.sql` เปลี่ยน `subjects_update` จาก
+  `is_admin() or owner_id = auth.uid()` → `is_admin()` เท่านั้น · policy อื่น (units/scores/...
+  ผ่าน `can_edit_subject`) **ไม่แตะ** · `subjects_insert`/`subjects_delete` เป็น admin-only อยู่แล้ว
+  · ตรวจแล้วว่าการแก้โครงสร้าง/ลงทะเบียนของครูเจ้าของ **ไม่เคยไปแตะแถว subjects** (คนละตาราง) จึง
+  ไม่พังเมื่อ subjects_update เป็น admin-only
+- **โปรแกรม `academic/manage.html`**: แยก `applyEditPermissionUI()` เป็น 2 gate — `canEditInfo`
+  (=`isAdminUser`) คุมปุ่ม "บันทึกข้อมูลวิชา" + `setSubjectInfoDisabled()` ปิดช่องกรอกข้อมูลวิชา 12
+  ช่อง (f-type/f-name/f-code/f-level/f-grade/f-max/f-credits/f-year/f-term/f-teacher/f-owner/
+  f-periods) เมื่อไม่ใช่ admin · `canEditStructure` (=`canEditCurrentSubject()` owner-or-admin) คุม
+  ปุ่มโครงสร้าง/สมาชิกเหมือนเดิม · แบนเนอร์ 3 สถานะ: admin=ไม่มี, เจ้าของครู=อำพัน "ข้อมูลวิชาแก้ได้
+  เฉพาะ admin แต่แก้โครงสร้าง/คะแนนได้", ไม่ใช่เจ้าของ=แดง "ดูได้อย่างเดียว" · อัปเดตข้อความช่อง
+  เจ้าของวิชาให้ตรงสิทธิ์ใหม่ · `applyEditPermissionUI()` เรียกหลัง `fillSubjectForm()` เสมอ (disable
+  หลังเติมค่า)
+- ตรวจ: `node --check` module ผ่าน · field id ครบ 12 + element อื่นครบ · SQL migration paren สมดุล ·
+  admin path ไม่เปลี่ยน (canEditInfo=true → ช่องเปิด ปุ่มโชว์)
+- **ยังไม่ทดสอบ browser การกันครูจริง** — ต้องมีบัญชี teacher ที่เป็นเจ้าของวิชาถึงจะเห็นผล (ผู้ใช้
+  เป็น admin) · admin ทดสอบได้ว่ายังแก้ได้ครบเหมือนเดิม
+- อัปเดต CLAUDE.md/AGENTS.md (หัวข้อ RLS) ตรงกันแล้ว

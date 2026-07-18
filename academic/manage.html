@@ -289,7 +289,7 @@
     <div class="field" id="field-owner" style="display:none">
       <label for="f-owner">เจ้าของวิชา (แก้ไขวิชานี้ได้)</label>
       <select id="f-owner"></select>
-      <div class="field-note">เห็นเฉพาะ admin — ใช้กำหนดว่าครูบัญชีไหนแก้ไขวิชานี้ได้ (การลบวิชาสงวนสำหรับ admin)</div>
+      <div class="field-note">เห็นเฉพาะ admin — ครูที่เป็นเจ้าของแก้ได้เฉพาะ<b>โครงสร้าง/คะแนน/ลงทะเบียน</b>ของวิชานี้ ส่วน<b>ข้อมูลวิชา</b>(ชื่อ/รหัส/คาบ/เจ้าของ)และการลบวิชา สงวนไว้ให้ admin</div>
     </div>
     <div class="field" id="field-periods">
       <label for="f-periods">จำนวนคาบเรียนทั้งเทอม</label>
@@ -474,17 +474,49 @@ function canEditCurrentSubject() {
   return currentSubject.owner_id === myUserId;
 }
 
-// ซ่อน/ปิดปุ่มแก้ไขทั้งหมด ถ้าไม่ใช่เจ้าของวิชานี้ (RLS เป็นตัวกันจริงอยู่แล้ว
-// อันนี้แค่กันสับสน ไม่ให้กดแล้วเจอ error "บันทึกไม่สำเร็จ" เฉยๆ)
+// ช่องกรอกใน "ข้อมูลวิชา" — ปิด/เปิดพร้อมกันตามสิทธิ์แก้ข้อมูลวิชา (admin เท่านั้น)
+const SUBJECT_INFO_FIELDS = ["f-type","f-name","f-code","f-level","f-grade","f-max","f-credits","f-year","f-term","f-teacher","f-owner","f-periods"];
+function setSubjectInfoDisabled(disabled) {
+  for (const id of SUBJECT_INFO_FIELDS) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+  }
+}
+
+// สิทธิ์ 2 ระดับ (RLS เป็นตัวกันจริง อันนี้แค่กัน UI สับสน):
+//   - "ข้อมูลวิชา" (ชื่อ/รหัส/คาบ/เจ้าของ ฯลฯ) + ลบวิชา = admin เท่านั้น
+//   - "โครงสร้าง/คะแนน/ลงทะเบียน/สมาชิกบูรณาการ" = admin หรือเจ้าของวิชา (canEditCurrentSubject)
 function applyEditPermissionUI() {
-  const canEdit = canEditCurrentSubject();
-  document.getElementById("readonly-banner").style.display = canEdit ? "none" : "block";
-  document.getElementById("btn-save-subject").style.display = canEdit ? "block" : "none";
-  elDelSubject.style.display = (isAdminUser && currentSubject) ? "block" : "none"; // ลบได้เฉพาะ admin
-  document.getElementById("btn-add-unit-vicha").style.display = canEdit ? "inline-block" : "none";
-  document.getElementById("btn-add-unit-competency").style.display = canEdit ? "inline-block" : "none";
-  document.getElementById("btn-add-member").style.display = canEdit ? "inline-block" : "none";
-  elSelAddMember.style.display = canEdit ? "block" : "none";
+  const canEditStructure = canEditCurrentSubject();   // owner หรือ admin
+  const canEditInfo = isAdminUser;                    // admin เท่านั้น
+
+  // ข้อมูลวิชา: เฉพาะ admin
+  document.getElementById("btn-save-subject").style.display = canEditInfo ? "block" : "none";
+  setSubjectInfoDisabled(!canEditInfo);
+  elDelSubject.style.display = (isAdminUser && currentSubject) ? "block" : "none";
+
+  // โครงสร้าง/สมาชิก: owner หรือ admin (คงเดิม)
+  document.getElementById("btn-add-unit-vicha").style.display = canEditStructure ? "inline-block" : "none";
+  document.getElementById("btn-add-unit-competency").style.display = canEditStructure ? "inline-block" : "none";
+  document.getElementById("btn-add-member").style.display = canEditStructure ? "inline-block" : "none";
+  elSelAddMember.style.display = canEditStructure ? "block" : "none";
+
+  // แบนเนอร์อธิบายสิทธิ์ 3 สถานะ
+  const banner = document.getElementById("readonly-banner");
+  if (isAdminUser) {
+    banner.style.display = "none";
+  } else if (canEditStructure) {
+    // เจ้าของวิชา (ครู): แก้โครงสร้าง/คะแนนได้ แต่ข้อมูลวิชาแก้ไม่ได้
+    banner.textContent = "ข้อมูลวิชา (ชื่อ/รหัส/คาบ/เจ้าของ) แก้ได้เฉพาะ admin — คุณเป็นเจ้าของวิชานี้ จึงแก้โครงสร้างและคะแนนด้านล่างได้";
+    banner.style.background = "#faf1dd";
+    banner.style.color = "#93690f";
+    banner.style.display = "block";
+  } else {
+    banner.textContent = "คุณไม่ใช่เจ้าของวิชานี้ — ดูได้อย่างเดียว (ให้ admin ตั้งเป็นเจ้าของก่อน)";
+    banner.style.background = "var(--danger-soft)";
+    banner.style.color = "var(--danger)";
+    banner.style.display = "block";
+  }
 }
 
 // ตัวเลือกชั้นเรียนตามระดับ

@@ -1252,3 +1252,17 @@ create policy profile_avatars_update_own on storage.objects
   ) with check (
     bucket_id = 'profile-avatars' and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- ============================================================
+-- Migration: แก้ "ข้อมูลวิชา" (subjects) สงวนให้ admin เท่านั้น (2026-07-18)
+-- ------------------------------------------------------------
+-- เดิม subjects_update = admin หรือเจ้าของวิชา (owner_id) — เปลี่ยนเป็น admin เท่านั้น
+-- เจตนา: ชื่อ/รหัส/คาบ/หน่วยกิต/เจ้าของ ของวิชา แก้ได้เฉพาะ admin
+-- ส่วน "โครงสร้าง/คะแนน" (units/indicators/collections/scores/attendance/remarks/
+-- makeup_hours/enrollments/integration_members) ยังเป็น admin-หรือ-เจ้าของวิชา ผ่าน
+-- can_edit_subject() เหมือนเดิม — บล็อกนี้ไม่แตะ policy เหล่านั้น
+-- (subjects_insert และ subjects_delete เป็น admin-only อยู่แล้ว ไม่ต้องแก้)
+-- ============================================================
+drop policy if exists subjects_update on subjects;
+create policy subjects_update on subjects
+  for update using (is_admin()) with check (is_admin());
