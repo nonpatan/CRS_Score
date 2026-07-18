@@ -282,14 +282,10 @@
         </select>
       </div>
     </div>
-    <div class="field" id="field-teacher">
-      <label for="f-teacher">ครูผู้สอน</label>
-      <input type="text" id="f-teacher" placeholder="ชื่อหรืออีเมลครู">
-    </div>
     <div class="field" id="field-owner" style="display:none">
-      <label for="f-owner">เจ้าของวิชา (แก้ไขวิชานี้ได้)</label>
-      <select id="f-owner"></select>
-      <div class="field-note">เห็นเฉพาะ admin — ครูที่เป็นเจ้าของแก้ได้เฉพาะ<b>โครงสร้าง/คะแนน/ลงทะเบียน</b>ของวิชานี้ ส่วน<b>ข้อมูลวิชา</b>(ชื่อ/รหัส/คาบ/เจ้าของ)และการลบวิชา สงวนไว้ให้ admin</div>
+      <label for="f-owner">ครูเจ้าของวิชา (เลือกด้วยอีเมล)</label>
+      <select id="f-owner" required></select>
+      <div class="field-note">ต้องเลือกอีเมลครูเจ้าของวิชาก่อนบันทึก — ใช้อีเมลบัญชีเป็นครูผู้สอนของวิชานี้; ชื่อที่แสดงให้ดูจากข้อมูลส่วนตัวของบัญชี ครูเจ้าของแก้ได้เฉพาะ<b>โครงสร้าง/คะแนน/ลงทะเบียน</b> ส่วน<b>ข้อมูลวิชา</b>และการลบวิชาสงวนไว้ให้ admin</div>
     </div>
     <div class="field" id="field-periods">
       <label for="f-periods">จำนวนคาบเรียนทั้งเทอม</label>
@@ -427,7 +423,6 @@ const fMax = document.getElementById("f-max");
 const fCredits = document.getElementById("f-credits");
 const fYear = document.getElementById("f-year");
 const fTerm = document.getElementById("f-term");
-const fTeacher = document.getElementById("f-teacher");
 const fPeriods = document.getElementById("f-periods");
 const fOwner = document.getElementById("f-owner");
 const fieldCredits = document.getElementById("field-credits");
@@ -445,11 +440,11 @@ if (isAdminUser) {
   const { data } = await sb.from("profiles").select("*").order("email");
   allProfiles = data || [];
   fieldOwner.style.display = "block";
-  fOwner.innerHTML = "<option value=''>— ไม่มีเจ้าของ (admin แก้ได้อย่างเดียว) —</option>";
+  fOwner.innerHTML = "<option value='' disabled selected>— เลือกอีเมลครูเจ้าของวิชา —</option>";
   for (const p of allProfiles) {
     const o = document.createElement("option");
     o.value = p.id;
-    o.textContent = (p.name || p.email || p.id) + (p.role === "admin" ? " (admin)" : "");
+    o.textContent = (p.email || p.id) + (p.role === "admin" ? " (admin)" : "");
     fOwner.appendChild(o);
   }
 }
@@ -475,7 +470,7 @@ function canEditCurrentSubject() {
 }
 
 // ช่องกรอกใน "ข้อมูลวิชา" — ปิด/เปิดพร้อมกันตามสิทธิ์แก้ข้อมูลวิชา (admin เท่านั้น)
-const SUBJECT_INFO_FIELDS = ["f-type","f-name","f-code","f-level","f-grade","f-max","f-credits","f-year","f-term","f-teacher","f-owner","f-periods"];
+const SUBJECT_INFO_FIELDS = ["f-type","f-name","f-code","f-level","f-grade","f-max","f-credits","f-year","f-term","f-owner","f-periods"];
 function setSubjectInfoDisabled(disabled) {
   for (const id of SUBJECT_INFO_FIELDS) {
     const el = document.getElementById(id);
@@ -546,12 +541,9 @@ function updateLevelDependentFields() {
 fLevel.addEventListener("change", () => { updateGradeOptions(); updateLevelDependentFields(); });
 
 // วิชาบูรณาการไม่มีหน่วยใหญ่/สมรรถนะหลักเป็นของตัวเอง แต่มีวิชาพื้นฐานสมาชิกแทน
-// ครูผู้สอนก็ไม่ต้องมี เพราะซ้ำกับครูของวิชาพื้นฐานแต่ละตัวที่ประกอบกันอยู่แล้ว
 function updateTypeDependentUI() {
   const isIntegrated = fType.value === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
-  document.getElementById("field-teacher").style.display = isIntegrated ? "none" : "block";
-  if (isIntegrated) fTeacher.value = "";
   if (currentSubject) {
     elStructure.style.display = isIntegrated ? "none" : "block";
     elEnrollCard.style.display = isIntegrated ? "none" : "block";
@@ -716,12 +708,10 @@ function fillSubjectForm(subj) {
   // สร้างวิชาใหม่: เติมปีการศึกษาที่ทำงานอยู่ให้อัตโนมัติ (ครูไม่ต้องพิมพ์ซ้ำ แก้ได้)
   fYear.value = subj && subj.year ? subj.year : getActiveYear();
   fTerm.value = subj && subj.term ? subj.term : "1";
-  fTeacher.value = subj && subj.teacher ? subj.teacher : "";
   fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
   if (isAdminUser) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
   const isIntegratedSubj = subj && subj.subject_type === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegratedSubj ? "none" : "block";
-  document.getElementById("field-teacher").style.display = isIntegratedSubj ? "none" : "block";
 }
 
 // ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
@@ -734,6 +724,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
   if (!gradeLevel) { showToast("กรุณาเลือกชั้น", false); return; }
   const year = fYear.value.trim();
   if (!year) { showToast("กรุณากรอกปีการศึกษา (บังคับ เพื่อกันข้อมูลปนกันข้ามปี)", false); return; }
+  if (isAdminUser && !fOwner.value) { showToast("กรุณาเลือกอีเมลครูเจ้าของวิชา", false); return; }
   const maxScore = Number(fMax.value);
   if (isNaN(maxScore) || maxScore <= 0) { showToast("คะแนนเต็มวิชาต้องมากกว่า 0", false); return; }
 
@@ -762,12 +753,11 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     credits: credits,
     year: year,
     term: isMatthayom ? fTerm.value : null,
-    teacher: isIntegrated ? null : (fTeacher.value.trim() || null),
     total_periods: periods
   };
   // เจ้าของวิชา: admin เลือกเองได้ (รวมถึงเปลี่ยนเจ้าของทีหลัง) ส่วนครูทั่วไปตอนสร้างวิชาใหม่
   // จะได้เป็นเจ้าของอัตโนมัติ — ตอนแก้ไขวิชาเดิมไม่ต้องส่ง owner_id ไปทับ (ไม่มีสิทธิ์เปลี่ยนอยู่แล้ว)
-  if (isAdminUser) payload.owner_id = fOwner.value || null;
+  if (isAdminUser) payload.owner_id = fOwner.value;
   else if (!currentSubject) payload.owner_id = myUserId;
 
   if (currentSubject) {

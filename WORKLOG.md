@@ -1045,15 +1045,40 @@
   · ตรวจแล้วว่าการแก้โครงสร้าง/ลงทะเบียนของครูเจ้าของ **ไม่เคยไปแตะแถว subjects** (คนละตาราง) จึง
   ไม่พังเมื่อ subjects_update เป็น admin-only
 - **โปรแกรม `academic/manage.html`**: แยก `applyEditPermissionUI()` เป็น 2 gate — `canEditInfo`
-  (=`isAdminUser`) คุมปุ่ม "บันทึกข้อมูลวิชา" + `setSubjectInfoDisabled()` ปิดช่องกรอกข้อมูลวิชา 12
-  ช่อง (f-type/f-name/f-code/f-level/f-grade/f-max/f-credits/f-year/f-term/f-teacher/f-owner/
-  f-periods) เมื่อไม่ใช่ admin · `canEditStructure` (=`canEditCurrentSubject()` owner-or-admin) คุม
+  (=`isAdminUser`) คุมปุ่ม "บันทึกข้อมูลวิชา" + `setSubjectInfoDisabled()` ปิดช่องกรอกข้อมูลวิชา 11
+  ช่อง (f-type/f-name/f-code/f-level/f-grade/f-max/f-credits/f-year/f-term/f-owner/f-periods)
+  เมื่อไม่ใช่ admin · `canEditStructure` (=`canEditCurrentSubject()` owner-or-admin) คุม
   ปุ่มโครงสร้าง/สมาชิกเหมือนเดิม · แบนเนอร์ 3 สถานะ: admin=ไม่มี, เจ้าของครู=อำพัน "ข้อมูลวิชาแก้ได้
   เฉพาะ admin แต่แก้โครงสร้าง/คะแนนได้", ไม่ใช่เจ้าของ=แดง "ดูได้อย่างเดียว" · อัปเดตข้อความช่อง
   เจ้าของวิชาให้ตรงสิทธิ์ใหม่ · `applyEditPermissionUI()` เรียกหลัง `fillSubjectForm()` เสมอ (disable
   หลังเติมค่า)
-- ตรวจ: `node --check` module ผ่าน · field id ครบ 12 + element อื่นครบ · SQL migration paren สมดุล ·
+- ตรวจ: `node --check` module ผ่าน · field id ครบ + element อื่นครบ · SQL migration paren สมดุล ·
   admin path ไม่เปลี่ยน (canEditInfo=true → ช่องเปิด ปุ่มโชว์)
 - **ยังไม่ทดสอบ browser การกันครูจริง** — ต้องมีบัญชี teacher ที่เป็นเจ้าของวิชาถึงจะเห็นผล (ผู้ใช้
   เป็น admin) · admin ทดสอบได้ว่ายังแก้ได้ครบเหมือนเดิม
+
+## 2026-07-18 — เลิกใช้ช่องครูผู้สอนซ้ำในข้อมูลวิชา
+
+- ตัดช่อง `subjects.teacher` ออกจากฟอร์ม `manage.html` แล้ว ใช้ `owner_id` เพียงแหล่งเดียวสำหรับ
+  ระบุครูเจ้าของวิชา โดย admin เลือกจากอีเมลบัญชีในช่อง “ครูเจ้าของวิชา”
+- การสร้าง/แก้ไขวิชาจะไม่เขียนทับค่า `teacher` เดิม จึงไม่ลบข้อมูลเก่าโดยไม่ตั้งใจ; การ rollover
+  ปีใหม่ไม่คัดลอกค่า legacy นี้แล้ว ส่วนวิชาใหม่จะมีค่าว่าง
+- เอาข้อความครูจากตัวเลือกวิชาย่อยใน `entry.html` และรายการเช็คชื่อใน `attendance.html` ออก
+  เพื่อไม่ให้แสดงข้อมูลเก่าที่ซ้ำกับบัญชีครู; หากต้องแสดงชื่อในอนาคต ให้ใช้ข้อมูลส่วนตัวของบัญชี
+  ที่ผูกด้วย `owner_id` แทน
+- ทำเครื่องหมายคอลัมน์ `subjects.teacher` ใน `schema.sql` ว่าเป็น legacy และแก้ seed ไม่ให้ใส่
+  ค่านี้อีก; ไม่มี migration หรือการแก้ข้อมูลใน Supabase รอบนี้
+- ตรวจผ่าน: module script ของ `manage.html`, `entry.html`, `attendance.html`, `rollover.html`
+  ผ่าน `node --check` และไม่เหลือการอ่าน/เขียน `teacher` ในหน้าเว็บที่ใช้งานจริง
+- **ยังไม่ deploy** — รอผู้ใช้ดู local ก่อน
 - อัปเดต CLAUDE.md/AGENTS.md (หัวข้อ RLS) ตรงกันแล้ว
+
+## 2026-07-18 — บังคับกำหนดครูเจ้าของวิชา
+
+- ผู้ใช้ยืนยันว่าเจ้าของวิชาเป็นข้อมูลสำคัญ จึงปรับ `manage.html` ให้ admin ต้องเลือกอีเมล
+  “ครูเจ้าของวิชา” ก่อนบันทึกทุกครั้ง ทั้งสร้างวิชาใหม่และแก้ไขวิชาเดิม
+- เอาตัวเลือก “ไม่มีเจ้าของ” ออก, เพิ่ม placeholder ที่เลือกไม่ได้ และตรวจซ้ำใน JavaScript
+  ก่อนส่งข้อมูลไป Supabase; ข้อมูลวิชาเก่าที่ `owner_id` ว่างจะต้องเลือกครูก่อนจึงบันทึกได้
+- ยังไม่เปลี่ยนคอลัมน์ฐานข้อมูลเป็น `NOT NULL` เพื่อไม่ให้ migration ล้มจากวิชาเก่าที่อาจไม่มี
+  เจ้าของ — หลังตรวจและกำหนดเจ้าของให้ครบทุกวิชาแล้ว ค่อยเพิ่ม constraint ระดับฐานข้อมูลได้
+- **ยังไม่ deploy** — รอผู้ใช้ดู local ก่อน

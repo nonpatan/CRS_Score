@@ -23,7 +23,7 @@ create table subjects (
   name        text    not null,                 -- ชื่อวิชา เช่น วิทยาการคำนวณ
   level       text    not null,                 -- 'ประถม' หรือ 'มัธยม' ใช้เลือก label
   max_score   integer not null default 100,     -- เพดานคะแนนวิชา ครูกำหนด
-  teacher     text,                             -- อีเมลหรือชื่อครูเจ้าของ
+  teacher     text,                             -- legacy: เลิกใช้แล้ว (ใช้ owner_id + profiles แทน)
   year        text,                             -- ปีการศึกษา
   term        text,                             -- ภาคเรียน
   created_at  timestamptz default now(),
@@ -132,8 +132,8 @@ declare
   v_std1 uuid; v_std2 uuid;
   v_ind uuid;
 begin
-  insert into subjects (name, level, max_score, teacher, year, term)
-  values ('วิทยาการคำนวณ', 'มัธยม', 100, 'teacher@crs.ac.th', '2568', '1')
+  insert into subjects (name, level, max_score, year, term)
+  values ('วิทยาการคำนวณ', 'มัธยม', 100, '2568', '1')
   returning id into v_subject;
 
   -- มาตรฐานที่ 1
