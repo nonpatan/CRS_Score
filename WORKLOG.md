@@ -898,3 +898,14 @@
   นักเรียนเดิม 20 คนแม้สถานะปัจจุบันถูกตั้งเป็นจบระหว่างทดสอบ
 - ข้อมูลทดสอบปี 9999 ถูกล้างและคืนค่า placement/ชั้น/ห้อง/สถานะของปี 2569 ครบแล้ว จึงไม่เหลือ
   งานทดสอบรายงานย้อนหลังเป็นรายการค้าง; เพิ่มข้อความสรุปไว้ใน `AGENTS.md` เพื่อไม่ให้รายงานผิดซ้ำ
+
+## 2026-07-18 — Deploy Dashboard และโครงสร้าง 3 ฝ่าย
+
+- ผู้ใช้สั่ง push จึงคัดลอกเฉพาะไฟล์ CRS Score จากโฟลเดอร์พัฒนาไปยัง repo deploy
+  `nonpatan/CRS_Score` โดยตรวจว่า worktree ปลายทางสะอาดก่อนเริ่ม
+- Deploy ครอบคลุมโครงสร้าง `academic/` พร้อม URL เก่าสำหรับส่งต่อ, Dashboard, Profile พร้อม
+  การจัดตำแหน่งรูป, โลโก้โรงเรียน, เมนูวิชาการที่กระชับ และเอกสารสถานะล่าสุด
+- ตรวจผ่านก่อน commit: `git diff --cached --check`, `node --check app-shell.js` และ
+  `node --check supabase-client.js`; เก็บ trailing whitespace ในไฟล์ที่ย้ายแล้ว
+- commit `e374706` (`Add school dashboard and profile settings`) ถูก push ขึ้น `main` สำเร็จ
+  จาก `0a4ff32`; GitHub Pages จะรับชุดนี้ไป deploy ตามปกติ
