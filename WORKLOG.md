@@ -909,3 +909,43 @@
   `node --check supabase-client.js`; เก็บ trailing whitespace ในไฟล์ที่ย้ายแล้ว
 - commit `e374706` (`Add school dashboard and profile settings`) ถูก push ขึ้น `main` สำเร็จ
   จาก `0a4ff32`; GitHub Pages จะรับชุดนี้ไป deploy ตามปกติ
+
+## 2026-07-18 — ปรับหน้าตาฝ่ายวิชาการเป็น Academic Workspace
+
+- ปรับ `app-shell.css` ที่ใช้ร่วมกันทั้ง 10 หน้าฝ่ายวิชาการ โดยไม่แตะ schema, Supabase,
+  สูตรคำนวณ หรือ event/ID ของฟอร์ม: หัวหน้าแต่ละหน้ากลายเป็นการ์ดสรุปแบบ modern, การ์ดข้อมูลมี
+  surface/เงา/มุมที่สม่ำเสมอ, ฟอร์มสูง 48px เพื่อแตะง่าย, และปุ่มหลัก/รอง/เตือนมีลำดับชัดขึ้น
+- ปรับเมนูกลางให้เป็นแถบเครื่องมือแบบมีหมวดและเลื่อนแนวนอนแถวเดียวทั้งมือถือและ iPad; ตรวจใน
+  browser แล้วพบครั้งแรกว่ายัง wrap หลายแถวจึงแก้เป็น `flex-wrap: nowrap` และ bump cache
+  `app-shell.css`/`app-shell.js` ในหน้าวิชาการครบ 10 หน้าเป็น `20260718-4`
+- `app-shell.js` เพิ่ม class และ aria-label ให้ header/menu เพื่อให้โครงสร้างอ่านง่ายขึ้นโดยไม่
+  เปลี่ยนรายการเมนูหรือ URL เดิม
+- ตรวจผ่าน: `node --check app-shell.js`, `node --check supabase-client.js`, และยืนยันว่าหน้า
+  วิชาการทั้ง 10 หน้าเรียก asset version ใหม่ครบ. Local browser แสดงเมนูและฟอร์มปกติก่อน reload;
+  หลัง reload session ทดสอบหมดอายุจึงกลับหน้า login (ไม่มีข้อมูลถูกแก้ไข)
+- **ยังไม่ deploy** — รอผู้ใช้ดูหน้า Academic บน local หลังล็อกอินก่อน
+
+## 2026-07-18 — ปรับ Academic Workspace ให้ต่างจากโครงเดิมชัดเจน
+
+- ผู้ใช้ดู local แล้วทักว่าหน้าตายังคล้ายเดิม จึงปรับรอบสองจากการขัดเงา CSS เป็นโครง workflow
+  จริง: app-shell.js เติมหัวข้อ “WORKFLOW”, คำอธิบายตามงาน และขั้นตอน 1–3 ให้การ์ดเริ่มต้นของ
+  ทุกหน้าฝ่ายวิชาการ โดยไม่แก้ id, form หรือ event เดิม
+- หน้า entry.html แสดง “ตั้งค่าการกรอกคะแนน → ตั้งค่า / เลือกครั้ง / กรอกคะแนน” ก่อนตัวเลือก;
+  หน้าอื่นใช้ข้อความ/ลำดับที่ตรงงาน เช่น เช็คชื่อ, รายงาน, จัดการวิชา และขึ้นปีใหม่
+- ปรับการ์ด workflow ให้เด่นด้วยพื้นหลังสี mint และบน iPad จัดฟอร์มใน workflow card เป็นสองคอลัมน์
+  เมื่อเหมาะสม; เมนูถูกล็อกเป็นแนวนอนแถวเดียวเพื่อไม่กลับไปสูงหลายแถว
+- bump cache asset ในทั้ง 10 หน้าวิชาการเป็น 20260718-5; ตรวจผ่าน node --check
+  ของ app-shell.js/supabase-client.js, ยืนยัน version ใหม่ครบ 10 หน้า, และตรวจ screenshot
+  local ของ academic/entry.html เห็น workflow card จริง
+- **ยังไม่ deploy** — ผู้ใช้กำลังตรวจ local preview
+
+## 2026-07-18 — แก้ฟอร์มชั้นสูงสุดที่หน้า rollover บนมือถือ
+
+- ผู้ใช้พบว่าการ์ด “ชั้นสูงสุดที่โรงเรียนเปิดสอน” ที่ rollover.html แสดง dropdown กับปุ่มบันทึก
+  ชิดขวาและดูผิดเลย์เอาต์ สาเหตุคือ responsive rule เปลี่ยน field แบบ flex เป็นแนวตั้ง แต่ inline
+  align-items:flex-end ของฟอร์มเดิมยังมีผลอยู่
+- แก้ CSS กลางบนจอ ≤600px ให้ field แบบ flex ใช้ align-items:stretch และบังคับ child ที่เป็น
+  flex:1 กับปุ่มให้กว้างเต็มการ์ด จึงได้ dropdown เต็มแถวและปุ่มบันทึกเต็มแถวตามลำดับ
+- bump cache asset ในทุกหน้าวิชาการเป็น 20260718-6; ตรวจผ่าน node --check และ screenshot local
+  ของ rollover.html ยืนยันว่าการ์ดแสดงตามปกติ
+- **ยังไม่ deploy** — ผู้ใช้กำลังตรวจ local preview
