@@ -1003,3 +1003,23 @@
   ทดสอบ preview academic/entry.html (mock) ดูดี เข้าชุดกัน
 - **ไม่แตะ `app-shell.js`** (งานอีก agent) แต่จะ deploy ไปด้วย (dev ต่าง deploy 35 บรรทัด — งาน
   workflow/motion ที่ยังไม่ push) — verify `node --check` ผ่านก่อน deploy เพราะกระทบทุกหน้าวิชาการ
+
+## 2026-07-18 — แก้บั๊ก iPad: settings card ของ competency-manage แตกเป็น 2 คอลัมน์
+
+- ผู้ใช้ส่งภาพ iPad พบหน้า "กำหนดสมรรถนะ" (competency-manage) ส่วนน้ำหนัก/เกณฑ์แปลผลจัดวางเพี้ยน
+  (ตารางน้ำหนักถูกอัดซ้ายครึ่งเดียว note ลอยไปขวา) — หน้าอื่นที่การ์ดแรกเป็นฟอร์มธรรมดา (attendance/
+  competency-entry) ดูปกติ
+- **สาเหตุ**: `app-shell.js` (decorateWorkspace) ตีตราการ์ดแรกของทุกหน้าเป็น `workspace-primary-card`
+  และ `app-shell.css` บังคับให้เป็น **grid 2 คอลัมน์ที่ ≥700px (iPad)** — เหมาะกับฟอร์มกรอง `.field`
+  ธรรมดา แต่ competency-manage การ์ดแรกคือ settings (ตารางน้ำหนัก 6 ด้าน + เกณฑ์แปลผล 4 ระดับ +
+  โน้ต + ปุ่ม) ที่ตั้งใจเรียงแนวตั้ง เลย 2-col แล้วแตก · reproduce ได้จริงด้วย mock (เติม
+  `workspace-primary-card` เอง เพราะชื่อไฟล์ mock ไม่ match `workflows`) ที่ 1024px
+- **แก้ที่ `app-shell.css`** (ในบล็อก `@media min-width:700px`): เปลี่ยนกติกา 2-col ให้ลูก**ทุกตัว
+  เต็มความกว้างเป็นค่าเริ่มต้น** (`.workspace-primary-card > * { grid-column: 1/-1 }`) แล้ว**เฉพาะ
+  `.field` ฟอร์มธรรมดาเท่านั้นที่เข้า 2 คอลัมน์** (`> .field { grid-column: auto }`, ส่วน
+  `.field[style*=display:flex]` เต็มความกว้าง) — เนื้อหาซับซ้อน (section/note/ตาราง/ปุ่ม) จึงเต็ม
+  ความกว้างเสมอ ไม่ถูกอัดเป็น 2 คอลัมน์
+- **ผลพลอยได้**: กันทุกหน้าที่การ์ดแรกมีเนื้อหาไม่ใช่ `.field` ล้วน ไม่ให้เจอปัญหาเดียวกัน
+- ทดสอบ (mock + fix, iPad 1024px): competency-manage settings เต็มความกว้างคอลัมน์เดียว ตารางอ่าน
+  สบาย ✓ · entry (ฟอร์มธรรมดา) ยังจับคู่ 2 คอลัมน์สวยงามไม่เปลี่ยน ✓ · brace balance app-shell.css OK
+- bump cache `?v=20260718-8→-9` ทั้ง 10 หน้าวิชาการ (เพราะแก้ app-shell.css)
