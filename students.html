@@ -125,6 +125,35 @@
     background: var(--amber-soft, #faf1dd); color: var(--amber, #93690f);
     padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
   }
+
+  /* ---------- modal ลบนักเรียน (แสดงรายละเอียดข้อมูลที่ผูกอยู่) ---------- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(20,28,30,0.45);
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 20px; z-index: 50; overflow-y: auto;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-card {
+    background: var(--white); border-radius: 12px; padding: 20px;
+    max-width: 520px; width: 100%; margin: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+  }
+  .modal-card h2 { font-size: 18px; font-weight: 600; margin: 0 0 2px; }
+  .modal-card .sub { color: var(--muted); font-size: 13px; margin: 0 0 4px; }
+  .link-group { margin-top: 14px; }
+  .link-group .g-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .link-group ul { margin: 0; padding-left: 18px; font-size: 14px; }
+  .link-group li { margin: 2px 0; }
+  .link-group li b { font-weight: 600; }
+  .link-count { color: var(--danger); font-weight: 600; }
+  .no-links { color: var(--muted); font-size: 14px; margin-top: 12px; }
+  .danger-box {
+    background: var(--danger-soft); color: var(--danger);
+    padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-top: 16px; line-height: 1.5;
+  }
+  .confirm-field { margin-top: 14px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .modal-actions button { flex: 1; margin-top: 0; }
 </style>
 <link rel="stylesheet" href="app-shell.css">
 </head>
@@ -254,6 +283,19 @@
   </div>
 
   <div class="toast" id="toast"></div>
+</div>
+
+<!-- modal ลบนักเรียนที่มีข้อมูลผูกอยู่ -->
+<div class="modal-overlay" id="del-modal">
+  <div class="modal-card">
+    <h2 id="del-modal-title">ลบนักเรียน</h2>
+    <p class="sub" id="del-modal-sub"></p>
+    <div id="del-modal-body"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="del-modal-cancel">ยกเลิก</button>
+      <button class="danger" id="del-modal-confirm" disabled>ลบนักเรียน + ข้อมูลทั้งหมด</button>
+    </div>
+  </div>
 </div>
 
 <script type="module">
@@ -401,27 +443,163 @@ async function insertStudentsWithPlacements(rows, year) {
   return { error: new Error("บันทึกประวัติชั้น/ห้องไม่สำเร็จ: " + placementError.message + cleanupText) };
 }
 
-// ---------- ลบนักเรียน (กันไว้ถ้ามีคะแนน/เช็คชื่อ/ร./ลงทะเบียนวิชาอยู่) ----------
-async function deleteStudent(stu) {
-  const [{ count: scoreCount }, { count: attCount }, { count: remarkCount }, { count: enrollCount }] = await Promise.all([
-    sb.from("scores").select("id", { count: "exact", head: true }).eq("student_id", stu.id),
-    sb.from("attendance_records").select("id", { count: "exact", head: true }).eq("student_id", stu.id),
-    sb.from("remarks").select("id", { count: "exact", head: true }).eq("student_id", stu.id),
-    sb.from("enrollments").select("id", { count: "exact", head: true }).eq("student_id", stu.id)
+// ---------- ลบนักเรียน ----------
+// ทุก FK ที่ผูก student_id เป็น ON DELETE CASCADE ทั้งหมด (schema.sql) ฐานข้อมูลจึงลบได้เสมอ
+// และจะลบข้อมูลลูกตามให้ — guard ที่นี่เป็นแค่ด่านฝั่งหน้าเว็บกันลบพลาด ถ้ามีคะแนน/เช็คชื่อ/ร./
+// ชั่วโมงชดเชย/คะแนนสมรรถนะ อยู่ จะไม่ลบเงียบ ๆ แต่เปิด modal โชว์ว่าติดตรงไหนบ้างก่อน ให้ครู
+// พิมพ์ชื่อยืนยันแล้วจึงลบทั้งหมดทีเดียว (เผื่อกรณีสร้างผิด/ทดสอบแล้วอยากล้างจริง)
+
+// ป้ายวิชา: รหัส · ชื่อ · ปี · เทอม (เทอมเฉพาะมัธยมที่มีค่า)
+function subjLabel(subj) {
+  if (!subj) return "(ไม่ทราบวิชา)";
+  const parts = [];
+  if (subj.code) parts.push(subj.code);
+  parts.push(subj.name || "(ไม่มีชื่อ)");
+  if (subj.year) parts.push("ปี " + subj.year);
+  if (subj.term) parts.push("เทอม " + subj.term);
+  return parts.join(" · ");
+}
+
+// รวมยอดรายการตามวิชา แล้วคืน array เรียงตามชื่อวิชา
+function tallyBySubject(rows, getSubject) {
+  const map = new Map();
+  for (const r of (rows || [])) {
+    const subj = getSubject(r);
+    if (!subj) continue;
+    if (!map.has(subj.id)) map.set(subj.id, { subj, count: 0 });
+    map.get(subj.id).count++;
+  }
+  return [...map.values()].sort((a, b) => subjLabel(a.subj).localeCompare(subjLabel(b.subj), "th"));
+}
+
+// ดึงข้อมูลทั้งหมดที่ผูกกับนักเรียนคนนี้ พร้อมชื่อวิชา/กิจกรรม เพื่อแสดงรายละเอียด
+async function gatherStudentLinks(studentId) {
+  const [scores, att, remarks, makeup, comp, enroll, placements] = await Promise.all([
+    sb.from("scores").select("id, collections!inner(indicators!inner(units!inner(subjects!inner(id,name,code,year,term))))").eq("student_id", studentId),
+    sb.from("attendance_records").select("id, attendance_sessions!inner(subjects!inner(id,name,code,year,term))").eq("student_id", studentId),
+    sb.from("remarks").select("id, code, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
+    sb.from("makeup_hours").select("id, periods, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
+    sb.from("competency_assessment_scores").select("id, competency_assessment_sessions!inner(competency_assessments!inner(id,name))").eq("student_id", studentId),
+    sb.from("enrollments").select("id, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
+    sb.from("student_year_placements").select("id, year, grade_level, classroom").eq("student_id", studentId).order("year")
   ]);
-  const total = (scoreCount || 0) + (attCount || 0) + (remarkCount || 0);
-  if (total > 0) {
-    showToast("ลบไม่ได้ นักเรียนคนนี้มีคะแนน/เช็คชื่อ/ร. บันทึกไว้แล้ว (" + total + " รายการ)", false);
+  const err = scores.error || att.error || remarks.error || makeup.error || comp.error || enroll.error || placements.error;
+  if (err) throw err;
+
+  // คะแนนสมรรถนะ (กิจกรรม/กิจวัตร) รวมตามชื่อรายการ
+  const compMap = new Map();
+  for (const r of (comp.data || [])) {
+    const a = r.competency_assessment_sessions && r.competency_assessment_sessions.competency_assessments;
+    if (!a) continue;
+    if (!compMap.has(a.id)) compMap.set(a.id, { name: a.name || "(ไม่มีชื่อ)", count: 0 });
+    compMap.get(a.id).count++;
+  }
+
+  return {
+    scores:   tallyBySubject(scores.data,  r => r.collections && r.collections.indicators && r.collections.indicators.units && r.collections.indicators.units.subjects),
+    att:      tallyBySubject(att.data,     r => r.attendance_sessions && r.attendance_sessions.subjects),
+    remarks:  tallyBySubject(remarks.data, r => r.subjects),
+    makeup:   tallyBySubject(makeup.data,  r => r.subjects),
+    comp:     [...compMap.values()].sort((a, b) => a.name.localeCompare(b.name, "th")),
+    enroll:   tallyBySubject(enroll.data,  r => r.subjects),
+    placements: (placements.data || []).map(p => ({ year: p.year, grade_level: p.grade_level, classroom: p.classroom }))
+  };
+}
+
+// สร้าง HTML section ของแต่ละหมวด (รายการวิชา + จำนวน)
+function linkSectionHtml(title, unit, rows, labelFn) {
+  if (!rows || rows.length === 0) return "";
+  const items = rows.map(r => "<li>" + labelFn(r) + " — <span class='link-count'>" + r.count + " " + unit + "</span></li>").join("");
+  return "<div class='link-group'><div class='g-title'>" + escapeHtml(title) + "</div><ul>" + items + "</ul></div>";
+}
+
+const delModal = document.getElementById("del-modal");
+const delModalTitle = document.getElementById("del-modal-title");
+const delModalSub = document.getElementById("del-modal-sub");
+const delModalBody = document.getElementById("del-modal-body");
+const delModalCancel = document.getElementById("del-modal-cancel");
+const delModalConfirm = document.getElementById("del-modal-confirm");
+let delTarget = null;
+
+function closeDelModal() {
+  delModal.classList.remove("show");
+  delTarget = null;
+  delModalBody.innerHTML = "";
+  delModalConfirm.disabled = true;
+}
+delModalCancel.addEventListener("click", closeDelModal);
+delModal.addEventListener("click", (e) => { if (e.target === delModal) closeDelModal(); });
+
+async function deleteStudent(stu) {
+  let links;
+  try {
+    links = await gatherStudentLinks(stu.id);
+  } catch (e) {
+    showToast("ตรวจข้อมูลที่ผูกกับนักเรียนไม่สำเร็จ: " + (e.message || e), false);
     return;
   }
-  if ((enrollCount || 0) > 0 && !confirm("นักเรียนคนนี้ลงทะเบียนอยู่ " + enrollCount + " วิชา จะลบพร้อมเลิกลงทะเบียนทั้งหมดหรือไม่?")) return;
-  if ((enrollCount || 0) === 0 && !confirm("ยืนยันลบ \"" + stu.name + "\" ?")) return;
 
-  const { error } = await sb.from("students").delete().eq("id", stu.id);
-  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
-  showToast("ลบแล้ว", true);
-  await loadStudents();
+  const gradeCount = links.scores.reduce((s, r) => s + r.count, 0)
+    + links.att.reduce((s, r) => s + r.count, 0)
+    + links.remarks.reduce((s, r) => s + r.count, 0)
+    + links.makeup.reduce((s, r) => s + r.count, 0)
+    + links.comp.reduce((s, r) => s + r.count, 0);
+
+  // ไม่มีคะแนน/เช็คชื่อ/ร./ชดเชย/สมรรถนะ เลย → ลบได้เลยแบบเดิม (ยืนยันสั้น ๆ)
+  if (gradeCount === 0) {
+    const enrollN = links.enroll.length;
+    if (enrollN > 0 && !confirm("นักเรียนคนนี้ลงทะเบียนอยู่ " + enrollN + " วิชา จะลบพร้อมเลิกลงทะเบียนทั้งหมดหรือไม่?")) return;
+    if (enrollN === 0 && !confirm("ยืนยันลบ \"" + stu.name + "\" ?")) return;
+    const { error } = await sb.from("students").delete().eq("id", stu.id);
+    if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+    showToast("ลบแล้ว", true);
+    await loadStudents();
+    return;
+  }
+
+  // มีข้อมูลผูกอยู่ → เปิด modal โชว์รายละเอียดว่าติดตรงไหนบ้าง
+  delTarget = stu;
+  delModalTitle.textContent = "ลบนักเรียน: " + stu.name;
+  delModalSub.textContent = "เลขที่ " + (stu.student_no || "-")
+    + (stu.grade_level ? " · " + stu.grade_level : "")
+    + (stu.classroom ? "/" + stu.classroom : "");
+
+  let body = "<p class='no-links' style='margin-top:4px'>นักเรียนคนนี้มีข้อมูลผูกอยู่ในระบบดังนี้ (ลบนักเรียนจะลบข้อมูลเหล่านี้ทั้งหมดด้วย):</p>";
+  body += linkSectionHtml("คะแนนรายวิชา", "ช่อง", links.scores, r => escapeHtml(subjLabel(r.subj)));
+  body += linkSectionHtml("เช็คชื่อ", "รายการ", links.att, r => escapeHtml(subjLabel(r.subj)));
+  body += linkSectionHtml("ติด ร.", "รายการ", links.remarks, r => escapeHtml(subjLabel(r.subj)));
+  body += linkSectionHtml("ชั่วโมงชดเชย", "รายการ", links.makeup, r => escapeHtml(subjLabel(r.subj)));
+  body += linkSectionHtml("คะแนนสมรรถนะ (กิจกรรม/กิจวัตร)", "รายการ", links.comp, r => escapeHtml(r.name));
+  if (links.enroll.length) body += linkSectionHtml("ลงทะเบียนวิชา", "วิชา", links.enroll.map(r => ({ subj: r.subj, count: 1 })), r => escapeHtml(subjLabel(r.subj)));
+  if (links.placements.length) {
+    const items = links.placements.map(p => "<li>ปี " + escapeHtml(p.year) + " — " + escapeHtml(p.grade_level || "?") + "/" + escapeHtml(p.classroom || "?") + "</li>").join("");
+    body += "<div class='link-group'><div class='g-title'>ประวัติชั้น/ห้อง</div><ul>" + items + "</ul></div>";
+  }
+
+  body += "<div class='danger-box'>⚠ การลบนี้ <b>กู้คืนไม่ได้</b> — คะแนนและข้อมูลทั้งหมดของนักเรียนคนนี้จะถูกลบถาวร<br>"
+    + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้ใช้ปุ่ม \"จบ/ย้ายออก\" ที่หน้าขึ้นปีใหม่แทน (ยังไม่ทำในหน้านี้)</div>";
+  body += "<div class='confirm-field'><label for='del-confirm-name'>พิมพ์ชื่อนักเรียนให้ตรงเพื่อยืนยัน: <b>" + escapeHtml(stu.name) + "</b></label>"
+    + "<input type='text' id='del-confirm-name' autocomplete='off' placeholder='พิมพ์ชื่อ-นามสกุลให้ตรง'></div>";
+
+  delModalBody.innerHTML = body;
+  delModalConfirm.disabled = true;
+  const nameInput = document.getElementById("del-confirm-name");
+  nameInput.addEventListener("input", () => {
+    delModalConfirm.disabled = nameInput.value.trim() !== stu.name.trim();
+  });
+  delModal.classList.add("show");
+  nameInput.focus();
 }
+
+delModalConfirm.addEventListener("click", async () => {
+  if (!delTarget) return;
+  delModalConfirm.disabled = true;
+  const { error } = await sb.from("students").delete().eq("id", delTarget.id);
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); delModalConfirm.disabled = false; return; }
+  closeDelModal();
+  showToast("ลบนักเรียนและข้อมูลทั้งหมดแล้ว", true);
+  await loadStudents();
+});
 
 // ---------- เพิ่มทีละคน ----------
 document.getElementById("btn-add-one").addEventListener("click", async () => {
