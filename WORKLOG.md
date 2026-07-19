@@ -1131,3 +1131,11 @@ Hub/One/Connect/MIS — เลือก MIS เพราะเป็นทาง
 - ฝ่ายการเงิน/บุคคล/ทั่วไป ยัง disabled (ยังไม่มีโมดูล) — เป็นแค่การแสดงขอบเขตระบบ
 
 **Deploy แล้ว**
+
+## 2026-07-19 — อัปเดตไฟล์บริบท CLAUDE.md / AGENTS.md
+
+อัปเดตเอกสารโปรเจกต์ให้ตรงกับสถานะปัจจุบัน (แก้ทั้ง CLAUDE.md และ AGENTS.md ให้ตรงกัน):
+- หัวเรื่อง + ภาพรวม: เปลี่ยนชื่อระบบเป็น CRS MIS + note 4 กลุ่มงาน สพฐ.
+- section "แยกฝ่าย": เพิ่ม `finance/` (ครบ 4 ฝ่าย)
+- section "หลักการทำงานร่วมกัน": บันทึก path ปลายทาง deploy จริง (git repo บน Google Drive →
+  github.com/nonpatan/CRS_Score → GitHub Pages) + ขั้นตอน cp/add/commit/push ตามที่ผู้ใช้ยืนยัน
