@@ -1193,3 +1193,27 @@ Hub/One/Connect/MIS — เลือก MIS เพราะเป็นทาง
 - อัปเดตคำเตือน rollover ใน CLAUDE.md/AGENTS.md จาก "ห้ามรันบนข้อมูลจริง" เป็นบันทึกผลทดสอบจริง +
   ขอบเขต mutate + แนวทาง (production ให้รันตอนขึ้นปีจริง+backup)
 - **เทสต์ครบทุกเฟส A–N + H + M แล้ว** ข้อมูลจริงสะอาด ไม่มีตกค้าง
+
+## 2026-07-19 — ปรับหน้าเช็คชื่อ (4 ข้อ) + dropdown ชั้นจาก highest_grade ทุกหน้า
+
+**attendance.html — 4 ปรับปรุงตามผู้ใช้ (เลือกตัวเลือกที่แนะนำ):**
+1. เฉพาะเจ้าของวิชา/admin เช็คได้ — คนอื่นเห็นวิชาแต่ขึ้นแบนเนอร์อำพัน + disable โหลด/ชดเชย
+   (ตรงกับ RLS can_edit_subject ที่ DB) · เพิ่ม helper `canEdit()` + `#access-note`
+2. วิชาพื้นฐานไม่มีนักเรียนลงทะเบียน → แจ้ง + disable โหลด/ชดเชย (เช็ค roster ตอนเลือกวิชา) ·
+   ช่องจำนวนคาบ default ว่าง (เดิม=1) เตือนถ้าไม่กรอก
+3. บูรณาการ: วิชาย่อยโชว์เฉพาะที่ครูเป็นเจ้าของ (admin เห็นหมด) · คาบรายวิชา default ว่าง ·
+   ไม่มี นร. → disable โหลด · เพิ่มชดเชยในโหมดบล็อกผ่าน dropdown เลือกวิชาย่อย (refreshMakeup/
+   loadMakeupFor + makeupSubjectId แทน loadMakeupSection เดิม)
+4. รายชื่อที่โหลดแสดง "ขาดสะสม X คาบ" รายคน (บูรณาการ=รวมวิชาย่อยที่ติ๊ก) · computeMissedMap()
+   ใช้ computeMissedPeriods ตัวเดียวกับ มส.
+ไม่แตะ schema/RLS/สูตร มส.
+
+**dropdown ชั้นสร้างจาก highest_grade (app_settings) แทน hardcode ป.1–ม.6:**
+- attendance, entry, manage (filter+ฟอร์ม, กันวิชาเดิมชั้นเกินหายตอนแก้), students (ชั้นปี),
+  summary (filter+comp), retention — ทั้งหมด slice GRADE_ORDER ถึง highest_grade
+- warning: ใช้ชั้นจากนักเรียน active จริงอยู่แล้ว (ไม่ต้องแก้) + แก้บั๊กเรียงลำดับ `GRADE_ORDER[a]`
+  (array index ผิด) → `GRADE_ORDER.indexOf()`
+- rollover: ช่องตั้ง highest_grade เอง — ไม่แตะ
+
+**Verify:** node --check ผ่านทั้ง 7 ไฟล์ (syntax + top-level await) · ยังไม่ได้เทสต์พฤติกรรมบนเว็บจริง
+(session หมดอายุระหว่างทาง) — deploy แล้ว (commit 4ea6213)
