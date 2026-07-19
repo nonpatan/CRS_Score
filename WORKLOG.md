@@ -1139,3 +1139,9 @@ Hub/One/Connect/MIS — เลือก MIS เพราะเป็นทาง
 - section "แยกฝ่าย": เพิ่ม `finance/` (ครบ 4 ฝ่าย)
 - section "หลักการทำงานร่วมกัน": บันทึก path ปลายทาง deploy จริง (git repo บน Google Drive →
   github.com/nonpatan/CRS_Score → GitHub Pages) + ขั้นตอน cp/add/commit/push ตามที่ผู้ใช้ยืนยัน
+
+## 2026-07-19 — แก้ตกหล่นตอนเปลี่ยนชื่อ: eyebrow หัวหน้าฝ่ายวิชาการ
+
+ระหว่างทดสอบผ่านเบราว์เซอร์ เจอว่า `header::before` ใน `app-shell.css` ยัง hardcode
+"CRS SCORE  /  ACADEMIC" (ตัวพิมพ์ใหญ่ เลยไม่โดน grep "CRS Score" รอบเปลี่ยนชื่อ) — โผล่บนหัว
+ทุกหน้าฝ่ายวิชาการ · แก้เป็น "CRS MIS  /  วิชาการ" ให้เข้าชุดแบรนด์ใหม่
