@@ -17,6 +17,9 @@
     --bg: #f7f8f7;
     --white: #ffffff;
     --danger: #a32d2d;
+    --amber: #8a5a00;
+    --amber-soft: #fff4df;
+    --amber-line: #f0c869;
   }
   * { box-sizing: border-box; }
   body {
@@ -100,6 +103,17 @@
   }
   button.load:disabled, button.save:disabled { opacity: 0.5; cursor: default; }
 
+  /* กล่องแจ้งเตือนสิทธิ์/ไม่มีนักเรียน (อำพัน) */
+  .access-note {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--amber-soft);
+    border: 1px solid var(--amber-line);
+    border-radius: 8px;
+    color: var(--amber);
+    font-size: 14px;
+  }
+
   .session-note { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
 
   .student-row {
@@ -113,6 +127,7 @@
   .student-info { flex: 1; min-width: 0; }
   .student-info .name { font-weight: 500; }
   .student-info .meta { color: var(--muted); font-size: 13px; }
+  .student-info .meta .missed { color: var(--danger); font-weight: 600; }
   .student-row select { width: 120px; }
 
   .toast {
@@ -172,25 +187,8 @@
     <div class="field" style="display:flex; gap:12px;">
       <div style="flex:1">
         <label for="filter-grade">ชั้น</label>
-        <select id="filter-grade">
-          <option value="">— ทุกชั้น —</option>
-          <optgroup label="ประถม">
-            <option value="ป.1">ป.1</option>
-            <option value="ป.2">ป.2</option>
-            <option value="ป.3">ป.3</option>
-            <option value="ป.4">ป.4</option>
-            <option value="ป.5">ป.5</option>
-            <option value="ป.6">ป.6</option>
-          </optgroup>
-          <optgroup label="มัธยม">
-            <option value="ม.1">ม.1</option>
-            <option value="ม.2">ม.2</option>
-            <option value="ม.3">ม.3</option>
-            <option value="ม.4">ม.4</option>
-            <option value="ม.5">ม.5</option>
-            <option value="ม.6">ม.6</option>
-          </optgroup>
-        </select>
+        <!-- ตัวเลือกชั้นสร้างจาก highest_grade ใน app_settings (โชว์เฉพาะชั้นที่โรงเรียนเปิดสอนจริง) -->
+        <select id="filter-grade"><option value="">— ทุกชั้น —</option></select>
       </div>
       <div style="flex:1">
         <label for="filter-term">ภาคเรียน</label>
@@ -209,8 +207,8 @@
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
-    <!-- วิชาบูรณาการ: ติ๊กวิชาย่อยที่ครั้งนี้ครอบคลุม (ครูที่รับผิดชอบหลายวิชาย่อย เช็คเด็ก
-         รอบเดียว ระบบบันทึกแยกให้ทุกวิชาที่ติ๊ก — เวลาเรียนรวมกันคิด มส. ที่วิชาบู) -->
+    <!-- วิชาบูรณาการ: ติ๊กวิชาย่อยที่ครั้งนี้ครอบคลุม (โชว์เฉพาะวิชาย่อยที่ครูเป็นเจ้าของ/admin
+         เห็นหมด) — ครูที่รับผิดชอบหลายวิชาย่อย เช็คเด็กรอบเดียว ระบบบันทึกแยกให้ทุกวิชาที่ติ๊ก -->
     <div class="field" id="member-pick" style="display:none">
       <label>วิชาย่อยที่เช็คครั้งนี้ (ติ๊กได้หลายวิชา + จำนวนคาบของแต่ละวิชา)</label>
       <div id="member-list"></div>
@@ -218,15 +216,17 @@
         ติ๊กหลายวิชา = เช็คเด็กรอบเดียว บันทึกแยกให้ทุกวิชาที่ติ๊ก · ติ๊กวิชาเดียว = เปิดครั้งเดิมของวิชานั้นมาแก้ได้
       </div>
     </div>
+    <div class="field" id="field-periods">
+      <label for="inp-periods">จำนวนคาบที่ครั้งนี้ครอบคลุม</label>
+      <input type="number" id="inp-periods" min="1" step="1" placeholder="ต้องกรอก เช่น 2">
+    </div>
     <div class="field">
       <label for="inp-date">วันที่เช็คชื่อ</label>
       <input type="date" id="inp-date">
     </div>
-    <div class="field" id="field-periods">
-      <label for="inp-periods">จำนวนคาบที่ครั้งนี้ครอบคลุม</label>
-      <input type="number" id="inp-periods" min="1" step="1" value="1">
-    </div>
     <button class="load" id="btn-load">โหลดรายชื่อ</button>
+    <!-- แจ้งเตือนสิทธิ์ / ไม่มีนักเรียน (เห็นได้ทันทีที่เลือกวิชา ก่อนกดโหลด) -->
+    <div class="access-note" id="access-note" style="display:none"></div>
   </div>
 
   <!-- รายชื่อนักเรียนให้ติ๊กสถานะ -->
@@ -249,6 +249,11 @@
       ให้นักเรียนที่เข้าเรียนไม่ครบ 80% ชดเชยเวลา (ทำงาน/เรียนเสริม ฯลฯ) แล้วบันทึกจำนวนคาบตรงนี้
       ระบบจะบวกเข้ายอดเข้าเรียนตอนคำนวณ มส. ที่หน้าสรุปคะแนนให้เอง
     </div>
+    <!-- โหมดบล็อก (บูรณาการติ๊กหลายวิชา): เลือกก่อนว่าจะบันทึกชดเชยเข้าวิชาย่อยไหน -->
+    <div class="field" id="makeup-member-field" style="display:none">
+      <label for="sel-makeup-member">วิชาย่อยที่จะบันทึกชดเชย</label>
+      <select id="sel-makeup-member"></select>
+    </div>
     <div id="makeup-list"></div>
     <div class="field" style="margin-top:10px">
       <label for="sel-makeup-student">นักเรียน</label>
@@ -270,7 +275,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears } from "../supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -279,9 +284,14 @@ if (!session) {
 } else {
 document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
 
-// role ใช้ตัดสินค่าเริ่มต้นการติ๊กวิชาย่อยของวิชาบูรณาการ (admin = ติ๊กทุกตัว, ครู = เฉพาะที่เป็นเจ้าของ)
+// role ใช้ตัดสินว่าใครเช็คชื่อ/เห็นวิชาย่อยได้ (admin = ทุกวิชา, ครู = เฉพาะวิชาที่ตัวเองเป็นเจ้าของ)
 const myProfile = await getProfile(session.user.id);
 const isAdminUser = myProfile && myProfile.role === "admin";
+
+// เจ้าของหรือ admin เท่านั้นที่เช็คชื่อ/บันทึกชดเชยวิชานั้นได้ (ให้ตรงกับ RLS can_edit_subject ที่ DB)
+function canEdit(subj) {
+  return !!subj && (isAdminUser || subj.owner_id === session.user.id);
+}
 
 // สถานะเช็คชื่อที่เลือกได้ทั้งหมด (ต้องตรงกับ check constraint ใน schema.sql)
 const STATUS_OPTIONS = ["มา", "ขาด", "ลาป่วย", "ลากิจ", "มาสาย"];
@@ -299,6 +309,7 @@ const elFieldPeriods = document.getElementById("field-periods");
 const elDate          = document.getElementById("inp-date");
 const elPeriods       = document.getElementById("inp-periods");
 const btnLoad         = document.getElementById("btn-load");
+const elAccessNote    = document.getElementById("access-note");
 const elStudentsCard  = document.getElementById("students-card");
 const elDaySessions   = document.getElementById("day-sessions");
 const elStudentList   = document.getElementById("student-list");
@@ -320,10 +331,12 @@ let students = [];           // รายชื่อนักเรียนท
 let allSubjects = [];        // วิชาทั้งหมด (กรองด้วยปี/ชั้น/ภาคเรียนก่อนเติมลง dropdown)
 let memberIdSet = new Set(); // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown หลัก)
 let daySessions = [];        // ครั้งเช็คชื่อทั้งหมดของ วิชา+วันที่ ที่เลือกอยู่ (รองรับหลายครั้งต่อวัน)
-let memberSubjects = [];     // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
+let memberSubjects = [];     // วิชาย่อยของวิชาบูรณาการที่ "เจ้าของเห็นได้" (กรองตามสิทธิ์แล้ว)
 let blockMode = false;       // true = กำลังเช็คแบบบล็อก (หลายวิชาย่อยพร้อมกัน สร้างใหม่เท่านั้น)
 let blockMembers = [];       // วิชาย่อยที่ติ๊กไว้ตอนโหลดรายชื่อในโหมดบล็อก [{id, name, periods}]
 let blockStudentSubjects = new Map(); // student_id -> Set of subject_id ที่ลงทะเบียนในโหมดบล็อก
+let missedMap = {};          // student_id -> จำนวนคาบขาดสะสม (รวมวิชาย่อยที่ติ๊กถ้าเป็นบูรณาการ)
+let makeupSubjectId = null;  // วิชาพื้นฐานที่การ์ดชดเชยกำลังจัดการอยู่ (โหมดบล็อกเลือกจาก dropdown)
 
 // ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
@@ -355,6 +368,10 @@ function showToast(msg, ok) {
   elToast.className = "toast " + (ok ? "ok" : "err");
   setTimeout(() => { elToast.className = "toast"; }, 2500);
 }
+
+// กล่องแจ้งเตือนสิทธิ์/ไม่มีนักเรียน (อำพัน) ใต้ปุ่มโหลดรายชื่อ
+function showAccessNote(msg) { elAccessNote.textContent = msg; elAccessNote.style.display = "block"; }
+function clearAccessNote() { elAccessNote.textContent = ""; elAccessNote.style.display = "none"; }
 
 // ตั้งวันที่เริ่มต้นเป็นวันนี้ (ตามเวลาเครื่อง ไม่ใช้ toISOString เพราะจะเพี้ยนเรื่อง timezone)
 function todayStr() {
@@ -426,11 +443,20 @@ elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.
 
 elSubject.addEventListener("change", async () => {
   hideStudents();
+  clearAccessNote();
+  elMakeupCard.style.display = "none";
+  btnLoad.disabled = false;
   pickedSubject = elSubject.value ? allSubjects.find(s => s.id === elSubject.value) || null : null;
   currentSubjectId = null;
   currentSubject = null;
 
-  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
+  if (!pickedSubject) {
+    elMemberPick.style.display = "none";
+    elFieldPeriods.style.display = "block";
+    return;
+  }
+
+  if (pickedSubject.subject_type === "บูรณาการ") {
     // วิชาบูรณาการ: จำนวนคาบกรอกรายวิชาย่อย (ซ่อนช่องกลาง) — ติ๊กวิชาย่อยก่อนถึงโหลดรายชื่อได้
     elMemberPick.style.display = "block";
     elFieldPeriods.style.display = "none";
@@ -438,55 +464,61 @@ elSubject.addEventListener("change", async () => {
   } else {
     elMemberPick.style.display = "none";
     elFieldPeriods.style.display = "block";
-    currentSubjectId = pickedSubject ? pickedSubject.id : null;
-    currentSubject = pickedSubject || null;
+    currentSubjectId = pickedSubject.id;
+    currentSubject = pickedSubject;
+
+    // ข้อ 1: เฉพาะเจ้าของ/admin เช็คได้ — คนอื่นเห็นได้แต่กดไม่ได้
+    if (!canEdit(pickedSubject)) {
+      showAccessNote("คุณไม่ใช่เจ้าของวิชานี้ — เช็คชื่อ/บันทึกชั่วโมงชดเชยได้เฉพาะครูเจ้าของวิชาหรือผู้ดูแลระบบ");
+      btnLoad.disabled = true;
+      return;
+    }
+    // ข้อ 2a: ไม่มีนักเรียนลงทะเบียน → แจ้ง + disable โหลด/ชดเชย
+    const roster = await getRosterForSubject(currentSubjectId);
+    if (roster.length === 0) {
+      showAccessNote("วิชานี้ยังไม่มีนักเรียนลงทะเบียน — เพิ่มรายชื่อที่หน้า \"จัดการโครงสร้าง\" (ลงทะเบียน) ก่อน");
+      btnLoad.disabled = true;
+      return;
+    }
+    await refreshMakeup();
   }
-  await loadMakeupSection();
 });
 
-// ---------- เติมรายการวิชาย่อยของวิชาบูรณาการ (ติ๊กได้หลายวิชา + คาบรายวิชา) ----------
+// ---------- เติมรายการวิชาย่อยของวิชาบูรณาการ (โชว์เฉพาะที่ครูเป็นเจ้าของ + คาบว่าง) ----------
 async function loadMemberOptions(integratedId) {
+  clearAccessNote();
+  btnLoad.disabled = true;
   elMemberList.innerHTML = "<div class='hint'>กำลังโหลดวิชาย่อย...</div>";
   const { data: rows, error } = await sb
     .from("integration_members")
     .select("*, member:member_subject_id(*)")
     .eq("integrated_subject_id", integratedId);
   if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
-  memberSubjects = (rows || []).map(r => r.member).filter(Boolean);
-  if (memberSubjects.length === 0) {
+  const allMembers = (rows || []).map(r => r.member).filter(Boolean);
+  if (allMembers.length === 0) {
     elMemberList.innerHTML = "<div class='hint'>วิชาบูรณาการนี้ยังไม่มีวิชาย่อย — ไปเพิ่มที่หน้า \"จัดการโครงสร้าง\" ก่อน</div>";
     return;
   }
 
-  // เติมจำนวนคาบจาก "ครั้งล่าสุดที่เคยเช็ค" ของแต่ละวิชาย่อย — ครั้งแรกปล่อยว่างให้กรอกเอง
-  for (const m of memberSubjects) {
-    const { data: last } = await sb
-      .from("attendance_sessions")
-      .select("periods_covered")
-      .eq("subject_id", m.id)
-      .order("session_date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1);
-    m.lastPeriods = (last && last.length > 0) ? last[0].periods_covered : "";
+  // ข้อ 3a: โชว์เฉพาะวิชาย่อยที่ครูคนนี้เป็นเจ้าของ (admin เห็นทุกตัว)
+  memberSubjects = allMembers.filter(m => canEdit(m));
+  if (memberSubjects.length === 0) {
+    elMemberList.innerHTML = "<div class='hint'>คุณไม่ได้เป็นเจ้าของวิชาย่อยใดในวิชาบูรณาการนี้ — เช็คชื่อได้เฉพาะวิชาย่อยที่ตัวเองเป็นเจ้าของ</div>";
+    return;
+  }
 
-    // ตรวจสอบจำนวนนักเรียนที่ลงทะเบียน
+  // นับจำนวนนักเรียนที่ลงทะเบียนของแต่ละวิชาย่อย (ใช้ตัดสินว่า disable ปุ่มโหลดไหม)
+  for (const m of memberSubjects) {
     const roster = await getRosterForSubject(m.id);
     m.roster = roster;
     m.studentCount = roster.length;
   }
 
-  // เติมกล่อง "ห้อง" โดยรวมรายชื่อจากทุกวิชาย่อย
-  const combinedRoster = [];
-  for (const m of memberSubjects) {
-    if (m.roster) combinedRoster.push(...m.roster);
-  }
-
   elMemberList.innerHTML = "";
   for (const m of memberSubjects) {
     const hasStudents = m.studentCount > 0;
-    // ค่าเริ่มต้น: ติ๊กเฉพาะวิชาย่อยที่ครูคนนี้เป็นเจ้าของ (admin เห็นติ๊กทุกตัว) — ครูที่รับ
-    // ผิดชอบหลายวิชาย่อยจะได้ติ๊กครบชุดของตัวเองมาเลย ปรับเอาออก/เพิ่มเองได้ก่อนโหลดรายชื่อ
-    const defaultChecked = hasStudents && (isAdminUser || m.owner_id === session.user.id);
+    // ค่าเริ่มต้น: ติ๊กวิชาย่อยที่มีนักเรียน (ครูเห็นเฉพาะของตัวเองอยู่แล้ว) — ปรับเอาออกเองได้
+    const defaultChecked = hasStudents;
     const row = document.createElement("label");
     row.className = "student-row";
     row.style.cursor = hasStudents ? "pointer" : "not-allowed";
@@ -500,11 +532,11 @@ async function loadMemberOptions(integratedId) {
     cb.disabled = !hasStudents;
     cb.style.cssText = "width:18px; height:18px; flex:none";
     // ติ๊กเปลี่ยน = รายชื่อ/โหมดที่โหลดไว้ใช้ไม่ได้แล้ว ต้องกดโหลดรายชื่อใหม่ (การ์ดชดเชยก็ซ่อนรอ)
-    cb.addEventListener("change", async () => {
+    cb.addEventListener("change", () => {
       hideStudents();
       currentSubjectId = null;
       currentSubject = null;
-      await loadMakeupSection();
+      elMakeupCard.style.display = "none";
     });
 
     const info = document.createElement("span");
@@ -512,12 +544,13 @@ async function loadMemberOptions(integratedId) {
     info.innerHTML = "<span class='name'>" + escapeHtml(m.name) + "</span>" +
       (!hasStudents ? " <span class='hint'>(ไม่มีนักเรียน)</span>" : "");
 
+    // ข้อ 3b: ช่องคาบรายวิชา ค่าเริ่มต้นว่างเปล่า (ให้ครูกรอกเองทุกครั้ง)
     const num = document.createElement("input");
     num.type = "number";
     num.className = "member-periods";
     num.dataset.id = m.id;
     num.min = "1"; num.step = "1";
-    num.value = m.lastPeriods;
+    num.value = "";
     num.placeholder = "คาบ";
     num.disabled = !hasStudents;
     num.style.cssText = "width:80px; text-align:center; flex:none";
@@ -529,6 +562,11 @@ async function loadMemberOptions(integratedId) {
     row.appendChild(num);
     elMemberList.appendChild(row);
   }
+
+  // ข้อ 3c: ถ้าไม่มีวิชาย่อยตัวไหนมีนักเรียนเลย → disable ปุ่มโหลดรายชื่อ + แจ้งเตือน
+  const anyWithStudents = memberSubjects.some(m => m.studentCount > 0);
+  btnLoad.disabled = !anyWithStudents;
+  if (!anyWithStudents) showAccessNote("วิชาย่อยที่คุณดูแลยังไม่มีนักเรียนลงทะเบียน — เพิ่มรายชื่อที่หน้า \"จัดการโครงสร้าง\" ก่อน");
 }
 
 // อ่านวิชาย่อยที่ติ๊ก + จำนวนคาบของแต่ละตัว — คืน null ถ้ากรอกไม่ถูก (แจ้งเตือนแล้ว)
@@ -584,7 +622,6 @@ btnLoad.addEventListener("click", async () => {
         blockMode = false;
         currentSubjectId = ticked[0].id;
         currentSubject = memberSubjects.find(x => x.id === ticked[0].id) || null;
-        await loadMakeupSection();
         await loadPlainSubjectDay();
       } else {
         // ติ๊กหลายวิชา = โหมดบล็อก เช็คเด็กรอบเดียว บันทึกแยกให้ทุกวิชา (สร้างใหม่เท่านั้น)
@@ -592,7 +629,6 @@ btnLoad.addEventListener("click", async () => {
         blockMembers = ticked;
         currentSubjectId = null;
         currentSubject = null;
-        await loadMakeupSection();
         await loadBlockRoster();
       }
     } else {
@@ -713,10 +749,11 @@ elClassroom.addEventListener("change", () => {
 // ---------- โหมดวิชาเดียว: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน) ----------
 async function loadPlainSubjectDay() {
   const periods = readCurrentPeriods();
-  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+  if (isNaN(periods) || periods <= 0) { showToast("กรอกจำนวนคาบที่ครั้งนี้ครอบคลุมก่อน (ต้องมากกว่า 0)", false); return; }
 
   students = await getRosterForSubject(currentSubjectId);
-
+  await computeMissedMap([currentSubjectId]); // ข้อ 4: คาบขาดสะสมของวิชานี้
+  await refreshMakeup();
 
   const ok = await refreshDaySessions();
   if (!ok) return;
@@ -743,7 +780,9 @@ async function loadBlockRoster() {
 
   if (students.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
 
-
+  // ข้อ 4: คาบขาดสะสม "รวม" ทุกวิชาย่อยที่ติ๊ก
+  await computeMissedMap(blockMembers.map(m => m.id));
+  await refreshMakeup();
 
   currentSession = null;
   daySessions = [];
@@ -752,6 +791,20 @@ async function loadBlockRoster() {
   elSessionNote.textContent = "เช็ครอบเดียวให้ " + blockMembers.map(m => m.name + " (" + m.periods + " คาบ)").join(" + ") +
     " — บันทึกแล้วจะสร้างครั้งแยกให้ทุกวิชา · ถ้าจะแก้ย้อนหลัง ให้ติ๊กวิชาเดียวแล้วโหลดใหม่";
   renderStudents({});
+}
+
+// ---------- ข้อ 4: คำนวณคาบขาดสะสมต่อคน (รวมทุกวิชาใน subjectIds) ----------
+// ใช้ computeMissedPeriods() ตัวเดียวกับ summary/มส. — ส่ง session ของทุกวิชาที่เกี่ยวเข้าไป
+// รวมกัน (คนหนึ่งจะถูกนับเฉพาะครั้งที่ตัวเองมีบันทึกจริง จึงได้ยอดขาดรวมของวิชาที่ติ๊กพอดี)
+async function computeMissedMap(subjectIds) {
+  missedMap = {};
+  if (!subjectIds || subjectIds.length === 0) return;
+  const { data: sessionsData, error } = await sb
+    .from("attendance_sessions")
+    .select("periods_covered, attendance_records(status, student_id)")
+    .in("subject_id", subjectIds);
+  if (error) return; // ถ้าโหลดพลาด ให้ขึ้น 0 ไปก่อน ไม่บล็อกการเช็คชื่อ
+  for (const stu of students) missedMap[stu.id] = computeMissedPeriods(stu.id, sessionsData || []);
 }
 
 // โหลดรายการครั้งเช็คชื่อของ วิชา+วันที่ ที่เลือก แล้ววาดปุ่มสลับครั้ง — คืน false ถ้าโหลดพลาด
@@ -815,7 +868,7 @@ function startNewSession() {
   renderDaySessionChips();
 }
 
-// วาดรายชื่อนักเรียน + ช่องเลือกสถานะ
+// วาดรายชื่อนักเรียน + ช่องเลือกสถานะ (+ คาบขาดสะสมรายคน — ข้อ 4)
 function renderStudents(scoreMap) {
   elStudentList.innerHTML = "";
   for (const stu of students) {
@@ -826,12 +879,17 @@ function renderStudents(scoreMap) {
       row.style.display = "none";
     }
 
+    const missed = missedMap[stu.id] || 0;
+    const missedText = missed > 0
+      ? " · <span class='missed'>ขาดสะสม " + missed + " คาบ</span>"
+      : " · ขาดสะสม 0 คาบ";
+
     const info = document.createElement("div");
     info.className = "student-info";
     info.innerHTML =
-      "<div class='name'>" + stu.name + "</div>" +
-      "<div class='meta'>เลขที่ " + stu.student_no +
-      (stu.classroom ? " · " + stu.classroom : "") + "</div>";
+      "<div class='name'>" + escapeHtml(stu.name) + "</div>" +
+      "<div class='meta'>เลขที่ " + escapeHtml(stu.student_no) +
+      (stu.classroom ? " · " + escapeHtml(stu.classroom) : "") + missedText + "</div>";
 
     const sel = document.createElement("select");
     sel.dataset.studentId = stu.id;
@@ -874,7 +932,7 @@ btnSave.addEventListener("click", async () => {
 // โหมดวิชาเดียว: สร้าง/แก้ไขครั้งที่เช็คชื่อ แล้ว upsert สถานะทุกคน
 async function saveSingleSubject() {
   const periods = readCurrentPeriods();
-  if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); return; }
+  if (isNaN(periods) || periods <= 0) { showToast("กรอกจำนวนคาบที่ครั้งนี้ครอบคลุมก่อน (ต้องมากกว่า 0)", false); return; }
 
   let sessionId;
   if (currentSession) {
@@ -948,6 +1006,7 @@ async function saveBlock() {
   showToast("บันทึกแล้ว " + statuses.length + " คน ใน " + created + " วิชาย่อย", true);
   // ซ่อนรายชื่อกันกดบันทึกซ้ำ (จะกลายเป็นสร้างครั้งใหม่ซ้ำอีกชุด) — แก้ย้อนหลังให้ติ๊กทีละวิชา
   hideStudents();
+  elMakeupCard.style.display = "none";
 }
 
 function hideStudents() {
@@ -960,6 +1019,7 @@ function hideStudents() {
   blockMode = false;
   blockMembers = [];
   blockStudentSubjects.clear();
+  missedMap = {};
 }
 
 function escapeHtml(s) {
@@ -968,26 +1028,48 @@ function escapeHtml(s) {
 
 // ---------- ชั่วโมงชดเชย (เติมยอดเข้าเรียนให้ถึงเกณฑ์ ไม่ใช่ข้ามเช็ค มส.) ----------
 const elMakeupCard = document.getElementById("makeup-card");
+const elMakeupMemberField = document.getElementById("makeup-member-field");
+const elMakeupMember = document.getElementById("sel-makeup-member");
 const elMakeupList = document.getElementById("makeup-list");
 const elMakeupStudent = document.getElementById("sel-makeup-student");
 let makeupRoster = [];
 let makeupRecords = [];
 
-async function loadMakeupSection() {
-  // ชั่วโมงชดเชยผูกกับวิชาพื้นฐานเท่านั้น (มส. คิดต่อวิชาพื้นฐาน) — เลือกวิชาบูรณาการอยู่ให้ซ่อน
-  if (!currentSubjectId || (currentSubject && currentSubject.subject_type === "บูรณาการ")) {
+// ตัดสินว่าจะแสดงการ์ดชดเชยแบบไหน:
+// - โหมดบล็อก (บูรณาการติ๊กหลายวิชา) → โชว์ dropdown เลือกวิชาย่อยก่อน แล้วจัดการชดเชยของวิชานั้น
+// - วิชาพื้นฐานเดี่ยว / บูรณาการติ๊กวิชาเดียว → โชว์ชดเชยของวิชานั้นตรง ๆ
+// - อย่างอื่น (ยังไม่เลือก/เป็นตัวบูรณาการเอง) → ซ่อน
+async function refreshMakeup() {
+  if (blockMode && blockMembers.length > 0) {
+    elMakeupCard.style.display = "block";
+    elMakeupMemberField.style.display = "block";
+    elMakeupMember.innerHTML = "";
+    for (const m of blockMembers) {
+      const o = document.createElement("option");
+      o.value = m.id; o.textContent = m.name;
+      elMakeupMember.appendChild(o);
+    }
+    await loadMakeupFor(blockMembers[0].id);
+  } else if (currentSubjectId && currentSubject && currentSubject.subject_type !== "บูรณาการ") {
+    elMakeupCard.style.display = "block";
+    elMakeupMemberField.style.display = "none";
+    await loadMakeupFor(currentSubjectId);
+  } else {
     elMakeupCard.style.display = "none";
-    return;
   }
-  elMakeupCard.style.display = "block";
+}
+elMakeupMember.addEventListener("change", () => { if (elMakeupMember.value) loadMakeupFor(elMakeupMember.value); });
 
-  makeupRoster = await getRosterForSubject(currentSubjectId);
+// โหลดรายชื่อ + รายการชดเชยของวิชาพื้นฐานหนึ่งวิชา (ตั้ง makeupSubjectId ให้ปุ่มบันทึกใช้)
+async function loadMakeupFor(subjectId) {
+  makeupSubjectId = subjectId;
+  makeupRoster = await getRosterForSubject(subjectId);
   fillSelect(elMakeupStudent, makeupRoster, s => s.name + "  (เลขที่ " + s.student_no + ")", "— เลือกนักเรียน —");
 
   const { data, error } = await sb
     .from("makeup_hours")
     .select("*, student:student_id(*)")
-    .eq("subject_id", currentSubjectId)
+    .eq("subject_id", subjectId)
     .order("created_at");
   if (error) { showToast("โหลดชั่วโมงชดเชยไม่สำเร็จ: " + error.message, false); return; }
   makeupRecords = (data || []).filter(m => m.student);
@@ -1034,6 +1116,7 @@ async function getRawMissedInfo(subjectId, studentId) {
 }
 
 document.getElementById("btn-add-makeup").addEventListener("click", async () => {
+  if (!makeupSubjectId) { showToast("เลือกวิชาย่อยที่จะบันทึกชดเชยก่อน", false); return; }
   const studentId = elMakeupStudent.value;
   const periods = Number(document.getElementById("inp-makeup-periods").value);
   const reason = document.getElementById("inp-makeup-reason").value.trim();
@@ -1042,20 +1125,20 @@ document.getElementById("btn-add-makeup").addEventListener("click", async () => 
   if (!reason) { showToast("กรอกเหตุผล/รายละเอียดก่อน", false); return; }
 
   // ขาดสะสมเกินเพดานเรียนซ้ำแล้ว (40% ของคาบทั้งเทอม) = ต้องเรียนซ้ำรายวิชา ชดเชยชั่วโมงช่วยไม่ได้แล้ว (ยืนยันแล้ว)
-  const missedInfo = await getRawMissedInfo(currentSubjectId, studentId);
+  const missedInfo = await getRawMissedInfo(makeupSubjectId, studentId);
   if (missedInfo !== null && missedInfo.missed > missedInfo.maxMissedRetake) {
     showToast("นักเรียนคนนี้ขาดไปแล้ว " + missedInfo.missed + " คาบ (เกินเพดาน " + missedInfo.maxMissedRetake.toFixed(1) + " คาบ) ต้องเรียนซ้ำรายวิชา บันทึกชั่วโมงชดเชยไม่ได้แล้ว", false);
     return;
   }
 
   const { error } = await sb.from("makeup_hours").insert({
-    subject_id: currentSubjectId, student_id: studentId, periods, reason
+    subject_id: makeupSubjectId, student_id: studentId, periods, reason
   });
   if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
   showToast("บันทึกชั่วโมงชดเชยแล้ว", true);
   document.getElementById("inp-makeup-periods").value = "";
   document.getElementById("inp-makeup-reason").value = "";
-  await loadMakeupSection();
+  await loadMakeupFor(makeupSubjectId);
 });
 
 async function removeMakeup(m) {
@@ -1063,10 +1146,29 @@ async function removeMakeup(m) {
   const { error } = await sb.from("makeup_hours").delete().eq("id", m.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบแล้ว", true);
-  await loadMakeupSection();
+  await loadMakeupFor(makeupSubjectId);
+}
+
+// ---------- สร้างตัวเลือกชั้นจาก highest_grade (ชั้นสูงสุดที่โรงเรียนเปิดสอน) ----------
+// เก็บใน app_settings ตั้งค่าที่หน้า "ขึ้นปีใหม่" — โชว์เฉพาะชั้นที่มีจริง ไม่ต้อง hardcode ป.1–ม.6
+async function populateGradeOptions() {
+  let grades = GRADE_ORDER;
+  try {
+    const highest = await getSetting("highest_grade");
+    const maxIdx = highest ? GRADE_ORDER.indexOf(highest) : -1;
+    if (maxIdx >= 0) grades = GRADE_ORDER.slice(0, maxIdx + 1);
+  } catch (e) { /* อ่านค่าไม่ได้ ใช้ทุกชั้นไปก่อน */ }
+
+  const primary = grades.filter(g => g.startsWith("ป."));
+  const secondary = grades.filter(g => g.startsWith("ม."));
+  const optGroup = (label, list) => list.length
+    ? "<optgroup label='" + label + "'>" + list.map(g => "<option value='" + g + "'>" + g + "</option>").join("") + "</optgroup>"
+    : "";
+  elFilterGrade.innerHTML = "<option value=''>— ทุกชั้น —</option>" + optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
 }
 
 // เริ่มทำงาน
+await populateGradeOptions();
 loadSubjects();
 }
 </script>

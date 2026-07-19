@@ -223,19 +223,8 @@
     <div class="row2">
       <div class="field">
         <label for="f-grade">ชั้นปี</label>
-        <select id="f-grade">
-          <option value="">— เลือกชั้น —</option>
-          <optgroup label="ประถม">
-            <option value="ป.1">ป.1</option><option value="ป.2">ป.2</option>
-            <option value="ป.3">ป.3</option><option value="ป.4">ป.4</option>
-            <option value="ป.5">ป.5</option><option value="ป.6">ป.6</option>
-          </optgroup>
-          <optgroup label="มัธยม">
-            <option value="ม.1">ม.1</option><option value="ม.2">ม.2</option>
-            <option value="ม.3">ม.3</option><option value="ม.4">ม.4</option>
-            <option value="ม.5">ม.5</option><option value="ม.6">ม.6</option>
-          </optgroup>
-        </select>
+        <!-- ตัวเลือกชั้นสร้างจาก highest_grade ใน app_settings (โชว์เฉพาะชั้นที่โรงเรียนเปิดสอนจริง) -->
+        <select id="f-grade"><option value="">— เลือกชั้น —</option></select>
       </div>
       <div class="field">
         <label for="f-classroom">ห้อง</label>
@@ -299,7 +288,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear } from "../supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js";
 
 const session = await requireAuth();
 if (!session) {
@@ -690,7 +679,27 @@ document.getElementById("btn-import-save").addEventListener("click", async () =>
   await loadStudents();
 });
 
+// ---------- สร้างตัวเลือกชั้น "ชั้นปี" (ตอนเพิ่มนักเรียน) จาก highest_grade ----------
+// ชั้นสูงสุดที่โรงเรียนเปิดสอน (app_settings) ตั้งที่หน้า "ขึ้นปีใหม่" — โชว์เฉพาะชั้นที่มีจริง
+async function populateAddGradeOptions() {
+  let grades = GRADE_ORDER;
+  try {
+    const highest = await getSetting("highest_grade");
+    const maxIdx = highest ? GRADE_ORDER.indexOf(highest) : -1;
+    if (maxIdx >= 0) grades = GRADE_ORDER.slice(0, maxIdx + 1);
+  } catch (e) { /* อ่านค่าไม่ได้ ใช้ทุกชั้นไปก่อน */ }
+
+  const primary = grades.filter(g => g.startsWith("ป."));
+  const secondary = grades.filter(g => g.startsWith("ม."));
+  const optGroup = (label, list) => list.length
+    ? "<optgroup label='" + label + "'>" + list.map(g => "<option value='" + g + "'>" + g + "</option>").join("") + "</optgroup>"
+    : "";
+  document.getElementById("f-grade").innerHTML =
+    "<option value=''>— เลือกชั้น —</option>" + optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
+}
+
 // เริ่มทำงาน
+await populateAddGradeOptions();
 loadStudents();
 }
 </script>

@@ -187,25 +187,8 @@
     <div class="row2">
       <div class="field">
         <label for="filter-grade">ชั้น</label>
-        <select id="filter-grade">
-          <option value="">— ทุกชั้น —</option>
-          <optgroup label="ประถม">
-            <option value="ป.1">ป.1</option>
-            <option value="ป.2">ป.2</option>
-            <option value="ป.3">ป.3</option>
-            <option value="ป.4">ป.4</option>
-            <option value="ป.5">ป.5</option>
-            <option value="ป.6">ป.6</option>
-          </optgroup>
-          <optgroup label="มัธยม">
-            <option value="ม.1">ม.1</option>
-            <option value="ม.2">ม.2</option>
-            <option value="ม.3">ม.3</option>
-            <option value="ม.4">ม.4</option>
-            <option value="ม.5">ม.5</option>
-            <option value="ม.6">ม.6</option>
-          </optgroup>
-        </select>
+        <!-- ตัวเลือกชั้นสร้างจาก highest_grade ใน app_settings (โชว์เฉพาะชั้นที่โรงเรียนเปิดสอนจริง) -->
+        <select id="filter-grade"><option value="">— ทุกชั้น —</option></select>
       </div>
       <div class="field">
         <label for="filter-term">ภาคเรียน</label>
@@ -376,7 +359,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade } from "../supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -520,8 +503,35 @@ const GRADE_OPTIONS = {
   "มัธยม": ["ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6"]
 };
 
+// ชั้นสูงสุดที่โรงเรียนเปิดสอน (app_settings) — จำกัดตัวเลือกชั้นทั้งตัวกรองและฟอร์มสร้างวิชา
+// โหลดครั้งเดียวตอนเริ่มทำงาน (loadHighestGrade) — ยังไม่โหลด = ไม่จำกัด (โชว์ทุกชั้น)
+let schoolHighestGrade = null;
+function isGradeAllowed(g) {
+  if (!schoolHighestGrade) return true;
+  const max = GRADE_ORDER.indexOf(schoolHighestGrade);
+  const idx = GRADE_ORDER.indexOf(g);
+  return max === -1 || idx === -1 || idx <= max;
+}
+async function loadHighestGrade() {
+  try { schoolHighestGrade = await getSetting("highest_grade"); } catch (e) { schoolHighestGrade = null; }
+}
+// ตัวกรองชั้นด้านบน — สร้างจากชั้นที่เปิดสอน (คงกลุ่ม ประถม/มัธยม)
+function populateFilterGradeOptions() {
+  const primary = GRADE_OPTIONS["ประถม"].filter(isGradeAllowed);
+  const secondary = GRADE_OPTIONS["มัธยม"].filter(isGradeAllowed);
+  const grp = (label, list) => list.length
+    ? "<optgroup label='" + label + "'>" + list.map(g => "<option value='" + g + "'>" + g + "</option>").join("") + "</optgroup>"
+    : "";
+  elFilterGrade.innerHTML = "<option value=''>— ทุกชั้น —</option>" + grp("ประถม", primary) + grp("มัธยม", secondary);
+}
+
 function updateGradeOptions(keepValue) {
-  const opts = GRADE_OPTIONS[fLevel.value] || [];
+  const all = GRADE_OPTIONS[fLevel.value] || [];
+  let opts = all.filter(isGradeAllowed);
+  // วิชาเดิมที่ชั้นเกิน highest (เช่นตั้งค่าทีหลัง) — คงตัวเลือกนั้นไว้ จะได้ไม่หายตอนแก้ไข
+  if (keepValue && all.includes(keepValue) && !opts.includes(keepValue)) {
+    opts = all.filter(g => isGradeAllowed(g) || g === keepValue);
+  }
   fGrade.innerHTML = "";
   for (const g of opts) {
     const o = document.createElement("option");
@@ -1360,7 +1370,10 @@ function hideAll() {
   elEmptyHint.style.display = "block";
 }
 
-// เริ่มทำงาน
+// เริ่มทำงาน — โหลดชั้นสูงสุดก่อน แล้วสร้างตัวเลือกชั้น (ตัวกรอง + ฟอร์ม) ให้จำกัดตามที่เปิดสอน
+await loadHighestGrade();
+populateFilterGradeOptions();
+updateGradeOptions();
 loadSubjects();
 }
 </script>

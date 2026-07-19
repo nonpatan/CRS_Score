@@ -194,25 +194,8 @@
     <div class="field" style="display:flex; gap:12px;">
       <div style="flex:1">
         <label for="filter-grade">ชั้น</label>
-        <select id="filter-grade">
-          <option value="">— ทุกชั้น —</option>
-          <optgroup label="ประถม">
-            <option value="ป.1">ป.1</option>
-            <option value="ป.2">ป.2</option>
-            <option value="ป.3">ป.3</option>
-            <option value="ป.4">ป.4</option>
-            <option value="ป.5">ป.5</option>
-            <option value="ป.6">ป.6</option>
-          </optgroup>
-          <optgroup label="มัธยม">
-            <option value="ม.1">ม.1</option>
-            <option value="ม.2">ม.2</option>
-            <option value="ม.3">ม.3</option>
-            <option value="ม.4">ม.4</option>
-            <option value="ม.5">ม.5</option>
-            <option value="ม.6">ม.6</option>
-          </optgroup>
-        </select>
+        <!-- ตัวเลือกชั้นสร้างจาก highest_grade ใน app_settings (โชว์เฉพาะชั้นที่โรงเรียนเปิดสอนจริง) -->
+        <select id="filter-grade"><option value="">— ทุกชั้น —</option></select>
       </div>
       <div style="flex:1">
         <label for="filter-term">ภาคเรียน</label>
@@ -250,17 +233,8 @@
       </div>
       <div class="field">
         <label for="comp-grade">ชั้น</label>
-        <select id="comp-grade">
-          <option value="">— เลือกชั้น —</option>
-          <optgroup label="ประถม">
-            <option value="ป.1">ป.1</option><option value="ป.2">ป.2</option><option value="ป.3">ป.3</option>
-            <option value="ป.4">ป.4</option><option value="ป.5">ป.5</option><option value="ป.6">ป.6</option>
-          </optgroup>
-          <optgroup label="มัธยม">
-            <option value="ม.1">ม.1</option><option value="ม.2">ม.2</option><option value="ม.3">ม.3</option>
-            <option value="ม.4">ม.4</option><option value="ม.5">ม.5</option><option value="ม.6">ม.6</option>
-          </optgroup>
-        </select>
+        <!-- ตัวเลือกชั้นสร้างจาก highest_grade ใน app_settings -->
+        <select id="comp-grade"><option value="">— เลือกชั้น —</option></select>
       </div>
       <div class="field" id="comp-term-field" style="display:none">
         <label for="comp-term">ภาคเรียน</label>
@@ -285,7 +259,7 @@ import {
   loadSubjectData, computeSubjectResult, computeIntegratedResult,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
-  computeCombinedCompetencyResult
+  computeCombinedCompetencyResult, GRADE_ORDER, getSetting
 } from "../supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -1018,7 +992,29 @@ function renderCompetencyResult(student, rows, year, grade, term) {
   elCompResult.innerHTML = html;
 }
 
+// ---------- สร้างตัวเลือกชั้นจาก highest_grade (ชั้นสูงสุดที่โรงเรียนเปิดสอน) ----------
+// เก็บใน app_settings ตั้งค่าที่หน้า "ขึ้นปีใหม่" — โชว์เฉพาะชั้นที่มีจริง ไม่ต้อง hardcode ป.1–ม.6
+async function populateGradeSelects() {
+  let grades = GRADE_ORDER;
+  try {
+    const highest = await getSetting("highest_grade");
+    const maxIdx = highest ? GRADE_ORDER.indexOf(highest) : -1;
+    if (maxIdx >= 0) grades = GRADE_ORDER.slice(0, maxIdx + 1);
+  } catch (e) { /* อ่านค่าไม่ได้ ใช้ทุกชั้นไปก่อน */ }
+
+  const primary = grades.filter(g => g.startsWith("ป."));
+  const secondary = grades.filter(g => g.startsWith("ม."));
+  const optGroup = (label, list) => list.length
+    ? "<optgroup label='" + label + "'>" + list.map(g => "<option value='" + g + "'>" + g + "</option>").join("") + "</optgroup>"
+    : "";
+  const body = optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
+  const setSel = (id, placeholder) => { const el = document.getElementById(id); if (el) el.innerHTML = "<option value=''>" + placeholder + "</option>" + body; };
+  setSel("filter-grade", "— ทุกชั้น —");
+  setSel("comp-grade", "— เลือกชั้น —");
+}
+
 // เริ่มทำงาน
+await populateGradeSelects();
 await loadSubjects();
 await initCompetencyReport();
 }
