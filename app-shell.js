@@ -13,9 +13,9 @@
     {
       label: "ลงคะแนน",
       items: [
+        ["attendance.html", "เช็คชื่อ"],
         ["entry.html", "กรอกคะแนน"],
-        ["competency-entry.html", "ลงคะแนนสมรรถนะ"],
-        ["attendance.html", "เช็คชื่อ"]
+        ["competency-entry.html", "ลงคะแนนสมรรถนะ"]
       ]
     },
     {
