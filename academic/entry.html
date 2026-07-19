@@ -14,6 +14,9 @@
     --line: #dfe4e3;
     --teal: #0f6e56;
     --teal-soft: #e1f5ee;
+    --amber: #93690f;
+    --amber-soft: #faf1dd;
+    --amber-line: #ead39e;
     --bg: #f7f8f7;
     --white: #ffffff;
     --danger: #a32d2d;
@@ -112,6 +115,16 @@
   .toast.err { display: block; background: #fceaea; color: var(--danger); }
 
   .hint { color: var(--muted); font-size: 14px; }
+  .access-note {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--amber-soft);
+    border: 1px solid var(--amber-line);
+    border-radius: 8px;
+    color: var(--amber);
+    font-size: 14px;
+    line-height: 1.5;
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260718-9">
 </head>
@@ -174,6 +187,7 @@
     <div class="field">
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
+      <div class="access-note" id="access-note" style="display:none"></div>
     </div>
     <!-- วิชาบูรณาการ: เลือกวิชาย่อยที่จะกรอกคะแนน (คะแนน/ร. เก็บที่วิชาย่อยแต่ละตัว) -->
     <div class="field" id="member-pick" style="display:none">
@@ -240,7 +254,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getRosterForSubject, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -252,6 +266,13 @@ if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
 } else {
 document.getElementById("btn-signout").addEventListener("click", (e) => { e.preventDefault(); signOut(); });
+
+// ใช้สิทธิ์เดียวกับ RLS: admin ทำได้ทุกวิชา ส่วนครูทำได้เฉพาะวิชาที่เป็นเจ้าของ
+const myProfile = await getProfile(session.user.id);
+const isAdminUser = !!myProfile && myProfile.role === "admin";
+function canEdit(subj) {
+  return !!subj && (isAdminUser || subj.owner_id === session.user.id);
+}
 
 // อ้างอิง element ที่ใช้บ่อย
 const elFilterYear  = document.getElementById("filter-year");
@@ -273,6 +294,7 @@ const elCollHead   = document.getElementById("collection-head");
 const elEmptyHint  = document.getElementById("empty-hint");
 const elToast      = document.getElementById("toast");
 const btnSave      = document.getElementById("btn-save");
+const elAccessNote = document.getElementById("access-note");
 
 // เก็บ state ที่กำลังทำงานอยู่
 let currentSubject = null;
@@ -385,6 +407,16 @@ function showToast(msg, ok) {
   setTimeout(() => { elToast.className = "toast"; }, 2500);
 }
 
+function showAccessNote(message) {
+  elAccessNote.textContent = message;
+  elAccessNote.style.display = "block";
+}
+
+function clearAccessNote() {
+  elAccessNote.textContent = "";
+  elAccessNote.style.display = "none";
+}
+
 // ---------- โหลดวิชาทั้งหมด ----------
 async function loadSubjects() {
   const { data, error } = await sb
@@ -475,19 +507,25 @@ elClassroom.addEventListener("change", () => {
 // ---------- เมื่อเลือกวิชา: โหลดโครงสร้างและรายชื่อ ----------
 elSubject.addEventListener("change", async () => {
   resetBelow("unit");
+  clearAccessNote();
+  students = [];
+  hideRemarkSection();
   const picked = elSubject.value ? allSubjects.find(s => s.id === elSubject.value) : null;
 
   if (picked && picked.subject_type === "บูรณาการ") {
     currentSubject = null;
     elMemberPick.style.display = "block";
     await loadMemberOptions(picked.id);
-    await loadUnits();
-    await loadRemarkSection();
     return;
   }
 
   elMemberPick.style.display = "none";
   currentSubject = picked || null;
+  if (currentSubject && !canEdit(currentSubject)) {
+    currentSubject = null;
+    showAccessNote("คุณไม่ใช่เจ้าของวิชานี้ — กรอกคะแนนและจัดการ ร. ได้เฉพาะครูเจ้าของวิชาหรือผู้ดูแลระบบ");
+    return;
+  }
   await loadUnits();
   if (currentSubject) {
     students = await getRosterForSubject(currentSubject.id);
@@ -497,22 +535,39 @@ elSubject.addEventListener("change", async () => {
 
 // ---------- เติมตัวเลือกวิชาย่อยของวิชาบูรณาการ ----------
 async function loadMemberOptions(integratedId) {
+  elMemberSelect.innerHTML = "<option value=''>— กำลังโหลดวิชาย่อย —</option>";
   const { data: rows, error } = await sb
     .from("integration_members")
     .select("member:member_subject_id(*)")
     .eq("integrated_subject_id", integratedId);
   if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
-  memberSubjects = (rows || []).map(r => r.member).filter(Boolean);
-  const placeholder = memberSubjects.length > 0
-    ? "— เลือกวิชาย่อย —"
-    : "— วิชาบูรณาการนี้ยังไม่มีวิชาย่อย (เพิ่มที่หน้าจัดการโครงสร้าง) —";
-  fillSelect(elMemberSelect, memberSubjects, s => s.name, placeholder);
+  const allMemberSubjects = (rows || []).map(r => r.member).filter(Boolean);
+  if (allMemberSubjects.length === 0) {
+    memberSubjects = [];
+    elMemberSelect.innerHTML = "<option value=''>— วิชาบูรณาการนี้ยังไม่มีวิชาย่อย —</option>";
+    return;
+  }
+  memberSubjects = allMemberSubjects.filter(canEdit);
+  if (memberSubjects.length === 0) {
+    elMemberSelect.innerHTML = "<option value=''>— ไม่มีวิชาย่อยที่คุณเป็นเจ้าของ —</option>";
+    showAccessNote("คุณไม่ใช่เจ้าของวิชาย่อยของวิชาบูรณาการนี้ — กรอกคะแนนได้เฉพาะวิชาย่อยที่เป็นของคุณหรือเมื่อเป็นผู้ดูแลระบบ");
+    return;
+  }
+  fillSelect(elMemberSelect, memberSubjects, s => s.name, "— เลือกวิชาย่อย —");
 }
 
 elMemberSelect.addEventListener("change", async () => {
   resetBelow("unit");
+  clearAccessNote();
+  students = [];
+  hideRemarkSection();
   const m = memberSubjects.find(x => x.id === elMemberSelect.value);
   currentSubject = m || null;
+  if (currentSubject && !canEdit(currentSubject)) {
+    currentSubject = null;
+    showAccessNote("คุณไม่ใช่เจ้าของวิชาย่อยนี้ — กรอกคะแนนและจัดการ ร. ได้เฉพาะครูเจ้าของวิชาหรือผู้ดูแลระบบ");
+    return;
+  }
   await loadUnits();
   if (currentSubject) {
     students = await getRosterForSubject(currentSubject.id);
@@ -574,6 +629,7 @@ elIndicator.addEventListener("change", async () => {
 elCollection.addEventListener("change", async () => {
   const id = elCollection.value;
   if (!id) { hideStudents(); return; }
+  if (!currentSubject || !canEdit(currentSubject)) { hideStudents(); return; }
 
   const { data: coll } = await sb.from("collections").select("*").eq("id", id).single();
   currentCollection = coll;
@@ -682,6 +738,13 @@ const elRemarkCard = document.getElementById("remark-card");
 const elRemarkList = document.getElementById("remark-list");
 const elRemarkStudent = document.getElementById("sel-remark-student");
 let remarkRecords = [];
+
+function hideRemarkSection() {
+  elRemarkCard.style.display = "none";
+  remarkRecords = [];
+  elRemarkList.innerHTML = "";
+  elRemarkStudent.innerHTML = "";
+}
 
 async function loadRemarkSection() {
   if (!currentSubject) { elRemarkCard.style.display = "none"; return; }
