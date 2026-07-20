@@ -68,6 +68,19 @@
   .danger { color:var(--danger); background:var(--danger-soft); }
   .icon-btn { background:transparent; border:0; cursor:pointer; font-size:17px; padding:4px 6px; color:var(--muted); border-radius:7px; box-shadow:none; } .icon-btn.edit:hover { background:var(--teal-soft); color:var(--teal); } .icon-btn.del:hover { background:var(--danger-soft); color:var(--danger); }
   .assessment-row,.member-row,.student-row { display:flex; gap:9px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:9px 10px; margin-bottom:7px; } .assessment-row { cursor:pointer; } .assessment-row.selected { border-color:var(--teal); background:var(--teal-soft); } .grow { flex:1; min-width:0; } .title { font-weight:600; } .meta { color:var(--muted); font-size:13px; margin-top:1px; }
+  .assessment-group { margin-top:8px; }
+  .assessment-group:first-child { margin-top:0; }
+  .assessment-group-toggle {
+    display:flex; align-items:center; gap:8px; width:100%; min-height:44px;
+    padding:6px 4px; border:0; border-bottom:1px solid var(--line);
+    border-radius:4px; background:transparent; color:var(--muted);
+    font:inherit; text-align:left; cursor:pointer;
+  }
+  .assessment-group-toggle:hover,.assessment-group-toggle:focus-visible { background:var(--teal-soft); outline:none; }
+  .assessment-group-summary { flex:1; min-width:0; font-size:13px; font-weight:600; }
+  .assessment-group-caret { flex:0 0 auto; color:var(--teal); font-size:17px; }
+  .assessment-group-body { display:none; }
+  .assessment-group-body.is-open { display:block; }
   .competency-target-group { border:1px solid var(--line); border-radius:10px; overflow:hidden; margin-bottom:10px; background:var(--white); } .competency-target-title { padding:10px 12px; font-weight:600; color:var(--teal); background:var(--teal-soft); } .competency-target-cap { display:block; font-weight:400; font-size:12px; color:var(--muted); margin-top:2px; } .target-row { display:flex; gap:9px; align-items:center; padding:9px 12px; border-top:1px solid var(--line); } .target-row .stage { display:inline-block; padding:1px 6px; border-radius:999px; background:var(--teal-soft); color:var(--teal); font-size:12px; } .score { width:82px; flex:none; } .target-actions { display:flex; gap:4px; align-items:center; flex:none; } .icon { min-height:32px; padding:3px 8px; }
   .element-group { border:1px solid var(--line); border-radius:8px; padding:9px; margin-top:9px; } .element-group h4 { margin:0 0 6px; font-size:14px; color:var(--teal); } .element-option { display:grid; grid-template-columns:22px 1fr 80px; gap:6px; align-items:center; padding:5px 0; border-top:1px solid #edf1f2; } .element-option:first-of-type { border-top:0; } .element-option input[type=checkbox] { width:18px; height:18px; } .element-option input[type=number] { min-height:34px; }
   .member-tools { display:grid; grid-template-columns:1fr 1fr; gap:9px; align-items:end; } .student-picker { max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin-top:9px; } .student-row { border:0; border-bottom:1px solid #edf1f2; border-radius:0; margin:0; } .student-row:last-child { border-bottom:0; } .student-row input { width:18px; height:18px; flex:none; } .empty { color:var(--muted); font-size:14px; padding:8px 0; } .empty-note { color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:9px 12px; font-size:14px; font-weight:600; } .readonly { color:var(--danger); background:var(--danger-soft); border-radius:8px; padding:9px; font-size:14px; margin-bottom:10px; } .student-row.blocked { opacity:.65; } .student-row .block-note { color:var(--danger); font-size:12px; margin-top:2px; }
@@ -338,27 +351,52 @@ function renderSettings(){
   }
 }
 function renderAssessments() {
-  const el=$("assessment-list"); el.innerHTML="";
+  const el=$("assessment-list");
+  const openTypes=new Set([...el.querySelectorAll(".assessment-group-body.is-open")].map(body=>body.dataset.type));
+  el.innerHTML="";
   if(!assessments.length){el.textContent="ยังไม่มีรายการ — สร้างกิจกรรมหรือแม่แบบกิจวัตรด้านบน";return;}
   const yearFilter=$("filter-assessment-year").value;
   const rows=assessments
     .filter(a=>!yearFilter||a.year===yearFilter)
     .sort((x,y)=>x.name.localeCompare(y.name,"th"));
   if(!rows.length){el.textContent="ไม่มีรายการตรงตัวกรองปีการศึกษาที่เลือก";return;}
-  for(const a of rows){
-    const row=document.createElement("div");
-    row.className="assessment-row"+(current&&current.id===a.id?" selected":"");
-    row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+"</div><div class='meta'>"+esc(a.source_type)+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ยังไม่ระบุภาคเรียน")+" · "+esc(ownerLabel(a))+"</div></div>";
-    row.addEventListener("click",()=>selectAssessment(a.id));
-    if(canManageAssessment(a)){
-      const actions=document.createElement("div"); actions.className="target-actions";
-      const edit=document.createElement("button"); edit.className="icon-btn edit"; edit.textContent="✎"; edit.title="แก้ไขรายการ"; edit.setAttribute("aria-label","แก้ไขรายการ "+a.name);
-      edit.onclick=event=>{event.stopPropagation();openAssessmentModal(a);};
-      const remove=document.createElement("button"); remove.className="icon-btn del"; remove.textContent="🗑"; remove.title="ลบรายการ"; remove.setAttribute("aria-label","ลบรายการ "+a.name);
-      remove.onclick=event=>{event.stopPropagation();removeAssessment(a);};
-      actions.append(edit,remove); row.appendChild(actions);
+  const groups=new Map();
+  for(const assessment of rows){
+    const type=assessment.source_type||"(ไม่ระบุประเภท)";
+    if(!groups.has(type))groups.set(type,[]);
+    groups.get(type).push(assessment);
+  }
+  const typeOrder=["กิจกรรม","กิจวัตรประจำวัน"];
+  const types=[...groups.keys()].sort((a,b)=>{
+    const ai=typeOrder.indexOf(a),bi=typeOrder.indexOf(b);
+    if(ai===-1&&bi===-1)return a.localeCompare(b,"th");
+    if(ai===-1)return 1;if(bi===-1)return -1;return ai-bi;
+  });
+  for(const type of types){
+    const wrap=document.createElement("div");wrap.className="assessment-group";
+    const toggle=document.createElement("button");toggle.type="button";toggle.className="assessment-group-toggle";
+    const isOpen=openTypes.has(type);toggle.setAttribute("aria-expanded",String(isOpen));toggle.setAttribute("aria-label",(isOpen?"พับ":"กาง")+"รายการ"+type);
+    const summary=document.createElement("span");summary.className="assessment-group-summary";summary.textContent=type+" ("+groups.get(type).length+" รายการ)";
+    const caret=document.createElement("span");caret.className="assessment-group-caret";caret.setAttribute("aria-hidden","true");caret.textContent=isOpen?"▾":"▸";
+    toggle.append(summary,caret);
+    const body=document.createElement("div");body.className="assessment-group-body"+(isOpen?" is-open":"");body.dataset.type=type;
+    toggle.addEventListener("click",()=>{const opened=body.classList.toggle("is-open");caret.textContent=opened?"▾":"▸";toggle.setAttribute("aria-expanded",String(opened));toggle.setAttribute("aria-label",(opened?"พับ":"กาง")+"รายการ"+type);});
+    for(const a of groups.get(type)){
+      const row=document.createElement("div");
+      row.className="assessment-row"+(current&&current.id===a.id?" selected":"");
+      row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+"</div><div class='meta'>"+esc(a.source_type)+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ยังไม่ระบุภาคเรียน")+" · "+esc(ownerLabel(a))+"</div></div>";
+      row.addEventListener("click",()=>selectAssessment(a.id));
+      if(canManageAssessment(a)){
+        const actions=document.createElement("div"); actions.className="target-actions";
+        const edit=document.createElement("button"); edit.className="icon-btn edit"; edit.textContent="✎"; edit.title="แก้ไขรายการ"; edit.setAttribute("aria-label","แก้ไขรายการ "+a.name);
+        edit.onclick=event=>{event.stopPropagation();openAssessmentModal(a);};
+        const remove=document.createElement("button"); remove.className="icon-btn del"; remove.textContent="🗑"; remove.title="ลบรายการ"; remove.setAttribute("aria-label","ลบรายการ "+a.name);
+        remove.onclick=event=>{event.stopPropagation();removeAssessment(a);};
+        actions.append(edit,remove); row.appendChild(actions);
+      }
+      body.appendChild(row);
     }
-    el.appendChild(row);
+    wrap.append(toggle,body);el.appendChild(wrap);
   }
 }
 async function selectAssessment(id) {
