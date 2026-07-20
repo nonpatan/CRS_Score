@@ -488,26 +488,107 @@ function renderSubjects() {
     return;
   }
   elSubjectSummary.innerHTML =
-    "<div class='summary-box'>วิชาปี " + escapeHtml(elSourceYear.value) + " ทั้งหมด " + sourceSubjects.length + " วิชา<br>" +
+    "<div class='summary-box'>วิชาปี " + escapeHtml(elSourceYear.value) + " ทั้งหมด " + sourceSubjects.length + " วิชา" +
+    " · เลือกยก <b id='subject-selected-count'>" + sourceSubjects.length + "</b>" +
+    " · ไม่ยก <b id='subject-unselected-count'>0</b><br>" +
     "<span class='hint'>ติ๊กออก = ไม่ยกวิชานี้ (เช่น จะปรับปรุงโครงสร้างใหม่)</span> " +
     "<span class='link-toggle' id='toggle-all-subj'>เลือก/ไม่เลือกทั้งหมด</span></div>";
 
+  // แบ่งตามชั้นเหมือนส่วนเลื่อนชั้น แต่คง checkbox ทุกวิชาไว้ใน DOM แม้กลุ่มจะพับอยู่
+  const byGrade = {};
+  for (const subject of sourceSubjects) {
+    const grade = subject.grade_level || "(ไม่ระบุชั้น)";
+    if (!byGrade[grade]) byGrade[grade] = [];
+    byGrade[grade].push(subject);
+  }
+  const grades = Object.keys(byGrade).sort((a, b) => {
+    const ai = GRADE_ORDER.indexOf(a), bi = GRADE_ORDER.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b, "th");
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+
   let html = "";
-  for (const s of sourceSubjects) {
-    const meta = [s.grade_level || "-", s.term ? "เทอม " + s.term : "", s.subject_type === "บูรณาการ" ? "บูรณาการ" : ""].filter(Boolean).join(" · ");
-    html +=
-      "<label class='row'>" +
-        "<input type='checkbox' class='subject-cb' data-id='" + s.id + "' checked>" +
-        "<span class='info'><span class='name'>" + escapeHtml(s.code ? s.code + " " : "") + escapeHtml(s.name) + "</span>" +
-        "<span class='meta'> " + escapeHtml(meta) + "</span></span>" +
-      "</label>";
+  for (const grade of grades) {
+    html += "<div class='group-head'>" +
+      "<button type='button' class='grade-toggle subject-grade-toggle' data-grade='" + escapeHtml(grade) + "' aria-expanded='false' aria-label='กางรายวิชาชั้น " + escapeHtml(grade) + "'>" +
+        "<span class='group-summary subject-group-summary' data-grade='" + escapeHtml(grade) + "'></span>" +
+        "<span class='grade-caret' aria-hidden='true'>▸</span>" +
+      "</button>" +
+      "<div class='group-actions'>" +
+        "<span class='link-toggle subject-group-set' data-grade='" + escapeHtml(grade) + "' data-checked='true'>เลือกทั้งหมด</span> · " +
+        "<span class='link-toggle subject-group-set' data-grade='" + escapeHtml(grade) + "' data-checked='false'>ไม่เลือกทั้งหมด</span>" +
+      "</div></div>" +
+      "<div class='grade-body subject-grade-body' data-grade='" + escapeHtml(grade) + "'>";
+    for (const s of byGrade[grade]) {
+      const meta = [s.grade_level || "-", s.term ? "เทอม " + s.term : "", s.subject_type === "บูรณาการ" ? "บูรณาการ" : ""].filter(Boolean).join(" · ");
+      html +=
+        "<label class='row'>" +
+          "<input type='checkbox' class='subject-cb' data-id='" + s.id + "' data-grade='" + escapeHtml(grade) + "' checked>" +
+          "<span class='info'><span class='name'>" + escapeHtml(s.code ? s.code + " " : "") + escapeHtml(s.name) + "</span>" +
+          "<span class='meta'> " + escapeHtml(meta) + "</span></span>" +
+        "</label>";
+    }
+    html += "</div>";
   }
   elSubjectList.innerHTML = html;
 
+  // พับ/กางรายวิชา — ซ่อนด้วย CSS เท่านั้น checkbox ทุกตัวยังอยู่ใน DOM
+  elSubjectList.querySelectorAll(".subject-grade-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const body = Array.from(elSubjectList.querySelectorAll(".subject-grade-body"))
+        .find(el => el.dataset.grade === btn.dataset.grade);
+      if (!body) return;
+      const isOpen = body.classList.toggle("is-open");
+      const caret = btn.querySelector(".grade-caret");
+      if (caret) caret.textContent = isOpen ? "▾" : "▸";
+      btn.setAttribute("aria-expanded", String(isOpen));
+      btn.setAttribute("aria-label", (isOpen ? "พับ" : "กาง") + "รายวิชาชั้น " + btn.dataset.grade);
+    });
+  });
+
+  // เลือก/ไม่เลือกเฉพาะชั้นได้ขณะกลุ่มพับอยู่
+  elSubjectList.querySelectorAll(".subject-group-set").forEach(el => {
+    el.addEventListener("click", () => {
+      const checked = el.dataset.checked === "true";
+      elSubjectList.querySelectorAll(".subject-cb").forEach(cb => {
+        if (cb.dataset.grade === el.dataset.grade) cb.checked = checked;
+      });
+      updateSubjectSummary();
+    });
+  });
+
+  elSubjectList.querySelectorAll(".subject-cb").forEach(cb => cb.addEventListener("change", updateSubjectSummary));
   document.getElementById("toggle-all-subj").addEventListener("click", () => {
     const cbs = elSubjectList.querySelectorAll(".subject-cb");
     const anyUnchecked = [...cbs].some(cb => !cb.checked);
     cbs.forEach(cb => { cb.checked = anyUnchecked; });
+    updateSubjectSummary();
+  });
+  updateSubjectSummary();
+}
+
+// ---------- นับสรุปวิชาที่เลือกยก ทั้งหมด + แยกรายชั้น ----------
+function updateSubjectSummary() {
+  const cbs = elSubjectList.querySelectorAll(".subject-cb");
+  const selected = [...cbs].filter(cb => cb.checked).length;
+  const selectedEl = document.getElementById("subject-selected-count");
+  const unselectedEl = document.getElementById("subject-unselected-count");
+  if (selectedEl) selectedEl.textContent = selected;
+  if (unselectedEl) unselectedEl.textContent = cbs.length - selected;
+
+  const byGrade = {};
+  cbs.forEach(cb => {
+    if (!byGrade[cb.dataset.grade]) byGrade[cb.dataset.grade] = { total: 0, selected: 0 };
+    byGrade[cb.dataset.grade].total++;
+    if (cb.checked) byGrade[cb.dataset.grade].selected++;
+  });
+  elSubjectList.querySelectorAll(".subject-group-summary").forEach(el => {
+    const group = byGrade[el.dataset.grade];
+    if (!group) return;
+    el.textContent = el.dataset.grade + " (" + group.total + " วิชา) — ยก " + group.selected +
+      " · ไม่ยก " + (group.total - group.selected);
   });
 }
 
