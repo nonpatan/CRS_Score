@@ -92,7 +92,21 @@
   .tag.grad { background: var(--amber-soft); color: var(--amber); }
   .tag.hold { background: var(--danger-soft); color: var(--danger); }
 
-  .group-head { font-weight: 600; font-size: 13px; color: var(--muted); margin: 10px 0 2px; }
+  .group-head {
+    color: var(--muted); margin: 10px 0 2px; padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .group-head-main { display: flex; align-items: flex-start; gap: 6px; }
+  .group-summary { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+  .group-actions { padding-left: 28px; margin-top: 3px; line-height: 1.8; }
+  .grade-toggle {
+    flex: 0 0 22px; width: 22px; height: 22px; padding: 0;
+    border: 0; border-radius: 4px; background: transparent; color: var(--teal);
+    font: inherit; font-size: 17px; line-height: 22px; cursor: pointer;
+  }
+  .grade-toggle:hover, .grade-toggle:focus-visible { background: var(--teal-soft); outline: none; }
+  .grade-body { display: none; }
+  .grade-body.is-open { display: block; }
 
   .summary-box { background: var(--teal-soft); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
   .warn-note { background: var(--amber-soft); color: var(--amber); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
@@ -363,10 +377,17 @@ function renderPromote() {
   let html = "";
   for (const g of grades) {
     // ปุ่มตั้งทั้งกลุ่มเร็วๆ (เช่น ป.6 บางคนย้ายออก — ตั้งกลุ่มเป็นย้ายออกก่อน แล้วแก้รายคน)
-    html += "<div class='group-head'>" + escapeHtml(g) + " (" + byGrade[g].length + " คน) " +
-      "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='advance'>ตั้งกลุ่ม: เลื่อน/จบ</span> · " +
-      "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='hold'>ซ้ำชั้น</span> · " +
-      "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='left'>ย้ายออก</span></div>";
+    html += "<div class='group-head'>" +
+      "<div class='group-head-main'>" +
+        "<button type='button' class='grade-toggle' data-grade='" + escapeHtml(g) + "' aria-expanded='false' aria-label='กางรายชื่อนักเรียนชั้น " + escapeHtml(g) + "'>▸</button>" +
+        "<span class='group-summary' data-grade='" + escapeHtml(g) + "'></span>" +
+      "</div>" +
+      "<div class='group-actions'>" +
+        "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='advance'>ตั้งกลุ่ม: เลื่อน/จบ</span> · " +
+        "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='hold'>ซ้ำชั้น</span> · " +
+        "<span class='link-toggle group-set' data-grade='" + escapeHtml(g) + "' data-action='left'>ย้ายออก</span>" +
+      "</div></div>" +
+      "<div class='grade-body' data-grade='" + escapeHtml(g) + "'>";
     for (const stu of byGrade[g]) {
       const p = planFor(stu);
       const advanceLabel = p.advance === "graduate" ? "จบการศึกษา" : actionLabel("promote", p);
@@ -381,8 +402,22 @@ function renderPromote() {
           "</select>" +
         "</div>";
     }
+    html += "</div>";
   }
   elPromoteList.innerHTML = html;
+
+  // พับ/กางด้วย CSS เท่านั้น — ทุก dropdown ต้องอยู่ใน DOM เสมอเพื่อให้ขั้นตอนรันอ่านค่าได้ครบ
+  elPromoteList.querySelectorAll(".grade-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const body = Array.from(elPromoteList.querySelectorAll(".grade-body"))
+        .find(el => el.dataset.grade === btn.dataset.grade);
+      if (!body) return;
+      const isOpen = body.classList.toggle("is-open");
+      btn.textContent = isOpen ? "▾" : "▸";
+      btn.setAttribute("aria-expanded", String(isOpen));
+      btn.setAttribute("aria-label", (isOpen ? "พับ" : "กาง") + "รายชื่อนักเรียนชั้น " + btn.dataset.grade);
+    });
+  });
 
   // ตั้งทั้งกลุ่ม
   elPromoteList.querySelectorAll(".group-set").forEach(el => {
@@ -404,12 +439,35 @@ function renderPromote() {
 function updatePromoteSummary() {
   const sels = elPromoteList.querySelectorAll(".promote-action");
   let promote = 0, grad = 0, hold = 0, left = 0;
+  const byGrade = {};
   sels.forEach(s => {
+    if (!byGrade[s.dataset.grade]) {
+      byGrade[s.dataset.grade] = {
+        total: 0, promote: 0, grad: 0, hold: 0, left: 0,
+        advanceAction: s.options[0].value
+      };
+    }
+    const group = byGrade[s.dataset.grade];
+    group.total++;
     if (s.value === "promote") promote++;
     else if (s.value === "graduate") grad++;
     else if (s.value === "hold") hold++;
     else if (s.value === "left") left++;
+    if (s.value === "promote") group.promote++;
+    else if (s.value === "graduate") group.grad++;
+    else if (s.value === "hold") group.hold++;
+    else if (s.value === "left") group.left++;
   });
+
+  elPromoteList.querySelectorAll(".group-summary").forEach(el => {
+    const group = byGrade[el.dataset.grade];
+    if (!group) return;
+    const advanceLabel = group.advanceAction === "graduate" ? "จบ" : "เลื่อน";
+    const advanceCount = group.promote + group.grad;
+    el.textContent = el.dataset.grade + " (" + group.total + " คน) — " + advanceLabel + " " + advanceCount +
+      " · ซ้ำชั้น " + group.hold + " · ย้ายออก " + group.left;
+  });
+
   elPromoteSummary.innerHTML =
     "<div class='summary-box'>นักเรียน active " + sels.length + " คน · เลื่อนชั้น <b>" + promote +
     "</b> · จบ <b>" + grad + "</b> · ซ้ำชั้น <b>" + hold + "</b> · ย้ายออก <b>" + left + "</b><br>" +
