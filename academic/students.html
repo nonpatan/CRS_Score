@@ -101,6 +101,19 @@
   .student-row .info { flex: 1; min-width: 0; }
   .student-row .name { font-weight: 500; }
   .student-row .meta { color: var(--muted); font-size: 13px; }
+  .student-group { margin-top: 8px; }
+  .student-group:first-child { margin-top: 0; }
+  .student-group-toggle {
+    display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px;
+    padding: 6px 4px; border: 0; border-bottom: 1px solid var(--line);
+    border-radius: 4px; background: transparent; color: var(--muted);
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .student-group-toggle:hover, .student-group-toggle:focus-visible { background: var(--teal-soft); outline: none; }
+  .student-group-summary { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+  .student-group-caret { flex: 0 0 auto; color: var(--teal); font-size: 17px; }
+  .student-group-body { display: none; }
+  .student-group-body.is-open { display: block; }
   .icon-btn {
     background: none; border: none; cursor: pointer; font-size: 15px;
     padding: 4px 6px; color: var(--muted); border-radius: 6px;
@@ -364,26 +377,75 @@ function renderList() {
   elList.innerHTML = "";
   if (filtered.length === 0) { elList.innerHTML = "<div class='hint'>ไม่มีนักเรียนตรงตัวกรอง</div>"; return; }
 
+  // แบ่งตามชั้น/ห้อง และคงแถวนักเรียนทุกคนไว้ใน DOM แม้กลุ่มจะพับอยู่
+  const groups = new Map();
   for (const stu of filtered) {
-    const row = document.createElement("div");
-    row.className = "student-row";
-    const info = document.createElement("div");
-    info.className = "info";
-    info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) +
-      (stu.graduated ? " <span class='hint'>(จบแล้ว)</span>" : "") +
-      (stu.left_school ? " <span class='hint'>(ย้ายออก)</span>" : "") + "</div>" +
-      "<div class='meta'>เลขที่ " + escapeHtml(stu.student_no) +
-      (stu.grade_level ? " · " + escapeHtml(stu.grade_level) : "") +
-      (stu.classroom ? "/" + escapeHtml(stu.classroom) : "") + "</div>";
-    row.appendChild(info);
-    if (isAdminUser) {
-      const delBtn = document.createElement("button");
-      delBtn.className = "icon-btn del";
-      delBtn.textContent = "🗑";
-      delBtn.addEventListener("click", () => deleteStudent(stu));
-      row.appendChild(delBtn);
+    const grade = stu.grade_level || "(ไม่ระบุชั้น)";
+    const classroom = stu.classroom || "(ไม่ระบุห้อง)";
+    const key = grade + "\u0000" + classroom;
+    if (!groups.has(key)) {
+      const fullRoom = stu.grade_level && stu.classroom && String(stu.classroom).indexOf(stu.grade_level) === 0;
+      const label = fullRoom ? String(stu.classroom) : grade + "/" + classroom;
+      groups.set(key, { label, students: [] });
     }
-    elList.appendChild(row);
+    groups.get(key).students.push(stu);
+  }
+
+  for (const group of groups.values()) {
+    const wrap = document.createElement("div");
+    wrap.className = "student-group";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "student-group-toggle";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", "กางรายชื่อนักเรียนห้อง " + group.label);
+
+    const summary = document.createElement("span");
+    summary.className = "student-group-summary";
+    summary.textContent = group.label + " (" + group.students.length + " คน)";
+    const caret = document.createElement("span");
+    caret.className = "student-group-caret";
+    caret.setAttribute("aria-hidden", "true");
+    caret.textContent = "▸";
+    toggle.appendChild(summary);
+    toggle.appendChild(caret);
+
+    const body = document.createElement("div");
+    body.className = "student-group-body";
+    toggle.addEventListener("click", () => {
+      const isOpen = body.classList.toggle("is-open");
+      caret.textContent = isOpen ? "▾" : "▸";
+      toggle.setAttribute("aria-expanded", String(isOpen));
+      toggle.setAttribute("aria-label", (isOpen ? "พับ" : "กาง") + "รายชื่อนักเรียนห้อง " + group.label);
+    });
+
+    for (const stu of group.students) {
+      const row = document.createElement("div");
+      row.className = "student-row";
+      const info = document.createElement("div");
+      info.className = "info";
+      info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) +
+        (stu.graduated ? " <span class='hint'>(จบแล้ว)</span>" : "") +
+        (stu.left_school ? " <span class='hint'>(ย้ายออก)</span>" : "") + "</div>" +
+        "<div class='meta'>เลขที่ " + escapeHtml(stu.student_no) +
+        (stu.grade_level ? " · " + escapeHtml(stu.grade_level) : "") +
+        (stu.classroom ? "/" + escapeHtml(stu.classroom) : "") + "</div>";
+      row.appendChild(info);
+      if (isAdminUser) {
+        const delBtn = document.createElement("button");
+        delBtn.className = "icon-btn del";
+        delBtn.textContent = "🗑";
+        delBtn.setAttribute("aria-label", "ลบนักเรียน " + stu.name);
+        delBtn.addEventListener("click", () => deleteStudent(stu));
+        row.appendChild(delBtn);
+      }
+      body.appendChild(row);
+    }
+
+    wrap.appendChild(toggle);
+    wrap.appendChild(body);
+    elList.appendChild(wrap);
   }
 }
 
