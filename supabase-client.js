@@ -513,3 +513,107 @@ export function computeIntegratedResult(studentId, memberDataList) {
 
   return { memberResults, overall, totalBase, rawMissed, makeupTotal };
 }
+
+// ---------- รวมผลทุกวิชาของนักเรียนทุกคน ในชั้น + ปีการศึกษา (+ เทอม ถ้าส่งมา) ----------
+// ใช้ร่วมกันระหว่าง retention.html (เกณฑ์เรียนซ้ำชั้น — ไม่ส่ง term = รวมทั้งปี) และ
+// summary.html แท็บ "ผลการเรียนรายคน" (มัธยมส่ง term = คิดรายเทอม, ประถมไม่ส่ง = คิดรายปี)
+// กติกาวิชาบูรณาการ: นับวิชาบูรณาการเป็น 1 รายวิชา ไม่นับวิชาพื้นฐานสมาชิกซ้ำอีกที (ยืนยันแล้ว)
+// คืน Map<studentId, { student, subjects: [{ subject, result }] }>  (result รูปทรงเดียวกับ
+// computeSubjectResult().result / computeIntegratedResult().overall) — โยน Error ถ้าโหลดไม่สำเร็จ
+export async function computeStudentSubjectResults({ grade, year, term } = {}) {
+  const out = new Map();
+  if (!grade || !year) return out;
+
+  const { data: allSubj, error: subjErr } = await sb
+    .from("subjects").select("*").eq("grade_level", grade).eq("year", year);
+  if (subjErr) throw new Error("โหลดวิชาไม่สำเร็จ: " + subjErr.message);
+  if (!allSubj || allSubj.length === 0) return out;
+
+  // มัธยมส่ง term มา = คิดเฉพาะวิชาของเทอมนั้น; ประถมไม่ส่ง term จึงรวมทั้งปี (ยืนยันแล้ว)
+  const scopedSubj = term ? allSubj.filter(s => s.term === term) : allSubj;
+  if (scopedSubj.length === 0) return out;
+
+  // วิชาบูรณาการในชุดนี้ + วิชาพื้นฐานสมาชิกของมัน (นับที่วิชาบูรณาการตัวเดียว กันนับซ้ำ)
+  const integratedIds = scopedSubj.filter(s => s.subject_type === "บูรณาการ").map(s => s.id);
+  let memberLinks = [];
+  if (integratedIds.length > 0) {
+    const { data } = await sb.from("integration_members").select("*").in("integrated_subject_id", integratedIds);
+    memberLinks = data || [];
+  }
+  const memberSubjectIds = new Set(memberLinks.map(m => m.member_subject_id));
+  const countableSubjects = scopedSubj.filter(s => s.subject_type === "บูรณาการ" || !memberSubjectIds.has(s.id));
+
+  // โหลดข้อมูลเต็มของวิชาพื้นฐานที่ต้องใช้จริง (นับตรง ๆ + ที่เป็นสมาชิกบูรณาการ)
+  const plainIdsToLoad = new Set();
+  for (const s of countableSubjects) if (s.subject_type === "พื้นฐาน") plainIdsToLoad.add(s.id);
+  for (const id of memberSubjectIds) plainIdsToLoad.add(id);
+
+  const loadedData = new Map();
+  await Promise.all([...plainIdsToLoad].map(async id => { loadedData.set(id, await loadSubjectData(id)); }));
+
+  const groupMembers = new Map(); // integrated_subject_id -> [member_subject_id, ...]
+  for (const link of memberLinks) {
+    if (!groupMembers.has(link.integrated_subject_id)) groupMembers.set(link.integrated_subject_id, []);
+    groupMembers.get(link.integrated_subject_id).push(link.member_subject_id);
+  }
+
+  // รายชื่อนักเรียน = ผ่าน enrollments ของวิชาพื้นฐานเท่านั้น (วิชาบูรณาการไม่มี enrollments ของตัวเอง)
+  const enrollSubjectIds = [...plainIdsToLoad];
+  const { data: enrollRows, error: enrollErr } = enrollSubjectIds.length
+    ? await sb.from("enrollments").select("student_id, subject_id, student:student_id(*)").in("subject_id", enrollSubjectIds)
+    : { data: [], error: null };
+  if (enrollErr) throw new Error("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + enrollErr.message);
+
+  const enrolledBySubject = new Map();
+  const studentsMap = new Map();
+  for (const row of (enrollRows || [])) {
+    if (!enrolledBySubject.has(row.subject_id)) enrolledBySubject.set(row.subject_id, new Set());
+    enrolledBySubject.get(row.subject_id).add(row.student_id);
+    if (row.student) studentsMap.set(row.student_id, row.student);
+  }
+  if (studentsMap.size === 0) return out;
+
+  for (const [studentId, student] of studentsMap) out.set(studentId, { student, subjects: [] });
+
+  for (const subj of countableSubjects) {
+    if (subj.subject_type === "บูรณาการ") {
+      const members = groupMembers.get(subj.id) || [];
+      const memberDataList = members.map(id => loadedData.get(id)).filter(Boolean);
+      const enrolledSet = new Set();
+      for (const id of members) for (const sid of (enrolledBySubject.get(id) || [])) enrolledSet.add(sid);
+      for (const studentId of enrolledSet) {
+        if (!out.has(studentId)) continue;
+        const ir = computeIntegratedResult(studentId, memberDataList);
+        out.get(studentId).subjects.push({ subject: subj, result: ir.overall });
+      }
+    } else {
+      const data = loadedData.get(subj.id);
+      const enrolledSet = enrolledBySubject.get(subj.id) || new Set();
+      for (const studentId of enrolledSet) {
+        if (!out.has(studentId)) continue;
+        const r = computeSubjectResult(studentId, data.subject, data.units, data.remarksData, data.sessions, data.makeupHours);
+        out.get(studentId).subjects.push({ subject: subj, result: r.result });
+      }
+    }
+  }
+
+  return out;
+}
+
+// ---------- คิดเกรดเฉลี่ย (GPA) จากผลรายวิชาของนักเรียน 1 คน ----------
+// ถ่วงน้ำหนักด้วยหน่วยกิต (credits) — ไม่มีหน่วยกิต (ประถม) ถือเป็น 1 หน่วยเท่ากัน (ยืนยันแล้ว)
+// มีวิชาติด ร./มส. ที่ยังไม่แก้แม้แต่วิชาเดียว → pending=true ("ยังสรุปไม่ได้") ไม่คิด GPA (ยืนยันแล้ว)
+// รับ subjectResults = [{ subject, result }, ...]  คืน { gpa: number|null, pending, total }
+export function computeGpa(subjectResults) {
+  const list = subjectResults || [];
+  const total = list.length;
+  const pending = list.some(x => x.result.type === "มส." || x.result.type === "ร.");
+  if (pending || total === 0) return { gpa: null, pending, total };
+  let weightedSum = 0, weightSum = 0;
+  for (const x of list) {
+    const w = x.subject.credits && x.subject.credits > 0 ? Number(x.subject.credits) : 1;
+    weightedSum += x.result.grade * w;
+    weightSum += w;
+  }
+  return { gpa: weightSum > 0 ? weightedSum / weightSum : 0, pending: false, total };
+}
