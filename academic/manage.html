@@ -271,9 +271,9 @@
       <div class="field-note">ต้องเลือกอีเมลครูเจ้าของวิชาก่อนบันทึก — ใช้อีเมลบัญชีเป็นครูผู้สอนของวิชานี้; ชื่อที่แสดงให้ดูจากข้อมูลส่วนตัวของบัญชี ครูเจ้าของแก้ได้เฉพาะ<b>โครงสร้าง/คะแนน/ลงทะเบียน</b> ส่วน<b>ข้อมูลวิชา</b>และการลบวิชาสงวนไว้ให้ admin</div>
     </div>
     <div class="field" id="field-periods">
-      <label for="f-periods">จำนวนคาบเรียนทั้งเทอม <span style="color:var(--danger,#d33737)">*</span></label>
+      <label for="f-periods" id="periods-label">จำนวนคาบเรียนทั้งปีการศึกษา <span style="color:var(--danger,#d33737)">*</span></label>
       <input type="number" id="f-periods" min="1" step="1" required placeholder="ต้องกรอก เช่น 40">
-      <div class="field-note" id="periods-note">ใช้เป็นตัวหารคำนวณเปอร์เซ็นต์เวลาเรียนสำหรับ มส. — <b>จำเป็นต้องกรอก</b></div>
+      <div class="field-note" id="periods-note">ประถมให้กรอกจำนวนคาบรวมทั้งปี ใช้เป็นฐานคำนวณเกณฑ์เวลาเรียนสำหรับ มส. — <b>จำเป็นต้องกรอก</b></div>
     </div>
     <button class="primary" id="btn-save-subject">บันทึกข้อมูลวิชา</button>
     <button class="danger" id="btn-del-subject" style="width:100%; margin-top:8px; display:none">ลบวิชานี้</button>
@@ -314,7 +314,7 @@
     <div class="field-note" style="margin-bottom:10px">
       คะแนนของแต่ละวิชายังกรอกแยกตามปกติที่หน้า "กรอกคะแนน" หน้านี้แค่กำหนดว่าวิชาไหน
       ประกอบกันเป็นวิชาบูรณาการนี้บ้าง — หน้าสรุปจะถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียน
-      (จำนวนคาบเรียนทั้งเทอม) ของแต่ละวิชาให้เอง ถ้าวิชาไหนติด ร./มส. วิชาบูรณาการนี้จะติดตามด้วย
+      (ประถมใช้ทั้งปี / มัธยมใช้ทั้งภาคเรียน) ของแต่ละวิชาให้เอง ถ้าวิชาไหนติด ร./มส. วิชาบูรณาการนี้จะติดตามด้วย
     </div>
     <div id="member-list"></div>
     <div class="row2" style="margin-top:10px">
@@ -542,10 +542,19 @@ function updateGradeOptions(keepValue) {
 }
 
 // หน่วยกิต/ภาคเรียน (แบบเลือก) ใช้เฉพาะมัธยม — ประถมไม่มีหน่วยกิต และไม่ต้องเลือกภาคเรียน
+// total_periods ใช้คอลัมน์เดียวกัน แต่ขอบเขตตามวิชา: ประถม = ทั้งปี, มัธยม = ทั้งภาคเรียน
 function updateLevelDependentFields() {
   const isMatthayom = fLevel.value === "มัธยม";
   fieldCredits.style.display = isMatthayom ? "block" : "none";
   fieldTerm.style.display = isMatthayom ? "block" : "none";
+  document.getElementById("periods-label").innerHTML =
+    "จำนวนคาบเรียน" + (isMatthayom ? "ทั้งภาคเรียน" : "ทั้งปีการศึกษา") +
+    " <span style='color:var(--danger,#d33737)'>*</span>";
+  document.getElementById("periods-note").innerHTML =
+    (isMatthayom
+      ? "มัธยมให้กรอกจำนวนคาบรวมของภาคเรียนที่เลือก"
+      : "ประถมให้กรอกจำนวนคาบรวมทั้งปี") +
+    " ใช้เป็นฐานคำนวณเกณฑ์เวลาเรียนสำหรับ มส. — <b>จำเป็นต้องกรอก</b>";
   if (!isMatthayom) { fCredits.value = ""; }
 }
 fLevel.addEventListener("change", () => { updateGradeOptions(); updateLevelDependentFields(); });
@@ -749,7 +758,8 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
 
   let periods = null;
   if (!isIntegrated) {
-    if (fPeriods.value.trim() === "") { showToast("กรุณากรอกจำนวนคาบเรียนทั้งเทอม (ใช้คำนวณ มส.)", false); fPeriods.focus(); return; }
+    const periodsScope = isMatthayom ? "ทั้งภาคเรียน" : "ทั้งปีการศึกษา";
+    if (fPeriods.value.trim() === "") { showToast("กรุณากรอกจำนวนคาบเรียน" + periodsScope + " (ใช้คำนวณ มส.)", false); fPeriods.focus(); return; }
     periods = Number(fPeriods.value);
     if (isNaN(periods) || periods <= 0) { showToast("จำนวนคาบต้องมากกว่า 0", false); fPeriods.focus(); return; }
   }
