@@ -137,6 +137,10 @@
   .student-button:hover,.student-button.selected { border-color:var(--teal); background:var(--teal-soft); }
   .student-button .student-name { font-weight:600; }
   .student-button .student-meta { color:var(--muted); font-size:13px; }
+  .student-button.attendance-risk { border-color:#d8a43c; background:var(--amber-soft); }
+  .student-button.attendance-risk .student-name { color:var(--amber); }
+  .student-button.attendance-risk.selected { border-color:var(--amber); background:var(--amber-soft); box-shadow:0 0 0 2px rgba(147,105,15,0.16); }
+  .attendance-risk-label { display:block; color:var(--amber); font-weight:600; margin-top:2px; }
   .competency-card { padding:0; overflow:hidden; }
   .competency-head { padding:13px 16px; background:var(--teal-soft); display:flex; justify-content:space-between; gap:10px; align-items:center; }
   .competency-head .name { font-weight:600; }
@@ -336,7 +340,7 @@ import {
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
-  computeCombinedCompetencyResult, computeMissedPeriods, GRADE_ORDER, getSetting
+  computeCombinedCompetencyResult, computeMissedPeriods, computeAttendanceRisk, GRADE_ORDER, getSetting
 } from "../supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -403,6 +407,7 @@ let gpaResultsMap = null, gpaResultsKey = "", gpaResultsError = "";
 // แท็บ "รายละเอียดการเข้าเรียน"
 let attendancePlacements = [], attendancePlacementError = "";
 let attendanceSubject = null, attendanceMembers = [], attendanceRoster = [], attendanceSessions = [];
+let attendanceMakeupHours = [];
 let attendanceRosterBySubject = new Map();
 let attendanceLoadToken = 0, selectedAttendanceStudentId = "";
 
@@ -852,6 +857,7 @@ function resetAttendanceSubjectContext(message) {
   attendanceMembers = [];
   attendanceRoster = [];
   attendanceSessions = [];
+  attendanceMakeupHours = [];
   attendanceRosterBySubject = new Map();
   selectedAttendanceStudentId = "";
   elAttStudentList.innerHTML = "<div class='hint'>เลือกวิชาก่อน</div>";
@@ -915,6 +921,11 @@ function renderAttendanceStudentList() {
   selectedAttendanceStudentId = "";
   const room = elAttRoom.value;
   const rows = attendanceRoster.filter(s => !room || s.classroom === room);
+  const riskDataList = attendanceMembers.map(subject => ({
+    subject,
+    sessions: attendanceSessions.filter(session => session.subject_id === subject.id),
+    makeupHours: attendanceMakeupHours.filter(row => row.subject_id === subject.id)
+  }));
   elAttResult.innerHTML = "<div class='card hint'>" + (rows.length
     ? "เลือกนักเรียนจากรายชื่อเพื่อดูประวัติการเข้าเรียน"
     : "ไม่มีนักเรียนที่ลงทะเบียนในวิชาและห้องที่เลือก") + "</div>";
@@ -925,13 +936,16 @@ function renderAttendanceStudentList() {
 
   elAttStudentList.innerHTML = "";
   for (const student of rows) {
+    const risk = computeAttendanceRisk(student.id, riskDataList);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "student-button";
+    button.className = "student-button" + (risk.risky ? " attendance-risk" : "");
     button.dataset.student = student.id;
     button.innerHTML = "<span class='student-name'>" + escapeHtml(student.name) + "</span>" +
       "<span class='student-meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
-      (student.classroom ? " · " + escapeHtml(student.classroom) : "") + "</span>";
+      (student.classroom ? " · " + escapeHtml(student.classroom) : "") +
+      (risk.risky ? "<span class='attendance-risk-label'>เสี่ยง มส. · ขาดสุทธิ " + risk.percent.toFixed(1) + "%</span>" : "") +
+      "</span>";
     button.addEventListener("click", () => {
       selectedAttendanceStudentId = student.id;
       elAttStudentList.querySelectorAll(".student-button").forEach(item =>
@@ -955,6 +969,7 @@ async function loadAttendanceSubjectContext() {
   attendanceMembers = [];
   attendanceRoster = [];
   attendanceSessions = [];
+  attendanceMakeupHours = [];
   attendanceRosterBySubject = new Map();
   selectedAttendanceStudentId = "";
   elAttStudentList.innerHTML = "<div class='hint'>กำลังโหลดรายชื่อนักเรียน...</div>";
@@ -986,17 +1001,21 @@ async function loadAttendanceSubjectContext() {
   }
 
   const subjectIds = attendanceMembers.map(s => s.id);
-  const [rosters, sessionResult] = await Promise.all([
+  const [rosters, sessionResult, makeupResult] = await Promise.all([
     Promise.all(subjectIds.map(id => getRosterForSubject(id))),
     sb.from("attendance_sessions")
       .select("id,subject_id,session_date,periods_covered,created_at,attendance_records(student_id,status)")
       .in("subject_id", subjectIds)
       .order("session_date")
-      .order("created_at")
+      .order("created_at"),
+    sb.from("makeup_hours")
+      .select("subject_id,student_id,periods")
+      .in("subject_id", subjectIds)
   ]);
   if (token !== attendanceLoadToken) return;
-  if (sessionResult.error) {
-    elAttResult.innerHTML = "<div class='card incomplete'>โหลดประวัติเช็คชื่อไม่สำเร็จ: " + escapeHtml(sessionResult.error.message) + "</div>";
+  if (sessionResult.error || makeupResult.error) {
+    const loadError = sessionResult.error || makeupResult.error;
+    elAttResult.innerHTML = "<div class='card incomplete'>โหลดข้อมูลการเข้าเรียนไม่สำเร็จ: " + escapeHtml(loadError.message) + "</div>";
     return;
   }
 
@@ -1013,6 +1032,7 @@ async function loadAttendanceSubjectContext() {
   attendanceRoster = placementResult.rows
     .sort((a,b) => (a.student_no || "").localeCompare(b.student_no || "", "th", { numeric:true }));
   attendanceSessions = sessionResult.data || [];
+  attendanceMakeupHours = makeupResult.data || [];
   renderAttendanceStudentList();
   if (placementResult.missing > 0) {
     elAttResult.innerHTML = "<div class='warn-note'>นักเรียน " + placementResult.missing +

@@ -158,7 +158,7 @@
 <div class="wrap">
   <header>
     <h1>เฝ้าระวัง มส. (Attendance Warning)</h1>
-    <p>ดูรายชื่อนักเรียนที่มีความเสี่ยงติด มส. ในทุกรายวิชา (ขาดเรียนเกิน 10%)</p>
+    <p>ดูรายชื่อนักเรียนที่มีความเสี่ยงติด มส. ในทุกรายวิชา (ขาดเรียนตั้งแต่ 10%)</p>
     <div class="nav">
       <a href="entry.html">กรอกคะแนน</a>
       <a href="competency-manage.html">กำหนดสมรรถนะ</a>
@@ -213,7 +213,7 @@
 <div id="toast"></div>
 
 <script type="module">
-  import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getActiveStudents, loadSubjectData, computeMissedPeriods } from "../supabase-client.js";
+  import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getActiveStudents, loadSubjectData, computeAttendanceRisk } from "../supabase-client.js";
 
   let allActiveStudents = [];
   const elYear = document.getElementById("filter-year");
@@ -383,35 +383,23 @@
           const d = item.data;
 
           if (s.subject_type === 'บูรณาการ') {
-            let totalBase = 0;
-            let rawMissedTotal = 0;
-            let makeupTotalTotal = 0;
             let enrolledInAny = false;
 
             for (const mem of item.membersData) {
-              const mData = mem.data;
               const mSubj = mem.subj;
               // ถ้าเด็กลงทะเบียนวิชาย่อยตัวนี้ (จริงๆ ควรลงผ่าน enrollments ของวิชาย่อย)
               if (enrollMap[mSubj.id] && enrollMap[mSubj.id].has(stu.id)) {
                 enrolledInAny = true;
               }
-              totalBase += (mSubj.total_periods || 0);
-              const mRawMissed = computeMissedPeriods(stu.id, mData.sessions || []);
-              const mMakeup = (mData.makeupHours || []).filter(h => h.student_id === stu.id).reduce((sum, h) => sum + Number(h.periods), 0);
-              rawMissedTotal += mRawMissed;
-              makeupTotalTotal += mMakeup;
             }
 
-            if (enrolledInAny && totalBase > 0) {
-              const netMissed = Math.max(0, rawMissedTotal - makeupTotalTotal);
-              const pct = (netMissed / totalBase) * 100;
-              if (pct >= 10) {
-                if (pct > maxPct) maxPct = pct;
+            const risk = computeAttendanceRisk(stu.id, item.membersData.map(mem => mem.data));
+            if (enrolledInAny && risk.risky) {
+                if (risk.percent > maxPct) maxPct = risk.percent;
                 riskySubjects.push({
                   name: s.code + " " + s.name + " (บูรณาการ)",
-                  netMissed, total: totalBase, pct
+                  netMissed: risk.netMissed, total: risk.totalBase, pct: risk.percent, critical: risk.critical
                 });
-              }
             }
           } else {
             // วิชาพื้นฐาน (ข้ามวิชาที่เป็นสมาชิกบูรณาการ เพื่อไม่โชว์ซ้ำซ้อน)
@@ -422,26 +410,20 @@
             // เช็คว่าลงทะเบียนไหม
             if (!enrollMap[s.id] || !enrollMap[s.id].has(stu.id)) continue;
 
-            const total = s.total_periods || 0;
-            if (total > 0) {
-              const rawMissed = computeMissedPeriods(stu.id, d.sessions || []);
-              const makeup = (d.makeupHours || []).filter(h => h.student_id === stu.id).reduce((sum, h) => sum + Number(h.periods), 0);
-              const netMissed = Math.max(0, rawMissed - makeup);
-              const pct = (netMissed / total) * 100;
-              if (pct >= 10) {
-                if (pct > maxPct) maxPct = pct;
-                riskySubjects.push({
-                  name: s.code + " " + s.name,
-                  netMissed, total, pct
-                });
-              }
+            const risk = computeAttendanceRisk(stu.id, [d]);
+            if (risk.risky) {
+              if (risk.percent > maxPct) maxPct = risk.percent;
+              riskySubjects.push({
+                name: s.code + " " + s.name,
+                netMissed: risk.netMissed, total: risk.totalBase, pct: risk.percent, critical: risk.critical
+              });
             }
           }
         }
 
         if (riskySubjects.length > 0) {
           riskySubjects.sort((a,b) => b.pct - a.pct);
-          flaggedStudents.push({ stu, riskySubjects, maxPct });
+          flaggedStudents.push({ stu, riskySubjects, maxPct, critical: riskySubjects[0].critical });
         }
       }
 
@@ -453,8 +435,8 @@
         let html = `<div class='card summary-line'>นักเรียนทั้งหมด ${targetStudents.length} คน · เสี่ยงติด มส. <b>${flaggedStudents.length}</b> คน</div>`;
 
         for (const f of flaggedStudents) {
-          const type = f.maxPct > 20 ? "danger" : "warn";
-          const badgeHtml = f.maxPct > 20 ? "<span class='badge bad'>วิกฤต (>20%)</span>" : "<span class='badge mid'>เสี่ยง (>10%)</span>";
+          const type = f.critical ? "danger" : "warn";
+          const badgeHtml = f.critical ? "<span class='badge bad'>วิกฤต (>20%)</span>" : "<span class='badge mid'>เสี่ยง (≥10%)</span>";
 
           html += `
             <div class='card student-card ${type}'>
@@ -470,9 +452,7 @@
           `;
 
           for (const subj of f.riskySubjects) {
-            let rowType = "";
-            if (subj.pct > 20) rowType = "danger-text";
-            else if (subj.pct >= 10) rowType = "warn-text";
+            const rowType = subj.critical ? "danger-text" : "warn-text";
 
             html += `
               <div class='score-row'>

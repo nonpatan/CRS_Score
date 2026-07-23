@@ -331,8 +331,8 @@ export function percentToGrade(p) {
 
 // นับจำนวนคาบที่ขาดสะสมจริงของนักเรียน 1 คน (ถ่วงน้ำหนักแบบเดียวกับเช็ค มส.: ขาด = เต็ม 1,
 // ลาป่วย/ลากิจ = ครึ่งเดียว, มา/มาสาย = ไม่นับ) จาก session ที่เช็คชื่อไปแล้วเท่านั้น — ไม่ใช่
-// % ของคาบทั้งเทอม เพราะถ้าเทียบเป็น % ตั้งแต่ต้นเทอม (ที่เช็คชื่อไปแค่ไม่กี่ครั้ง) ตัวเลขจะ
-// เพี้ยนสูงเกินจริง ทำให้ต้นเทอมติด มส. ง่ายเกินไปทั้งที่ยังเหลือเวลาทั้งเทอมให้แก้ตัวอีกเยอะ
+// % ของคาบเต็มตามรอบวิชา (ประถมทั้งปี / มัธยมทั้งภาคเรียน) เพราะถ้าเทียบเป็น % ตั้งแต่ช่วงต้น
+// (ที่เช็คชื่อไปแค่ไม่กี่ครั้ง) ตัวเลขจะเพี้ยนสูงเกินจริง ทำให้ติด มส. ง่ายเกินไปทั้งที่ยังเหลือเวลาแก้ตัวอีกเยอะ
 // (บั๊กที่ผู้ใช้เจอจริงตอนเปิดเทอมใหม่ — ยืนยันแก้แล้ว 2026-07)
 export function computeMissedPeriods(studentId, sessionsArr) {
   let missed = 0;
@@ -344,6 +344,38 @@ export function computeMissedPeriods(studentId, sessionsArr) {
     // 'มา'/'มาสาย' ไม่นับ (ไม่ขาด)
   }
   return missed;
+}
+
+// คำนวณสถานะเฝ้าระวัง มส. จากวิชาพื้นฐาน 1 ตัว หรือหลายตัวที่ประกอบเป็นวิชาบูรณาการ
+// ใช้ร่วมกันทั้ง dashboard.html, warning.html และ summary.html เพื่อให้เกณฑ์ไม่แยกกันหลายหน้า
+// subjectDataList ใช้รูปเดียวกับผลจาก loadSubjectData(): [{ subject, sessions, makeupHours }, ...]
+// เกณฑ์ที่ยืนยันแล้ว: ขาดสุทธิหลังหักชั่วโมงชดเชย >= 10% = เสี่ยง, > 20% = วิกฤต
+export function computeAttendanceRisk(studentId, subjectDataList) {
+  const dataList = Array.isArray(subjectDataList) ? subjectDataList : [];
+  let totalBase = 0;
+  let rawMissed = 0;
+  let makeupTotal = 0;
+
+  for (const item of dataList) {
+    if (!item || !item.subject) continue;
+    totalBase += Number(item.subject.total_periods) || 0;
+    rawMissed += computeMissedPeriods(studentId, item.sessions || []);
+    makeupTotal += (item.makeupHours || [])
+      .filter(row => row.student_id === studentId)
+      .reduce((sum, row) => sum + (Number(row.periods) || 0), 0);
+  }
+
+  const netMissed = Math.max(0, rawMissed - makeupTotal);
+  const percent = totalBase > 0 ? (netMissed / totalBase) * 100 : 0;
+  return {
+    totalBase,
+    rawMissed,
+    makeupTotal,
+    netMissed,
+    percent,
+    risky: totalBase > 0 && percent >= 10,
+    critical: totalBase > 0 && percent > 20
+  };
 }
 
 // โหลดข้อมูลเต็มของวิชา 1 ตัว (โครงสร้างคะแนน + ร. + เช็คชื่อ + ชั่วโมงชดเชย) — ใช้ได้ทั้งวิชาพื้นฐานเดี่ยว
@@ -421,12 +453,12 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   // 2) เช็ค มส. — ใช้ทั้งประถมและมัธยม (ยืนยันกับผู้ใช้แล้ว) ต้องมีทั้ง total_periods
   //    กับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้ง ไม่งั้นข้ามไปคิดเกรดตามปกติ (ยัง เช็ค มส. ไม่ได้)
   // มส. มี 2 ระดับ ตาม "จำนวนคาบขาดสะสมจริง" เทียบกับเพดานคาบที่ขาดได้สูงสุด (ไม่ใช่ % ของคาบ
-  // ทั้งเทอมแบบเดิม — เปลี่ยนเพราะเทียบ % ตั้งแต่ต้นเทอมทำให้ติด มส. ง่ายเกินจริง ยืนยันแล้ว
-  // 2026-07): เพดานคำนวณจาก total_periods ทั้งเทอมเสมอ (ไม่ใช่คาบที่เช็คไปแล้ว) เพราะงั้นต้น
-  // เทอมที่ยังเช็คไม่กี่ครั้ง คาบขาดสะสมจะยังน้อยกว่าเพดานเยอะ ไม่ติด มส. ง่ายๆ
-  //   ขาดสะสม > 20% ของคาบทั้งเทอม และ <= 40%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชย
+  // เต็มตามรอบวิชาแบบเดิม — เปลี่ยนเพราะเทียบ % ตั้งแต่ช่วงต้นทำให้ติด มส. ง่ายเกินจริง ยืนยันแล้ว
+  // 2026-07): เพดานคำนวณจาก total_periods ของรอบวิชาเสมอ (ประถมทั้งปี / มัธยมทั้งภาคเรียน)
+  // ไม่ใช่คาบที่เช็คไปแล้ว จึงไม่ติด มส. ง่ายๆ ตอนที่ยังเช็คชื่อเพียงไม่กี่ครั้ง
+  //   ขาดสะสม > 20% ของคาบเต็มตามรอบวิชา และ <= 40%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชย
   //     ลบยอดขาดสุทธิให้ไม่เกิน 20% ได้
-  //   ขาดสะสม > 40% ของคาบทั้งเทอม             → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
+  //   ขาดสะสม > 40% ของคาบเต็มตามรอบวิชา               → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
   if (!skipMs && subj.total_periods && sessionsArr.length > 0) {
     const rawMissed = computeMissedPeriods(studentId, sessionsArr);
     const maxMissedRetake = subj.total_periods * 0.40;

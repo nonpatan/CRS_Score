@@ -228,7 +228,7 @@
   </div>
 </div>
 <script type="module">
-  import { sb, requireAuth, getActiveStudents, getActiveYear, setActiveYear, distinctYears, computeMissedPeriods, getMyProfilePresentation, profileInitials } from "./supabase-client.js";
+  import { sb, requireAuth, getActiveStudents, getActiveYear, setActiveYear, distinctYears, computeAttendanceRisk, getMyProfilePresentation, profileInitials } from "./supabase-client.js";
 
   const riskCount = document.getElementById("risk-count");
   const frequentCount = document.getElementById("frequent-count");
@@ -261,11 +261,10 @@
       const detail = mode === "subjects"
         ? item.risks.slice(0, 2).map(risk => labelForSubject(risk.subject)).join(" · ")
         : "ขาดสะสมสูงสุดจากวิชาที่ลงทะเบียน";
-      const critical = item.maxPct > 20;
       return `<div class="student-row">
         <span class="student-avatar">${escapeHtml(profileInitials(item.student.name))}</span>
         <div><div class="student-name">${escapeHtml(item.student.name)}<span class="grade-badge">${escapeHtml(studentClass(item.student))}</span></div><div class="student-detail">${escapeHtml(detail)}</div></div>
-        <div class="risk-value${critical ? " critical" : ""}">${item.maxPct.toFixed(1)}%<br><span style="font-weight:500">ขาด ${item.maxMissed} คาบ</span></div>
+        <div class="risk-value${item.critical ? " critical" : ""}">${item.maxPct.toFixed(1)}%<br><span style="font-weight:500">ขาด ${item.maxMissed} คาบ</span></div>
       </div>`;
     }).join("");
   }
@@ -322,28 +321,40 @@
       for (const subject of visibleSubjects) {
         if (subject.subject_type === "บูรณาการ") {
           const members = integratedMembers.get(subject.id) || [];
-          let enrolledAny = false, totalPeriods = 0, rawMissed = 0, makeup = 0;
-          members.forEach(member => {
+          let enrolledAny = false;
+          const riskDataList = members.map(member => {
             if (enrolledBySubject.get(member.id)?.has(student.id)) enrolledAny = true;
-            totalPeriods += Number(member.total_periods || 0);
-            rawMissed += computeMissedPeriods(student.id, sessionsBySubject.get(member.id) || []);
-            makeup += makeupFor(makeupMap, member.id, student.id);
+            return {
+              subject: member,
+              sessions: sessionsBySubject.get(member.id) || [],
+              makeupHours: [{ student_id: student.id, periods: makeupFor(makeupMap, member.id, student.id) }]
+            };
           });
-          const netMissed = Math.max(0, rawMissed - makeup);
-          const percent = totalPeriods > 0 ? (netMissed / totalPeriods) * 100 : 0;
-          if (enrolledAny && percent >= 10) risks.push({ subject, netMissed, percent });
+          const risk = computeAttendanceRisk(student.id, riskDataList);
+          if (enrolledAny && risk.risky) {
+            risks.push({ subject, netMissed:risk.netMissed, percent:risk.percent, critical:risk.critical });
+          }
         } else {
           if (!enrolledBySubject.get(subject.id)?.has(student.id)) continue;
-          const totalPeriods = Number(subject.total_periods || 0);
-          const rawMissed = computeMissedPeriods(student.id, sessionsBySubject.get(subject.id) || []);
-          const netMissed = Math.max(0, rawMissed - makeupFor(makeupMap, subject.id, student.id));
-          const percent = totalPeriods > 0 ? (netMissed / totalPeriods) * 100 : 0;
-          if (percent >= 10) risks.push({ subject, netMissed, percent });
+          const risk = computeAttendanceRisk(student.id, [{
+            subject,
+            sessions: sessionsBySubject.get(subject.id) || [],
+            makeupHours: [{ student_id: student.id, periods: makeupFor(makeupMap, subject.id, student.id) }]
+          }]);
+          if (risk.risky) {
+            risks.push({ subject, netMissed:risk.netMissed, percent:risk.percent, critical:risk.critical });
+          }
         }
       }
       if (risks.length) {
         risks.sort((a, b) => b.percent - a.percent);
-        flagged.push({ student, risks, maxPct: risks[0].percent, maxMissed: risks[0].netMissed });
+        flagged.push({
+          student,
+          risks,
+          maxPct: risks[0].percent,
+          maxMissed: risks[0].netMissed,
+          critical: risks[0].critical
+        });
       }
     }
     return flagged.sort((a, b) => b.maxPct - a.maxPct || b.maxMissed - a.maxMissed);
