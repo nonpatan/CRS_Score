@@ -8,6 +8,7 @@
 
   // ไฟล์ shell อยู่รากเว็บเสมอ จึงใช้สร้าง URL ที่ถูกต้องจากทั้ง root และ academic/
   const appRootUrl = new URL("./", document.currentScript.src);
+  const shellVersion = new URL(document.currentScript.src).searchParams.get("v");
   const dashboardUrl = new URL("dashboard.html", appRootUrl).href;
   const groups = [
     {
@@ -44,8 +45,11 @@
   nav.innerHTML = dashboardLink + groups.map(group => {
     const isCurrent = group.items.some(([href]) => href === current);
     const links = group.items.map(([href, label]) => {
-      const target = new URL("academic/" + href, appRootUrl).href;
-      return `<a href="${target}"${href === current ? " class='active'" : ""}>${label}</a>`;
+      const target = new URL("academic/" + href, appRootUrl);
+      // ส่ง cache version ไปกับลิงก์หน้า HTML ด้วย เพื่อให้การนำทางหลัง deploy
+      // ไม่ดึง document รุ่นเก่าจาก browser/GitHub Pages cache
+      if (shellVersion) target.searchParams.set("v", shellVersion);
+      return `<a href="${target.href}"${href === current ? " class='active'" : ""}>${label}</a>`;
     }).join("");
     return `<div class="nav-group${isCurrent ? " current" : ""}"><span class="nav-group-label">${group.label}</span><div class="nav-group-links">${links}</div></div>`;
   }).join("") + `<a href="#" id="btn-signout">ออกจากระบบ</a>`;
