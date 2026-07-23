@@ -59,7 +59,7 @@
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     document.body.classList.add("academic-motion");
-    const revealItems = Array.from(document.querySelectorAll(".wrap > header, .wrap > .card"));
+    const revealItems = Array.from(document.querySelectorAll(".wrap > header, .academic-content > .card"));
     revealItems.forEach((element, index) => {
       element.classList.add("shell-reveal");
       element.style.setProperty("--shell-reveal-delay", `${Math.min(index * 55, 280)}ms`);
@@ -137,6 +137,27 @@
   const workflow = workflows[current];
   if (!workflow) return;
 
+  // รวมเนื้อหาที่อยู่ถัดจาก header ไว้ในคอลัมน์เดียวกันทั้งหมด
+  // เพื่อให้ sidebar desktop ไม่กำหนดความสูงของแถวแรกแล้วดันการ์ดใบถัดไปลงไปไกล
+  const wrapAcademicContent = () => {
+    const wrap = header && header.parentElement;
+    if (!wrap || !wrap.classList.contains("wrap")) return;
+    const existing = Array.from(wrap.children).find(element =>
+      element.classList && element.classList.contains("academic-content")
+    );
+    if (existing) return;
+
+    const movable = Array.from(wrap.children).filter(element =>
+      element !== header && element.tagName !== "SCRIPT"
+    );
+    if (movable.length === 0) return;
+
+    const content = document.createElement("div");
+    content.className = "academic-content";
+    wrap.insertBefore(content, movable[0]);
+    movable.forEach(element => content.appendChild(element));
+  };
+
   const decorateWorkspace = () => {
     const primaryCard = document.querySelector(".wrap .card:not(.report-tabs)");
     if (!primaryCard || primaryCard.querySelector(".workspace-card-heading")) return;
@@ -151,6 +172,7 @@
     );
   };
   const initializeWorkspace = () => {
+    wrapAcademicContent();
     decorateWorkspace();
     preparePageReveal();
   };
