@@ -146,6 +146,22 @@
   .source-row .missing { color:var(--danger); }
   .competency-result { padding:12px 16px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .incomplete { color:var(--danger); font-size:13px; }
+  .attendance-summary { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin:10px 0; }
+  .attendance-stat { border:1px solid var(--line); border-radius:9px; padding:9px 10px; background:var(--bg); }
+  .attendance-stat .label { display:block; color:var(--muted); font-size:12px; }
+  .attendance-stat .value { display:block; font-weight:600; font-size:16px; }
+  .attendance-stat .sub { display:block; color:var(--muted); font-size:12px; }
+  .attendance-history { display:grid; gap:7px; margin-top:10px; }
+  .attendance-row { display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:8px; align-items:center; border-top:1px solid var(--line); padding-top:8px; }
+  .attendance-date { font-weight:500; font-size:14px; }
+  .attendance-round { color:var(--muted); font-size:12px; }
+  .attendance-periods { color:var(--muted); font-size:13px; white-space:nowrap; }
+  .status-badge { display:inline-block; border-radius:999px; padding:3px 9px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .status-present { color:var(--teal); background:var(--teal-soft); }
+  .status-late { color:#76520a; background:#fff0c7; }
+  .status-leave { color:#365e8d; background:#e9f1fb; }
+  .status-absent { color:var(--danger); background:var(--danger-soft); }
+  .status-missing { color:var(--muted); background:#eef1f0; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260719-1">
 </head>
@@ -182,6 +198,7 @@
 
   <div class="card report-tabs">
     <button type="button" class="report-tab active" id="tab-subject">สรุปรายวิชา</button>
+    <button type="button" class="report-tab" id="tab-attendance">รายละเอียดการเข้าเรียน</button>
     <button type="button" class="report-tab" id="tab-gpa">ผลการเรียนรายคน</button>
     <button type="button" class="report-tab" id="tab-competency">สมรรถนะรายนักเรียน</button>
   </div>
@@ -224,6 +241,37 @@
   <div id="result-area"></div>
 
   <div class="card hint" id="empty-hint">เลือกวิชาเพื่อดูสรุปคะแนน</div>
+  </div>
+
+  <div id="attendance-report" style="display:none">
+    <div class="card">
+      <div class="field">
+        <label for="att-year">ปีการศึกษา</label>
+        <select id="att-year"><option value="">— เลือกปีการศึกษา —</option></select>
+      </div>
+      <div class="field">
+        <label for="att-grade">ชั้น</label>
+        <!-- ตัวเลือกชั้นสร้างจาก highest_grade ใน app_settings -->
+        <select id="att-grade"><option value="">— ทุกชั้น —</option></select>
+      </div>
+      <div class="field" id="att-term-field" style="display:none">
+        <label for="att-term">ภาคเรียน</label>
+        <select id="att-term"><option value="">— ทุกภาคเรียน —</option><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select>
+      </div>
+      <div class="field">
+        <label for="att-room">ห้อง</label>
+        <select id="att-room"><option value="">— ทุกห้อง —</option></select>
+      </div>
+      <div class="field">
+        <label for="att-subject">วิชา</label>
+        <select id="att-subject"><option value="">— เลือกปีการศึกษาก่อน —</option></select>
+      </div>
+      <div class="field">
+        <label for="att-student">นักเรียน</label>
+        <select id="att-student"><option value="">— เลือกวิชาก่อน —</option></select>
+      </div>
+    </div>
+    <div id="att-result"><div class="card hint">เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย</div></div>
   </div>
 
   <div id="competency-report" style="display:none">
@@ -288,7 +336,7 @@ import {
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
-  computeCombinedCompetencyResult, GRADE_ORDER, getSetting
+  computeCombinedCompetencyResult, computeMissedPeriods, GRADE_ORDER, getSetting
 } from "../supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -309,6 +357,15 @@ const elStudent     = document.getElementById("sel-student");
 const elResult    = document.getElementById("result-area");
 const elEmptyHint = document.getElementById("empty-hint");
 const elSubjectReport = document.getElementById("subject-report");
+const elAttendanceReport = document.getElementById("attendance-report");
+const elAttYear = document.getElementById("att-year");
+const elAttGrade = document.getElementById("att-grade");
+const elAttTermField = document.getElementById("att-term-field");
+const elAttTerm = document.getElementById("att-term");
+const elAttRoom = document.getElementById("att-room");
+const elAttSubject = document.getElementById("att-subject");
+const elAttStudent = document.getElementById("att-student");
+const elAttResult = document.getElementById("att-result");
 const elCompetencyReport = document.getElementById("competency-report");
 const elCompYear = document.getElementById("comp-year");
 const elCompGrade = document.getElementById("comp-grade");
@@ -343,6 +400,11 @@ let placementWarning = "";
 // แท็บ "ผลการเรียนรายคน" (GPA)
 let gpaStudents = [], gpaPlacementError = "", selectedGpaStudentId = "";
 let gpaResultsMap = null, gpaResultsKey = "", gpaResultsError = "";
+// แท็บ "รายละเอียดการเข้าเรียน"
+let attendancePlacements = [], attendancePlacementError = "";
+let attendanceSubject = null, attendanceMembers = [], attendanceRoster = [], attendanceSessions = [];
+let attendanceRosterBySubject = new Map();
+let attendanceLoadToken = 0;
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -350,13 +412,16 @@ function escapeHtml(s) {
 
 function setReportMode(mode) {
   elSubjectReport.style.display = mode === "subject" ? "block" : "none";
+  elAttendanceReport.style.display = mode === "attendance" ? "block" : "none";
   elGpaReport.style.display = mode === "gpa" ? "block" : "none";
   elCompetencyReport.style.display = mode === "competency" ? "block" : "none";
   document.getElementById("tab-subject").classList.toggle("active", mode === "subject");
+  document.getElementById("tab-attendance").classList.toggle("active", mode === "attendance");
   document.getElementById("tab-gpa").classList.toggle("active", mode === "gpa");
   document.getElementById("tab-competency").classList.toggle("active", mode === "competency");
 }
 document.getElementById("tab-subject").addEventListener("click", () => setReportMode("subject"));
+document.getElementById("tab-attendance").addEventListener("click", () => setReportMode("attendance"));
 document.getElementById("tab-gpa").addEventListener("click", () => setReportMode("gpa"));
 document.getElementById("tab-competency").addEventListener("click", () => setReportMode("competency"));
 
@@ -759,6 +824,312 @@ function renderStudentCard(stu, r) {
     "</div>"
   );
 }
+
+// ============================================================
+// รายละเอียดการเข้าเรียนรายนักเรียน: มา / ขาด / ลาป่วย / ลากิจ / มาสาย
+// วิชาบูรณาการแสดงแยกตามวิชาพื้นฐานสมาชิก เพราะ session ถูกบันทึกที่วิชาย่อยจริง
+// ============================================================
+const attendanceStatuses = ["มา", "มาสาย", "ลาป่วย", "ลากิจ", "ขาด"];
+
+function attendanceStatusClass(status) {
+  if (status === "มา") return "status-present";
+  if (status === "มาสาย") return "status-late";
+  if (status === "ลาป่วย" || status === "ลากิจ") return "status-leave";
+  if (status === "ขาด") return "status-absent";
+  return "status-missing";
+}
+
+function formatAttendanceDate(value) {
+  if (!value) return "ไม่ระบุวันที่";
+  const date = new Date(value + "T00:00:00");
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"numeric" });
+}
+
+function resetAttendanceSubjectContext(message) {
+  attendanceLoadToken++;
+  attendanceSubject = null;
+  attendanceMembers = [];
+  attendanceRoster = [];
+  attendanceSessions = [];
+  attendanceRosterBySubject = new Map();
+  elAttStudent.innerHTML = "<option value=''>— เลือกวิชาก่อน —</option>";
+  elAttStudent.disabled = true;
+  elAttResult.innerHTML = "<div class='card hint'>" + escapeHtml(message || "เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย") + "</div>";
+}
+
+async function loadAttendancePlacements() {
+  attendancePlacements = [];
+  attendancePlacementError = "";
+  if (!elAttYear.value) return;
+  const { data, error } = await getStudentPlacements(elAttYear.value);
+  if (error) {
+    attendancePlacementError = error.message;
+    return;
+  }
+  attendancePlacements = (data || []).map(p => p.student && ({
+    ...p.student,
+    grade_level: p.grade_level,
+    classroom: p.classroom
+  })).filter(Boolean);
+}
+
+function refreshAttendanceRooms() {
+  const currentRoom = elAttRoom.value;
+  const grade = elAttGrade.value;
+  const rooms = [...new Set(attendancePlacements
+    .filter(s => !grade || s.grade_level === grade)
+    .map(s => s.classroom).filter(Boolean))]
+    .sort((a,b) => a.localeCompare(b, "th", { numeric:true }));
+  elAttRoom.innerHTML = "<option value=''>— ทุกห้อง —</option>";
+  for (const room of rooms) {
+    const option = document.createElement("option");
+    option.value = room;
+    option.textContent = room;
+    elAttRoom.appendChild(option);
+  }
+  if (rooms.includes(currentRoom)) elAttRoom.value = currentRoom;
+}
+
+function refreshAttendanceSubjectOptions() {
+  const year = elAttYear.value;
+  const grade = elAttGrade.value;
+  const isSecondary = grade.startsWith("ม.");
+  elAttTermField.style.display = isSecondary ? "block" : "none";
+  if (!isSecondary) elAttTerm.value = "";
+  const term = isSecondary ? elAttTerm.value : "";
+
+  const rows = allSubjects.filter(s => {
+    if (memberIdSet.has(s.id)) return false;
+    if (year && s.year !== year) return false;
+    if (grade && s.grade_level !== grade) return false;
+    if (term && s.term !== term) return false;
+    return true;
+  });
+  fillSelect(elAttSubject, rows, subjectLabel, year ? "— เลือกวิชา (" + rows.length + " วิชา) —" : "— เลือกปีการศึกษาก่อน —");
+  elAttSubject.disabled = !year;
+  resetAttendanceSubjectContext("เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย");
+}
+
+function refreshAttendanceStudentOptions() {
+  const room = elAttRoom.value;
+  const rows = attendanceRoster.filter(s => !room || s.classroom === room);
+  fillSelect(
+    elAttStudent,
+    rows,
+    s => s.name + " (รหัสประจำตัว " + s.student_no + (s.classroom ? " · " + s.classroom : "") + ")",
+    rows.length ? "— เลือกนักเรียน (" + rows.length + " คน) —" : "— ไม่มีนักเรียนในห้องที่เลือก —"
+  );
+  elAttStudent.disabled = rows.length === 0;
+  elAttResult.innerHTML = "<div class='card hint'>" +
+    (rows.length ? "เลือกนักเรียนเพื่อดูประวัติการเข้าเรียน" : "ไม่มีนักเรียนที่ลงทะเบียนในวิชาและห้องที่เลือก") +
+    "</div>";
+}
+
+async function loadAttendanceSubjectContext() {
+  const subjectId = elAttSubject.value;
+  if (!subjectId) {
+    resetAttendanceSubjectContext("เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย");
+    return;
+  }
+
+  const token = ++attendanceLoadToken;
+  attendanceSubject = allSubjects.find(s => s.id === subjectId) || null;
+  attendanceMembers = [];
+  attendanceRoster = [];
+  attendanceSessions = [];
+  attendanceRosterBySubject = new Map();
+  elAttStudent.innerHTML = "<option value=''>— กำลังโหลดรายชื่อ —</option>";
+  elAttStudent.disabled = true;
+  elAttResult.innerHTML = "<div class='card hint'>กำลังโหลดประวัติการเข้าเรียน...</div>";
+  if (!attendanceSubject) {
+    elAttResult.innerHTML = "<div class='card incomplete'>ไม่พบข้อมูลวิชาที่เลือก</div>";
+    return;
+  }
+
+  if (attendanceSubject.subject_type === "บูรณาการ") {
+    const { data, error } = await sb.from("integration_members")
+      .select("*, member:member_subject_id(*)")
+      .eq("integrated_subject_id", subjectId);
+    if (token !== attendanceLoadToken) return;
+    if (error) {
+      elAttResult.innerHTML = "<div class='card incomplete'>โหลดวิชาพื้นฐานสมาชิกไม่สำเร็จ: " + escapeHtml(error.message) + "</div>";
+      return;
+    }
+    attendanceMembers = (data || []).map(row => row.member).filter(Boolean)
+      .sort((a,b) => (a.name || "").localeCompare(b.name || "", "th"));
+  } else {
+    attendanceMembers = [attendanceSubject];
+  }
+
+  if (!attendanceMembers.length) {
+    elAttStudent.innerHTML = "<option value=''>— ไม่มีวิชาพื้นฐานสมาชิก —</option>";
+    elAttResult.innerHTML = "<div class='card hint'>วิชาบูรณาการนี้ยังไม่มีวิชาพื้นฐานสมาชิก จึงยังไม่มีข้อมูลเช็คชื่อ</div>";
+    return;
+  }
+
+  const subjectIds = attendanceMembers.map(s => s.id);
+  const [rosters, sessionResult] = await Promise.all([
+    Promise.all(subjectIds.map(id => getRosterForSubject(id))),
+    sb.from("attendance_sessions")
+      .select("id,subject_id,session_date,periods_covered,created_at,attendance_records(student_id,status)")
+      .in("subject_id", subjectIds)
+      .order("session_date")
+      .order("created_at")
+  ]);
+  if (token !== attendanceLoadToken) return;
+  if (sessionResult.error) {
+    elAttResult.innerHTML = "<div class='card incomplete'>โหลดประวัติเช็คชื่อไม่สำเร็จ: " + escapeHtml(sessionResult.error.message) + "</div>";
+    return;
+  }
+
+  const union = new Map();
+  subjectIds.forEach((id, index) => {
+    attendanceRosterBySubject.set(id, new Set(rosters[index].map(student => student.id)));
+    for (const student of rosters[index]) union.set(student.id, student);
+  });
+  const placementResult = await applyPlacementsToReportStudents([...union.values()], attendanceSubject.year);
+  if (placementResult.error) {
+    elAttResult.innerHTML = "<div class='card incomplete'>โหลดประวัติชั้น/ห้องไม่สำเร็จ: " + escapeHtml(placementResult.error.message) + "</div>";
+    return;
+  }
+  attendanceRoster = placementResult.rows
+    .sort((a,b) => (a.student_no || "").localeCompare(b.student_no || "", "th", { numeric:true }));
+  attendanceSessions = sessionResult.data || [];
+  refreshAttendanceStudentOptions();
+  if (placementResult.missing > 0) {
+    elAttResult.innerHTML = "<div class='warn-note'>นักเรียน " + placementResult.missing +
+      " คนยังไม่มีประวัติชั้น/ห้องของปี " + escapeHtml(attendanceSubject.year) +
+      " จึงเลือกได้เมื่อดูทุกห้อง</div><div class='card hint'>เลือกนักเรียนเพื่อดูประวัติการเข้าเรียน</div>";
+  }
+}
+
+function attendanceRoundMap(sessionsForSubject) {
+  const byDate = new Map();
+  for (const session of sessionsForSubject) {
+    const key = session.session_date || "";
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key).push(session);
+  }
+  const rounds = new Map();
+  for (const rows of byDate.values()) {
+    rows.sort((a,b) => {
+      const created = String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      return created || String(a.id || "").localeCompare(String(b.id || ""));
+    });
+    rows.forEach((session, index) => rounds.set(session.id, index + 1));
+  }
+  return rounds;
+}
+
+function renderAttendanceMember(student, subject) {
+  const sessionsForSubject = attendanceSessions.filter(session => session.subject_id === subject.id);
+  const rounds = attendanceRoundMap(sessionsForSubject);
+  const counts = Object.fromEntries(attendanceStatuses.map(status => [status, { times:0, periods:0 }]));
+  let missingRecords = 0;
+
+  const history = sessionsForSubject.map(session => {
+    const record = (session.attendance_records || []).find(row => row.student_id === student.id);
+    if (record && counts[record.status]) {
+      counts[record.status].times++;
+      counts[record.status].periods += Number(session.periods_covered) || 0;
+    } else if (!record) {
+      missingRecords++;
+    }
+    return { session, status: record ? record.status : "ยังไม่บันทึก" };
+  }).sort((a,b) => {
+    const byDate = String(b.session.session_date || "").localeCompare(String(a.session.session_date || ""));
+    if (byDate) return byDate;
+    return String(b.session.created_at || "").localeCompare(String(a.session.created_at || ""));
+  });
+
+  const recordedTimes = attendanceStatuses.reduce((sum, status) => sum + counts[status].times, 0);
+  const recordedPeriods = attendanceStatuses.reduce((sum, status) => sum + counts[status].periods, 0);
+  const missedPeriods = computeMissedPeriods(student.id, sessionsForSubject);
+  const statHtml = attendanceStatuses.map(status => {
+    const item = counts[status];
+    return "<div class='attendance-stat'><span class='label'>" + escapeHtml(status) + "</span>" +
+      "<span class='value'>" + item.periods + " คาบ</span><span class='sub'>" + item.times + " ครั้ง</span></div>";
+  }).join("");
+  const historyHtml = history.map(item =>
+    "<div class='attendance-row'>" +
+      "<div><div class='attendance-date'>" + escapeHtml(formatAttendanceDate(item.session.session_date)) + "</div>" +
+        "<div class='attendance-round'>ครั้งที่ " + (rounds.get(item.session.id) || 1) + " ของวัน</div></div>" +
+      "<span class='status-badge " + attendanceStatusClass(item.status) + "'>" + escapeHtml(item.status) + "</span>" +
+      "<span class='attendance-periods'>" + escapeHtml(item.session.periods_covered) + " คาบ</span>" +
+    "</div>"
+  ).join("");
+
+  return "<div class='card'>" +
+    "<div class='section-title'>" + escapeHtml(subject.code || "") + (subject.code ? " · " : "") + escapeHtml(subject.name) + "</div>" +
+    "<div class='hint'>บันทึกแล้ว " + recordedTimes + " ครั้ง · รวม " + recordedPeriods + " คาบ" +
+      " · คาบขาดสะสมที่ใช้เช็ค มส. " + missedPeriods + " คาบ" +
+      (missingRecords ? " · <span class='incomplete'>ยังไม่บันทึก " + missingRecords + " ครั้ง</span>" : "") +
+    "</div>" +
+    "<div class='attendance-summary'>" + statHtml + "</div>" +
+    "<div class='hint'>คาบขาดสะสมคิด ขาด = เต็มคาบ, ลาป่วย/ลากิจ = ครึ่งคาบ, มา/มาสาย = ไม่ขาด</div>" +
+    "<div class='attendance-history'>" +
+      (historyHtml || "<div class='hint'>ยังไม่มีประวัติเช็คชื่อในวิชานี้</div>") +
+    "</div>" +
+  "</div>";
+}
+
+function renderAttendanceStudent() {
+  const student = attendanceRoster.find(row => row.id === elAttStudent.value);
+  if (!student || !attendanceSubject) {
+    elAttResult.innerHTML = "<div class='card hint'>เลือกนักเรียนเพื่อดูประวัติการเข้าเรียน</div>";
+    return;
+  }
+  const subjectsForStudent = attendanceMembers.filter(subject =>
+    (attendanceRosterBySubject.get(subject.id) || new Set()).has(student.id)
+  );
+  let html = "<div class='card student-card'><div class='student-head'><span class='name'>" + escapeHtml(student.name) +
+    "</span><span class='meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
+    (student.classroom ? " · " + escapeHtml(student.classroom) : "") + "</span></div></div>";
+  if (attendanceSubject.subject_type === "บูรณาการ") {
+    html += "<div class='warn-note'>วิชาบูรณาการแสดงประวัติแยกตามวิชาพื้นฐานที่นักเรียนลงทะเบียนจริง</div>";
+  }
+  html += subjectsForStudent.map(subject => renderAttendanceMember(student, subject)).join("");
+  if (!subjectsForStudent.length) html += "<div class='card hint'>นักเรียนคนนี้ไม่ได้ลงทะเบียนในวิชาพื้นฐานสมาชิก</div>";
+  elAttResult.innerHTML = html;
+}
+
+async function initAttendanceReport() {
+  const years = distinctYears(allSubjects);
+  elAttYear.innerHTML = "<option value=''>— เลือกปีการศึกษา —</option>";
+  for (const year of years) {
+    const option = document.createElement("option");
+    option.value = year;
+    option.textContent = "ปีการศึกษา " + year;
+    elAttYear.appendChild(option);
+  }
+  const savedYear = getActiveYear();
+  if (years.includes(savedYear)) elAttYear.value = savedYear;
+  await loadAttendancePlacements();
+  refreshAttendanceRooms();
+  refreshAttendanceSubjectOptions();
+  if (attendancePlacementError) {
+    elAttResult.innerHTML = "<div class='card incomplete'>โหลดประวัติชั้น/ห้องไม่สำเร็จ: " + escapeHtml(attendancePlacementError) + "</div>";
+  }
+}
+
+elAttYear.addEventListener("change", async () => {
+  setActiveYear(elAttYear.value);
+  await loadAttendancePlacements();
+  refreshAttendanceRooms();
+  refreshAttendanceSubjectOptions();
+  if (attendancePlacementError) {
+    elAttResult.innerHTML = "<div class='card incomplete'>โหลดประวัติชั้น/ห้องไม่สำเร็จ: " + escapeHtml(attendancePlacementError) + "</div>";
+  }
+});
+elAttGrade.addEventListener("change", () => {
+  refreshAttendanceRooms();
+  refreshAttendanceSubjectOptions();
+});
+elAttTerm.addEventListener("change", refreshAttendanceSubjectOptions);
+elAttRoom.addEventListener("change", refreshAttendanceStudentOptions);
+elAttSubject.addEventListener("change", loadAttendanceSubjectContext);
+elAttStudent.addEventListener("change", renderAttendanceStudent);
 
 // ============================================================
 // รายงานสมรรถนะรายนักเรียน: รวมรายวิชา + กิจกรรม + กิจวัตรประจำวัน
@@ -1229,6 +1600,7 @@ async function populateGradeSelects() {
   const body = optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
   const setSel = (id, placeholder) => { const el = document.getElementById(id); if (el) el.innerHTML = "<option value=''>" + placeholder + "</option>" + body; };
   setSel("filter-grade", "— ทุกชั้น —");
+  setSel("att-grade", "— ทุกชั้น —");
   setSel("comp-grade", "— เลือกชั้น —");
   setSel("gpa-grade", "— เลือกชั้น —");
 }
@@ -1236,6 +1608,7 @@ async function populateGradeSelects() {
 // เริ่มทำงาน
 await populateGradeSelects();
 await loadSubjects();
+await initAttendanceReport();
 await initCompetencyReport();
 await initGpaReport();
 }
