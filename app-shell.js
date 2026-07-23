@@ -37,6 +37,8 @@
     }
   ];
   const current = window.location.pathname.split("/").pop() || "entry.html";
+  const pageName = current.replace(/\.html$/i, "").replace(/[^a-z0-9-]/gi, "-");
+  document.body.classList.add("academic-shell", "academic-" + pageName);
   const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link${current === "dashboard.html" ? " active" : ""}">ภาพรวม</a>`;
 
   nav.innerHTML = dashboardLink + groups.map(group => {
