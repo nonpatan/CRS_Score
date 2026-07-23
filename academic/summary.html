@@ -266,10 +266,10 @@
         <label for="att-subject">วิชา</label>
         <select id="att-subject"><option value="">— เลือกปีการศึกษาก่อน —</option></select>
       </div>
-      <div class="field">
-        <label for="att-student">นักเรียน</label>
-        <select id="att-student"><option value="">— เลือกวิชาก่อน —</option></select>
-      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">รายชื่อนักเรียน</div>
+      <div id="att-student-list" class="student-list"><div class="hint">เลือกวิชาก่อน</div></div>
     </div>
     <div id="att-result"><div class="card hint">เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย</div></div>
   </div>
@@ -364,7 +364,7 @@ const elAttTermField = document.getElementById("att-term-field");
 const elAttTerm = document.getElementById("att-term");
 const elAttRoom = document.getElementById("att-room");
 const elAttSubject = document.getElementById("att-subject");
-const elAttStudent = document.getElementById("att-student");
+const elAttStudentList = document.getElementById("att-student-list");
 const elAttResult = document.getElementById("att-result");
 const elCompetencyReport = document.getElementById("competency-report");
 const elCompYear = document.getElementById("comp-year");
@@ -404,7 +404,7 @@ let gpaResultsMap = null, gpaResultsKey = "", gpaResultsError = "";
 let attendancePlacements = [], attendancePlacementError = "";
 let attendanceSubject = null, attendanceMembers = [], attendanceRoster = [], attendanceSessions = [];
 let attendanceRosterBySubject = new Map();
-let attendanceLoadToken = 0;
+let attendanceLoadToken = 0, selectedAttendanceStudentId = "";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -853,8 +853,8 @@ function resetAttendanceSubjectContext(message) {
   attendanceRoster = [];
   attendanceSessions = [];
   attendanceRosterBySubject = new Map();
-  elAttStudent.innerHTML = "<option value=''>— เลือกวิชาก่อน —</option>";
-  elAttStudent.disabled = true;
+  selectedAttendanceStudentId = "";
+  elAttStudentList.innerHTML = "<div class='hint'>เลือกวิชาก่อน</div>";
   elAttResult.innerHTML = "<div class='card hint'>" + escapeHtml(message || "เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย") + "</div>";
 }
 
@@ -911,19 +911,36 @@ function refreshAttendanceSubjectOptions() {
   resetAttendanceSubjectContext("เลือกวิชาและนักเรียน เพื่อดูประวัติการมา ขาด ลา และมาสาย");
 }
 
-function refreshAttendanceStudentOptions() {
+function renderAttendanceStudentList() {
+  selectedAttendanceStudentId = "";
   const room = elAttRoom.value;
   const rows = attendanceRoster.filter(s => !room || s.classroom === room);
-  fillSelect(
-    elAttStudent,
-    rows,
-    s => s.name + " (รหัสประจำตัว " + s.student_no + (s.classroom ? " · " + s.classroom : "") + ")",
-    rows.length ? "— เลือกนักเรียน (" + rows.length + " คน) —" : "— ไม่มีนักเรียนในห้องที่เลือก —"
-  );
-  elAttStudent.disabled = rows.length === 0;
-  elAttResult.innerHTML = "<div class='card hint'>" +
-    (rows.length ? "เลือกนักเรียนเพื่อดูประวัติการเข้าเรียน" : "ไม่มีนักเรียนที่ลงทะเบียนในวิชาและห้องที่เลือก") +
-    "</div>";
+  elAttResult.innerHTML = "<div class='card hint'>" + (rows.length
+    ? "เลือกนักเรียนจากรายชื่อเพื่อดูประวัติการเข้าเรียน"
+    : "ไม่มีนักเรียนที่ลงทะเบียนในวิชาและห้องที่เลือก") + "</div>";
+  if (!rows.length) {
+    elAttStudentList.innerHTML = "<div class='hint'>ไม่มีนักเรียนในวิชาและห้องที่เลือก</div>";
+    return;
+  }
+
+  elAttStudentList.innerHTML = "";
+  for (const student of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "student-button";
+    button.dataset.student = student.id;
+    button.innerHTML = "<span class='student-name'>" + escapeHtml(student.name) + "</span>" +
+      "<span class='student-meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
+      (student.classroom ? " · " + escapeHtml(student.classroom) : "") + "</span>";
+    button.addEventListener("click", () => {
+      selectedAttendanceStudentId = student.id;
+      elAttStudentList.querySelectorAll(".student-button").forEach(item =>
+        item.classList.toggle("selected", item.dataset.student === student.id)
+      );
+      renderAttendanceStudent();
+    });
+    elAttStudentList.appendChild(button);
+  }
 }
 
 async function loadAttendanceSubjectContext() {
@@ -939,8 +956,8 @@ async function loadAttendanceSubjectContext() {
   attendanceRoster = [];
   attendanceSessions = [];
   attendanceRosterBySubject = new Map();
-  elAttStudent.innerHTML = "<option value=''>— กำลังโหลดรายชื่อ —</option>";
-  elAttStudent.disabled = true;
+  selectedAttendanceStudentId = "";
+  elAttStudentList.innerHTML = "<div class='hint'>กำลังโหลดรายชื่อนักเรียน...</div>";
   elAttResult.innerHTML = "<div class='card hint'>กำลังโหลดประวัติการเข้าเรียน...</div>";
   if (!attendanceSubject) {
     elAttResult.innerHTML = "<div class='card incomplete'>ไม่พบข้อมูลวิชาที่เลือก</div>";
@@ -963,7 +980,7 @@ async function loadAttendanceSubjectContext() {
   }
 
   if (!attendanceMembers.length) {
-    elAttStudent.innerHTML = "<option value=''>— ไม่มีวิชาพื้นฐานสมาชิก —</option>";
+    elAttStudentList.innerHTML = "<div class='hint'>ไม่มีวิชาพื้นฐานสมาชิก</div>";
     elAttResult.innerHTML = "<div class='card hint'>วิชาบูรณาการนี้ยังไม่มีวิชาพื้นฐานสมาชิก จึงยังไม่มีข้อมูลเช็คชื่อ</div>";
     return;
   }
@@ -996,7 +1013,7 @@ async function loadAttendanceSubjectContext() {
   attendanceRoster = placementResult.rows
     .sort((a,b) => (a.student_no || "").localeCompare(b.student_no || "", "th", { numeric:true }));
   attendanceSessions = sessionResult.data || [];
-  refreshAttendanceStudentOptions();
+  renderAttendanceStudentList();
   if (placementResult.missing > 0) {
     elAttResult.innerHTML = "<div class='warn-note'>นักเรียน " + placementResult.missing +
       " คนยังไม่มีประวัติชั้น/ห้องของปี " + escapeHtml(attendanceSubject.year) +
@@ -1075,7 +1092,7 @@ function renderAttendanceMember(student, subject) {
 }
 
 function renderAttendanceStudent() {
-  const student = attendanceRoster.find(row => row.id === elAttStudent.value);
+  const student = attendanceRoster.find(row => row.id === selectedAttendanceStudentId);
   if (!student || !attendanceSubject) {
     elAttResult.innerHTML = "<div class='card hint'>เลือกนักเรียนเพื่อดูประวัติการเข้าเรียน</div>";
     return;
@@ -1127,9 +1144,8 @@ elAttGrade.addEventListener("change", () => {
   refreshAttendanceSubjectOptions();
 });
 elAttTerm.addEventListener("change", refreshAttendanceSubjectOptions);
-elAttRoom.addEventListener("change", refreshAttendanceStudentOptions);
+elAttRoom.addEventListener("change", renderAttendanceStudentList);
 elAttSubject.addEventListener("change", loadAttendanceSubjectContext);
-elAttStudent.addEventListener("change", renderAttendanceStudent);
 
 // ============================================================
 // รายงานสมรรถนะรายนักเรียน: รวมรายวิชา + กิจกรรม + กิจวัตรประจำวัน
