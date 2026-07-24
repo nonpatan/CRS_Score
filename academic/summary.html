@@ -155,11 +155,21 @@
   .attendance-stat .label { display:block; color:var(--muted); font-size:12px; }
   .attendance-stat .value { display:block; font-weight:600; font-size:16px; }
   .attendance-stat .sub { display:block; color:var(--muted); font-size:12px; }
-  .attendance-absence-overview { border:1px solid #efc7c3; border-radius:10px; padding:11px 12px; margin:10px 0; background:var(--danger-soft); }
-  .attendance-absence-overview .main { color:var(--danger); font-size:15px; line-height:1.55; }
+  /* พาดหัวการ์ดเข้าเรียน: สีตามระดับความเสี่ยง มส. (คิดจากยอดขาดสุทธิหลังหักชดเชย)
+     ปลอดภัย < 10% = เขียว, เสี่ยง 10–20% = ส้ม, วิกฤต > 20% = แดง */
+  .attendance-absence-overview { border:1px solid var(--line); border-radius:10px; padding:11px 12px; margin:10px 0; background:var(--bg); }
+  .attendance-absence-overview .main { color:var(--teal); font-size:15px; line-height:1.55; }
   .attendance-absence-overview .risk-basis { color:var(--muted); font-size:12px; line-height:1.5; margin-top:3px; }
-  .attendance-absence-overview.no-absence { border-color:var(--line); background:var(--bg); }
-  .attendance-absence-overview.no-absence .main { color:var(--teal); }
+  .attendance-absence-overview .risk-tag { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; vertical-align:middle; }
+  .attendance-absence-overview.risk-safe { border-color:#a7d8c9; background:var(--teal-soft); }
+  .attendance-absence-overview.risk-safe .main, .attendance-absence-overview.risk-safe .risk-tag { color:var(--teal); }
+  .attendance-absence-overview.risk-safe .risk-tag { background:#cdeee2; }
+  .attendance-absence-overview.risk-warn { border-color:#e6cf94; background:var(--amber-soft); }
+  .attendance-absence-overview.risk-warn .main, .attendance-absence-overview.risk-warn .risk-tag { color:var(--amber); }
+  .attendance-absence-overview.risk-warn .risk-tag { background:#f2e0b4; }
+  .attendance-absence-overview.risk-danger { border-color:#efc7c3; background:var(--danger-soft); }
+  .attendance-absence-overview.risk-danger .main, .attendance-absence-overview.risk-danger .risk-tag { color:var(--danger); }
+  .attendance-absence-overview.risk-danger .risk-tag { background:#f6d3d3; }
   .attendance-integrated-card { border:2px solid #a7d8c9; background:#fbfffd; }
   .attendance-integrated-card > .section-title { color:var(--teal); font-size:14px; }
   .attendance-history { display:grid; gap:7px; margin-top:10px; }
@@ -351,7 +361,7 @@ import {
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
-  computeCombinedCompetencyResult, computeMissedPeriods, computeAttendanceRisk, GRADE_ORDER, getSetting
+  computeCombinedCompetencyResult, computeAttendanceRisk, GRADE_ORDER, getSetting
 } from "../supabase-client.js";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -867,19 +877,34 @@ function formatAttendanceNumber(value) {
   return Number.isInteger(number) ? String(number) : number.toFixed(1);
 }
 
-function attendanceAbsenceOverviewHtml(absentTimes, absentPeriods, totalPeriods, risk, combined = false) {
-  const absentPercent = totalPeriods > 0 ? (absentPeriods / totalPeriods) * 100 : 0;
-  return "<div class='attendance-absence-overview" + (absentPeriods > 0 ? "" : " no-absence") + "'>" +
-    "<div class='main'>" + (combined ? "ขาดเรียนรวม " : "ขาดเรียน ") +
-      "<strong>" + absentTimes + " ครั้ง</strong> (" + formatAttendanceNumber(absentPeriods) +
-      " คาบ) จากเวลาเรียนทั้งหมด <strong>" +
+// พาดหัวสรุปการเข้าเรียน: เลขเด่น = "ยอดขาดสุทธิ" (ขาดเต็มคาบ + ลาป่วย/ลากิจครึ่งคาบ − ชั่วโมงชดเชย)
+// ซึ่งเป็นตัวเดียวกับที่ใช้ตัดสินความเสี่ยง มส. จริง — ระบายสีตามระดับ: ปลอดภัย < 10% เขียว,
+// เสี่ยง 10–20% ส้ม, วิกฤต > 20% แดง (ยืนยันกับผู้ใช้แล้ว 2026-07-24)
+function attendanceAbsenceOverviewHtml(counts, totalPeriods, risk) {
+  const missedTimes = ["ขาด", "ลาป่วย", "ลากิจ"]
+    .reduce((sum, status) => sum + counts[status].times, 0);
+  const leavePeriods = counts["ลาป่วย"].periods + counts["ลากิจ"].periods;
+
+  // ระดับความเสี่ยงจากยอดขาดสุทธิ (risk.percent = netMissed / totalBase * 100)
+  let levelClass = "risk-safe", tag = "ยังไม่เสี่ยง มส.";
+  if (totalPeriods <= 0) { levelClass = ""; tag = ""; }
+  else if (risk.critical) { levelClass = "risk-danger"; tag = "วิกฤต · เข้าข่าย มส."; }
+  else if (risk.risky) { levelClass = "risk-warn"; tag = "เสี่ยง มส."; }
+
+  return "<div class='attendance-absence-overview" + (levelClass ? " " + levelClass : "") + "'>" +
+    "<div class='main'>ขาดเรียนสุทธิ <strong>" + formatAttendanceNumber(risk.netMissed) +
+      " คาบ</strong> จากเวลาเรียนทั้งหมด <strong>" +
       (totalPeriods > 0 ? formatAttendanceNumber(totalPeriods) + " คาบ" : "ยังไม่กำหนด") + "</strong>" +
-      (totalPeriods > 0 ? " · คิดเป็น <strong>" + absentPercent.toFixed(1) + "%</strong>" : "") +
+      (totalPeriods > 0 ? " · คิดเป็น <strong>" + risk.percent.toFixed(1) + "%</strong>" : "") +
+      (tag ? "<span class='risk-tag'>" + tag + "</span>" : "") +
     "</div>" +
     (totalPeriods > 0
-      ? "<div class='risk-basis'>ยอดขาดสุทธิที่ใช้เฝ้าระวัง มส. " +
-        formatAttendanceNumber(risk.netMissed) + " คาบ จาก " + formatAttendanceNumber(risk.totalBase) +
-        " คาบ · " + risk.percent.toFixed(1) + "% (นับลาป่วย/ลากิจครึ่งคาบ และหักชั่วโมงชดเชย)</div>"
+      ? "<div class='risk-basis'>รวมขาดและลา " + missedTimes + " ครั้ง — " +
+        "ขาดล้วน " + formatAttendanceNumber(counts["ขาด"].periods) + " คาบ · " +
+        "ลาป่วย/ลากิจ " + formatAttendanceNumber(leavePeriods) + " คาบ (นับครึ่ง = " +
+        formatAttendanceNumber(leavePeriods * 0.5) + ") · " +
+        "ชดเชย " + formatAttendanceNumber(risk.makeupTotal) + " คาบ" +
+        " · รวมขาดตามเกณฑ์ก่อนหักชดเชย " + formatAttendanceNumber(risk.rawMissed) + " คาบ</div>"
       : "<div class='risk-basis'>ต้องกำหนดเวลาเรียนทั้งหมดในหน้าจัดการโครงสร้าง จึงจะคำนวณเปอร์เซ็นต์ได้</div>") +
   "</div>";
 }
@@ -1101,7 +1126,9 @@ function attendanceRoundMap(sessionsForSubject) {
   return rounds;
 }
 
-function renderAttendanceMember(student, subject) {
+// integratedMember=true → เป็นการ์ดวิชาย่อยในวิชาบูรณาการ: ไม่ตัดสิน มส. รายวิชา (คิดรวมที่การ์ดบนสุด)
+// แสดงแค่ยอดขาดของวิชานี้เป็นข้อมูลประกอบ · false → วิชาพื้นฐานเดี่ยว แสดงพาดหัวตัดสิน มส. เต็มรูปแบบ
+function renderAttendanceMember(student, subject, { integratedMember = false } = {}) {
   const sessionsForSubject = attendanceSessions.filter(session => session.subject_id === subject.id);
   const rounds = attendanceRoundMap(sessionsForSubject);
   const counts = Object.fromEntries(attendanceStatuses.map(status => [status, { times:0, periods:0 }]));
@@ -1124,16 +1151,20 @@ function renderAttendanceMember(student, subject) {
 
   const recordedTimes = attendanceStatuses.reduce((sum, status) => sum + counts[status].times, 0);
   const recordedPeriods = attendanceStatuses.reduce((sum, status) => sum + counts[status].periods, 0);
-  const missedPeriods = computeMissedPeriods(student.id, sessionsForSubject);
   const totalPeriods = Number(subject.total_periods) || 0;
-  const absentTimes = counts["ขาด"].times;
-  const absentPeriods = counts["ขาด"].periods;
   const risk = computeAttendanceRisk(student.id, [{
     subject,
     sessions: sessionsForSubject,
     makeupHours: attendanceMakeupHours.filter(row => row.subject_id === subject.id)
   }]);
-  const absenceOverview = attendanceAbsenceOverviewHtml(absentTimes, absentPeriods, totalPeriods, risk);
+  const leavePeriods = counts["ลาป่วย"].periods + counts["ลากิจ"].periods;
+  // วิชาย่อยของบูรณาการ: โชว์ยอดขาดของวิชานี้เฉย ๆ ไม่ตัดสิน มส. (มส. คิดรวมที่การ์ดบนสุด)
+  const absenceOverview = integratedMember
+    ? "<div class='hint'>ขาดในวิชานี้ <strong>" + formatAttendanceNumber(risk.rawMissed) + " คาบ</strong>" +
+        " (ขาดล้วน " + formatAttendanceNumber(counts["ขาด"].periods) + " · ลาป่วย/ลากิจ " +
+        formatAttendanceNumber(leavePeriods) + " นับครึ่ง)" +
+        (risk.makeupTotal > 0 ? " · ชดเชย " + formatAttendanceNumber(risk.makeupTotal) + " คาบ" : "") + "</div>"
+    : attendanceAbsenceOverviewHtml(counts, totalPeriods, risk);
   const statHtml = attendanceStatHtml(counts);
   const historyHtml = history.map(item =>
     "<div class='attendance-row'>" +
@@ -1147,7 +1178,6 @@ function renderAttendanceMember(student, subject) {
   return "<div class='card'>" +
     "<div class='section-title'>" + escapeHtml(subject.code || "") + (subject.code ? " · " : "") + escapeHtml(subject.name) + "</div>" +
     "<div class='hint'>บันทึกแล้ว " + recordedTimes + " ครั้ง · รวม " + recordedPeriods + " คาบ" +
-      " · คาบขาดสะสมก่อนหักชดเชย " + missedPeriods + " คาบ" +
       (missingRecords ? " · <span class='incomplete'>ยังไม่บันทึก " + missingRecords + " ครั้ง</span>" : "") +
     "</div>" +
     absenceOverview +
@@ -1184,24 +1214,31 @@ function renderIntegratedAttendanceOverview(student, subjectsForStudent) {
   const recordedPeriods = attendanceStatuses.reduce((sum, status) => sum + counts[status].periods, 0);
   const totalPeriods = attendanceMembers.reduce((sum, subject) => sum + (Number(subject.total_periods) || 0), 0);
   const risk = computeAttendanceRisk(student.id, riskDataList);
-  const absenceOverview = attendanceAbsenceOverviewHtml(
-    counts["ขาด"].times,
-    counts["ขาด"].periods,
-    totalPeriods,
-    risk,
-    true
-  );
+  const absenceOverview = attendanceAbsenceOverviewHtml(counts, totalPeriods, risk);
 
   return "<div class='card attendance-integrated-card'>" +
     "<div class='section-title'>รวมวิชาบูรณาการ · " + escapeHtml(attendanceSubject.name) + "</div>" +
     "<div class='hint'>รวมฐานเวลาเรียน " + attendanceMembers.length + " วิชาสมาชิก" +
       " · บันทึกแล้ว " + recordedTimes + " รายการ · " + formatAttendanceNumber(recordedPeriods) + " คาบ" +
-      " · คาบขาดสะสมก่อนหักชดเชย " + formatAttendanceNumber(risk.rawMissed) + " คาบ" +
       (missingRecords ? " · <span class='incomplete'>ยังไม่บันทึก " + missingRecords + " รายการ</span>" : "") +
     "</div>" +
     absenceOverview +
     "<div class='attendance-summary'>" + attendanceStatHtml(counts) + "</div>" +
     "<div class='hint'>ยอดรวมใช้ฐานเวลาเรียนของทุกวิชาสมาชิกชุดเดียวกับหน้าเฝ้าระวัง มส. และแสดงประวัติแยกรายวิชาด้านล่าง</div>" +
+  "</div>";
+}
+
+// การ์ดวิชาสมาชิกที่นักเรียนยังไม่ได้ลงทะเบียน — คาบเรียนของวิชานี้ยังถูกนับรวมในฐานเวลารวม
+function renderUnenrolledMemberCard(subject) {
+  const periods = Number(subject.total_periods) || 0;
+  return "<div class='card'>" +
+    "<div class='section-title'>" + escapeHtml(subject.code || "") + (subject.code ? " · " : "") + escapeHtml(subject.name) + "</div>" +
+    "<div class='hint'><span class='status-badge status-missing'>ไม่ได้ลงทะเบียน</span> " +
+      "นักเรียนไม่ได้ลงทะเบียนวิชานี้ — " +
+      (periods > 0
+        ? "แต่คาบเรียน " + formatAttendanceNumber(periods) + " คาบ ยังถูกนับรวมในฐานเวลาของวิชาบูรณาการ"
+        : "วิชานี้ยังไม่ได้กำหนดจำนวนคาบเรียน") +
+    "</div>" +
   "</div>";
 }
 
@@ -1211,18 +1248,27 @@ function renderAttendanceStudent() {
     elAttResult.innerHTML = "<div class='card hint'>เลือกนักเรียนเพื่อดูประวัติการเข้าเรียน</div>";
     return;
   }
-  const subjectsForStudent = attendanceMembers.filter(subject =>
-    (attendanceRosterBySubject.get(subject.id) || new Set()).has(student.id)
-  );
+  const enrolledMemberIds = new Set(attendanceMembers
+    .filter(subject => (attendanceRosterBySubject.get(subject.id) || new Set()).has(student.id))
+    .map(subject => subject.id));
+  const subjectsForStudent = attendanceMembers.filter(subject => enrolledMemberIds.has(subject.id));
   let html = "<div class='card student-card'><div class='student-head'><span class='name'>" + escapeHtml(student.name) +
     "</span><span class='meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
     (student.classroom ? " · " + escapeHtml(student.classroom) : "") + "</span></div></div>";
   if (attendanceSubject.subject_type === "บูรณาการ") {
     html += renderIntegratedAttendanceOverview(student, subjectsForStudent);
-    html += "<div class='warn-note'>ด้านล่างเป็นประวัติแยกตามวิชาพื้นฐานที่นักเรียนลงทะเบียนจริง</div>";
+    html += "<div class='warn-note'>ด้านล่างเป็นประวัติแยกรายวิชาพื้นฐานสมาชิก — วิชาที่นักเรียนยังไม่ลงทะเบียน คาบเรียนยังถูกนับรวมในฐานเวลาของวิชาบูรณาการ</div>";
+    // แสดงครบทุกวิชาสมาชิก: ที่ลงทะเบียน → ประวัติเต็ม, ที่ยังไม่ลงทะเบียน → การ์ดบอกสถานะ
+    // (เพื่อให้เห็นครบว่าฐานเวลารวมมาจากวิชาไหนบ้าง — ยืนยันกับผู้ใช้แล้ว 2026-07-24)
+    html += attendanceMembers.map(subject =>
+      enrolledMemberIds.has(subject.id)
+        ? renderAttendanceMember(student, subject, { integratedMember: true })
+        : renderUnenrolledMemberCard(subject)
+    ).join("");
+  } else {
+    html += subjectsForStudent.map(subject => renderAttendanceMember(student, subject)).join("");
+    if (!subjectsForStudent.length) html += "<div class='card hint'>นักเรียนคนนี้ไม่ได้ลงทะเบียนในวิชาพื้นฐานสมาชิก</div>";
   }
-  html += subjectsForStudent.map(subject => renderAttendanceMember(student, subject)).join("");
-  if (!subjectsForStudent.length) html += "<div class='card hint'>นักเรียนคนนี้ไม่ได้ลงทะเบียนในวิชาพื้นฐานสมาชิก</div>";
   elAttResult.innerHTML = html;
 }
 
