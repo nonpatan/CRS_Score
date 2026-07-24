@@ -160,6 +160,8 @@
   .attendance-absence-overview .risk-basis { color:var(--muted); font-size:12px; line-height:1.5; margin-top:3px; }
   .attendance-absence-overview.no-absence { border-color:var(--line); background:var(--bg); }
   .attendance-absence-overview.no-absence .main { color:var(--teal); }
+  .attendance-integrated-card { border:2px solid #a7d8c9; background:#fbfffd; }
+  .attendance-integrated-card > .section-title { color:var(--teal); font-size:14px; }
   .attendance-history { display:grid; gap:7px; margin-top:10px; }
   .attendance-row { display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:8px; align-items:center; border-top:1px solid var(--line); padding-top:8px; }
   .attendance-date { font-weight:500; font-size:14px; }
@@ -865,6 +867,32 @@ function formatAttendanceNumber(value) {
   return Number.isInteger(number) ? String(number) : number.toFixed(1);
 }
 
+function attendanceAbsenceOverviewHtml(absentTimes, absentPeriods, totalPeriods, risk, combined = false) {
+  const absentPercent = totalPeriods > 0 ? (absentPeriods / totalPeriods) * 100 : 0;
+  return "<div class='attendance-absence-overview" + (absentPeriods > 0 ? "" : " no-absence") + "'>" +
+    "<div class='main'>" + (combined ? "ขาดเรียนรวม " : "ขาดเรียน ") +
+      "<strong>" + absentTimes + " ครั้ง</strong> (" + formatAttendanceNumber(absentPeriods) +
+      " คาบ) จากเวลาเรียนทั้งหมด <strong>" +
+      (totalPeriods > 0 ? formatAttendanceNumber(totalPeriods) + " คาบ" : "ยังไม่กำหนด") + "</strong>" +
+      (totalPeriods > 0 ? " · คิดเป็น <strong>" + absentPercent.toFixed(1) + "%</strong>" : "") +
+    "</div>" +
+    (totalPeriods > 0
+      ? "<div class='risk-basis'>ยอดขาดสุทธิที่ใช้เฝ้าระวัง มส. " +
+        formatAttendanceNumber(risk.netMissed) + " คาบ จาก " + formatAttendanceNumber(risk.totalBase) +
+        " คาบ · " + risk.percent.toFixed(1) + "% (นับลาป่วย/ลากิจครึ่งคาบ และหักชั่วโมงชดเชย)</div>"
+      : "<div class='risk-basis'>ต้องกำหนดเวลาเรียนทั้งหมดในหน้าจัดการโครงสร้าง จึงจะคำนวณเปอร์เซ็นต์ได้</div>") +
+  "</div>";
+}
+
+function attendanceStatHtml(counts) {
+  return attendanceStatuses.map(status => {
+    const item = counts[status];
+    return "<div class='attendance-stat'><span class='label'>" + escapeHtml(status) + "</span>" +
+      "<span class='value'>" + formatAttendanceNumber(item.periods) +
+      " คาบ</span><span class='sub'>" + item.times + " ครั้ง</span></div>";
+  }).join("");
+}
+
 function resetAttendanceSubjectContext(message) {
   attendanceLoadToken++;
   attendanceSubject = null;
@@ -1100,29 +1128,13 @@ function renderAttendanceMember(student, subject) {
   const totalPeriods = Number(subject.total_periods) || 0;
   const absentTimes = counts["ขาด"].times;
   const absentPeriods = counts["ขาด"].periods;
-  const absentPercent = totalPeriods > 0 ? (absentPeriods / totalPeriods) * 100 : 0;
   const risk = computeAttendanceRisk(student.id, [{
     subject,
     sessions: sessionsForSubject,
     makeupHours: attendanceMakeupHours.filter(row => row.subject_id === subject.id)
   }]);
-  const absenceOverview = "<div class='attendance-absence-overview" + (absentPeriods > 0 ? "" : " no-absence") + "'>" +
-    "<div class='main'>ขาดเรียน <strong>" + absentTimes + " ครั้ง</strong> (" +
-      formatAttendanceNumber(absentPeriods) + " คาบ) จากเวลาเรียนทั้งหมด <strong>" +
-      (totalPeriods > 0 ? formatAttendanceNumber(totalPeriods) + " คาบ" : "ยังไม่กำหนด") + "</strong>" +
-      (totalPeriods > 0 ? " · คิดเป็น <strong>" + absentPercent.toFixed(1) + "%</strong>" : "") +
-    "</div>" +
-    (totalPeriods > 0
-      ? "<div class='risk-basis'>ยอดขาดสุทธิที่ใช้เฝ้าระวัง มส. " +
-        formatAttendanceNumber(risk.netMissed) + " คาบ จาก " + formatAttendanceNumber(risk.totalBase) +
-        " คาบ · " + risk.percent.toFixed(1) + "% (นับลาป่วย/ลากิจครึ่งคาบ และหักชั่วโมงชดเชย)</div>"
-      : "<div class='risk-basis'>ต้องกำหนดเวลาเรียนทั้งหมดในหน้าจัดการโครงสร้าง จึงจะคำนวณเปอร์เซ็นต์ได้</div>") +
-  "</div>";
-  const statHtml = attendanceStatuses.map(status => {
-    const item = counts[status];
-    return "<div class='attendance-stat'><span class='label'>" + escapeHtml(status) + "</span>" +
-      "<span class='value'>" + item.periods + " คาบ</span><span class='sub'>" + item.times + " ครั้ง</span></div>";
-  }).join("");
+  const absenceOverview = attendanceAbsenceOverviewHtml(absentTimes, absentPeriods, totalPeriods, risk);
+  const statHtml = attendanceStatHtml(counts);
   const historyHtml = history.map(item =>
     "<div class='attendance-row'>" +
       "<div><div class='attendance-date'>" + escapeHtml(formatAttendanceDate(item.session.session_date)) + "</div>" +
@@ -1147,6 +1159,52 @@ function renderAttendanceMember(student, subject) {
   "</div>";
 }
 
+function renderIntegratedAttendanceOverview(student, subjectsForStudent) {
+  const riskDataList = attendanceMembers.map(subject => ({
+    subject,
+    sessions: attendanceSessions.filter(session => session.subject_id === subject.id),
+    makeupHours: attendanceMakeupHours.filter(row => row.subject_id === subject.id)
+  }));
+  const enrolledSubjectIds = new Set(subjectsForStudent.map(subject => subject.id));
+  const sessionsForStudent = attendanceSessions.filter(session => enrolledSubjectIds.has(session.subject_id));
+  const counts = Object.fromEntries(attendanceStatuses.map(status => [status, { times:0, periods:0 }]));
+  let missingRecords = 0;
+
+  for (const session of sessionsForStudent) {
+    const record = (session.attendance_records || []).find(row => row.student_id === student.id);
+    if (record && counts[record.status]) {
+      counts[record.status].times++;
+      counts[record.status].periods += Number(session.periods_covered) || 0;
+    } else if (!record) {
+      missingRecords++;
+    }
+  }
+
+  const recordedTimes = attendanceStatuses.reduce((sum, status) => sum + counts[status].times, 0);
+  const recordedPeriods = attendanceStatuses.reduce((sum, status) => sum + counts[status].periods, 0);
+  const totalPeriods = attendanceMembers.reduce((sum, subject) => sum + (Number(subject.total_periods) || 0), 0);
+  const risk = computeAttendanceRisk(student.id, riskDataList);
+  const absenceOverview = attendanceAbsenceOverviewHtml(
+    counts["ขาด"].times,
+    counts["ขาด"].periods,
+    totalPeriods,
+    risk,
+    true
+  );
+
+  return "<div class='card attendance-integrated-card'>" +
+    "<div class='section-title'>รวมวิชาบูรณาการ · " + escapeHtml(attendanceSubject.name) + "</div>" +
+    "<div class='hint'>รวมฐานเวลาเรียน " + attendanceMembers.length + " วิชาสมาชิก" +
+      " · บันทึกแล้ว " + recordedTimes + " รายการ · " + formatAttendanceNumber(recordedPeriods) + " คาบ" +
+      " · คาบขาดสะสมก่อนหักชดเชย " + formatAttendanceNumber(risk.rawMissed) + " คาบ" +
+      (missingRecords ? " · <span class='incomplete'>ยังไม่บันทึก " + missingRecords + " รายการ</span>" : "") +
+    "</div>" +
+    absenceOverview +
+    "<div class='attendance-summary'>" + attendanceStatHtml(counts) + "</div>" +
+    "<div class='hint'>ยอดรวมใช้ฐานเวลาเรียนของทุกวิชาสมาชิกชุดเดียวกับหน้าเฝ้าระวัง มส. และแสดงประวัติแยกรายวิชาด้านล่าง</div>" +
+  "</div>";
+}
+
 function renderAttendanceStudent() {
   const student = attendanceRoster.find(row => row.id === selectedAttendanceStudentId);
   if (!student || !attendanceSubject) {
@@ -1160,7 +1218,8 @@ function renderAttendanceStudent() {
     "</span><span class='meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
     (student.classroom ? " · " + escapeHtml(student.classroom) : "") + "</span></div></div>";
   if (attendanceSubject.subject_type === "บูรณาการ") {
-    html += "<div class='warn-note'>วิชาบูรณาการแสดงประวัติแยกตามวิชาพื้นฐานที่นักเรียนลงทะเบียนจริง</div>";
+    html += renderIntegratedAttendanceOverview(student, subjectsForStudent);
+    html += "<div class='warn-note'>ด้านล่างเป็นประวัติแยกตามวิชาพื้นฐานที่นักเรียนลงทะเบียนจริง</div>";
   }
   html += subjectsForStudent.map(subject => renderAttendanceMember(student, subject)).join("");
   if (!subjectsForStudent.length) html += "<div class='card hint'>นักเรียนคนนี้ไม่ได้ลงทะเบียนในวิชาพื้นฐานสมาชิก</div>";
