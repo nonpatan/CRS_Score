@@ -46,6 +46,97 @@ export async function getProfile(userId) {
   return data;
 }
 
+// ------------------------------------------------------------
+// สิทธิ์ระดับฝ่าย (user_departments) — ต้องรัน migration "ระบบสิทธิ์ระดับฝ่าย" ท้าย schema.sql ก่อน
+// โมเดล: (อยู่ฝ่ายไหน) + (admin กดอนุญาต granted=true) → มีอำนาจเท่า admin เฉพาะหน้าฝ่ายนั้น
+// ⚠ ฟังก์ชันฝั่งนี้ใช้ "ซ่อน/แสดงปุ่ม" เท่านั้น ความจริงบังคับที่ RLS ในฐานข้อมูลเสมอ
+// ------------------------------------------------------------
+export const DEPARTMENTS = ["วิชาการ", "บุคลากร", "การเงิน", "บริหารทั่วไป"];
+
+// ฝ่ายที่ผู้ใช้คนนี้ได้รับอนุญาตแล้วจริง (ยังไม่อนุญาต = ไม่คืนมา)
+export async function getMyDepartments(userId) {
+  const { data, error } = await sb
+    .from("user_departments")
+    .select("department")
+    .eq("user_id", userId)
+    .eq("granted", true);
+  if (error) return [];
+  return (data || []).map(r => r.department);
+}
+
+// admin ถือว่ามีสิทธิ์ทุกฝ่ายเสมอ (ตรงกับฟังก์ชัน has_department() ในฐานข้อมูล)
+export async function canUseDepartment(userId, department, profile = null) {
+  const p = profile || await getProfile(userId);
+  if (p && p.role === "admin") return true;
+  const mine = await getMyDepartments(userId);
+  return mine.includes(department);
+}
+
+// ถามฐานข้อมูลตรง ๆ ว่ามีสิทธิ์ในฝ่ายนี้ไหม — ใช้ฟังก์ชันตัวเดียวกับที่ RLS ใช้ตัดสิน
+// จึงตรงกับความจริงเสมอ (ต่างจาก canUseDepartment ที่ประกอบจากหลาย query ฝั่งเว็บ)
+export async function checkDepartment(department) {
+  const { data, error } = await sb.rpc("has_department", { p_department: department });
+  if (error) return false;
+  return data === true;
+}
+
+// สำหรับหน้าจัดการสิทธิ์ (admin): ดึงสิทธิ์ทุกคนมาแสดง
+export async function listAllUserDepartments() {
+  const { data, error } = await sb.from("user_departments").select("*");
+  if (error) return [];
+  return data || [];
+}
+
+// admin กำหนด/แก้สิทธิ์ของคนหนึ่งในฝ่ายหนึ่ง (มีอยู่แล้วให้ทับ)
+export async function setUserDepartment(userId, department, granted, grantedBy) {
+  return await sb.from("user_departments").upsert({
+    user_id: userId,
+    department,
+    granted,
+    granted_by: granted ? (grantedBy || null) : null,
+    granted_at: granted ? new Date().toISOString() : null
+  }, { onConflict: "user_id,department" });
+}
+
+// admin ถอดคนออกจากฝ่าย (ต่างจากตั้ง granted=false ตรงที่ลบแถวทิ้งเลย)
+export async function removeUserDepartment(userId, department) {
+  return await sb.from("user_departments")
+    .delete()
+    .eq("user_id", userId)
+    .eq("department", department);
+}
+
+// ------------------------------------------------------------
+// ซิงก์ข้อมูลจาก Jibble ผ่าน Edge Function "jibble-sync"
+// key ของ Jibble อยู่ใน Supabase secrets ฝั่ง server — หน้าเว็บไม่เคยเห็น
+// invoke() แนบ access token ของผู้ใช้ให้อัตโนมัติ ฝั่ง function จึงเช็ค has_department() ได้
+// ------------------------------------------------------------
+export async function syncJibble(scope, options = {}) {
+  const { data, error } = await sb.functions.invoke("jibble-sync", {
+    body: { scope, ...options }
+  });
+  if (error) {
+    // ข้อความจริงของ error มักอยู่ในเนื้อ response ไม่ใช่ error.message ("non-2xx status")
+    let detail = error.message || String(error);
+    try {
+      const body = await error.context?.json();
+      if (body?.error) detail = body.error;
+    } catch { /* อ่านเนื้อไม่ได้ก็ใช้ข้อความเดิม */ }
+    throw new Error(detail);
+  }
+  if (data && data.ok === false) throw new Error(data.error || "ซิงก์ไม่สำเร็จ");
+  return data;
+}
+
+// สถานะการซิงก์ล่าสุด — serverless พังเงียบได้ หน้าเว็บต้องแสดงให้เห็น
+export async function getLastSyncLog(scope = null) {
+  let q = sb.from("jibble_sync_log").select("*").order("started_at", { ascending: false }).limit(1);
+  if (scope) q = q.eq("scope", scope);
+  const { data, error } = await q;
+  if (error) return null;
+  return (data && data[0]) || null;
+}
+
 // ข้อมูลส่วนตัวที่เจ้าของบัญชีแก้ได้เอง แยกจาก profiles เพื่อไม่ให้ครูแก้ role/email ได้
 // ตารางนี้จะมีหลังรัน migration "ข้อมูลส่วนตัวและรูปโปรไฟล์" ท้าย schema.sql
 export async function getMyProfileDetails(userId) {
@@ -648,4 +739,224 @@ export function computeGpa(subjectResults) {
     weightSum += w;
   }
   return { gpa: weightSum > 0 ? weightedSum / weightSum : 0, pending: false, total };
+}
+
+// ============================================================
+// ตรรกะเวลาทำงานของฝ่ายบุคคล — "แก้ที่นี่ที่เดียว"
+// ------------------------------------------------------------
+// ทุกหน้า (work-summary / my-work / index ของฝ่ายบุคคล) ต้องเรียกฟังก์ชันชุดนี้
+// ห้ามคัดลอกตรรกะไปเขียนซ้ำในหน้าใดหน้าหนึ่ง — กันบัคแบบ "แก้ที่หนึ่งลืมอีกที่"
+// (บทเรียนเดียวกับตอนย้ายสูตร มส./ร./เกรด มารวมไว้ที่ไฟล์นี้)
+//
+// ลำดับการตัดสินสถานะของ (คน × วัน) — ยืนยันกับผู้ใช้แล้ว:
+//   1. ไม่ใช่วันทำงาน (ตารางงาน) หรือเป็นวันหยุด  → 'holiday'  ไม่นับอะไรเลย
+//   2. วันในอนาคต                               → 'pending'  ยังไม่ถึงวันทำงาน
+//   3. คนอนุโลม (exempt)                        → 'present'  ถือว่ามาเสมอ
+//   4. มีใบลาครอบวันนั้น                         → 'leave'    (เต็มวัน 1.0 / ครึ่งวัน 0.5)
+//   5. มีเวลาเข้า  → เทียบ cutoff → 'present' หรือ 'late'
+//   6. วันนี้ที่ยังไม่ถึงเวลาปิดวัน (18:00)        → 'pending'  ยังไม่ครบวัน ห้ามนับว่าขาด
+//   7. ไม่มีเวลาเข้าเลยหลังปิดวัน                 → 'absent'
+//
+//   cutoff = staff.allowed_late_time (ถ้ามี)  มิฉะนั้น  ตารางงาน.start_time + late_grace_minutes
+// ============================================================
+
+export const WORK_STATUS_LABEL = {
+  holiday: "วันหยุด", pending: "ยังไม่ครบวัน", present: "มา",
+  late: "สาย", leave: "ลา", absent: "ขาด"
+};
+
+// อ่านค่าตั้งงานบุคคลทั้งหมดเป็น object เดียว
+export async function getHrSettings() {
+  const { data } = await sb.from("hr_settings").select("key,value");
+  const map = {};
+  (data || []).forEach(r => { map[r.key] = r.value; });
+  return {
+    lateGraceMinutes: Number(map.late_grace_minutes ?? 5),
+    dayFinalTime: map.day_final_time || "18:00"
+  };
+}
+
+// ---------- ตัวช่วยเรื่องวันที่ (คิดตามเวลาไทยเสมอ) ----------
+const TH_OFFSET_MIN = 7 * 60;
+export function bangkokNow() {
+  return new Date(Date.now() + TH_OFFSET_MIN * 60_000);
+}
+export function toDateStr(d) {
+  return d.toISOString().slice(0, 10);
+}
+export function addDaysStr(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return toDateStr(d);
+}
+// ไล่วันจาก from ถึง to (รวมปลายทั้งสองข้าง)
+export function eachDate(from, to) {
+  const out = [];
+  for (let d = from; d <= to; d = addDaysStr(d, 1)) out.push(d);
+  return out;
+}
+// 1=จันทร์ ... 7=อาทิตย์ (ตรงกับ work_schedule.weekday)
+export function isoWeekday(dateStr) {
+  const wd = new Date(dateStr + "T00:00:00Z").getUTCDay();  // 0=อาทิตย์
+  return wd === 0 ? 7 : wd;
+}
+function timeToMinutes(t) {
+  if (!t) return null;
+  const [h, m] = String(t).split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+// ---------- โหลดข้อมูลที่ต้องใช้คำนวณทั้งช่วง ----------
+export async function loadWorkContext(from, to) {
+  const [staffRes, attRes, holRes, schedRes, leaveRes, settings] = await Promise.all([
+    sb.from("staff").select("*").order("full_name"),
+    sb.from("work_attendance").select("*").gte("work_date", from).lte("work_date", to),
+    sb.from("work_holidays").select("*").gte("holiday_date", from).lte("holiday_date", to),
+    sb.from("work_schedule").select("*"),
+    // ใบลาที่ "คาบเกี่ยว" ช่วงนี้ (เริ่มก่อนช่วงแต่ยังไม่จบ ก็ต้องเอามาด้วย)
+    sb.from("staff_leaves").select("*").lte("start_date", to).gte("end_date", from),
+    getHrSettings()
+  ]);
+
+  const attendance = new Map();
+  (attRes.data || []).forEach(r => attendance.set(r.staff_id + "|" + r.work_date, r));
+
+  const schedule = new Map();
+  (schedRes.data || []).forEach(r => schedule.set(r.weekday, r));
+
+  return {
+    staff: staffRes.data || [],
+    attendance,
+    holidays: new Set((holRes.data || []).map(r => r.holiday_date)),
+    schedule,
+    leaves: leaveRes.data || [],
+    settings
+  };
+}
+
+// ---------- ตัดสินสถานะของคนหนึ่งในวันหนึ่ง ----------
+export function computeDayStatus(staff, dateStr, ctx) {
+  const sched = ctx.schedule.get(isoWeekday(dateStr));
+
+  // 1) ไม่ใช่วันทำงาน หรือเป็นวันหยุดที่โรงเรียนประกาศ
+  if (!sched || !sched.is_working_day || ctx.holidays.has(dateStr)) {
+    return { status: "holiday", weight: 0 };
+  }
+
+  // 2) วันในอนาคตยังสรุปไม่ได้
+  const now = bangkokNow();
+  const today = toDateStr(now);
+  if (dateStr > today) return { status: "pending", weight: 0 };
+
+  // 3) คนที่ได้รับการอนุโลม ไม่ต้องลงเวลา ถือว่ามาทุกวันทำงาน
+  if (staff.exempt) return { status: "present", weight: 1, exempt: true };
+
+  // 4) ใบลา — ครึ่งวันนับ 0.5 (โครงสร้างบังคับให้ครึ่งวันเป็นวันเดียวอยู่แล้ว)
+  const leave = ctx.leaves.find(l =>
+    l.staff_id === staff.id && l.start_date <= dateStr && dateStr <= l.end_date);
+  if (leave) {
+    return {
+      status: "leave", weight: leave.day_portion === "full" ? 1 : 0.5,
+      leaveType: leave.leave_type, portion: leave.day_portion, reason: leave.reason
+    };
+  }
+
+  // 5) มีเวลาเข้า → เทียบกับเวลาที่อนุญาต (วันนี้แสดงผลที่รู้แล้วได้ทันที ไม่ต้องรอปิดวัน)
+  const rec = ctx.attendance.get(staff.id + "|" + dateStr);
+  if (rec && rec.first_in_local) {
+    const cutoff = staff.allowed_late_time
+      ? timeToMinutes(staff.allowed_late_time)
+      : timeToMinutes(sched.start_time) + ctx.settings.lateGraceMinutes;
+    const arrived = timeToMinutes(rec.first_in_local);
+    return {
+      status: arrived > cutoff ? "late" : "present", weight: 1,
+      firstIn: rec.first_in_local, autoOut: rec.auto_out,
+      lateMinutes: arrived > cutoff ? arrived - cutoff : 0
+    };
+  }
+
+  // 6) วันนี้ยังไม่ปิดวันและยังไม่มีเวลาเข้า — รอก่อน ห้ามตัดสินว่าขาด
+  if (dateStr === today) {
+    const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+    if (nowMin < timeToMinutes(ctx.settings.dayFinalTime)) {
+      return { status: "pending", weight: 0 };
+    }
+  }
+
+  // 7) ไม่มีร่องรอยการลงเวลาเลยหลังปิดวัน
+  return { status: "absent", weight: 1 };
+}
+
+// ---------- สรุปของคนหนึ่งตลอดช่วง ----------
+export function summarizeStaff(staff, from, to, ctx) {
+  const days = eachDate(from, to);
+  const sum = {
+    staff, workDays: 0, present: 0, late: 0, absent: 0,
+    leaveDays: 0, leaveByType: {}, pendingDays: 0, rows: []
+  };
+  for (const d of days) {
+    const r = computeDayStatus(staff, d, ctx);
+    sum.rows.push({ date: d, ...r });
+    if (r.status === "holiday") continue;
+    if (r.status === "pending") { sum.pendingDays++; continue; }
+
+    sum.workDays++;
+    if (r.status === "present") sum.present++;
+    else if (r.status === "late") { sum.late++; sum.present++; }   // สายก็ถือว่ามาทำงาน
+    else if (r.status === "absent") sum.absent++;
+    else if (r.status === "leave") {
+      sum.leaveDays += r.weight;
+      sum.leaveByType[r.leaveType] = (sum.leaveByType[r.leaveType] || 0) + r.weight;
+      // ลาครึ่งวัน = มาอีกครึ่งวัน จึงนับเป็นมาด้วยครึ่งหนึ่ง
+      if (r.weight === 0.5) sum.present += 0.5;
+    }
+  }
+  return sum;
+}
+
+// สรุปทุกคน (ใช้ที่หน้าสรุปเวลาทำงานของผู้บริหาร)
+export function summarizeAll(from, to, ctx, { activeOnly = true } = {}) {
+  return ctx.staff
+    .filter(s => !activeOnly || s.is_active)
+    .map(s => summarizeStaff(s, from, to, ctx));
+}
+
+// ---------- ปีการศึกษา ----------
+// รอบปี = [วันเริ่มปีนี้, วันเริ่มปีถัดไป) → เดือนเมษายนตกอยู่ในปีก่อนหน้าอัตโนมัติ
+// ทำให้ทุกวันในปฏิทินมีปีการศึกษาสังกัดเสมอ ไม่มีวันไหนตกหล่น
+export async function getAcademicYears() {
+  const { data } = await sb.from("academic_years").select("*").order("year");
+  return data || [];
+}
+export function academicYearRange(year, years) {
+  const list = [...years].sort((a, b) => a.year.localeCompare(b.year));
+  const idx = list.findIndex(y => y.year === year);
+  if (idx < 0) return null;
+  const start = list[idx].start_date;
+  const next = list[idx + 1];
+  // ไม่มีปีถัดไปในระบบ → ใช้ 1 ปีถัดจากวันเริ่ม ลบ 1 วัน
+  const end = next ? addDaysStr(next.start_date, -1) : (() => {
+    const d = new Date(start + "T00:00:00Z");
+    d.setUTCFullYear(d.getUTCFullYear() + 1);
+    return addDaysStr(toDateStr(d), -1);
+  })();
+  return { start, end };
+}
+// ปีการศึกษาที่วันที่นี้สังกัดอยู่
+export function academicYearOf(dateStr, years) {
+  const list = [...years].sort((a, b) => b.start_date.localeCompare(a.start_date));
+  const found = list.find(y => y.start_date <= dateStr);
+  return found ? found.year : null;
+}
+
+// โควตาวันลาของปีการศึกษาหนึ่ง → { 'ลากิจ': 7, ... }
+export async function getLeaveQuotas(year) {
+  const { data } = await sb.from("leave_quotas").select("*").eq("year", year);
+  const map = {};
+  (data || []).forEach(r => { map[r.leave_type] = Number(r.days); });
+  return map;
+}
+export async function getLeaveTypes() {
+  const { data } = await sb.from("leave_types").select("*").eq("active", true).order("sort_order");
+  return data || [];
 }

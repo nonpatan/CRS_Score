@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จัดการสิทธิ์ผู้ใช้ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --teal:#075e5a; --teal-2:#0b8d86; --teal-soft:#e5f5f3; --ink:#183638; --muted:#657778; --line:#dce7e6; --bg:#f4f8f8; --white:#fff; --amber:#8a5a00; --amber-soft:#fff4df; --danger:#c52e35; --danger-soft:#fff0f1; --ok:#0b7a4b; --ok-soft:#e6f6ee; --shadow:0 14px 36px rgba(16,69,69,.09),0 2px 7px rgba(16,69,69,.04); }
+  * { box-sizing:border-box; } html { -webkit-text-size-adjust:100%; }
+  body { min-width:320px; min-height:100svh; margin:0; color:var(--ink); background:var(--bg); font:16px/1.5 "Sarabun",sans-serif; }
+  .topbar { display:flex; align-items:center; min-height:68px; padding:10px 16px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.94); }
+  .back-link { display:inline-flex; align-items:center; gap:8px; min-height:44px; color:var(--teal); font-weight:700; text-decoration:none; }
+  .back-link:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline:3px solid rgba(11,141,134,.25); outline-offset:2px; }
+  main { max-width:960px; margin:0 auto; padding:26px 16px 60px; }
+  h1 { margin:0; font-size:clamp(25px,6vw,32px); line-height:1.25; letter-spacing:-.02em; }
+  .intro { margin:4px 0 18px; color:var(--muted); }
+  .card { padding:19px; margin-bottom:16px; border:1px solid var(--line); border-radius:19px; background:var(--white); box-shadow:var(--shadow); }
+  .note { padding:13px 15px; border-radius:14px; background:var(--amber-soft); color:var(--amber); font-size:14.5px; }
+  .note b { color:var(--amber); }
+  .search { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:4px; }
+  .search input { flex:1 1 220px; min-height:46px; padding:9px 13px; border:1px solid var(--line); border-radius:12px; font:inherit; color:inherit; background:var(--white); }
+  .count { color:var(--muted); font-size:14.5px; }
+  .user { padding:16px 17px; margin-bottom:12px; border:1px solid var(--line); border-radius:16px; background:var(--white); }
+  .user-head { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:baseline; margin-bottom:12px; }
+  .user-name { font-weight:700; font-size:17px; }
+  .user-mail { color:var(--muted); font-size:14.5px; word-break:break-all; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:13px; font-weight:700; }
+  .badge.admin { background:var(--teal-soft); color:var(--teal); }
+  .badge.teacher { background:#eef1f1; color:var(--muted); }
+  .depts { display:grid; gap:9px; grid-template-columns:1fr; }
+  @media (min-width:700px) { .depts { grid-template-columns:1fr 1fr; } }
+  .dept { display:flex; gap:10px; align-items:center; justify-content:space-between; padding:9px 12px; border:1px solid var(--line); border-radius:12px; background:#fbfdfd; }
+  .dept-name { font-weight:600; }
+  .dept select { min-height:44px; padding:6px 9px; border:1px solid var(--line); border-radius:10px; font:inherit; color:inherit; background:var(--white); }
+  .dept.on { border-color:rgba(11,122,75,.35); background:var(--ok-soft); }
+  .dept.pending { border-color:rgba(138,90,0,.3); background:var(--amber-soft); }
+  .admin-all { padding:9px 12px; border:1px dashed var(--line); border-radius:12px; color:var(--muted); font-size:14.5px; }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); padding:11px 18px; border-radius:12px; background:var(--ink); color:#fff; font-weight:600; box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity .18s; z-index:50; }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+  .empty { padding:22px; color:var(--muted); text-align:center; }
+</style>
+</head>
+<body>
+
+<div class="topbar"><a class="back-link" href="dashboard.html">← กลับหน้าภาพรวม</a></div>
+
+<main>
+  <h1>จัดการสิทธิ์ผู้ใช้</h1>
+  <p class="intro">กำหนดว่าใครอยู่ฝ่ายไหน และอนุญาตให้ทำงานในฝ่ายนั้นได้หรือไม่</p>
+
+  <div id="gate" class="card" style="display:none">
+    <div class="note" id="gate-msg">กำลังตรวจสอบสิทธิ์…</div>
+  </div>
+
+  <div id="main-area" style="display:none">
+    <div class="card">
+      <div class="note">
+        <b>สิทธิ์ระดับฝ่ายทำงานอย่างไร</b><br>
+        ผู้ที่ได้รับอนุญาตในฝ่ายใด จะทำงานในหน้าของฝ่ายนั้นได้เหมือน admin — <b>เพิ่มและแก้ไขได้ แต่ลบไม่ได้</b>
+        (การลบสงวนไว้ที่ admin เท่านั้น) · ถ้าตั้งเป็น “อยู่ฝ่ายนี้ แต่ยังไม่อนุญาต” จะยังทำอะไรไม่ได้<br>
+        คนหนึ่งอยู่ได้หลายฝ่ายพร้อมกัน · การเลื่อนใครเป็น admin ยังต้องทำผ่าน Supabase (SQL) เหมือนเดิม
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="search">
+        <input id="q" type="search" placeholder="ค้นหาชื่อหรืออีเมล" autocomplete="off">
+        <span class="count" id="count"></span>
+      </div>
+    </div>
+
+    <div id="list"></div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script type="module">
+  import { sb, requireAuth, getProfile, DEPARTMENTS,
+           listAllUserDepartments, setUserDepartment, removeUserDepartment } from "./supabase-client.js";
+
+  const elGate = document.getElementById("gate");
+  const elGateMsg = document.getElementById("gate-msg");
+  const elMain = document.getElementById("main-area");
+  const elList = document.getElementById("list");
+  const elQ = document.getElementById("q");
+  const elCount = document.getElementById("count");
+  const elToast = document.getElementById("toast");
+
+  let toastTimer = null;
+  function toast(msg, isError) {
+    elToast.textContent = msg;
+    elToast.classList.toggle("err", !!isError);
+    elToast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => elToast.classList.remove("show"), 2600);
+  }
+
+  let me = null;
+  let users = [];
+  // แผนที่สิทธิ์: "userId||ฝ่าย" → granted (true/false) · ไม่มีคีย์ = ไม่ได้อยู่ฝ่ายนั้น
+  const grants = new Map();
+  const key = (userId, dept) => userId + "||" + dept;
+
+  // ค่าใน dropdown สะท้อนโมเดลจริงตรง ๆ: ไม่มีแถว / มีแถวแต่ granted=false / granted=true
+  const OPTIONS = [
+    ["none", "ไม่อยู่ฝ่ายนี้"],
+    ["pending", "อยู่ฝ่ายนี้ (ยังไม่อนุญาต)"],
+    ["granted", "อยู่ฝ่ายนี้ + อนุญาต"]
+  ];
+
+  function stateOf(userId, dept) {
+    const k = key(userId, dept);
+    if (!grants.has(k)) return "none";
+    return grants.get(k) ? "granted" : "pending";
+  }
+
+  function render() {
+    const q = elQ.value.trim().toLowerCase();
+    const shown = users.filter(u => {
+      if (!q) return true;
+      return (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
+    });
+
+    elCount.textContent = `ผู้ใช้ ${shown.length} คน` + (shown.length !== users.length ? ` (จากทั้งหมด ${users.length})` : "");
+
+    if (shown.length === 0) {
+      elList.innerHTML = '<div class="card empty">ไม่พบผู้ใช้ที่ตรงกับคำค้น</div>';
+      return;
+    }
+
+    elList.innerHTML = shown.map(u => {
+      const isAdmin = u.role === "admin";
+      // admin มีสิทธิ์ทุกฝ่ายอยู่แล้วตามฟังก์ชัน has_department() จึงไม่ต้องตั้งรายฝ่าย
+      const body = isAdmin
+        ? '<div class="admin-all">เป็น admin — มีสิทธิ์ทุกฝ่ายอยู่แล้ว ไม่ต้องกำหนดรายฝ่าย</div>'
+        : '<div class="depts">' + DEPARTMENTS.map(d => {
+            const st = stateOf(u.id, d);
+            const cls = st === "granted" ? " on" : (st === "pending" ? " pending" : "");
+            const opts = OPTIONS.map(([v, label]) =>
+              `<option value="${v}"${v === st ? " selected" : ""}>${label}</option>`).join("");
+            return `<div class="dept${cls}"><span class="dept-name">${d}</span>` +
+                   `<select data-user="${u.id}" data-dept="${d}" aria-label="สิทธิ์ฝ่าย${d} ของ ${u.email || ""}">${opts}</select></div>`;
+          }).join("") + '</div>';
+
+      const nameHtml = u.name ? `<span class="user-name">${u.name}</span>` : `<span class="user-name">(ยังไม่ตั้งชื่อ)</span>`;
+      return `<div class="user">
+        <div class="user-head">${nameHtml}
+          <span class="badge ${isAdmin ? "admin" : "teacher"}">${isAdmin ? "admin" : "ครู"}</span>
+          <span class="user-mail">${u.email || ""}</span>
+        </div>${body}</div>`;
+    }).join("");
+  }
+
+  async function onChange(select) {
+    const userId = select.dataset.user;
+    const dept = select.dataset.dept;
+    const value = select.value;
+    const previous = stateOf(userId, dept);
+    select.disabled = true;
+    try {
+      let res;
+      if (value === "none") {
+        res = await removeUserDepartment(userId, dept);
+        if (res.error) throw res.error;
+        grants.delete(key(userId, dept));
+      } else {
+        res = await setUserDepartment(userId, dept, value === "granted", me.id);
+        if (res.error) throw res.error;
+        grants.set(key(userId, dept), value === "granted");
+      }
+      toast("บันทึกแล้ว");
+      render();
+    } catch (e) {
+      // คืนค่าเดิมให้ตรงกับฐานข้อมูล จะได้ไม่หลงว่าบันทึกสำเร็จ
+      select.value = previous;
+      toast("บันทึกไม่สำเร็จ: " + (e.message || e), true);
+    } finally {
+      select.disabled = false;
+    }
+  }
+
+  elList.addEventListener("change", ev => {
+    const select = ev.target.closest("select[data-user]");
+    if (select) onChange(select);
+  });
+  elQ.addEventListener("input", render);
+
+  (async () => {
+    const session = await requireAuth();
+    if (!session) return;
+    me = session.user;
+    const profile = await getProfile(me.id);
+
+    if (!profile || profile.role !== "admin") {
+      elGate.style.display = "";
+      elGateMsg.innerHTML = "<b>หน้านี้สำหรับผู้ดูแลระบบ (admin) เท่านั้น</b><br>หากต้องการสิทธิ์เพิ่ม กรุณาติดต่อผู้ดูแลระบบ";
+      return;
+    }
+
+    const [{ data: profileRows, error: profileError }, deptRows] = await Promise.all([
+      sb.from("profiles").select("id,email,name,role").order("email"),
+      listAllUserDepartments()
+    ]);
+
+    if (profileError) {
+      elGate.style.display = "";
+      elGateMsg.textContent = "โหลดรายชื่อผู้ใช้ไม่สำเร็จ: " + profileError.message;
+      return;
+    }
+
+    users = profileRows || [];
+    deptRows.forEach(r => grants.set(key(r.user_id, r.department), !!r.granted));
+
+    elMain.style.display = "";
+    render();
+  })();
+</script>
+</body>
+</html>

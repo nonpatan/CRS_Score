@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บันทึกการลา — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+          --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
+          --amber:#8a5a00; --amber-soft:#fff4df; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:560px; margin:0 auto; }
+  header h1 { font-size:20px; font-weight:600; margin:4px 0; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
+  header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
+                border-radius:99px; border:1px solid var(--line);
+                box-shadow:0 4px 12px rgba(0,0,0,.05); margin:0 0 24px; align-items:center; }
+  header .nav a { color:var(--muted); text-decoration:none; font-weight:500;
+                  padding:8px 16px; border-radius:99px; font-size:14px; }
+  header .nav a.active { background:var(--teal); color:var(--white); }
+  header .nav #btn-signout { margin-left:auto; color:var(--danger); background:#fff0f0; }
+
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px; }
+  label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
+  input[type="text"], input[type="date"], input[type="search"], select, textarea {
+    width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+    border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  textarea { resize:vertical; min-height:70px; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  .field { margin-bottom:14px; } .field:last-child { margin-bottom:0; }
+  .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
+  .row2 { display:flex; gap:12px; } .row2 > * { flex:1; }
+  button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
+           border:none; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); width:100%; margin-top:8px; }
+  button.small { font-size:13px; padding:6px 10px; }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  button:disabled { opacity:.5; cursor:default; }
+  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+                   text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
+  .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  .banner.info { background:var(--teal-soft); color:var(--teal); }
+  .leave-row { display:flex; gap:10px; align-items:flex-start; padding:11px 0; border-bottom:1px solid var(--line); }
+  .leave-row:last-child { border-bottom:none; }
+  .leave-row .info { flex:1; min-width:0; }
+  .leave-row .who { font-weight:600; }
+  .leave-row .meta { color:var(--muted); font-size:13.5px; }
+  .chip { font-size:12px; font-weight:600; padding:2px 9px; border-radius:99px;
+          background:var(--teal-soft); color:var(--teal); }
+  .chip.half { background:var(--amber-soft); color:var(--amber); }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
+           border-radius:10px; background:#1f2a2e; color:#fff; font-weight:600; opacity:0;
+           pointer-events:none; transition:opacity .18s; z-index:60; }
+  #toast.show { opacity:1; } #toast.err { background:var(--danger); }
+  .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-1">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>บันทึกการลา</h1>
+    <p>คีย์ใบลาเข้าระบบ รองรับลาเต็มวันและครึ่งวัน</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="leave.html">บันทึกการลา</a>
+      <a href="staff.html">ทะเบียนบุคลากร</a>
+      <a href="hr-settings.html">ตั้งค่างานบุคคล</a>
+      <a href="work-summary.html">สรุปเวลาทำงาน</a>
+      <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260725-1"></script>
+  </header>
+
+  <div id="gate" class="card" style="display:none"></div>
+
+  <div id="form-card" class="card" style="display:none">
+    <div class="section-title">บันทึกใบลาใหม่</div>
+    <div class="field">
+      <label for="f-staff">บุคลากร</label>
+      <select id="f-staff"></select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-type">ประเภทการลา</label>
+        <select id="f-type"></select>
+      </div>
+      <div class="field">
+        <label for="f-portion">ช่วงเวลา</label>
+        <select id="f-portion">
+          <option value="full">เต็มวัน</option>
+          <option value="morning">ครึ่งวันเช้า</option>
+          <option value="afternoon">ครึ่งวันบ่าย</option>
+        </select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="f-start">ตั้งแต่วันที่</label>
+        <input id="f-start" type="date">
+      </div>
+      <div class="field">
+        <label for="f-end">ถึงวันที่</label>
+        <input id="f-end" type="date">
+        <div class="field-note" id="end-note">ลาวันเดียวใส่วันเดียวกันได้</div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-reason">เหตุผล</label>
+      <textarea id="f-reason" placeholder="เช่น ป่วยเป็นไข้ / ไปติดต่อราชการ"></textarea>
+    </div>
+    <div id="quota-hint" class="field-note"></div>
+    <button id="btn-save" class="primary">บันทึกใบลา</button>
+  </div>
+
+  <div class="card">
+    <div class="section-title">ใบลาที่บันทึกไว้</div>
+    <div class="field">
+      <input id="q" type="search" placeholder="ค้นหาชื่อบุคลากร" autocomplete="off">
+    </div>
+    <div id="count" class="field-note">—</div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import { sb, requireAuth, signOut, checkDepartment, getLeaveTypes,
+         getAcademicYears, academicYearOf, academicYearRange, getLeaveQuotas,
+         bangkokNow, toDateStr } from "../supabase-client.js";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const elToast = el("toast");
+  let t = null;
+  const toast = (m, err) => {
+    elToast.textContent = m; elToast.classList.toggle("err", !!err);
+    elToast.classList.add("show"); clearTimeout(t);
+    t = setTimeout(() => elToast.classList.remove("show"), 3200);
+  };
+  el("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
+
+  const canEdit = await checkDepartment("บุคลากร");
+  let staffList = [], leaves = [], years = [];
+
+  if (!canEdit) {
+    el("gate").style.display = "";
+    el("gate").innerHTML = '<div class="banner warn"><b>คุณดูได้อย่างเดียว</b><br>' +
+      'การบันทึกใบลาต้องเป็นผู้ดูแลระบบ หรือได้รับสิทธิ์ฝ่ายบุคลากร<br>' +
+      'รายการด้านล่างจะแสดงเฉพาะใบลาของคุณเอง</div>';
+  } else {
+    el("form-card").style.display = "";
+  }
+
+  const PORTION_LABEL = { full: "เต็มวัน", morning: "ครึ่งวันเช้า", afternoon: "ครึ่งวันบ่าย" };
+
+  async function loadAll() {
+    // จำค่าที่ผู้ใช้เลือกไว้ก่อนสร้าง option ใหม่ เพื่อให้ลงใบลารายการถัดไปได้ต่อเนื่อง
+    const selectedStaff = el("f-staff").value;
+    const selectedType = el("f-type").value;
+    const [staffRes, typeRows, leaveRes, yearRows] = await Promise.all([
+      sb.from("staff").select("id,full_name,is_active").eq("is_active", true).order("full_name"),
+      getLeaveTypes(),
+      sb.from("staff_leaves").select("*").order("start_date", { ascending: false }).limit(300),
+      getAcademicYears()
+    ]);
+    staffList = staffRes.data || [];
+    leaves = leaveRes.data || [];
+    years = yearRows;
+
+    el("f-staff").innerHTML = '<option value="">— เลือกบุคลากร —</option>' +
+      staffList.map(s => `<option value="${s.id}">${s.full_name}</option>`).join("");
+    el("f-type").innerHTML = typeRows.map(t => `<option value="${t.code}">${t.code}</option>`).join("");
+    if (selectedStaff && staffList.some(s => s.id === selectedStaff)) el("f-staff").value = selectedStaff;
+    if (selectedType && typeRows.some(t => t.code === selectedType)) el("f-type").value = selectedType;
+    render();
+  }
+
+  // ---------- เตือนโควตาคงเหลือ (เตือนเฉย ๆ ไม่บล็อก — ดุลยพินิจอยู่ที่โรงเรียน) ----------
+  async function updateQuotaHint() {
+    const staffId = el("f-staff").value;
+    const type = el("f-type").value;
+    const start = el("f-start").value;
+    el("quota-hint").textContent = "";
+    if (!staffId || !type || !start || years.length === 0) return;
+
+    const year = academicYearOf(start, years);
+    if (!year) { el("quota-hint").textContent = "วันที่นี้ยังไม่อยู่ในปีการศึกษาที่กำหนดไว้"; return; }
+    const range = academicYearRange(year, years);
+    const quotas = await getLeaveQuotas(year);
+    if (quotas[type] === undefined) { el("quota-hint").textContent = `ปีการศึกษา ${year} · ประเภทนี้ไม่ได้กำหนดโควตา`; return; }
+
+    // นับที่ใช้ไปแล้วในปีนั้น (ไม่รวมใบที่กำลังจะบันทึก)
+    const used = leaves
+      .filter(l => l.staff_id === staffId && l.leave_type === type &&
+                   l.start_date >= range.start && l.start_date <= range.end)
+      .reduce((sum, l) => {
+        if (l.day_portion !== "full") return sum + 0.5;
+        const a = new Date(l.start_date + "T00:00:00Z"), b = new Date(l.end_date + "T00:00:00Z");
+        return sum + Math.round((b - a) / 86400000) + 1;   // นับรวมวันแรกและวันสุดท้าย
+      }, 0);
+    const left = quotas[type] - used;
+    el("quota-hint").textContent =
+      `ปีการศึกษา ${year} · ${type} ใช้ไปแล้ว ${used} วัน จากสิทธิ์ ${quotas[type]} วัน` +
+      (left < 0 ? ` — เกินสิทธิ์ ${Math.abs(left)} วัน` : ` (เหลือ ${left} วัน)`);
+  }
+  ["f-staff", "f-type", "f-start"].forEach(id => el(id)?.addEventListener("change", updateQuotaHint));
+
+  // ครึ่งวันต้องเป็นวันเดียว (ฐานข้อมูลบังคับอยู่แล้ว ฝั่งนี้ช่วยไม่ให้ผู้ใช้กรอกแล้วโดนปฏิเสธ)
+  el("f-portion")?.addEventListener("change", () => {
+    const half = el("f-portion").value !== "full";
+    el("f-end").disabled = half;
+    if (half) { el("f-end").value = el("f-start").value; el("end-note").textContent = "ลาครึ่งวันต้องเป็นวันเดียว"; }
+    else el("end-note").textContent = "ลาวันเดียวใส่วันเดียวกันได้";
+  });
+  el("f-start")?.addEventListener("change", () => {
+    if (el("f-portion").value !== "full" || !el("f-end").value) el("f-end").value = el("f-start").value;
+  });
+
+  function render() {
+    const q = el("q").value.trim().toLowerCase();
+    const nameOf = id => (staffList.find(s => s.id === id) || {}).full_name || "(ไม่พบชื่อ)";
+    const rows = leaves.filter(l => !q || nameOf(l.staff_id).toLowerCase().includes(q));
+    el("count").textContent = `${rows.length} รายการ`;
+
+    if (rows.length === 0) {
+      el("list").innerHTML = '<div class="muted-empty">ยังไม่มีใบลาที่บันทึกไว้</div>';
+      return;
+    }
+    const fmt = d => new Date(d + "T00:00:00Z")
+      .toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+
+    el("list").innerHTML = rows.map(l => {
+      const range = l.start_date === l.end_date ? fmt(l.start_date) : `${fmt(l.start_date)} – ${fmt(l.end_date)}`;
+      const chip = l.day_portion === "full"
+        ? `<span class="chip">${l.leave_type}</span>`
+        : `<span class="chip half">${l.leave_type} · ${PORTION_LABEL[l.day_portion]}</span>`;
+      return `<div class="leave-row">
+        <div class="info">
+          <div class="who">${nameOf(l.staff_id)} ${chip}</div>
+          <div class="meta">${range}${l.reason ? " · " + l.reason : ""}</div>
+        </div>
+        ${canEdit ? `<button class="danger small" data-del="${l.id}">ลบ</button>` : ""}
+      </div>`;
+    }).join("");
+  }
+  el("q").addEventListener("input", render);
+
+  el("btn-save")?.addEventListener("click", async () => {
+    const staffId = el("f-staff").value;
+    const type = el("f-type").value;
+    const portion = el("f-portion").value;
+    const start = el("f-start").value;
+    const end = portion === "full" ? (el("f-end").value || start) : start;
+
+    if (!staffId) return toast("กรุณาเลือกบุคลากร", true);
+    if (!type) return toast("กรุณาเลือกประเภทการลา", true);
+    if (!start) return toast("กรุณาเลือกวันที่เริ่มลา", true);
+    if (end < start) return toast("วันสิ้นสุดต้องไม่ก่อนวันเริ่ม", true);
+
+    const btn = el("btn-save");
+    btn.disabled = true;
+    const { error } = await sb.from("staff_leaves").insert({
+      staff_id: staffId, leave_type: type, day_portion: portion,
+      start_date: start, end_date: end,
+      reason: el("f-reason").value.trim() || null,
+      created_by: session.user.id
+    });
+    btn.disabled = false;
+    if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
+
+    el("f-reason").value = "";
+    toast("บันทึกใบลาแล้ว");
+    await loadAll();
+    updateQuotaHint();
+  });
+
+  el("list").addEventListener("click", async ev => {
+    const btn = ev.target.closest("[data-del]");
+    if (!btn) return;
+    if (!confirm("ลบใบลานี้ใช่ไหม? การลบกู้คืนไม่ได้")) return;
+    const { error } = await sb.from("staff_leaves").delete().eq("id", btn.dataset.del);
+    // ตามกติกาสิทธิ์: ลบได้เฉพาะ admin — ฝ่ายบุคคลจะโดน RLS ปฏิเสธ จึงต้องบอกให้ชัด
+    if (error) return toast("ลบไม่สำเร็จ (การลบสงวนไว้ที่ผู้ดูแลระบบ): " + error.message, true);
+    toast("ลบใบลาแล้ว");
+    loadAll();
+  });
+
+  // ตั้งค่าเริ่มต้นเป็นวันนี้ตามเวลาไทย
+  const today = toDateStr(bangkokNow());
+  if (el("f-start")) { el("f-start").value = today; el("f-end").value = today; }
+
+  await loadAll();
+}
+</script>
+</body>
+</html>

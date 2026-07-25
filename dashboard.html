@@ -171,8 +171,9 @@
     <a class="side-link active" href="dashboard.html">⌂ &nbsp;แดชบอร์ด</a>
     <a class="side-link" href="academic/attendance.html">▣ &nbsp;ฝ่ายวิชาการ</a>
     <span class="side-link disabled" aria-disabled="true">฿ &nbsp;ฝ่ายการเงิน</span>
-    <span class="side-link disabled" aria-disabled="true">♙ &nbsp;ฝ่ายบุคคล</span>
+    <a class="side-link" href="personnel/index.html">♙ &nbsp;ฝ่ายบุคคล</a>
     <span class="side-link disabled" aria-disabled="true">▤ &nbsp;บริหารทั่วไป</span>
+    <a class="side-link" id="link-permissions" href="permissions.html" hidden>⚙ &nbsp;จัดการสิทธิ์</a>
     <div class="side-footer">ระบบติดตามนักเรียน</div>
   </aside>
   <div class="main-area">
@@ -184,7 +185,7 @@
       <a class="dept-tab active" href="dashboard.html">ภาพรวม</a>
       <a class="dept-tab" href="academic/attendance.html">วิชาการ</a>
       <span class="dept-tab" aria-disabled="true">การเงิน</span>
-      <span class="dept-tab" aria-disabled="true">บุคคล</span>
+      <a class="dept-tab" href="personnel/index.html">บุคคล</a>
       <span class="dept-tab" aria-disabled="true">บริหารทั่วไป</span>
     </nav>
     <main>
@@ -222,13 +223,13 @@
       <a class="active" href="dashboard.html"><b>⌂</b>ภาพรวม</a>
       <a href="academic/attendance.html"><b>▣</b>วิชาการ</a>
       <span><b>฿</b>การเงิน</span>
-      <span><b>♙</b>บุคคล</span>
+      <a href="personnel/index.html"><b>♙</b>บุคคล</a>
       <span><b>▤</b>ทั่วไป</span>
     </nav>
   </div>
 </div>
 <script type="module">
-  import { sb, requireAuth, getActiveStudents, getActiveYear, setActiveYear, distinctYears, computeAttendanceRisk, getMyProfilePresentation, profileInitials } from "./supabase-client.js";
+  import { sb, requireAuth, getProfile, getActiveStudents, getActiveYear, setActiveYear, distinctYears, computeAttendanceRisk, getMyProfilePresentation, profileInitials } from "./supabase-client.js";
 
   const riskCount = document.getElementById("risk-count");
   const frequentCount = document.getElementById("frequent-count");
@@ -374,10 +375,20 @@
     } else avatar.textContent = presentation.initials;
   }
 
+  // ลิงก์จัดการสิทธิ์เห็นเฉพาะ admin — ฝั่งหน้าเว็บเป็นแค่การซ่อนปุ่ม
+  // ตัวจริงที่กันคือ RLS (user_departments เขียนได้เฉพาะ is_admin()) และการเช็คซ้ำในหน้านั้นเอง
+  async function renderAdminLinks(session) {
+    const profile = await getProfile(session.user.id);
+    if (profile && profile.role === "admin") {
+      document.getElementById("link-permissions").hidden = false;
+    }
+  }
+
   async function init() {
     const session = await requireAuth();
     if (!session) return;
     renderAccount(session).catch(() => {});
+    renderAdminLinks(session).catch(() => {});
     const { data: yearRows, error } = await sb.from("subjects").select("year");
     if (error) throw error;
     const years = distinctYears(yearRows || []);

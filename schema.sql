@@ -190,7 +190,8 @@ alter table scores     disable row level security;
 -- เพราะ drop table ด้านบนสุดจะลบข้อมูลที่กรอกไว้แล้วทั้งหมด)
 -- ============================================================
 
--- จำนวนคาบเรียนทั้งหมดทั้งเทอมของวิชา ใช้เป็นตัวหารคำนวณ % เวลาเรียนสำหรับเช็ค มส.
+-- จำนวนคาบเรียนทั้งหมดตามรอบของวิชา: ประถม = ทั้งปี (term เป็น null),
+-- มัธยม = ทั้งภาคเรียน (term เป็น 1/2) ใช้เป็นฐานคำนวณเกณฑ์เวลาเรียนสำหรับเช็ค มส.
 -- ปล่อยให้เป็นค่าว่างได้ (nullable) เพราะวิชาที่มีอยู่แล้วยังไม่เคยกรอกค่านี้
 alter table subjects
   add column if not exists total_periods integer;
@@ -1266,3 +1267,391 @@ create policy profile_avatars_update_own on storage.objects
 drop policy if exists subjects_update on subjects;
 create policy subjects_update on subjects
   for update using (is_admin()) with check (is_admin());
+
+-- ============================================================
+-- Migration: ระบบสิทธิ์ระดับฝ่าย (2026-07-25)
+-- ------------------------------------------------------------
+-- โมเดล: (ระบุว่าอยู่ฝ่ายไหน) + (admin กดอนุญาต) → มีอำนาจเท่า admin เฉพาะหน้าของฝ่ายนั้น
+--   ถ้า granted = false → แม้ระบุว่าอยู่ฝ่ายนั้นก็ทำอะไรไม่ได้ (ยืนยันกับผู้ใช้แล้ว)
+--   คนหนึ่งอยู่ได้หลายฝ่ายพร้อมกัน (ยืนยันแล้ว) จึงเป็นตาราง many-to-many ไม่ใช่คอลัมน์ใน profiles
+--
+-- ทำไมไม่ใช้ profiles.role: role มีแค่ 'admin'/'teacher' + มี check constraint และเป็นค่าเดี่ยว
+--   เจ้าหน้าที่ที่คีย์ข้อมูลฝ่ายมักเป็น "ครูที่ทำธุรการควบ" ถ้าเปลี่ยน role จะกระทบสิทธิ์ฝ่ายวิชาการเดิม
+--
+-- ⚠ บล็อกนี้ "ไม่แตะ policy เดิมของฝ่ายวิชาการแม้แต่ตัวเดียว" — เป็นตาราง+ฟังก์ชันใหม่ล้วน
+--   การยกฝ่ายวิชาการมาใช้ has_department() เป็นงานแยก (ตัวเลือก C) ทำทีหลังพร้อมทดสอบเฉพาะ
+-- ============================================================
+create table if not exists user_departments (
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  department  text not null,
+  granted     boolean not null default false,   -- admin ต้องกดอนุญาตก่อนจึงมีผล
+  granted_by  uuid references auth.users(id),
+  granted_at  timestamptz,
+  created_at  timestamptz not null default now(),
+
+  primary key (user_id, department),
+  constraint user_departments_dept_ok check (
+    department in ('วิชาการ', 'บุคลากร', 'การเงิน', 'บริหารทั่วไป')
+  )
+);
+
+-- ใช้ตอนหน้าจัดการสิทธิ์ไล่ดูว่าฝ่ายหนึ่ง ๆ มีใครบ้าง
+create index if not exists user_departments_dept_idx on user_departments (department, granted);
+
+-- security definer เหมือน is_admin()/can_edit_subject() เพื่อไม่ให้ชนกับ RLS ของตารางที่มันอ่านเอง
+create or replace function has_department(p_department text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select is_admin() or exists (
+    select 1 from user_departments
+    where user_id = auth.uid()
+      and department = p_department
+      and granted
+  );
+$$;
+
+alter table user_departments enable row level security;
+
+-- อ่านได้เมื่อล็อกอิน (แนวเดียวกับ profiles_select) — หน้าเว็บต้องรู้ว่าตัวเองอยู่ฝ่ายไหนเพื่อซ่อน/แสดงปุ่ม
+drop policy if exists user_departments_select on user_departments;
+create policy user_departments_select on user_departments
+  for select using (auth.role() = 'authenticated');
+
+-- ⚠ เขียนได้เฉพาะ admin เท่านั้น — สำคัญมาก ไม่งั้นคนในฝ่ายจะแจกสิทธิ์ให้ตัวเอง/คนอื่นได้
+drop policy if exists user_departments_insert on user_departments;
+create policy user_departments_insert on user_departments
+  for insert with check (is_admin());
+drop policy if exists user_departments_update on user_departments;
+create policy user_departments_update on user_departments
+  for update using (is_admin()) with check (is_admin());
+drop policy if exists user_departments_delete on user_departments;
+create policy user_departments_delete on user_departments
+  for delete using (is_admin());
+
+-- ทางฉุกเฉินถ้าตารางนี้ทำให้อะไรพัง (ไม่กระทบฝ่ายวิชาการ เพราะยังไม่มี policy เดิมตัวไหนเรียกใช้):
+-- alter table user_departments disable row level security;
+
+-- ============================================================
+-- Migration: โมดูลฝ่ายบุคคล — slice แรก "สรุปเวลาทำงาน" (2026-07-25)
+-- ------------------------------------------------------------
+-- ต้นทางเวลาเข้า-ออกคือ Jibble (แอปแยก) ดึงผ่าน Supabase Edge Function แบบ on-demand
+-- (ดึงเมื่อมีคนเปิดหน้าดูเท่านั้น ไม่มี cron) — รายละเอียดการออกแบบอยู่ใน personnel/PLAN.md
+--
+-- กติกาสิทธิ์ทุกตารางในบล็อกนี้ (ยืนยันกับผู้ใช้แล้ว):
+--   select        = ผู้ล็อกอินทุกคน (ยกเว้นที่ระบุเป็นอย่างอื่น)
+--   insert/update = has_department('บุคลากร')   -- admin หรือฝ่ายบุคคลที่ได้รับอนุญาต
+--   delete        = is_admin()                   -- "แก้ได้แต่ลบไม่ได้" สงวนการลบไว้ที่ admin
+-- ============================================================
+
+-- ---------- 1) ทะเบียนบุคลากร ----------
+-- ครอบ "ทุกคนในโรงเรียน" รวมคนที่ไม่มีบัญชีล็อกอินและคนที่ไม่มีบัญชี Jibble
+create table if not exists staff (
+  id                uuid primary key default gen_random_uuid(),
+  full_name         text not null,
+  position          text,                       -- ตำแหน่ง เช่น ครูผู้สอน / ธุรการ / นักการ
+  staff_type        text,                       -- ประเภทบุคลากร (เผื่อโควตาวันลาต่างกันในอนาคต)
+  email             text,
+
+  -- จับคู่กับ Jibble ด้วย id ตรง ๆ ไม่เทียบชื่อ (ชื่อไทยสะกดต่างกันได้ง่าย)
+  -- ⚠ NULL ได้: คนอนุโลม 2 คนไม่มีบัญชีใน Jibble เลย (ยืนยันกับผู้ใช้แล้ว)
+  jibble_person_id  uuid unique,
+  jibble_code       text,                       -- People.code เช่น TA-1
+
+  is_active         boolean not null default true,   -- sync จาก Jibble status (Joined/Removed)
+
+  -- อนุโลมไม่ต้องลงเวลา → ถือว่า "มา" เสมอในวันทำงาน (คนละเรื่องกับ allowed_late_time)
+  exempt            boolean not null default false,
+  -- อนุญาตให้เข้าสายถึงเวลานี้เป็นรายคน โดยไม่นับว่าสาย (NULL = ใช้เวลากลาง)
+  allowed_late_time time,
+
+  -- ผูกกับบัญชีล็อกอิน ถ้ามี (ใช้ให้ครูเปิดดูข้อมูลของตัวเองได้) — คนไม่มีบัญชีเป็น NULL
+  user_id           uuid unique references auth.users(id) on delete set null,
+
+  note              text,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+create index if not exists staff_active_idx on staff (is_active);
+
+-- ---------- 2) สรุปเวลาทำงานรายวัน (Edge Function ยุบจาก Jibble TimeEntries) ----------
+-- Jibble คืนมาเป็น event ทีละครั้ง (In/Out) ไม่ใช่สรุปรายวัน จึงยุบเป็น 1 แถว/คน/วัน ที่นี่
+create table if not exists work_attendance (
+  id             uuid primary key default gen_random_uuid(),
+  staff_id       uuid not null references staff(id) on delete cascade,
+  work_date      date not null,
+
+  first_in       timestamptz,          -- เวลาเข้าแรกสุดของวัน (In ตัวแรก)
+  last_out       timestamptz,          -- เวลาออกท้ายสุด — ⚠ ใช้ประเมินชั่วโมงทำงานไม่ได้ ดูหมายเหตุ
+  first_in_local time,                 -- เวลาเข้าแบบเวลาท้องถิ่น ใช้เทียบเกณฑ์ "สาย" ตรง ๆ
+
+  -- true = ออกด้วย AutoOut 18:00 (แปลว่า "ลืมกด logout" ไม่ใช่ "ทำงานถึง 18:00")
+  -- ข้อมูลจริง 45 วัน: 80% ของการออกเป็น AutoOut และมีคนที่ลืม 100% หลายคน
+  -- → ห้ามใช้ last_out คำนวณชั่วโมงทำงาน/เวลากลับ จะได้ 18:00 เกือบทุกคนทุกวัน
+  auto_out       boolean not null default false,
+
+  source         text not null default 'jibble',
+  synced_at      timestamptz not null default now(),
+
+  constraint work_attendance_unique unique (staff_id, work_date)   -- upsert ซ้ำได้ ไม่เกิดแถวซ้ำ
+);
+create index if not exists work_attendance_date_idx on work_attendance (work_date);
+
+-- ---------- 3) สมุดจดว่าดึงข้อมูลถึงไหนแล้ว ----------
+-- จำเป็น เพราะ work_attendance เก็บเฉพาะคนที่มาลงเวลา →
+-- "วันหยุดที่ดึงแล้วไม่มีใครมา" กับ "วันที่ยังไม่เคยดึง" หน้าตาเหมือนกันเป๊ะ (ว่างทั้งคู่)
+-- ถ้าไม่มีตารางนี้ ระบบจะวิ่งดึงวันหยุด/เสาร์-อาทิตย์ซ้ำทุกครั้งที่เปิดหน้า และไม่มีวันหยุดวิ่ง
+create table if not exists work_month_sync (
+  year_month      text primary key,             -- '2026-07'
+  synced_through  date not null,                -- ดึงครบถึงวันไหนแล้ว (เฉพาะวันที่ "นิ่ง" แล้ว)
+  synced_at       timestamptz not null default now(),
+
+  constraint work_month_sync_format check (year_month ~ '^[0-9]{4}-[0-9]{2}$')
+);
+-- นิยาม "วันนิ่ง" = วันก่อนหน้า หรือ วันนี้ที่เลย 18:00 แล้ว (Jibble auto clock-out = ข้อมูลนิ่ง)
+-- → ก่อน 18:00 วันนี้ถูกดึงใหม่ทุกครั้งและไม่นับเข้ายอดสรุป · หลัง 18:00 ไม่ต้องดึงซ้ำ
+
+-- ---------- 4) วันหยุด (cache จาก Jibble CalendarDays) ----------
+-- ไม่ให้ครูกรอกวันหยุดในระบบเรา — กรอกที่ Jibble ที่เดียว กันข้อมูล 2 ที่ขัดกัน
+create table if not exists work_holidays (
+  holiday_date  date primary key,
+  name          text,
+  is_short_day  boolean not null default false,   -- Jibble มีแนวคิดวันทำงานครึ่งวัน
+  jibble_id     uuid,
+  synced_at     timestamptz not null default now()
+);
+
+-- ---------- 5) ตารางงาน (cache จาก Jibble Schedules) ----------
+-- ของโรงเรียนตอนนี้: จันทร์–ศุกร์ 07:45–16:30 (ไม่มีเสาร์-อาทิตย์ = ไม่ใช่วันทำงาน)
+-- เก็บไว้เพื่อ (ก) รู้ว่าวันไหนเป็นวันทำงาน (ข) ใช้ start_time เป็นฐานคำนวณ "สาย"
+create table if not exists work_schedule (
+  weekday         smallint primary key,          -- 1=จันทร์ ... 7=อาทิตย์ (ISO)
+  is_working_day  boolean not null default false,
+  start_time      time,
+  end_time        time,
+  synced_at       timestamptz not null default now(),
+
+  constraint work_schedule_weekday_ok check (weekday between 1 and 7)
+);
+
+-- ---------- 6) การลา (กรอกเองในระบบเรา — Jibble ไม่มีข้อมูลส่วนนี้) ----------
+-- ระบบ Time Off ของ Jibble ว่างเปล่าทั้งหมด (ตรวจแล้ว) โรงเรียนใช้ใบลากระดาษ
+-- ธุรการ/ฝ่ายบุคคลเป็นคนคีย์เข้าระบบ — ครูไม่ได้ยื่นเอง จึงไม่มีขั้นตอนอนุมัติ
+create table if not exists staff_leaves (
+  id           uuid primary key default gen_random_uuid(),
+  staff_id     uuid not null references staff(id) on delete cascade,
+  start_date   date not null,
+  end_date     date not null,
+  leave_type   text not null,                    -- อ้างอิง leave_types.code
+  day_portion  text not null default 'full',     -- full = เต็มวัน, morning/afternoon = ครึ่งวัน (0.5)
+  reason       text,
+  created_by   uuid references auth.users(id),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+
+  constraint staff_leaves_range_ok check (end_date >= start_date),
+  constraint staff_leaves_portion_ok check (day_portion in ('full', 'morning', 'afternoon')),
+  -- ครึ่งวันต้องเป็นวันเดียว ไม่งั้น "ลาครึ่งวัน 5 วันรวด" จะตีความไม่ได้
+  constraint staff_leaves_half_single_day check (day_portion = 'full' or start_date = end_date)
+);
+create index if not exists staff_leaves_staff_idx on staff_leaves (staff_id, start_date);
+
+-- ---------- 7) ประเภทการลา + โควตาต่อปีการศึกษา ----------
+-- แยกเป็นตารางเพื่อให้ admin เพิ่มประเภทใหม่ (ลาพักผ่อน/ลาบวช) ได้เองโดยไม่ต้องแก้โค้ด
+create table if not exists leave_types (
+  code        text primary key,                  -- 'ลากิจ', 'ลาป่วย', 'ลาคลอด'
+  sort_order  smallint not null default 0,
+  active      boolean not null default true
+);
+
+create table if not exists leave_quotas (
+  year        text not null,                     -- ปีการศึกษา เช่น '2569'
+  leave_type  text not null references leave_types(code) on delete cascade,
+  days        numeric(5,1) not null,             -- โควตาต่อปี (ไม่มีแถว = ไม่จำกัด/ไม่แสดงยอดคงเหลือ)
+  primary key (year, leave_type),
+
+  constraint leave_quotas_days_ok check (days >= 0)
+);
+
+-- ค่าตั้งต้นที่ผู้ใช้ยืนยันแล้ว 2026-07-25 (แก้ได้เองในหน้าตั้งค่างานบุคคล)
+insert into leave_types (code, sort_order) values
+  ('ลาป่วย', 1), ('ลากิจ', 2), ('ลาคลอด', 3)
+on conflict (code) do nothing;
+
+-- ---------- 8) ปีการศึกษา (วันเริ่มตั้งค่าได้) ----------
+-- ผู้ใช้ระบุว่าเริ่ม "ราว 16 พ.ค. ของทุกปี แต่อาจเปลี่ยนแปลงได้" → ห้าม hardcode
+-- รอบปี = [start_date ปีนี้, start_date ปีถัดไป) → เดือนเมษายนตกอยู่ในปีก่อนหน้าอัตโนมัติ
+-- ทำให้ทุกวันในปฏิทินมีปีการศึกษาสังกัดเสมอ ไม่มีวันไหนตกหล่น
+create table if not exists academic_years (
+  year        text primary key,                  -- '2569'
+  start_date  date not null
+);
+
+-- ---------- 9) ค่าตั้งงานบุคคล + บันทึกการซิงก์ ----------
+create table if not exists hr_settings (
+  key    text primary key,
+  value  text
+);
+-- late_grace_minutes = ผ่อนผันกี่นาทีหลังเวลาเข้างานถึงจะนับว่าสาย (ยืนยัน: 5 นาที → 07:50)
+insert into hr_settings (key, value) values ('late_grace_minutes', '5')
+on conflict (key) do nothing;
+
+-- serverless พังเงียบได้ ต้องเห็นว่าซิงก์ล่าสุดเมื่อไหร่ สำเร็จไหม
+create table if not exists jibble_sync_log (
+  id           uuid primary key default gen_random_uuid(),
+  started_at   timestamptz not null default now(),
+  finished_at  timestamptz,
+  ok           boolean,
+  scope        text,                             -- เช่น '2026-07' หรือ 'people'
+  rows_synced  integer,
+  message      text
+);
+create index if not exists jibble_sync_log_time_idx on jibble_sync_log (started_at desc);
+
+-- ------------------------------------------------------------
+-- RLS ของโมดูลฝ่ายบุคคล
+-- select ทั่วไป = ผู้ล็อกอินทุกคน · insert/update = ฝ่ายบุคคลที่ได้รับอนุญาต · delete = admin
+-- ยกเว้น staff_leaves + work_attendance ที่ครูทั่วไปเห็นเฉพาะของตัวเอง (ยืนยันกับผู้ใช้แล้ว)
+-- ------------------------------------------------------------
+alter table staff            enable row level security;
+alter table work_attendance  enable row level security;
+alter table work_month_sync  enable row level security;
+alter table work_holidays    enable row level security;
+alter table work_schedule    enable row level security;
+alter table staff_leaves     enable row level security;
+alter table leave_types      enable row level security;
+alter table leave_quotas     enable row level security;
+alter table academic_years   enable row level security;
+alter table hr_settings      enable row level security;
+alter table jibble_sync_log  enable row level security;
+
+-- true ถ้าแถว staff นี้คือตัวผู้ใช้ที่ล็อกอินอยู่ (ใช้ให้ครูดูข้อมูลของตัวเองได้)
+create or replace function is_my_staff_row(p_staff_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from staff where id = p_staff_id and user_id = auth.uid()
+  );
+$$;
+
+-- staff: อ่านได้ทุกคนที่ล็อกอิน (หน้าต่าง ๆ ต้องแสดงชื่อบุคลากร)
+drop policy if exists staff_select on staff;
+create policy staff_select on staff for select using (auth.role() = 'authenticated');
+drop policy if exists staff_insert on staff;
+create policy staff_insert on staff for insert with check (has_department('บุคลากร'));
+drop policy if exists staff_update on staff;
+create policy staff_update on staff for update
+  using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists staff_delete on staff;
+create policy staff_delete on staff for delete using (is_admin());
+
+-- work_attendance: ครูเห็นเฉพาะของตัวเอง · ฝ่ายบุคคล/admin เห็นทั้งหมด
+drop policy if exists work_attendance_select on work_attendance;
+create policy work_attendance_select on work_attendance for select
+  using (has_department('บุคลากร') or is_my_staff_row(staff_id));
+drop policy if exists work_attendance_insert on work_attendance;
+create policy work_attendance_insert on work_attendance for insert
+  with check (has_department('บุคลากร'));
+drop policy if exists work_attendance_update on work_attendance;
+create policy work_attendance_update on work_attendance for update
+  using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists work_attendance_delete on work_attendance;
+create policy work_attendance_delete on work_attendance for delete using (is_admin());
+
+-- staff_leaves: ครูเห็นเฉพาะใบลาของตัวเอง (มีเหตุผลการลาซึ่งเป็นเรื่องส่วนตัว)
+drop policy if exists staff_leaves_select on staff_leaves;
+create policy staff_leaves_select on staff_leaves for select
+  using (has_department('บุคลากร') or is_my_staff_row(staff_id));
+drop policy if exists staff_leaves_insert on staff_leaves;
+create policy staff_leaves_insert on staff_leaves for insert
+  with check (has_department('บุคลากร'));
+drop policy if exists staff_leaves_update on staff_leaves;
+create policy staff_leaves_update on staff_leaves for update
+  using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists staff_leaves_delete on staff_leaves;
+create policy staff_leaves_delete on staff_leaves for delete using (is_admin());
+
+-- ตารางอ้างอิงที่เหลือ: อ่านได้ทุกคนที่ล็อกอิน (หน้าสรุปต้องใช้คำนวณ) เขียนตามกติกาเดียวกัน
+-- เขียนตรง ๆ ทีละตัวแทน dynamic SQL เพื่อให้ตรวจด้วยตาและ grep หา policy ได้ เหมือน policy อื่นในไฟล์นี้
+
+drop policy if exists work_month_sync_select on work_month_sync;
+create policy work_month_sync_select on work_month_sync for select using (auth.role() = 'authenticated');
+drop policy if exists work_month_sync_insert on work_month_sync;
+create policy work_month_sync_insert on work_month_sync for insert with check (has_department('บุคลากร'));
+drop policy if exists work_month_sync_update on work_month_sync;
+create policy work_month_sync_update on work_month_sync for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists work_month_sync_delete on work_month_sync;
+create policy work_month_sync_delete on work_month_sync for delete using (is_admin());
+
+drop policy if exists work_holidays_select on work_holidays;
+create policy work_holidays_select on work_holidays for select using (auth.role() = 'authenticated');
+drop policy if exists work_holidays_insert on work_holidays;
+create policy work_holidays_insert on work_holidays for insert with check (has_department('บุคลากร'));
+drop policy if exists work_holidays_update on work_holidays;
+create policy work_holidays_update on work_holidays for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists work_holidays_delete on work_holidays;
+create policy work_holidays_delete on work_holidays for delete using (is_admin());
+
+drop policy if exists work_schedule_select on work_schedule;
+create policy work_schedule_select on work_schedule for select using (auth.role() = 'authenticated');
+drop policy if exists work_schedule_insert on work_schedule;
+create policy work_schedule_insert on work_schedule for insert with check (has_department('บุคลากร'));
+drop policy if exists work_schedule_update on work_schedule;
+create policy work_schedule_update on work_schedule for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists work_schedule_delete on work_schedule;
+create policy work_schedule_delete on work_schedule for delete using (is_admin());
+
+drop policy if exists leave_types_select on leave_types;
+create policy leave_types_select on leave_types for select using (auth.role() = 'authenticated');
+drop policy if exists leave_types_insert on leave_types;
+create policy leave_types_insert on leave_types for insert with check (has_department('บุคลากร'));
+drop policy if exists leave_types_update on leave_types;
+create policy leave_types_update on leave_types for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists leave_types_delete on leave_types;
+create policy leave_types_delete on leave_types for delete using (is_admin());
+
+drop policy if exists leave_quotas_select on leave_quotas;
+create policy leave_quotas_select on leave_quotas for select using (auth.role() = 'authenticated');
+drop policy if exists leave_quotas_insert on leave_quotas;
+create policy leave_quotas_insert on leave_quotas for insert with check (has_department('บุคลากร'));
+drop policy if exists leave_quotas_update on leave_quotas;
+create policy leave_quotas_update on leave_quotas for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists leave_quotas_delete on leave_quotas;
+create policy leave_quotas_delete on leave_quotas for delete using (is_admin());
+
+drop policy if exists academic_years_select on academic_years;
+create policy academic_years_select on academic_years for select using (auth.role() = 'authenticated');
+drop policy if exists academic_years_insert on academic_years;
+create policy academic_years_insert on academic_years for insert with check (has_department('บุคลากร'));
+drop policy if exists academic_years_update on academic_years;
+create policy academic_years_update on academic_years for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists academic_years_delete on academic_years;
+create policy academic_years_delete on academic_years for delete using (is_admin());
+
+drop policy if exists hr_settings_select on hr_settings;
+create policy hr_settings_select on hr_settings for select using (auth.role() = 'authenticated');
+drop policy if exists hr_settings_insert on hr_settings;
+create policy hr_settings_insert on hr_settings for insert with check (has_department('บุคลากร'));
+drop policy if exists hr_settings_update on hr_settings;
+create policy hr_settings_update on hr_settings for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists hr_settings_delete on hr_settings;
+create policy hr_settings_delete on hr_settings for delete using (is_admin());
+
+drop policy if exists jibble_sync_log_select on jibble_sync_log;
+create policy jibble_sync_log_select on jibble_sync_log for select using (auth.role() = 'authenticated');
+drop policy if exists jibble_sync_log_insert on jibble_sync_log;
+create policy jibble_sync_log_insert on jibble_sync_log for insert with check (has_department('บุคลากร'));
+drop policy if exists jibble_sync_log_update on jibble_sync_log;
+create policy jibble_sync_log_update on jibble_sync_log for update using (has_department('บุคลากร')) with check (has_department('บุคลากร'));
+drop policy if exists jibble_sync_log_delete on jibble_sync_log;
+create policy jibble_sync_log_delete on jibble_sync_log for delete using (is_admin());
+
+-- ทางฉุกเฉินถ้าบล็อกนี้ทำให้อะไรพัง (ไม่กระทบฝ่ายวิชาการ เพราะเป็นตารางใหม่ล้วน):
+-- alter table staff disable row level security;  -- ...ทำแบบเดียวกันกับตารางอื่นในบล็อกนี้
