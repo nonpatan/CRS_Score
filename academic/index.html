@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ภาพรวมวิชาการ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e;
+    --muted: #5f6b70;
+    --line: #dfe4e3;
+    --teal: #0f6e56;
+    --teal-soft: #e1f5ee;
+    --amber: #93690f;
+    --amber-soft: #faf1dd;
+    --bg: #f7f8f7;
+    --white: #ffffff;
+    --danger: #a32d2d;
+    --danger-soft: #fceaea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Sarabun", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 16px;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 4px 0; }
+  header p { color: var(--muted); margin: 0 0 8px; font-size: 14px; }
+  header .nav {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    background: var(--white); padding: 8px;
+    border-radius: 99px; border: 1px solid var(--line);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin: 0 0 24px; align-items: center;
+  }
+  header .nav a {
+    color: var(--muted); text-decoration: none; font-weight: 500;
+    padding: 8px 16px; border-radius: 99px; transition: all 0.2s ease; font-size: 14px;
+  }
+  header .nav a:hover { background: var(--teal-soft); color: var(--teal); }
+  header .nav a.active { background: var(--teal); color: var(--white); box-shadow: 0 2px 8px rgba(15, 110, 86, 0.3); }
+  header .nav #btn-signout { margin-left: auto; color: var(--danger); background: #fff0f0; }
+  header .nav #btn-signout:hover { background: #ffe0e0; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 16px; font-weight: 600; margin: 0 0 4px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  }
+  .card h2 .note { font-size: 13px; font-weight: 400; color: var(--muted); }
+  label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
+  select, input[type="number"] {
+    width: 100%; font-family: inherit; font-size: 16px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--white); color: var(--ink);
+  }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .hint { color: var(--muted); font-size: 14px; }
+
+  /* ---------- ตัวเลขรวมด้านบน ---------- */
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .metric { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
+  .metric .label { font-size: 13px; color: var(--muted); }
+  .metric .value { font-size: 22px; font-weight: 600; line-height: 1.2; }
+  .metric.warn .value { color: var(--amber); }
+  .metric.bad .value { color: var(--danger); }
+
+  /* ---------- ตารางรายชั้น ---------- */
+  .grade-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .grade-row:last-child { border-bottom: none; }
+  .grade-row .grade-name { font-weight: 600; min-width: 52px; }
+  .grade-row .grade-meta { color: var(--muted); font-size: 13px; flex: 1; }
+  .pill {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 13px; font-weight: 600; white-space: nowrap;
+  }
+  .pill.ok   { background: var(--teal-soft);   color: var(--teal); }
+  .pill.warn { background: var(--amber-soft);  color: var(--amber); }
+  .pill.bad  { background: var(--danger-soft); color: var(--danger); }
+
+  details { margin-top: 8px; }
+  details > summary {
+    cursor: pointer; color: var(--teal); font-size: 14px; font-weight: 500;
+    padding: 6px 0; list-style: none;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸ "; }
+  details[open] > summary::before { content: "▾ "; }
+
+  .student-line {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 8px 0; border-top: 1px dashed var(--line); font-size: 14px;
+  }
+  .student-line .who { font-weight: 500; }
+  .student-line .where { color: var(--muted); font-size: 13px; }
+  .student-line .val { text-align: right; white-space: nowrap; color: var(--amber); font-weight: 600; }
+  .student-line .val.critical { color: var(--danger); }
+  .subject-note { color: var(--muted); font-size: 13px; }
+
+  .issue-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid var(--line);
+  }
+  .issue-row:last-of-type { border-bottom: none; }
+  .issue-row .issue-name { font-size: 14px; }
+  .issue-row .issue-why { color: var(--muted); font-size: 12.5px; display: block; }
+
+  .bar { background: var(--bg); border-radius: 999px; height: 8px; overflow: hidden; margin-top: 4px; }
+  .bar > span { display: block; height: 100%; background: var(--teal); border-radius: 999px; }
+  .bar.low > span { background: var(--amber); }
+
+  .warn-note {
+    background: var(--amber-soft); color: var(--amber); border-radius: 8px;
+    padding: 8px 12px; font-size: 13px; margin-top: 12px;
+  }
+  .setting-row { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; }
+  .setting-row .field { flex: 1; }
+  .btn {
+    font-family: inherit; font-size: 15px; font-weight: 500; padding: 10px 16px;
+    border-radius: 8px; border: 1px solid var(--teal); background: var(--teal);
+    color: var(--white); cursor: pointer; white-space: nowrap;
+  }
+  .btn:disabled { opacity: 0.6; cursor: default; }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-1">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ภาพรวมวิชาการ</h1>
+    <p>สรุปทั้งโรงเรียนในปีการศึกษาเดียว — ใครต้องช่วยด่วน ข้อมูลพร้อมใช้ไหม และงานเดินไปถึงไหน</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมวิชาการ</a>
+      <a href="entry.html">กรอกคะแนน</a>
+      <a href="attendance.html">เช็คชื่อ</a>
+      <a href="summary.html">สรุปผลการเรียน</a>
+      <a href="warning.html">เฝ้าระวัง มส.</a>
+      <a href="retention.html">เรียนซ้ำชั้น</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260725-5"></script>
+  </header>
+
+  <main class="academic-content">
+    <div class="card">
+      <div class="field">
+        <label for="filter-year">ปีการศึกษา</label>
+        <select id="filter-year"><option value="">กำลังโหลด…</option></select>
+      </div>
+      <div class="hint" id="scope-note">เลือกปีการศึกษาเพื่อดูภาพรวม</div>
+    </div>
+
+    <div id="content" hidden>
+      <div class="card">
+        <h2>ต้องช่วยด่วน <span class="note" id="threshold-note"></span></h2>
+        <div class="metrics">
+          <div class="metric bad"><div class="label">เสี่ยงติด มส. (มัธยม)</div><div class="value" id="m-secondary">—</div></div>
+          <div class="metric warn"><div class="label">ขาดบ่อย (ประถม)</div><div class="value" id="m-primary">—</div></div>
+          <div class="metric bad"><div class="label">ขาดถึงขั้นวิกฤต</div><div class="value" id="m-critical">—</div></div>
+          <div class="metric warn"><div class="label">ติด ร. ค้างอยู่</div><div class="value" id="m-remark">—</div></div>
+        </div>
+        <div id="admin-setting" hidden>
+          <div class="setting-row">
+            <div class="field">
+              <label for="primary-percent">เกณฑ์ “ขาดบ่อย” ของประถม (%)</label>
+              <input type="number" id="primary-percent" min="1" max="100" step="0.5">
+            </div>
+            <button class="btn" id="btn-save-percent">บันทึก</button>
+          </div>
+          <div class="hint" id="setting-msg">แก้ได้เฉพาะผู้ดูแลระบบ · มีผลกับหน้านี้และหน้าภาพรวมส่วนกลาง</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>รายชั้น <span class="note">กดที่ชั้นเพื่อดูรายชื่อ</span></h2>
+        <div id="grade-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>ติด ร. ค้างอยู่ <span class="note">ร. วิชาเดียวทำให้คิดเกรดเฉลี่ยทั้งปีไม่ได้</span></h2>
+        <div id="remark-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>ความพร้อมของข้อมูล <span class="note">สิ่งที่ทำให้รายงานเพี้ยนแบบไม่มี error</span></h2>
+        <div id="readiness-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>ความคืบหน้าการเช็คชื่อ <span class="note">คาบที่เช็คแล้ว เทียบคาบทั้งรอบของวิชา</span></h2>
+        <div id="coverage-list"></div>
+      </div>
+    </div>
+
+    <div class="card hint" id="state-note">กำลังโหลด…</div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, getProfile,
+  getActiveYear, setActiveYear, distinctYears,
+  getSetting, setSetting,
+  loadAcademicOverviewData, buildAcademicOverview
+} from "../supabase-client.js?v=20260725-4";
+
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้
+} else {
+document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
+
+const elYear     = document.getElementById("filter-year");
+const elScope    = document.getElementById("scope-note");
+const elContent  = document.getElementById("content");
+const elState    = document.getElementById("state-note");
+const elGrades   = document.getElementById("grade-list");
+const elRemarks  = document.getElementById("remark-list");
+const elReady    = document.getElementById("readiness-list");
+const elCoverage = document.getElementById("coverage-list");
+
+const PRIMARY_SETTING_KEY = "primary_absence_warn_percent";
+const PRIMARY_DEFAULT = 5;
+let primaryWarnPercent = PRIMARY_DEFAULT;
+
+const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const fmtPct = n => (Math.round(n * 10) / 10).toFixed(1);
+const subjLabel = s => (s.code ? esc(s.code) + " " : "") + esc(s.name) +
+  (s.grade_level ? " <span class='subject-note'>· " + esc(s.grade_level) + "</span>" : "");
+
+function showState(msg) {
+  elContent.hidden = true;
+  elState.hidden = false;
+  elState.textContent = msg;
+}
+
+// ---------- ตัวเลือกปีการศึกษา (ใช้ปีกลางร่วมกับหน้าอื่น) ----------
+async function populateYears() {
+  const { data, error } = await sb.from("subjects").select("year");
+  if (error) { showState("โหลดปีการศึกษาไม่สำเร็จ: " + error.message); return null; }
+  const years = distinctYears(data || []);
+  if (years.length === 0) {
+    elYear.innerHTML = "<option value=''>— ยังไม่มีวิชาที่กรอกปีการศึกษา —</option>";
+    showState("ยังไม่มีวิชาไหนกรอกปีการศึกษาไว้ — เข้าหน้า “จัดการโครงสร้าง” เพื่อเติมปีให้วิชาก่อน");
+    return null;
+  }
+  const saved = getActiveYear();
+  const year = years.includes(saved) ? saved : years[0];
+  elYear.innerHTML = years.map(y => "<option value='" + esc(y) + "'>ปีการศึกษา " + esc(y) + "</option>").join("");
+  elYear.value = year;
+  setActiveYear(year);
+  return year;
+}
+
+// ---------- ช่องตั้งเกณฑ์ประถม (admin เท่านั้น — ตัวจริงกันด้วย RLS ของ app_settings) ----------
+async function setupAdminSetting() {
+  const profile = await getProfile(session.user.id);
+  if (!profile || profile.role !== "admin") return;
+  const box = document.getElementById("admin-setting");
+  const input = document.getElementById("primary-percent");
+  const btn = document.getElementById("btn-save-percent");
+  const msg = document.getElementById("setting-msg");
+  box.hidden = false;
+  input.value = primaryWarnPercent;
+  btn.addEventListener("click", async () => {
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value <= 0 || value > 100) {
+      msg.textContent = "กรอกเป็นตัวเลขระหว่าง 1–100";
+      return;
+    }
+    btn.disabled = true;
+    const ok = await setSetting(PRIMARY_SETTING_KEY, String(value));
+    btn.disabled = false;
+    if (!ok) {
+      // บันทึกไม่สำเร็จ ต้องคืนค่าเดิมให้เห็น ไม่ให้เข้าใจผิดว่าบันทึกแล้ว
+      input.value = primaryWarnPercent;
+      msg.textContent = "บันทึกไม่สำเร็จ (ต้องเป็นผู้ดูแลระบบ) — คืนค่าเดิมให้แล้ว";
+      return;
+    }
+    primaryWarnPercent = value;
+    msg.textContent = "บันทึกแล้ว — กำลังคำนวณใหม่…";
+    await render();
+    msg.textContent = "บันทึกแล้ว · ใช้เกณฑ์ " + value + "% กับชั้นประถม";
+  });
+}
+
+// ---------- ส่วนแสดงผล ----------
+function renderGrades(overview) {
+  if (overview.grades.length === 0) {
+    elGrades.innerHTML = "<div class='hint'>ยังไม่มีนักเรียนในปีการศึกษานี้</div>";
+    return;
+  }
+  elGrades.innerHTML = overview.grades.map(group => {
+    const flagged = group.flagged.length;
+    const pillClass = group.criticalCount > 0 ? "bad" : (flagged > 0 ? "warn" : "ok");
+    const label = group.isPrimary ? "ขาดบ่อย" : "เสี่ยง มส.";
+    const pill = "<span class='pill " + pillClass + "'>" + label + " " + flagged + " คน</span>";
+    const meta = [
+      "นักเรียน " + group.studentCount + " คน",
+      "เกณฑ์ " + group.warnPercent + "%",
+      group.criticalCount > 0 ? "วิกฤต " + group.criticalCount + " คน" : null,
+      group.remarkCount > 0 ? "ร. " + group.remarkCount + " รายการ" : null
+    ].filter(Boolean).join(" · ");
+
+    const students = flagged === 0
+      ? "<div class='hint'>ไม่มีใครถึงเกณฑ์ในชั้นนี้</div>"
+      : group.flagged.map(row => {
+          const worst = row.subjects[0];
+          const more = row.subjects.length > 1 ? " และอีก " + (row.subjects.length - 1) + " วิชา" : "";
+          return "<div class='student-line'>" +
+            "<div><div class='who'>" + esc(row.student.name) + "</div>" +
+            "<div class='where'>" + esc(row.classroom || row.grade || "") +
+            (row.student.student_no ? " · เลขที่ " + esc(row.student.student_no) : "") + "</div>" +
+            "<div class='subject-note'>" + subjLabel(worst.subject) + more + "</div></div>" +
+            "<div class='val" + (row.critical ? " critical" : "") + "'>" + fmtPct(row.maxPercent) + "%<br>" +
+            "<span style='font-weight:500'>ขาด " + worst.netMissed + " คาบ</span></div>" +
+            "</div>";
+        }).join("");
+
+    return "<div class='grade-row'>" +
+        "<span class='grade-name'>" + esc(group.grade) + "</span>" +
+        "<span class='grade-meta'>" + meta + "</span>" + pill +
+      "</div>" +
+      "<details><summary>ดูรายชื่อชั้น " + esc(group.grade) + " (" + flagged + " คน)</summary>" + students + "</details>";
+  }).join("");
+}
+
+function renderRemarks(overview) {
+  if (overview.remarks.length === 0) {
+    elRemarks.innerHTML = "<div class='hint'>ไม่มีนักเรียนติด ร. ค้างอยู่</div>";
+    return;
+  }
+  elRemarks.innerHTML = overview.remarks.map(item =>
+    "<div class='student-line'>" +
+      "<div><div class='who'>" + esc(item.student.name) + "</div>" +
+      "<div class='where'>" + esc(item.grade || "") + "</div>" +
+      "<div class='subject-note'>" + (item.subject ? subjLabel(item.subject) : "(ไม่พบวิชา)") +
+      " — " + esc(item.reason) + "</div></div>" +
+      "<div class='val'><span class='pill warn'>ร.</span></div>" +
+    "</div>"
+  ).join("");
+}
+
+function renderReadiness(overview) {
+  const r = overview.readiness;
+  const blocks = [
+    {
+      title: "วิชาที่ยังไม่ตั้งจำนวนคาบ",
+      why: "สูตร มส. ใช้คาบทั้งรอบเป็นตัวหาร วิชาที่ยังไม่ตั้ง จะไม่ขึ้นเตือนเลยแม้เด็กขาดหนัก",
+      items: r.noPeriods.map(s => subjLabel(s)),
+      fix: "แก้ที่ “จัดการโครงสร้าง”"
+    },
+    {
+      title: "วิชาที่ยังไม่มีนักเรียนลงทะเบียน",
+      why: "หน้ากรอกคะแนน/เช็คชื่อ/สรุปผล จะว่างเปล่าเหมือนไม่มีเด็กในวิชา",
+      items: r.noEnrollment.map(s => subjLabel(s)),
+      fix: "กด “เพิ่มทั้งห้อง” ที่จัดการโครงสร้าง"
+    },
+    {
+      title: "วิชาที่ยังไม่เคยเช็คชื่อเลย",
+      why: "ไม่มีข้อมูลการขาดเรียน จึงเฝ้าระวัง มส. ของวิชานี้ไม่ได้",
+      items: r.noSession.map(s => subjLabel(s)),
+      fix: "เริ่มที่หน้า “เช็คชื่อ”"
+    },
+    {
+      title: "วิชาที่ยังไม่มีเจ้าของ",
+      why: "มีแต่ผู้ดูแลระบบที่แก้โครงสร้าง/คะแนนของวิชานี้ได้ ครูผู้สอนแก้เองไม่ได้",
+      items: r.noOwner.map(s => subjLabel(s)),
+      fix: "ตั้งเจ้าของวิชาที่จัดการโครงสร้าง"
+    },
+    {
+      title: "วิชาที่ยังไม่กรอกปีการศึกษา",
+      why: "หายจากทุกรายงานที่กรองด้วยปี (รวมหน้านี้ด้วย)",
+      items: r.yearless.map(s => subjLabel(s)),
+      fix: "เติมปีที่จัดการโครงสร้าง"
+    },
+    {
+      title: "นักเรียนที่ยังไม่มีชั้นของปีนี้",
+      why: "รายงานที่อิงชั้นรายปีจะมองไม่เห็นเด็กกลุ่มนี้",
+      items: r.noPlacement.map(s => esc(s.name) + (s.grade_level ? " <span class='subject-note'>· ปัจจุบัน " + esc(s.grade_level) + "</span>" : "")),
+      fix: "ตรวจที่หน้า “นักเรียน” หรือ “ขึ้นปีใหม่”"
+    }
+  ];
+
+  const problems = blocks.filter(b => b.items.length > 0);
+  if (problems.length === 0) {
+    elReady.innerHTML = "<div class='hint'>ข้อมูลตั้งต้นครบทุกข้อ — รายงานทุกหน้าใช้ได้เต็มที่</div>";
+    return;
+  }
+  elReady.innerHTML = problems.map(b =>
+    "<div class='issue-row'>" +
+      "<div class='issue-name'>" + esc(b.title) +
+        "<span class='issue-why'>" + esc(b.why) + " · " + esc(b.fix) + "</span></div>" +
+      "<span class='pill warn'>" + b.items.length + "</span>" +
+    "</div>" +
+    "<details><summary>ดูรายการ</summary>" +
+      b.items.map(item => "<div class='student-line'><div>" + item + "</div></div>").join("") +
+    "</details>"
+  ).join("");
+}
+
+function renderCoverage(overview) {
+  if (overview.coverage.length === 0) {
+    elCoverage.innerHTML = "<div class='hint'>ยังไม่มีวิชาในปีการศึกษานี้</div>";
+    return;
+  }
+  const notStarted = overview.coverage.filter(c => c.percent !== null && c.checked === 0).length;
+  const head = notStarted > 0
+    ? "<div class='warn-note' style='margin-top:0;margin-bottom:12px'>มี " + notStarted + " วิชาที่ยังไม่เริ่มเช็คชื่อเลยในปีนี้</div>"
+    : "";
+
+  const rowHtml = c => {
+    if (c.percent === null) {
+      return "<div class='issue-row'><div class='issue-name'>" + subjLabel(c.subject) +
+        "<span class='issue-why'>ยังไม่ตั้งจำนวนคาบ จึงคิดความคืบหน้าไม่ได้</span></div>" +
+        "<span class='pill warn'>—</span></div>";
+    }
+    const pct = Math.min(100, c.percent);
+    const cls = pct < 50 ? "low" : "";
+    return "<div style='padding:8px 0;border-bottom:1px solid var(--line)'>" +
+      "<div class='issue-row' style='border:none;padding:0'>" +
+        "<div class='issue-name'>" + subjLabel(c.subject) + "</div>" +
+        "<span class='subject-note'>" + c.checked + "/" + c.total + " คาบ · " + fmtPct(c.percent) + "%</span>" +
+      "</div><div class='bar " + cls + "'><span style='width:" + pct + "%'></span></div></div>";
+  };
+
+  const slowest = overview.coverage.slice(0, 5);
+  const rest = overview.coverage.slice(5);
+  elCoverage.innerHTML = head + slowest.map(rowHtml).join("") +
+    (rest.length
+      ? "<details><summary>ดูอีก " + rest.length + " วิชา</summary>" + rest.map(rowHtml).join("") + "</details>"
+      : "");
+}
+
+// ---------- โหลด + วาดทั้งหน้า ----------
+let cachedRaw = null;
+
+async function render() {
+  const overview = buildAcademicOverview(cachedRaw, { primaryWarnPercent });
+  const secondaryFlagged = overview.flaggedRows.filter(r => !r.isPrimary).length;
+  const primaryFlagged = overview.flaggedRows.filter(r => r.isPrimary).length;
+
+  document.getElementById("m-secondary").textContent = secondaryFlagged;
+  document.getElementById("m-primary").textContent = primaryFlagged;
+  document.getElementById("m-critical").textContent = overview.flaggedRows.filter(r => r.critical).length;
+  document.getElementById("m-remark").textContent = overview.remarks.length;
+  document.getElementById("threshold-note").textContent =
+    "มัธยม ≥" + overview.thresholds.secondaryWarn + "% · ประถม ≥" + overview.thresholds.primaryWarn +
+    "% · วิกฤต >" + overview.thresholds.criticalPercent + "%";
+
+  elScope.innerHTML = "ปีการศึกษา " + esc(overview.year) + " · วิชา " + overview.subjectCount +
+    " รายการ · นักเรียน " + overview.studentCount + " คน" +
+    (overview.placementFallback
+      ? "<div class='warn-note'>ปีนี้ยังไม่มีข้อมูลชั้นรายปี (student_year_placements) จึงใช้ชั้นปัจจุบันของนักเรียนแทน — ถ้าเลื่อนชั้นไปแล้ว ตัวเลขรายชั้นของปีเก่าจะไม่ตรง</div>"
+      : "");
+
+  renderGrades(overview);
+  renderRemarks(overview);
+  renderReadiness(overview);
+  renderCoverage(overview);
+
+  elState.hidden = true;
+  elContent.hidden = false;
+}
+
+async function loadYear(year) {
+  if (!year) return;
+  showState("กำลังประมวลผลข้อมูลทั้งปีการศึกษา…");
+  try {
+    cachedRaw = await loadAcademicOverviewData(year);
+  } catch (e) {
+    showState(e.message || "โหลดข้อมูลไม่สำเร็จ");
+    return;
+  }
+  if (!cachedRaw.subjects.length) {
+    showState("ปีการศึกษา " + year + " ยังไม่มีวิชาในระบบ");
+    return;
+  }
+  await render();
+}
+
+elYear.addEventListener("change", () => {
+  setActiveYear(elYear.value);
+  loadYear(elYear.value);
+});
+
+// อ่านเกณฑ์ประถมจากค่าตั้งค่าส่วนกลาง (ห้าม hardcode — ให้ผู้ใช้แก้เองได้)
+const savedPercent = Number(await getSetting(PRIMARY_SETTING_KEY));
+if (Number.isFinite(savedPercent) && savedPercent > 0) primaryWarnPercent = savedPercent;
+
+setupAdminSetting().catch(() => {});
+const year = await populateYears();
+if (year) await loadYear(year);
+}
+</script>
+</body>
+</html>

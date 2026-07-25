@@ -794,6 +794,311 @@ export function computeGpa(subjectResults) {
 }
 
 // ============================================================
+// ภาพรวมฝ่ายวิชาการ — ใช้ร่วมกันระหว่าง academic/index.html กับ dashboard.html
+// ------------------------------------------------------------
+// ก่อนหน้านี้ตรรกะ "ใครเสี่ยงขาดเรียน" ถูกเขียนแยกกัน 2 ชุด (dashboard.html กับ
+// academic/warning.html) การเพิ่มหน้าภาพรวมจึงย้ายมารวมไว้ที่นี่ ไม่ก๊อปเป็นชุดที่ 3
+//
+// แบ่งเป็น 2 ส่วนตั้งใจ:
+//   loadAcademicOverviewData(year)  = ยิง query อย่างเดียว (ต้องมี network)
+//   buildAcademicOverview(raw, opt) = คำนวณล้วน ไม่แตะ sb/DOM เลย → เขียนสคริปต์ทดสอบได้
+//
+// เกณฑ์ (ยืนยันกับผู้ใช้ 2026-07-25):
+//   มัธยม → เสี่ยงติด มส. เมื่อขาดสุทธิ >= 10% ของคาบวิชา (เกณฑ์เดิมของ computeAttendanceRisk)
+//   ประถม → "ขาดบ่อย" เมื่อขาดสุทธิ >= 5% (เตือนเร็วกว่า เพราะอยากรู้ตั้งแต่ยังแก้ทัน)
+//   ทั้งสองระดับ วิกฤตที่ > 20% เท่ากัน เพราะกฎ มส. ใช้กับทั้งประถมและมัธยม —
+//   การแยกนี้เป็นแค่ "วิธีนำเสนอ" ไม่ได้เปลี่ยนกฎการตัดสิน มส. ที่ computeSubjectResult()
+// ============================================================
+
+// ชั้นประถมหรือไม่ — ดูจากคำนำหน้าชั้นของ "นักเรียน" (subjects.level ใช้กับวิชา ไม่ใช่คน)
+export function isPrimaryGrade(grade) {
+  return String(grade || "").startsWith("ป.");
+}
+
+// ⚠ Supabase/PostgREST คืนได้สูงสุด 1000 แถวต่อคำขอ — **เกินกว่านั้นถูกตัดทิ้งเงียบ ๆ ไม่มี error**
+// ตารางที่โตตามจำนวน (นักเรียน × วิชา) เช่น enrollments/attendance_sessions ทะลุ 1000 ได้ง่ายมาก
+// ถ้าไม่ไล่ดึงเป็นหน้า ๆ รายงานจะ "นับขาดน้อยกว่าจริง" แบบดูไม่ออก (เคยเจอกับดักนี้มาแล้วตอนดึงรายชื่อห้อง)
+// ต้อง order ด้วยคีย์ที่ไม่ซ้ำเสมอ ไม่งั้นการแบ่งหน้าอาจได้แถวซ้ำ/ตกหล่น
+const PAGE_SIZE = 1000;
+export async function fetchAllRows(makeQuery, orderColumn = "id") {
+  const out = [];
+  for (let page = 0; ; page++) {
+    const { data, error } = await makeQuery()
+      .order(orderColumn)
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (error) return { data: null, error };
+    const rows = data || [];
+    out.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+  }
+  return { data: out, error: null };
+}
+
+// ข้อมูลเช็คชื่อเป็นก้อนที่ใหญ่ที่สุดของหน้าภาพรวม (ครั้งที่เช็คทั้งปี × นักเรียนต่อครั้ง)
+// แต่สูตรคิด "คาบขาด" ใช้แค่ 3 สถานะนี้ — 'มา'/'มาสาย' คิดเป็นขาด 0 คาบอยู่แล้ว และ
+// computeMissedPeriods() ข้ามคนที่ "ไม่มีแถว" ด้วยผลเท่ากันเป๊ะ จึงกรองทิ้งตั้งแต่ฝั่งเซิร์ฟเวอร์ได้
+// (ปกติ 'มา' เป็นสัดส่วนมากที่สุดของตาราง — ตัดออกแล้วข้อมูลที่ต้องโหลดลดลงมาก)
+const ABSENCE_STATUSES = ["ขาด", "ลาป่วย", "ลากิจ"];
+
+async function fetchAttendanceSessions(subjectIds) {
+  const base = () => sb.from("attendance_sessions")
+    .select("id,subject_id,periods_covered,attendance_records(student_id,status)")
+    .in("subject_id", subjectIds);
+
+  const filtered = await fetchAllRows(() => base().in("attendance_records.status", ABSENCE_STATUSES));
+  if (!filtered.error) return filtered;
+  // ถ้าเซิร์ฟเวอร์ไม่รับการกรองที่ตารางลูก ให้ถอยไปดึงทั้งหมด — ผลลัพธ์เท่ากัน แค่หนักกว่า
+  // (ยอมช้าดีกว่าหน้าพังหรือได้ข้อมูลไม่ครบ)
+  return fetchAllRows(base);
+}
+
+export async function loadAcademicOverviewData(year) {
+  const empty = {
+    year, subjects: [], enrollments: [], members: [], sessions: [],
+    makeupRows: [], remarks: [], placements: [], yearlessSubjects: [], activeStudents: []
+  };
+  if (!year) return empty;
+
+  const { data: subjects, error: subjErr } = await sb.from("subjects")
+    .select("id,name,code,level,grade_level,subject_type,total_periods,owner_id,term")
+    .eq("year", year);
+  if (subjErr) throw new Error("โหลดรายวิชาไม่สำเร็จ: " + subjErr.message);
+  if (!subjects || subjects.length === 0) return empty;
+
+  const subjectIds = subjects.map(s => s.id);
+  const [enrollRes, memberRes, sessionRes, makeupRes, remarkRes, placementRes, yearlessRes, activeStudents] =
+    await Promise.all([
+      // 4 ตารางนี้โตตามจำนวนนักเรียน × วิชา จึงต้องไล่ดึงเป็นหน้า ๆ (ดูหมายเหตุ 1000 แถวด้านบน)
+      fetchAllRows(() => sb.from("enrollments").select("id,subject_id,student_id").in("subject_id", subjectIds)),
+      sb.from("integration_members").select("integrated_subject_id,member_subject_id").in("integrated_subject_id", subjectIds),
+      fetchAttendanceSessions(subjectIds),
+      fetchAllRows(() => sb.from("makeup_hours").select("id,subject_id,student_id,periods").in("subject_id", subjectIds)),
+      fetchAllRows(() => sb.from("remarks").select("id,student_id,subject_id,code,reason,created_at").in("subject_id", subjectIds)),
+      getStudentPlacements(year),
+      // วิชาที่ยังไม่กรอกปีการศึกษา — หาไม่เจอด้วย query ที่กรองด้วยปี จึงต้องถามแยก
+      sb.from("subjects").select("id,name,code,grade_level").is("year", null),
+      getActiveStudents()
+    ]);
+
+  for (const res of [enrollRes, memberRes, sessionRes, makeupRes, remarkRes, yearlessRes]) {
+    if (res.error) throw new Error("โหลดข้อมูลภาพรวมไม่สำเร็จ: " + res.error.message);
+  }
+
+  return {
+    year,
+    subjects,
+    enrollments: enrollRes.data || [],
+    members: memberRes.data || [],
+    sessions: sessionRes.data || [],
+    makeupRows: makeupRes.data || [],
+    remarks: remarkRes.data || [],
+    placements: placementRes.data || [],
+    yearlessSubjects: yearlessRes.data || [],
+    activeStudents: activeStudents || []
+  };
+}
+
+// คำนวณล้วน — รับผลจาก loadAcademicOverviewData() แล้วสรุปเป็นข้อมูลพร้อมแสดงผล
+export function buildAcademicOverview(raw, options = {}) {
+  const primaryWarn  = Number(options.primaryWarnPercent ?? 5);
+  const secondaryWarn = Number(options.secondaryWarnPercent ?? 10);
+  const criticalPercent = Number(options.criticalPercent ?? 20);
+
+  const data = raw || {};
+  const subjects = data.subjects || [];
+  const subjectById = new Map(subjects.map(s => [s.id, s]));
+
+  // ---------- วิชาบูรณาการกับสมาชิก (นับที่วิชาบูรณาการตัวเดียว กันนับซ้ำ เหมือน retention/summary) ----------
+  const membersOf = new Map();
+  const memberSubjectIds = new Set();
+  for (const link of (data.members || [])) {
+    const member = subjectById.get(link.member_subject_id);
+    if (!member) continue;
+    if (!membersOf.has(link.integrated_subject_id)) membersOf.set(link.integrated_subject_id, []);
+    membersOf.get(link.integrated_subject_id).push(member);
+    memberSubjectIds.add(member.id);
+  }
+  const countableSubjects = subjects.filter(s => s.subject_type === "บูรณาการ" || !memberSubjectIds.has(s.id));
+
+  // ---------- จัดข้อมูลเป็น map เพื่อคำนวณต่อ ----------
+  const enrolledBySubject = new Map();
+  for (const row of (data.enrollments || [])) {
+    if (!enrolledBySubject.has(row.subject_id)) enrolledBySubject.set(row.subject_id, new Set());
+    enrolledBySubject.get(row.subject_id).add(row.student_id);
+  }
+  const sessionsBySubject = new Map();
+  for (const row of (data.sessions || [])) {
+    if (!sessionsBySubject.has(row.subject_id)) sessionsBySubject.set(row.subject_id, []);
+    sessionsBySubject.get(row.subject_id).push(row);
+  }
+  const makeupBySubject = new Map();
+  for (const row of (data.makeupRows || [])) {
+    if (!makeupBySubject.has(row.subject_id)) makeupBySubject.set(row.subject_id, []);
+    makeupBySubject.get(row.subject_id).push(row);
+  }
+
+  // ---------- รายชื่อนักเรียน + ชั้นของ "ปีที่เลือก" ----------
+  // ใช้ student_year_placements เป็นหลักตามกติกาว่ารายงานต้องอิงชั้นของปีนั้น
+  // (students.grade_level คือชั้นปัจจุบัน จะเพี้ยนทันทีเมื่อดูปีเก่าหลังเลื่อนชั้นไปแล้ว)
+  const placements = data.placements || [];
+  const activeStudents = data.activeStudents || [];
+  const placementFallback = placements.length === 0;
+  const roster = [];
+  if (!placementFallback) {
+    for (const p of placements) {
+      const stu = p.student || { id: p.student_id };
+      roster.push({ student: stu, grade: p.grade_level, classroom: p.classroom });
+    }
+  } else {
+    for (const stu of activeStudents) {
+      roster.push({ student: stu, grade: stu.grade_level, classroom: stu.classroom });
+    }
+  }
+  const placedIds = new Set(placements.map(p => p.student_id));
+  const studentsWithoutPlacement = placementFallback
+    ? []
+    : activeStudents.filter(s => !placedIds.has(s.id));
+
+  // ---------- ความเสี่ยงรายคน ----------
+  const subjectDataFor = (subject, studentId) => ({
+    subject,
+    sessions: sessionsBySubject.get(subject.id) || [],
+    makeupHours: (makeupBySubject.get(subject.id) || []).filter(row => row.student_id === studentId)
+  });
+
+  const rows = [];
+  for (const entry of roster) {
+    const studentId = entry.student.id;
+    const warnPercent = isPrimaryGrade(entry.grade) ? primaryWarn : secondaryWarn;
+    const risky = [];
+
+    for (const subject of countableSubjects) {
+      let risk, enrolled;
+      if (subject.subject_type === "บูรณาการ") {
+        const members = membersOf.get(subject.id) || [];
+        enrolled = members.some(m => enrolledBySubject.get(m.id)?.has(studentId));
+        risk = computeAttendanceRisk(studentId, members.map(m => subjectDataFor(m, studentId)));
+      } else {
+        enrolled = Boolean(enrolledBySubject.get(subject.id)?.has(studentId));
+        risk = computeAttendanceRisk(studentId, [subjectDataFor(subject, studentId)]);
+      }
+      // totalBase = 0 คือวิชาที่ยังไม่ตั้งจำนวนคาบ — ตัดสินความเสี่ยงไม่ได้ ไปขึ้นที่ "ความพร้อมข้อมูล" แทน
+      if (!enrolled || risk.totalBase <= 0) continue;
+      if (risk.percent >= warnPercent) {
+        risky.push({
+          subject,
+          percent: risk.percent,
+          netMissed: risk.netMissed,
+          totalBase: risk.totalBase,
+          critical: risk.percent > criticalPercent
+        });
+      }
+    }
+
+    if (risky.length === 0) continue;
+    risky.sort((a, b) => b.percent - a.percent);
+    rows.push({
+      student: entry.student,
+      grade: entry.grade,
+      classroom: entry.classroom,
+      isPrimary: isPrimaryGrade(entry.grade),
+      warnPercent,
+      subjects: risky,
+      maxPercent: risky[0].percent,
+      maxMissed: risky[0].netMissed,
+      critical: risky.some(r => r.critical)
+    });
+  }
+  rows.sort((a, b) => b.maxPercent - a.maxPercent || b.maxMissed - a.maxMissed);
+
+  // ---------- ติด ร. ที่ยังค้างอยู่ (มีแถวใน remarks = ยังไม่ถูกถอด) ----------
+  const gradeOfStudent = new Map(roster.map(r => [r.student.id, r.grade]));
+  const studentOf = new Map(roster.map(r => [r.student.id, r.student]));
+  const incompleteRemarks = (data.remarks || [])
+    .filter(r => r.code === "ร.")
+    .map(r => ({
+      student: studentOf.get(r.student_id) || { id: r.student_id, name: "(ไม่พบชื่อนักเรียน)" },
+      grade: gradeOfStudent.get(r.student_id) || "",
+      subject: subjectById.get(r.subject_id) || null,
+      reason: r.reason,
+      created_at: r.created_at
+    }));
+
+  // ---------- ความพร้อมของข้อมูล ----------
+  // เช็คที่ระดับ "วิชาพื้นฐาน" เป็นหลัก เพราะคาบเรียน/เช็คชื่อ/รายชื่อ อยู่ที่วิชาพื้นฐานทั้งหมด
+  // (วิชาบูรณาการไม่มีของพวกนี้เป็นของตัวเองโดยการออกแบบ)
+  const plainSubjects = subjects.filter(s => s.subject_type !== "บูรณาการ");
+  const readiness = {
+    noPeriods: plainSubjects.filter(s => !Number(s.total_periods)),
+    noEnrollment: plainSubjects.filter(s => !(enrolledBySubject.get(s.id)?.size)),
+    noSession: plainSubjects.filter(s => !(sessionsBySubject.get(s.id)?.length)),
+    noOwner: subjects.filter(s => !s.owner_id),
+    yearless: data.yearlessSubjects || [],
+    noPlacement: studentsWithoutPlacement
+  };
+
+  // ---------- ความคืบหน้าการเช็คชื่อ (คาบที่เช็คไปแล้ว เทียบคาบทั้งรอบของวิชา) ----------
+  const coverage = countableSubjects.map(subject => {
+    const parts = subject.subject_type === "บูรณาการ" ? (membersOf.get(subject.id) || []) : [subject];
+    let checked = 0, total = 0;
+    for (const part of parts) {
+      checked += (sessionsBySubject.get(part.id) || []).reduce((sum, s) => sum + (Number(s.periods_covered) || 0), 0);
+      total += Number(part.total_periods) || 0;
+    }
+    return { subject, checked, total, percent: total > 0 ? (checked / total) * 100 : null };
+  }).sort((a, b) => {
+    if (a.percent === null && b.percent === null) return 0;
+    if (a.percent === null) return -1;
+    if (b.percent === null) return 1;
+    return a.percent - b.percent;
+  });
+
+  // ---------- สรุปรายชั้น ----------
+  const gradeMap = new Map();
+  for (const entry of roster) {
+    const grade = entry.grade || "(ไม่ระบุชั้น)";
+    if (!gradeMap.has(grade)) {
+      gradeMap.set(grade, {
+        grade,
+        isPrimary: isPrimaryGrade(grade),
+        warnPercent: isPrimaryGrade(grade) ? primaryWarn : secondaryWarn,
+        studentCount: 0, flagged: [], criticalCount: 0, remarkCount: 0
+      });
+    }
+    gradeMap.get(grade).studentCount += 1;
+  }
+  for (const row of rows) {
+    const group = gradeMap.get(row.grade || "(ไม่ระบุชั้น)");
+    if (!group) continue;
+    group.flagged.push(row);
+    if (row.critical) group.criticalCount += 1;
+  }
+  for (const remark of incompleteRemarks) {
+    const group = gradeMap.get(remark.grade || "(ไม่ระบุชั้น)");
+    if (group) group.remarkCount += 1;
+  }
+  const gradeOrderIndex = grade => {
+    const idx = GRADE_ORDER.indexOf(grade);
+    return idx === -1 ? GRADE_ORDER.length : idx;
+  };
+  const grades = [...gradeMap.values()].sort((a, b) => gradeOrderIndex(a.grade) - gradeOrderIndex(b.grade));
+
+  return {
+    year: data.year,
+    subjectCount: subjects.length,
+    countableCount: countableSubjects.length,
+    studentCount: roster.length,
+    placementFallback,
+    grades,
+    flaggedRows: rows,
+    remarks: incompleteRemarks,
+    readiness,
+    coverage,
+    thresholds: { primaryWarn, secondaryWarn, criticalPercent }
+  };
+}
+
+// ============================================================
 // ตรรกะเวลาทำงานของฝ่ายบุคคล — "แก้ที่นี่ที่เดียว"
 // ------------------------------------------------------------
 // ทุกหน้า (work-summary / my-work / index ของฝ่ายบุคคล) ต้องเรียกฟังก์ชันชุดนี้
