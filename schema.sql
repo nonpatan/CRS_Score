@@ -1655,3 +1655,162 @@ create policy jibble_sync_log_delete on jibble_sync_log for delete using (is_adm
 
 -- ทางฉุกเฉินถ้าบล็อกนี้ทำให้อะไรพัง (ไม่กระทบฝ่ายวิชาการ เพราะเป็นตารางใหม่ล้วน):
 -- alter table staff disable row level security;  -- ...ทำแบบเดียวกันกับตารางอื่นในบล็อกนี้
+
+-- ============================================================
+-- Migration: ยกฝ่ายวิชาการมาใช้ระบบสิทธิ์ระดับฝ่าย — ตัวเลือก C (2026-07-25)
+-- ------------------------------------------------------------
+-- เจตนา: คนที่อยู่ฝ่ายวิชาการและ admin กดอนุญาตแล้ว ทำงานในหน้าวิชาการได้เหมือน admin
+--        **ยกเว้นการลบ** ซึ่งสงวนไว้ที่ is_admin() เท่านั้น (กติกา "แก้ได้แต่ลบไม่ได้")
+--
+-- ขอบเขต = เฉพาะ policy ที่ "ปัจจุบันเป็น admin-only และเป็นงานวิชาการ" เท่านั้น
+--   ✅ แก้: subjects (insert/update) · students · student_year_placements · app_settings
+--          · core_competencies · core_competency_elements · competency_source_weights
+--          · competency_interpretation_levels · competency_assessments (insert)
+--   ❌ ไม่แตะ: 67 จุดที่ใช้ can_edit_subject() (owner-based) — ครูเจ้าของวิชายังแก้ของตัวเอง
+--             ได้เหมือนเดิมทุกประการ และฝ่ายวิชาการ *ไม่ได้* สิทธิ์แก้คะแนนวิชาคนอื่น
+--   ❌ ไม่แตะ: subjects_delete (คงเป็น admin-only ตามกติกาไม่ลบ)
+--   ❌ ไม่แตะ: profiles_update (การเลื่อน role เป็นงานผู้ดูแลระบบ ไม่ใช่งานวิชาการ)
+--
+-- ⚠ policy ที่เดิมเป็น `for all` (คลุม insert/update/delete รวมกัน) ต้องแตกเป็นรายคำสั่ง
+--   ไม่งั้นการให้สิทธิ์ฝ่ายวิชาการจะพ่วงสิทธิ์ "ลบ" ไปด้วยโดยไม่ตั้งใจ
+--   ทุกตารางมี policy _select ของตัวเองอยู่แล้ว การแตก _write จึงไม่กระทบการอ่าน
+--
+-- ย้อนกลับ: รันบล็อก "ย้อนกลับตัวเลือก C" ที่ comment ไว้ท้ายบล็อกนี้
+-- ============================================================
+
+-- ---------- subjects: สร้าง/แก้ข้อมูลวิชา (ลบยังเป็น admin เท่านั้น) ----------
+drop policy if exists subjects_insert on subjects;
+create policy subjects_insert on subjects for insert
+  with check (is_admin() or has_department('วิชาการ'));
+
+drop policy if exists subjects_update on subjects;
+create policy subjects_update on subjects for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+
+-- ---------- students ----------
+drop policy if exists students_write on students;
+drop policy if exists students_insert on students;
+create policy students_insert on students for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists students_update on students;
+create policy students_update on students for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists students_delete on students;
+create policy students_delete on students for delete using (is_admin());
+
+-- ---------- student_year_placements (ประวัติชั้น/ห้องรายปี) ----------
+drop policy if exists student_year_placements_write on student_year_placements;
+drop policy if exists student_year_placements_insert on student_year_placements;
+create policy student_year_placements_insert on student_year_placements for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists student_year_placements_update on student_year_placements;
+create policy student_year_placements_update on student_year_placements for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists student_year_placements_delete on student_year_placements;
+create policy student_year_placements_delete on student_year_placements for delete using (is_admin());
+
+-- ---------- app_settings (เช่น highest_grade ที่ rollover ใช้) ----------
+drop policy if exists app_settings_write on app_settings;
+drop policy if exists app_settings_insert on app_settings;
+create policy app_settings_insert on app_settings for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists app_settings_update on app_settings;
+create policy app_settings_update on app_settings for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists app_settings_delete on app_settings;
+create policy app_settings_delete on app_settings for delete using (is_admin());
+
+-- ---------- รายการกลางสมรรถนะหลัก 6 ด้าน ----------
+drop policy if exists core_competencies_write on core_competencies;
+drop policy if exists core_competencies_insert on core_competencies;
+create policy core_competencies_insert on core_competencies for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists core_competencies_update on core_competencies;
+create policy core_competencies_update on core_competencies for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists core_competencies_delete on core_competencies;
+create policy core_competencies_delete on core_competencies for delete using (is_admin());
+
+drop policy if exists core_elements_write on core_competency_elements;
+drop policy if exists core_elements_insert on core_competency_elements;
+create policy core_elements_insert on core_competency_elements for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists core_elements_update on core_competency_elements;
+create policy core_elements_update on core_competency_elements for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists core_elements_delete on core_competency_elements;
+create policy core_elements_delete on core_competency_elements for delete using (is_admin());
+
+-- ---------- น้ำหนักแหล่งที่มา + เกณฑ์แปลผลสมรรถนะ ----------
+drop policy if exists competency_source_weights_write on competency_source_weights;
+drop policy if exists competency_source_weights_insert on competency_source_weights;
+create policy competency_source_weights_insert on competency_source_weights for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists competency_source_weights_update on competency_source_weights;
+create policy competency_source_weights_update on competency_source_weights for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists competency_source_weights_delete on competency_source_weights;
+create policy competency_source_weights_delete on competency_source_weights for delete using (is_admin());
+
+drop policy if exists competency_levels_write on competency_interpretation_levels;
+drop policy if exists competency_levels_insert on competency_interpretation_levels;
+create policy competency_levels_insert on competency_interpretation_levels for insert
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists competency_levels_update on competency_interpretation_levels;
+create policy competency_levels_update on competency_interpretation_levels for update
+  using (is_admin() or has_department('วิชาการ'))
+  with check (is_admin() or has_department('วิชาการ'));
+drop policy if exists competency_levels_delete on competency_interpretation_levels;
+create policy competency_levels_delete on competency_interpretation_levels for delete using (is_admin());
+
+-- ---------- สร้างกิจกรรม/กิจวัตรประเมินสมรรถนะ ----------
+-- เดิม: เจ้าของ (owner_id) หรือ admin — เพิ่มฝ่ายวิชาการเข้าไป ส่วน update/delete
+-- ยังใช้ can_edit_competency_assessment() (owner-based) เหมือนเดิม ไม่แตะ
+drop policy if exists competency_assessments_insert on competency_assessments;
+create policy competency_assessments_insert on competency_assessments for insert
+  with check (owner_id = auth.uid() or is_admin() or has_department('วิชาการ'));
+
+-- ------------------------------------------------------------
+-- ย้อนกลับตัวเลือก C (คืนทุก policy ให้เป็น admin-only แบบเดิม)
+-- ------------------------------------------------------------
+-- drop policy if exists subjects_insert on subjects;
+-- create policy subjects_insert on subjects for insert with check (is_admin());
+-- drop policy if exists subjects_update on subjects;
+-- create policy subjects_update on subjects for update using (is_admin()) with check (is_admin());
+-- drop policy if exists students_insert on students;
+-- drop policy if exists students_update on students;
+-- drop policy if exists students_delete on students;
+-- create policy students_write on students for all using (is_admin()) with check (is_admin());
+-- drop policy if exists student_year_placements_insert on student_year_placements;
+-- drop policy if exists student_year_placements_update on student_year_placements;
+-- drop policy if exists student_year_placements_delete on student_year_placements;
+-- create policy student_year_placements_write on student_year_placements for all using (is_admin()) with check (is_admin());
+-- drop policy if exists app_settings_insert on app_settings;
+-- drop policy if exists app_settings_update on app_settings;
+-- drop policy if exists app_settings_delete on app_settings;
+-- create policy app_settings_write on app_settings for all using (is_admin()) with check (is_admin());
+-- drop policy if exists core_competencies_insert on core_competencies;
+-- drop policy if exists core_competencies_update on core_competencies;
+-- drop policy if exists core_competencies_delete on core_competencies;
+-- create policy core_competencies_write on core_competencies for all using (is_admin()) with check (is_admin());
+-- drop policy if exists core_elements_insert on core_competency_elements;
+-- drop policy if exists core_elements_update on core_competency_elements;
+-- drop policy if exists core_elements_delete on core_competency_elements;
+-- create policy core_elements_write on core_competency_elements for all using (is_admin()) with check (is_admin());
+-- drop policy if exists competency_source_weights_insert on competency_source_weights;
+-- drop policy if exists competency_source_weights_update on competency_source_weights;
+-- drop policy if exists competency_source_weights_delete on competency_source_weights;
+-- create policy competency_source_weights_write on competency_source_weights for all using (is_admin()) with check (is_admin());
+-- drop policy if exists competency_levels_insert on competency_interpretation_levels;
+-- drop policy if exists competency_levels_update on competency_interpretation_levels;
+-- drop policy if exists competency_levels_delete on competency_interpretation_levels;
+-- create policy competency_levels_write on competency_interpretation_levels for all using (is_admin()) with check (is_admin());
+-- drop policy if exists competency_assessments_insert on competency_assessments;
+-- create policy competency_assessments_insert on competency_assessments for insert with check (owner_id = auth.uid() or is_admin());
