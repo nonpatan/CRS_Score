@@ -69,13 +69,41 @@
   select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .hint { color: var(--muted); font-size: 14px; }
 
+  /* ---------- วงกลมสัดส่วนการเฝ้าระวัง ----------
+     สี 3 ตัวนี้ผ่านการตรวจด้วยเครื่องมือแล้ว (ระยะห่างของสีสำหรับตาบอดสีและตาปกติ +
+     ความต่างจากพื้นหลัง) — ชุดเดิมของแอป (amber #93690f กับ danger #a32d2d) ใกล้กัน
+     เกินไปจนแยกไม่ออกเมื่อวางติดกันในวงกลม จึงขยับเฉพาะที่ใช้ในกราฟ */
+  /* จอแคบ: คำอธิบายตกลงมาอยู่ใต้วงกลม จึงจัดกึ่งกลางไม่ให้เหลือช่องว่างข้างเดียว */
+  .donut-wrap {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
+  }
+  .donut-figure { position: relative; flex: 0 0 auto; width: 148px; height: 148px; }
+  .donut-figure svg { width: 100%; height: 100%; display: block; }
+  .donut-center {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; pointer-events: none;
+  }
+  .donut-hero { font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
+  .donut-hero-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .legend { flex: 1 1 170px; list-style: none; margin: 0; padding: 0; }
+  .legend li {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 5px 0; font-size: 14px;
+  }
+  .legend .swatch {
+    flex: 0 0 auto; width: 10px; height: 10px; border-radius: 3px; transform: translateY(1px);
+  }
+  .legend .legend-name { flex: 1; }
+  .legend .legend-value { font-weight: 600; white-space: nowrap; }
+  .legend .legend-share { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
   /* ---------- ตัวเลขรวมด้านบน ---------- */
   .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .metric { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
   .metric .label { font-size: 13px; color: var(--muted); }
   .metric .value { font-size: 22px; font-weight: 600; line-height: 1.2; }
-  .metric.warn .value { color: var(--amber); }
-  .metric.bad .value { color: var(--danger); }
 
   /* ---------- ตารางรายชั้น ---------- */
   .grade-row {
@@ -168,11 +196,26 @@
     <div id="content" hidden>
       <div class="card">
         <h2>ต้องช่วยด่วน <span class="note" id="threshold-note"></span></h2>
+        <!-- วงกลมแสดงเฉพาะสิ่งที่แบ่งกันได้จริงและรวมเป็น 100% คือนักเรียนทั้งหมด
+             แยกเป็น ปกติ/เฝ้าระวัง/วิกฤต — ตัวเลขอีก 3 ตัวด้านล่างเป็นคนละมิติกัน
+             (แยกตามระดับชั้น และเรื่อง ร. ที่ไม่เกี่ยวกับการขาดเรียน) จึงไม่เอามารวมในวงเดียวกัน -->
+        <div class="donut-wrap">
+          <div class="donut-figure">
+            <svg id="donut" viewBox="0 0 180 180" role="img" aria-labelledby="donut-title">
+              <title id="donut-title">สัดส่วนนักเรียนตามระดับการเฝ้าระวัง</title>
+            </svg>
+            <div class="donut-center">
+              <div class="donut-hero" id="donut-hero">—</div>
+              <div class="donut-hero-label">คนที่ต้องช่วย</div>
+            </div>
+          </div>
+          <ul class="legend" id="donut-legend"></ul>
+        </div>
+
         <div class="metrics">
-          <div class="metric bad"><div class="label">เสี่ยงติด มส. (มัธยม)</div><div class="value" id="m-secondary">—</div></div>
-          <div class="metric warn"><div class="label">ขาดบ่อย (ประถม)</div><div class="value" id="m-primary">—</div></div>
-          <div class="metric bad"><div class="label">ขาดถึงขั้นวิกฤต</div><div class="value" id="m-critical">—</div></div>
-          <div class="metric warn"><div class="label">ติด ร. ค้างอยู่</div><div class="value" id="m-remark">—</div></div>
+          <div class="metric"><div class="label">เสี่ยงติด มส. (มัธยม)</div><div class="value" id="m-secondary">—</div></div>
+          <div class="metric"><div class="label">ขาดบ่อย (ประถม)</div><div class="value" id="m-primary">—</div></div>
+          <div class="metric"><div class="label">ติด ร. ค้างอยู่</div><div class="value" id="m-remark">—</div></div>
         </div>
         <div id="admin-setting" hidden>
           <div class="setting-row">
@@ -297,6 +340,61 @@ async function setupAdminSetting() {
     await render();
     msg.textContent = "บันทึกแล้ว · ใช้เกณฑ์ " + value + "% กับชั้นประถม";
   });
+}
+
+// ---------- วงกลมสัดส่วนการเฝ้าระวัง ----------
+// แสดงเฉพาะกลุ่มที่ "ไม่ทับกัน" และรวมกันได้ 100% พอดี (ปกติ + เฝ้าระวัง + วิกฤต = นักเรียนทั้งหมด)
+// วิกฤตเป็นส่วนย่อยของคนที่ติดธงอยู่แล้ว จึงต้องหักออกจาก "เฝ้าระวัง" ไม่งั้นนับซ้ำ
+const WATCH_COLORS = { normal: "#12946f", watch: "#c47f00", critical: "#9e2a35" };
+
+function renderDonut(overview) {
+  const total = overview.studentCount;
+  const critical = overview.flaggedRows.filter(r => r.critical).length;
+  const watch = overview.flaggedRows.length - critical;
+  const normal = Math.max(0, total - overview.flaggedRows.length);
+
+  document.getElementById("donut-hero").textContent = overview.flaggedRows.length;
+
+  const segments = [
+    { key: "normal",   label: "ยังไม่ถึงเกณฑ์เฝ้าระวัง", value: normal },
+    { key: "watch",    label: "เฝ้าระวัง",              value: watch },
+    { key: "critical", label: "วิกฤต",                  value: critical }
+  ];
+
+  const svg = document.getElementById("donut");
+  const legend = document.getElementById("donut-legend");
+  const cx = 90, cy = 90, r = 62, thickness = 20, gap = 2;
+  const circumference = 2 * Math.PI * r;
+  const drawn = segments.filter(s => s.value > 0);
+
+  let arcs = "";
+  if (total === 0) {
+    arcs = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${thickness}"></circle>`;
+  } else {
+    let offset = 0;
+    for (const seg of drawn) {
+      const length = (seg.value / total) * circumference;
+      // เว้นช่องว่างสีพื้นระหว่างชิ้น เพื่อไม่ให้สองสีติดกันจนดูเป็นก้อนเดียว
+      // (ถ้ามีชิ้นเดียวก็ไม่ต้องเว้น ไม่งั้นวงกลมเต็มจะมีรอยบากโดยไม่จำเป็น)
+      const visible = drawn.length === 1 ? length : Math.max(0.5, length - gap);
+      arcs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+        stroke="${WATCH_COLORS[seg.key]}" stroke-width="${thickness}"
+        stroke-dasharray="${visible.toFixed(2)} ${(circumference - visible).toFixed(2)}"
+        stroke-dashoffset="${(-offset).toFixed(2)}"
+        transform="rotate(-90 ${cx} ${cy})"><title>${esc(seg.label)} ${seg.value} คน</title></circle>`;
+      offset += length;
+    }
+  }
+  svg.innerHTML = '<title id="donut-title">สัดส่วนนักเรียนตามระดับการเฝ้าระวัง</title>' + arcs;
+
+  // ตัวเลขกำกับทุกชิ้นในคำอธิบาย — สีจึงไม่ใช่ช่องทางเดียวที่บอกความหมาย
+  legend.innerHTML = segments.map(seg => {
+    const share = total > 0 ? Math.round((seg.value / total) * 100) : 0;
+    return "<li><span class='swatch' style='background:" + WATCH_COLORS[seg.key] + "'></span>" +
+      "<span class='legend-name'>" + esc(seg.label) + "</span>" +
+      "<span class='legend-value'>" + seg.value + " คน</span>" +
+      "<span class='legend-share'>" + share + "%</span></li>";
+  }).join("");
 }
 
 // ---------- ส่วนแสดงผล ----------
@@ -457,8 +555,8 @@ async function render() {
 
   document.getElementById("m-secondary").textContent = secondaryFlagged;
   document.getElementById("m-primary").textContent = primaryFlagged;
-  document.getElementById("m-critical").textContent = overview.flaggedRows.filter(r => r.critical).length;
   document.getElementById("m-remark").textContent = overview.remarks.length;
+  renderDonut(overview);
   document.getElementById("threshold-note").textContent =
     "มัธยม ≥" + overview.thresholds.secondaryWarn + "% · ประถม ≥" + overview.thresholds.primaryWarn +
     "% · วิกฤต >" + overview.thresholds.criticalPercent + "%";
