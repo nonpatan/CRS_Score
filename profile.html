@@ -76,7 +76,7 @@
 </div>
 <div id="toast"></div>
 <script type="module">
-  import { sb, requireAuth, signOut, getMyProfilePresentation, getMyProfileDetails, profileInitials } from "./supabase-client.js";
+  import { sb, requireAuth, signOut, getMyProfilePresentation, getMyProfileDetails, profileInitials } from "./supabase-client.js?v=20260725-3";
 
   const fileInput = document.getElementById("avatar-file");
   const previewText = document.getElementById("avatar-preview");
@@ -97,6 +97,7 @@
   const applyCropButton = document.getElementById("apply-avatar-crop");
   let currentSession = null;
   let currentDetails = null;
+  let currentStaffName = "";   // ชื่อจากทะเบียนบุคลากร ใช้เทียบว่าผู้ใช้แก้ชื่อเองหรือยัง
   let objectUrl = "";
   let cropSourceUrl = "";
   let pendingAvatarFile = null;
@@ -290,9 +291,11 @@
         });
         if (uploadError) throw uploadError;
       }
+      // ถ้าชื่อยังเหมือนทะเบียนบุคลากร เก็บเป็น null ไว้ เพื่อให้ชื่อ "ตามทะเบียน" ต่อไป
+      // (ถ้าฝ่ายบุคคลแก้ชื่อทีหลัง จะได้อัปเดตตามเอง ไม่ค้างชื่อเก่าที่ก๊อปไว้)
       const { error } = await sb.from("user_profile_details").upsert({
         user_id: currentSession.user.id,
-        display_name: name,
+        display_name: (currentStaffName && name === currentStaffName) ? null : name,
         avatar_path: avatarPath || null,
         updated_at: new Date().toISOString()
       }, { onConflict: "user_id" });
@@ -316,7 +319,16 @@
     currentSession = session;
     const presentation = await getMyProfilePresentation(session.user);
     currentDetails = presentation.details;
+    currentStaffName = presentation.staffName || "";
     displayName.value = presentation.displayName;
+    if (currentStaffName) {
+      const hint = displayName.parentElement.querySelector("small");
+      if (hint) {
+        hint.textContent = (presentation.details && presentation.details.display_name)
+          ? "ชื่อนี้จะแสดงข้างรูปโปรไฟล์ในทุกหน้าที่ล็อกอิน (คุณตั้งเอง)"
+          : "ตั้งต้นจากทะเบียนบุคลากร (" + currentStaffName + ") — แก้เป็นชื่อที่ต้องการได้";
+      }
+    }
     previewName.textContent = presentation.displayName;
     email.value = session.user.email || "";
     document.getElementById("profile-email").textContent = session.user.email || "";

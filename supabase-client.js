@@ -157,11 +157,35 @@ export function profileInitials(nameOrEmail) {
 }
 
 // รูปใน Storage เป็น private เสมอ จึงต้องสร้าง signed URL ก่อนแสดง และใช้เฉพาะของบัญชีที่ล็อกอิน
+// ชื่อจากทะเบียนบุคลากร (ผูกผ่าน staff.user_id) — ใช้เป็น "ชื่อตั้งต้น" ของบัญชี
+// ฝ่ายบุคคลกรอกชื่อจริงไว้แล้ว จึงไม่ควรให้ครูต้องมาพิมพ์ชื่อตัวเองซ้ำอีกรอบ
+// ตารางนี้จะมีหลังรัน migration "โมดูลฝ่ายบุคคล" — ถ้ายังไม่มีก็คืนค่าว่างไป ไม่ทำให้หน้าพัง
+export async function getStaffNameForUser(userId) {
+  const { data, error } = await sb
+    .from("staff").select("full_name").eq("user_id", userId).maybeSingle();
+  if (error) return "";
+  return (data && data.full_name) || "";
+}
+
+// ชื่อจากทะเบียนบุคลากรของหลายบัญชีพร้อมกัน (ใช้ที่หน้าจัดการสิทธิ์) → Map(userId → ชื่อ)
+export async function getStaffNamesByUser() {
+  const { data, error } = await sb
+    .from("staff").select("user_id,full_name").not("user_id", "is", null);
+  const map = new Map();
+  if (error) return map;
+  (data || []).forEach(r => map.set(r.user_id, r.full_name));
+  return map;
+}
+
 export async function getMyProfilePresentation(user) {
-  const profile = await getProfile(user.id);
-  const detailResult = await getMyProfileDetails(user.id);
+  const [profile, detailResult, staffName] = await Promise.all([
+    getProfile(user.id),
+    getMyProfileDetails(user.id),
+    getStaffNameForUser(user.id)
+  ]);
   const details = detailResult.data;
-  const displayName = (details && details.display_name) || (profile && profile.name) ||
+  // ลำดับ: ชื่อที่เจ้าตัวตั้งเอง → ชื่อจากทะเบียนบุคลากร → profiles.name → metadata → อีเมล
+  const displayName = (details && details.display_name) || staffName || (profile && profile.name) ||
     (user.user_metadata && user.user_metadata.full_name) || (user.email || "ผู้ใช้");
   let avatarUrl = "";
 
@@ -176,6 +200,7 @@ export async function getMyProfilePresentation(user) {
     details,
     detailsError: detailResult.error,
     displayName,
+    staffName,                  // หน้าโปรไฟล์ใช้เทียบว่าผู้ใช้แก้ชื่อเองหรือยัง
     initials: profileInitials(displayName),
     avatarUrl
   };

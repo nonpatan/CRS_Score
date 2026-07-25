@@ -80,8 +80,8 @@
 <div id="toast"></div>
 
 <script type="module">
-  import { sb, requireAuth, getProfile, DEPARTMENTS,
-           listAllUserDepartments, setUserDepartment, removeUserDepartment } from "./supabase-client.js";
+  import { sb, requireAuth, getProfile, DEPARTMENTS, getStaffNamesByUser,
+           listAllUserDepartments, setUserDepartment, removeUserDepartment } from "./supabase-client.js?v=20260725-3";
 
   const elGate = document.getElementById("gate");
   const elGateMsg = document.getElementById("gate-msg");
@@ -102,6 +102,8 @@
 
   let me = null;
   let users = [];
+  // ชื่อจากทะเบียนบุคลากร (ฝ่ายบุคคลกรอกไว้แล้ว) ใช้แทน "(ยังไม่ตั้งชื่อ)"
+  let staffNames = new Map();
   // แผนที่สิทธิ์: "userId||ฝ่าย" → granted (true/false) · ไม่มีคีย์ = ไม่ได้อยู่ฝ่ายนั้น
   const grants = new Map();
   const key = (userId, dept) => userId + "||" + dept;
@@ -123,7 +125,8 @@
     const q = elQ.value.trim().toLowerCase();
     const shown = users.filter(u => {
       if (!q) return true;
-      return (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
+      const name = u.name || staffNames.get(u.id) || "";
+      return name.toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
     });
 
     elCount.textContent = `ผู้ใช้ ${shown.length} คน` + (shown.length !== users.length ? ` (จากทั้งหมด ${users.length})` : "");
@@ -147,7 +150,10 @@
                    `<select data-user="${u.id}" data-dept="${d}" aria-label="สิทธิ์ฝ่าย${d} ของ ${u.email || ""}">${opts}</select></div>`;
           }).join("") + '</div>';
 
-      const nameHtml = u.name ? `<span class="user-name">${u.name}</span>` : `<span class="user-name">(ยังไม่ตั้งชื่อ)</span>`;
+      const shownName = u.name || staffNames.get(u.id) || "";
+      const nameHtml = shownName
+        ? `<span class="user-name">${shownName}</span>`
+        : `<span class="user-name">(ยังไม่ตั้งชื่อ)</span>`;
       return `<div class="user">
         <div class="user-head">${nameHtml}
           <span class="badge ${isAdmin ? "admin" : "teacher"}">${isAdmin ? "admin" : "ครู"}</span>
@@ -202,10 +208,12 @@
       return;
     }
 
-    const [{ data: profileRows, error: profileError }, deptRows] = await Promise.all([
+    const [{ data: profileRows, error: profileError }, deptRows, names] = await Promise.all([
       sb.from("profiles").select("id,email,name,role").order("email"),
-      listAllUserDepartments()
+      listAllUserDepartments(),
+      getStaffNamesByUser()
     ]);
+    staffNames = names;
 
     if (profileError) {
       elGate.style.display = "";
