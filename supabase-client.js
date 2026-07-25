@@ -72,6 +72,33 @@ export async function canUseDepartment(userId, department, profile = null) {
   return mine.includes(department);
 }
 
+// ------------------------------------------------------------
+// คุมการมองเห็นเมนู/หน้าของฝ่ายบุคคล
+// app-shell.js ซ่อนลิงก์ที่เป็นงานฝ่ายบุคคลไว้ก่อนเสมอ (data-restricted + hidden)
+// หน้าเว็บต้องเรียกฟังก์ชันนี้เพื่อเปิดให้คนที่มีสิทธิ์ — ถ้าไม่มีสิทธิ์จะถูกลบทิ้งจาก DOM
+// ⚠ นี่คือชั้น "ซ่อนปุ่ม" เท่านั้น ตัวจริงที่กันข้อมูลคือ RLS (staff/work_attendance/staff_leaves
+//   อ่านได้เฉพาะฝ่ายบุคคลหรือแถวของตัวเอง)
+// ------------------------------------------------------------
+export function applyPersonnelMenuAccess(canManageHr) {
+  const links = document.querySelectorAll('header .nav a[data-restricted]');
+  links.forEach(a => {
+    if (canManageHr) a.removeAttribute("hidden");
+    else a.remove();
+  });
+  if (canManageHr) return;
+  // กลุ่มเมนูที่ไม่เหลือลิงก์แล้ว ต้องซ่อนด้วย ไม่งั้นจะเห็นหัวข้อกลุ่มลอย ๆ
+  document.querySelectorAll("header .nav .nav-group").forEach(group => {
+    if (!group.querySelector(".nav-group-links a")) group.remove();
+  });
+}
+
+// การ์ดแจ้งเตือนสำหรับหน้าที่ครูทั่วไปเข้าไม่ได้ (ใช้ข้อความเดียวกันทุกหน้า)
+export function personnelAccessDeniedHtml() {
+  return '<div class="banner warn"><b>หน้านี้สำหรับฝ่ายบุคลากรเท่านั้น</b><br>' +
+    'ข้อมูลของบุคลากรคนอื่นเป็นข้อมูลส่วนบุคคล จึงเปิดให้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายบุคลากร<br>' +
+    'ดูข้อมูลการทำงานของคุณเองได้ที่หน้า <a href="my-work.html">ข้อมูลการทำงานของฉัน</a></div>';
+}
+
 // ถามฐานข้อมูลตรง ๆ ว่ามีสิทธิ์ในฝ่ายนี้ไหม — ใช้ฟังก์ชันตัวเดียวกับที่ RLS ใช้ตัดสิน
 // จึงตรงกับความจริงเสมอ (ต่างจาก canUseDepartment ที่ประกอบจากหลาย query ฝั่งเว็บ)
 export async function checkDepartment(department) {

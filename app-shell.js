@@ -106,6 +106,10 @@
       kicker: "บุคคล",
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมบุคลากร"],
+      // หน้าที่เป็นงานของฝ่ายบุคคลโดยเฉพาะ — ครูทั่วไปเห็นได้แค่ "ข้อมูลการทำงานของฉัน"
+      // ซ่อนไว้ก่อนเสมอ (fail-closed) แล้วให้หน้าเว็บเรียก applyPersonnelMenuAccess() เปิดให้
+      // ถ้าลืมเรียก คนมีสิทธิ์จะเห็นเมนูไม่ครบ (สังเกตได้ทันที) ดีกว่าเผลอเปิดให้คนไม่มีสิทธิ์
+      hrOnly: ["index.html", "leave.html", "staff.html", "hr-settings.html", "work-summary.html"],
       groups: [
         {
           label: "บันทึก",
@@ -178,7 +182,8 @@
     // ไม่ดึง document รุ่นเก่าจาก browser/GitHub Pages cache
     if (shellVersion) target.searchParams.set("v", shellVersion);
     const classes = [extraClass, href === current ? "active" : ""].filter(Boolean).join(" ");
-    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}>${label}</a>`;
+    const restricted = (mod.hrOnly || []).includes(href) ? ' data-restricted="1" hidden' : "";
+    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${restricted}>${label}</a>`;
   };
 
   const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link${current === "dashboard.html" ? " active" : ""}">ภาพรวม</a>`;

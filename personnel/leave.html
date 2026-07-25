@@ -77,7 +77,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-1"></script>
+    <script src="../app-shell.js?v=20260725-4"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -135,8 +135,9 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getLeaveTypes,
+         applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getAcademicYears, academicYearOf, academicYearRange, getLeaveQuotas,
-         bangkokNow, toDateStr } from "../supabase-client.js";
+         bangkokNow, toDateStr } from "../supabase-client.js?v=20260725-4";
 
 const session = await requireAuth();
 if (session) {
@@ -151,6 +152,16 @@ if (session) {
   el("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
   const canEdit = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canEdit);
+  // ใบลามีเหตุผลการลาซึ่งเป็นเรื่องส่วนตัว ครูทั่วไปจึงไม่ควรเห็นของคนอื่นเลย
+  if (!canEdit) {
+    applyPersonnelMenuAccess(false);
+    document.querySelectorAll("#main, #content, #report, .card").forEach(x => x.remove());
+    const box = document.createElement("div");
+    box.className = "card";
+    box.innerHTML = personnelAccessDeniedHtml();
+    document.querySelector(".wrap").appendChild(box);
+  } else {
   let staffList = [], leaves = [], years = [];
 
   if (!canEdit) {
@@ -301,6 +312,7 @@ if (session) {
   if (el("f-start")) { el("f-start").value = today; el("f-end").value = today; }
 
   await loadAll();
+  }
 }
 </script>
 </body>

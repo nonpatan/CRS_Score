@@ -104,7 +104,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-1"></script>
+    <script src="../app-shell.js?v=20260725-4"></script>
   </header>
 
   <div class="card">
@@ -161,10 +161,16 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, getLastSyncLog, checkDepartment, syncJibble,
-         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js";
+         applyPersonnelMenuAccess,
+         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260725-4";
 
 const session = await requireAuth();
 if (session) {
+  // หน้าภาพรวมเป็นข้อมูลรวมของบุคลากรทั้งโรงเรียน ครูทั่วไปจึงไม่ควรเห็น
+  // เด้งไปหน้าของตัวเองแทน (ลิงก์ "ฝ่ายบุคคล" บน dashboard ชี้มาที่นี่ทุกคน จึงต้องดักที่นี่)
+  const canManageHr = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canManageHr);
+  if (!canManageHr) location.replace("my-work.html");
   const el = id => document.getElementById(id);
   document.getElementById("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
@@ -229,10 +235,8 @@ if (session) {
     });
     el("today-date").textContent = dateLabel;
 
-    const [{ data: allHolidays }, canSync] = await Promise.all([
-      sb.from("work_holidays").select("holiday_date"),
-      checkDepartment("บุคลากร")
-    ]);
+    const { data: allHolidays } = await sb.from("work_holidays").select("holiday_date");
+    const canSync = canManageHr;
     let ctx = await loadWorkContext(today, today);
     const scheduleRows = [...ctx.schedule.values()];
     const active = ctx.staff.filter(s => s.is_active);

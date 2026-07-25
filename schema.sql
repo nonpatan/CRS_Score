@@ -1814,3 +1814,25 @@ create policy competency_assessments_insert on competency_assessments for insert
 -- create policy competency_levels_write on competency_interpretation_levels for all using (is_admin()) with check (is_admin());
 -- drop policy if exists competency_assessments_insert on competency_assessments;
 -- create policy competency_assessments_insert on competency_assessments for insert with check (owner_id = auth.uid() or is_admin());
+
+-- ============================================================
+-- Migration: จำกัดการอ่านทะเบียนบุคลากรให้เฉพาะฝ่ายบุคคลและเจ้าตัว (2026-07-25)
+-- ------------------------------------------------------------
+-- เดิม staff_select = ผู้ล็อกอินทุกคน → ครูทั่วไปอ่านทะเบียนได้ทั้งโรงเรียน
+-- (ชื่อ · อีเมล · ใครได้รับอนุญาตเข้าสาย · ใครได้รับการอนุโลม) ซึ่งเป็นข้อมูลของฝ่ายบุคคล
+--
+-- ผลข้างเคียงที่เป็นบั๊กจริง: `work_attendance`/`staff_leaves` ถูก RLS กรองให้เห็นเฉพาะของตัวเอง
+-- อยู่แล้ว แต่รายชื่อยังอ่านได้ครบ → ครูทั่วไปเปิดหน้าสรุปเวลาทำงานจะเห็น
+-- "ทุกคนขาดทุกวัน" เพราะมีชื่อแต่ไม่มีข้อมูลเวลา — รายงานผิดแบบน่าตกใจ
+--
+-- แก้ให้สอดคล้องกับ work_attendance_select / staff_leaves_select ที่ทำถูกอยู่แล้ว
+-- หมายเหตุ: is_my_staff_row() เป็น security definer จึงยังทำงานได้ตามปกติ
+--          และ getStaffNameForUser() ฝั่งหน้าเว็บอ่านแถวของตัวเองได้ (ชื่อบนโปรไฟล์ยังขึ้นปกติ)
+-- ============================================================
+drop policy if exists staff_select on staff;
+create policy staff_select on staff for select
+  using (has_department('บุคลากร') or user_id = auth.uid());
+
+-- ย้อนกลับ:
+-- drop policy if exists staff_select on staff;
+-- create policy staff_select on staff for select using (auth.role() = 'authenticated');

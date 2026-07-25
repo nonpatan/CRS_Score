@@ -91,7 +91,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-1"></script>
+    <script src="../app-shell.js?v=20260725-4"></script>
   </header>
 
   <div id="main">
@@ -150,7 +150,8 @@
 <div id="toast"></div>
 
 <script type="module">
-import { sb, requireAuth, signOut, checkDepartment, syncJibble, getLastSyncLog } from "../supabase-client.js";
+import { sb, requireAuth, signOut, checkDepartment, syncJibble, getLastSyncLog,
+         applyPersonnelMenuAccess, personnelAccessDeniedHtml } from "../supabase-client.js?v=20260725-4";
 
 const session = await requireAuth();
 if (session) {
@@ -169,6 +170,16 @@ if (session) {
 
   // สิทธิ์แก้ไขถามจากฐานข้อมูลด้วยฟังก์ชันตัวเดียวกับที่ RLS ใช้ → ตรงกับความจริงเสมอ
   const canEdit = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canEdit);
+  // ทะเบียนบุคลากรเป็นข้อมูลส่วนบุคคลของคนอื่น ครูทั่วไปจึงเข้าไม่ได้เลย ไม่ใช่แค่แก้ไม่ได้
+  if (!canEdit) {
+    applyPersonnelMenuAccess(false);
+    document.querySelectorAll("#main, #content, #report, .card").forEach(x => x.remove());
+    const box = document.createElement("div");
+    box.className = "card";
+    box.innerHTML = personnelAccessDeniedHtml();
+    document.querySelector(".wrap").appendChild(box);
+  } else {
   let staffList = [];
   let profiles = [];
 
@@ -332,7 +343,8 @@ if (session) {
   });
 
   await loadAll();
-  if (canEdit) refreshSyncStatus();
+  refreshSyncStatus();
+  }
 }
 </script>
 </body>

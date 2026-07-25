@@ -80,7 +80,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-1"></script>
+    <script src="../app-shell.js?v=20260725-4"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -152,7 +152,8 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings,
-         getAcademicYears, getLeaveTypes, getLeaveQuotas } from "../supabase-client.js";
+         applyPersonnelMenuAccess, personnelAccessDeniedHtml,
+         getAcademicYears, getLeaveTypes, getLeaveQuotas } from "../supabase-client.js?v=20260725-4";
 
 const session = await requireAuth();
 if (session) {
@@ -167,6 +168,15 @@ if (session) {
   el("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
   const canEdit = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canEdit);
+  if (!canEdit) {
+    applyPersonnelMenuAccess(false);
+    document.querySelectorAll("#main, #content, #report, .card").forEach(x => x.remove());
+    const box = document.createElement("div");
+    box.className = "card";
+    box.innerHTML = personnelAccessDeniedHtml();
+    document.querySelector(".wrap").appendChild(box);
+  } else {
   if (!canEdit) {
     el("gate").style.display = "";
     el("gate").innerHTML = '<div class="banner warn"><b>คุณดูได้อย่างเดียว</b><br>' +
@@ -295,6 +305,7 @@ if (session) {
 
   await loadWorkTime();
   await loadYears();
+  }
 }
 </script>
 </body>
