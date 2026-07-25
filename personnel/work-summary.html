@@ -62,6 +62,8 @@
   tbody tr:hover { background:var(--teal-soft); }
   td.bad { color:var(--danger); font-weight:600; }
   td.warn { color:var(--amber); font-weight:600; }
+  .cell-main { display:block; white-space:nowrap; }
+  .cell-sub { display:block; color:var(--muted); font-size:12px; font-weight:400; white-space:nowrap; }
   .table-scroll { overflow-x:auto; }
 
   .day-row { display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
@@ -129,7 +131,7 @@
       <div id="alerts"></div>
       <div class="stats">
         <div class="stat"><b id="s-staff">—</b><span>บุคลากร</span></div>
-        <div class="stat"><b id="s-late">—</b><span>สาย (ครั้ง)</span></div>
+        <div class="stat warn"><b id="s-late">—</b><span id="s-late-minutes">รวม — นาที</span></div>
         <div class="stat bad"><b id="s-absent">—</b><span>ขาด (วัน)</span></div>
         <div class="stat warn"><b id="s-leave">—</b><span>ลา (วัน)</span></div>
       </div>
@@ -162,7 +164,7 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          loadWorkContext, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, bangkokNow, toDateStr, eachDate } from "../supabase-client.js";
+         getAcademicYears, academicYearRange, bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260725-2";
 
 const session = await requireAuth();
 if (session) {
@@ -261,7 +263,10 @@ if (session) {
 
       el("overview-title").textContent = `ภาพรวม — ${range.label}`;
       el("s-staff").textContent = summaries.length;
-      el("s-late").textContent = summaries.reduce((a, s) => a + s.late, 0);
+      const totalLate = summaries.reduce((a, s) => a + s.late, 0);
+      const totalLateMinutes = summaries.reduce((a, s) => a + s.lateMinutes, 0);
+      el("s-late").textContent = `${totalLate} ครั้ง`;
+      el("s-late-minutes").textContent = `รวม ${totalLateMinutes} นาที`;
       el("s-absent").textContent = summaries.reduce((a, s) => a + s.absent, 0);
       el("s-leave").textContent = summaries.reduce((a, s) => a + s.leaveDays, 0);
 
@@ -309,7 +314,10 @@ if (session) {
       <tr data-staff="${s.staff.id}">
         <td>${s.staff.full_name}${s.staff.exempt ? ' <span class="field-note">(อนุโลม)</span>' : ""}</td>
         <td>${s.workDays}</td><td>${s.present}</td>
-        <td class="${s.late ? "warn" : ""}">${s.late}</td>
+        <td class="${s.late ? "warn" : ""}">
+          <span class="cell-main">${s.late} ครั้ง</span>
+          <span class="cell-sub">${s.lateMinutes} นาที</span>
+        </td>
         <td class="${s.absent ? "bad" : ""}">${s.absent}</td>
         <td>${s.leaveDays}</td>
       </tr>`).join("")
@@ -329,7 +337,7 @@ if (session) {
     const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
     el("detail-stats").innerHTML = `
       <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-      <div class="stat warn"><b>${s.late}</b><span>สาย (ครั้ง)</span></div>
+      <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
       <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
       <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>`;
 

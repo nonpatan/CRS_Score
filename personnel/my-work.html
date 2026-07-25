@@ -117,7 +117,7 @@
 <script type="module">
 import { sb, requireAuth, signOut, loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260725-2";
 
 const session = await requireAuth();
 if (session) {
@@ -158,7 +158,7 @@ if (session) {
       el("year-stats").innerHTML = `
         <div class="stat"><b>${s.workDays}</b><span>วันทำงาน</span></div>
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-        <div class="stat warn"><b>${s.late}</b><span>สาย (ครั้ง)</span></div>
+        <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>`;
 
       const quotas = await getLeaveQuotas(year);
@@ -196,7 +196,7 @@ if (session) {
       const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
       el("month-stats").innerHTML = `
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-        <div class="stat warn"><b>${s.late}</b><span>สาย (ครั้ง)</span></div>
+        <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
         <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>`;
 
@@ -216,6 +216,7 @@ if (session) {
       const ctxToday = await loadWorkContext(today, today);
       const r = computeDayStatus(me, today, ctxToday);
       let text = WORK_STATUS_LABEL[r.status];
+      if (r.status === "late") text = `สาย ${r.lateMinutes} นาที`;
       if (r.status === "leave") text = `ลา (${r.leaveType})`;
       if (r.status === "present" && r.exempt) text = "มา (อนุโลม)";
       const dToday = new Date(today + "T00:00:00Z")

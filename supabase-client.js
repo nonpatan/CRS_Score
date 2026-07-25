@@ -891,7 +891,7 @@ export function computeDayStatus(staff, dateStr, ctx) {
 export function summarizeStaff(staff, from, to, ctx) {
   const days = eachDate(from, to);
   const sum = {
-    staff, workDays: 0, present: 0, late: 0, absent: 0,
+    staff, workDays: 0, present: 0, late: 0, lateMinutes: 0, absent: 0,
     leaveDays: 0, leaveByType: {}, pendingDays: 0, rows: []
   };
   for (const d of days) {
@@ -902,7 +902,11 @@ export function summarizeStaff(staff, from, to, ctx) {
 
     sum.workDays++;
     if (r.status === "present") sum.present++;
-    else if (r.status === "late") { sum.late++; sum.present++; }   // สายก็ถือว่ามาทำงาน
+    else if (r.status === "late") {
+      sum.late++;
+      sum.lateMinutes += Number(r.lateMinutes) || 0;
+      sum.present++;   // สายก็ถือว่ามาทำงาน
+    }
     else if (r.status === "absent") sum.absent++;
     else if (r.status === "leave") {
       sum.leaveDays += r.weight;
