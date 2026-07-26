@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>กำหนดครูประจำชั้น — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.55;
+  }
+  .wrap { max-width:860px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; overflow:hidden;
+    border:1px solid var(--line); border-radius:12px; background:var(--white);
+  }
+  .field { min-width:0; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  select {
+    width:100%; min-width:0; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button {
+    min-height:40px; padding:8px 13px; border:0; border-radius:9px;
+    font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary { color:#fff; background:var(--teal); }
+  button.danger { color:var(--danger); background:var(--danger-soft); }
+  button:disabled { opacity:.55; cursor:default; }
+  .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner a { color:inherit; font-weight:700; }
+  .summary-line { margin-top:8px; color:var(--muted); font-size:13px; }
+  .room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .room-card {
+    min-width:0; padding:14px; border:1px solid var(--line);
+    border-radius:12px; background:#fff;
+  }
+  .room-card.not-ready { border-color:#e5c16a; background:#fffdf7; }
+  .room-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .room-head h2 { margin:0; font-size:18px; }
+  .room-head span { color:var(--muted); font-size:12px; white-space:nowrap; }
+  .teacher-list { display:grid; gap:7px; margin:12px 0; }
+  .teacher-chip {
+    display:flex; align-items:center; gap:8px; min-width:0;
+    padding:8px 9px; border-radius:9px; background:#f4f8f7;
+  }
+  .teacher-chip .who { min-width:0; flex:1; overflow-wrap:anywhere; }
+  .teacher-chip .who b { display:block; font-size:14px; }
+  .teacher-chip .who span { color:var(--muted); font-size:12px; }
+  .teacher-chip.no-login { color:var(--amber); background:var(--amber-soft); }
+  .teacher-chip button { min-height:32px; padding:5px 9px; font-size:12px; flex:0 0 auto; }
+  .assign-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; }
+  .select-warning { min-height:20px; margin-top:4px; color:var(--amber); font-size:12px; }
+  .room-warning { margin-top:9px; color:var(--danger); font-size:13px; font-weight:600; }
+  .empty { padding:28px 10px; color:var(--muted); text-align:center; }
+  #toast {
+    position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
+    padding:11px 18px; border-radius:10px; color:#fff; background:#1f2a2e;
+    font-weight:600; opacity:0; pointer-events:none; transform:translateX(-50%);
+    transition:opacity .18s;
+  }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:700px) { .room-grid { grid-template-columns:1fr; } }
+  @media (max-width:420px) {
+    .assign-row { grid-template-columns:1fr; }
+    .assign-row button { width:100%; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>กำหนดครูประจำชั้น</h1>
+    <p>หนึ่งห้องมีครูได้หลายคน แต่ต้องมีอย่างน้อยหนึ่งคนที่ผูกบัญชีจึงจะเช็คชื่อได้</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260726-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="gate" class="card" hidden></section>
+    <section id="manager-content" hidden>
+      <div class="card">
+        <div class="field">
+          <label for="year-select">ปีการศึกษา</label>
+          <select id="year-select"><option value="">กำลังโหลด…</option></select>
+        </div>
+        <div class="summary-line" id="scope-note">กำลังโหลดข้อมูลห้อง…</div>
+      </div>
+      <section id="placement-warning" class="card" hidden></section>
+      <section class="card">
+        <div class="banner info">
+          รายชื่อมาจากบุคลากรที่ปฏิบัติงานอยู่ ธง “ยังไม่ผูกบัญชี” หมายถึงคนนั้นยังเช็คชื่อไม่ได้
+          แม้จะถูกกำหนดเป็นครูประจำชั้นแล้ว
+        </div>
+        <div class="room-grid" id="room-grid"><div class="empty">กำลังโหลด…</div></div>
+      </section>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  getStudentPlacements, getActiveStudents, listStaffPicker, roomsFromPlacements,
+  bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260726-4";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").classList.toggle("err", isError);
+  el("toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el("toast").classList.remove("show"), 3200);
+}
+
+let years = [];
+let staff = [];
+let assignments = [];
+let rooms = [];
+let selectedYear = "";
+
+function staffById(id) {
+  return staff.find(person => person.id === id) || null;
+}
+function staffOptions(room) {
+  const assigned = new Set(
+    assignments.filter(row => roomKey(row) === roomKey(room)).map(row => row.staff_id)
+  );
+  return '<option value="">— เลือกครู —</option>' + staff.map(person => {
+    const disabled = assigned.has(person.id) ? " disabled" : "";
+    const suffix = person.has_login ? "" : " · ยังไม่ผูกบัญชี";
+    return `<option value="${esc(person.id)}"${disabled}>${esc(person.full_name)}${esc(suffix)}</option>`;
+  }).join("");
+}
+function renderRooms() {
+  if (!rooms.length) {
+    el("room-grid").innerHTML = '<div class="empty">ปีนี้ยังไม่มีข้อมูลห้องเรียนจาก student_year_placements</div>';
+    return;
+  }
+  el("room-grid").innerHTML = rooms.map(room => {
+    const roomAssignments = assignments.filter(row => roomKey(row) === roomKey(room));
+    const ready = roomAssignments.some(row => staffById(row.staff_id)?.has_login);
+    const teachers = roomAssignments.length
+      ? roomAssignments.map(row => {
+          const person = staffById(row.staff_id);
+          const name = person?.full_name || "บุคลากรที่ไม่อยู่ในรายชื่อปัจจุบัน";
+          const hasLogin = person?.has_login === true;
+          return `<div class="teacher-chip${hasLogin ? "" : " no-login"}">
+            <div class="who"><b>${esc(name)}</b><span>${hasLogin ? esc(person?.staff_position || "ผูกบัญชีแล้ว") : "ยังไม่ผูกบัญชี — คนนี้เช็คชื่อไม่ได้"}</span></div>
+            <button class="danger" data-remove="${esc(row.id)}" type="button">เอาออก</button>
+          </div>`;
+        }).join("")
+      : '<div class="summary-line">ยังไม่ได้กำหนดครูประจำชั้น</div>';
+    return `<article class="room-card${ready ? "" : " not-ready"}" data-room="${esc(roomKey(room))}">
+      <div class="room-head">
+        <h2>${esc(room.grade_level)} · ${esc(room.classroom)}</h2>
+        <span>${room.studentCount} คน</span>
+      </div>
+      <div class="teacher-list">${teachers}</div>
+      <div class="assign-row">
+        <div>
+          <label for="staff-${esc(room.index)}">เพิ่มครูประจำชั้น</label>
+          <select id="staff-${esc(room.index)}" data-staff-select="${esc(room.index)}">${staffOptions(room)}</select>
+          <div class="select-warning" data-select-warning="${esc(room.index)}"></div>
+        </div>
+        <button class="primary" data-add="${esc(room.index)}" type="button">เพิ่มครู</button>
+      </div>
+      ${ready ? "" : '<div class="room-warning">⚠ ห้องนี้ยังไม่มีครูที่ผูกบัญชี จึงยังเช็คชื่อไม่ได้</div>'}
+    </article>`;
+  }).join("");
+}
+
+async function loadYear() {
+  selectedYear = el("year-select").value;
+  el("room-grid").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+  const [placementRes, activeStudents, assignmentRes] = await Promise.all([
+    getStudentPlacements(selectedYear),
+    getActiveStudents(),
+    sb.from("homeroom_teachers").select("*").eq("year", selectedYear)
+  ]);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (assignmentRes.error) throw new Error("โหลดครูประจำชั้นไม่สำเร็จ: " + assignmentRes.error.message);
+  assignments = assignmentRes.data || [];
+  const placements = placementRes.data || [];
+  const placedIds = new Set(placements.map(p => p.student_id));
+  const missingCount = (activeStudents || []).filter(s => !placedIds.has(s.id)).length;
+  el("placement-warning").hidden = missingCount === 0;
+  el("placement-warning").innerHTML = missingCount
+    ? `<div class="banner warn" style="margin:0"><b>มีนักเรียน ${missingCount} คนที่ยังไม่มีชั้น/ห้องในปีการศึกษา ${esc(selectedYear)}</b><br>` +
+      `กรุณาจัดห้องที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a> เพื่อไม่ให้ตกจากรายชื่อเช็คชื่อ</div>`
+    : "";
+
+  const placementRooms = roomsFromPlacements(placements, selectedYear);
+  const mergedRooms = new Map(placementRooms.map(room => [roomKey(room), room]));
+  // รวม assignment เก่าที่ห้องยังไม่มี placement ไว้ด้วย เพื่อให้ผู้ดูแลเห็นและแก้ไขได้ ไม่ซ่อนข้อมูล
+  for (const row of assignments) {
+    const key = roomKey(row);
+    if (!mergedRooms.has(key)) mergedRooms.set(key, {
+      year:selectedYear, grade_level:row.grade_level, classroom:row.classroom, studentCount:0
+    });
+  }
+  // ส่งรายการที่รวมแล้วกลับผ่าน helper อีกครั้งเพื่อคงลำดับมาตรฐาน โดยเก็บ studentCount เดิมไว้
+  rooms = roomsFromPlacements([...mergedRooms.values()], selectedYear)
+    .map((room, index) => ({ ...mergedRooms.get(roomKey(room)), index }));
+  const readyCount = rooms.filter(room =>
+    assignments.some(row => roomKey(row) === roomKey(room) && staffById(row.staff_id)?.has_login)
+  ).length;
+  el("scope-note").textContent = `${rooms.length} ห้อง · พร้อมเช็คชื่อ ${readyCount} ห้อง · ยังไม่พร้อม ${rooms.length - readyCount} ห้อง`;
+  renderRooms();
+}
+
+el("room-grid").addEventListener("change", event => {
+  const select = event.target.closest("[data-staff-select]");
+  if (!select) return;
+  const person = staffById(select.value);
+  const warning = el("room-grid").querySelector(`[data-select-warning="${select.dataset.staffSelect}"]`);
+  warning.textContent = person && !person.has_login
+    ? "คนนี้ยังไม่ผูกบัญชี จึงเช็คชื่อไม่ได้จนกว่าจะผูกบัญชีที่ทะเบียนบุคลากร"
+    : "";
+});
+el("room-grid").addEventListener("click", async event => {
+  const addButton = event.target.closest("[data-add]");
+  const removeButton = event.target.closest("[data-remove]");
+  if (addButton) {
+    const room = rooms[Number(addButton.dataset.add)];
+    const select = el("room-grid").querySelector(`[data-staff-select="${addButton.dataset.add}"]`);
+    const person = staffById(select?.value);
+    if (!room || !person) return toast("กรุณาเลือกครูก่อน", true);
+    addButton.disabled = true;
+    const { error } = await sb.from("homeroom_teachers").insert({
+      year:selectedYear,
+      grade_level:room.grade_level,
+      classroom:room.classroom,
+      staff_id:person.id
+    });
+    addButton.disabled = false;
+    if (error) return toast("เพิ่มครูไม่สำเร็จ: " + error.message, true);
+    toast(person.has_login
+      ? `เพิ่ม ${person.full_name} เป็นครูประจำชั้นแล้ว`
+      : `เพิ่มแล้ว แต่ ${person.full_name} ยังเช็คชื่อไม่ได้จนกว่าจะผูกบัญชี`);
+    try { await loadYear(); } catch (error) { toast(error.message, true); }
+  }
+  if (removeButton) {
+    if (!confirm("ยืนยันเอาครูคนนี้ออกจากห้อง? ผลเช็คชื่อเดิมจะไม่ถูกลบ")) return;
+    removeButton.disabled = true;
+    const { error } = await sb.from("homeroom_teachers").delete().eq("id", removeButton.dataset.remove);
+    removeButton.disabled = false;
+    if (error) return toast("เอาครูออกไม่สำเร็จ: " + error.message, true);
+    toast("เอาครูออกจากห้องแล้ว");
+    try { await loadYear(); } catch (error) { toast(error.message, true); }
+  }
+});
+el("year-select").addEventListener("change", async () => {
+  try { await loadYear(); } catch (error) {
+    el("room-grid").innerHTML = `<div class="banner bad" style="margin:0"><b>โหลดข้อมูลไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
+  }
+});
+
+const session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  const canManage = await checkDepartment("บริหารทั่วไป");
+  if (!canManage) {
+    el("gate").hidden = false;
+    el("gate").innerHTML = '<div class="banner warn" style="margin:0"><b>หน้านี้สำหรับฝ่ายบริหารทั่วไป</b><br>' +
+      'การกำหนดหรือถอดครูประจำชั้นต้องเป็นผู้ดูแลระบบ หรือผู้ที่ได้รับสิทธิ์ฝ่ายบริหารทั่วไป</div>';
+  } else {
+    el("manager-content").hidden = false;
+    try {
+      [years, staff] = await Promise.all([getAcademicYears(), listStaffPicker()]);
+      const todayYear = academicYearOf(toDateStr(bangkokNow()), years);
+      el("year-select").innerHTML = years.length
+        ? [...years].sort((a, b) => b.start_date.localeCompare(a.start_date))
+            .map(y => `<option value="${esc(y.year)}"${y.year === todayYear ? " selected" : ""}>${esc(y.year)}</option>`).join("")
+        : '<option value="">— ยังไม่มีปีการศึกษา —</option>';
+      if (!years.length) {
+        el("scope-note").textContent = "กรุณาเพิ่มปีการศึกษาที่หน้าตั้งค่างานบุคคลก่อน";
+        el("room-grid").innerHTML = '<div class="empty">ยังไม่มีปีการศึกษา</div>';
+      } else {
+        await loadYear();
+      }
+    } catch (error) {
+      el("room-grid").innerHTML = `<div class="banner bad" style="margin:0"><b>เปิดหน้าจัดการไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
+    }
+  }
+}
+</script>
+</body>
+</html>

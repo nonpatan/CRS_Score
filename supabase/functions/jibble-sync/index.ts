@@ -9,6 +9,7 @@
 //   POST { scope: "people" }                          → ซิงก์รายชื่อ + ตารางงาน + วันหยุด
 //   POST { scope: "month", yearMonth: "2026-07" }     → ซิงก์เวลาเข้า-ออกของเดือนนั้น
 //   POST { scope: "month", yearMonth: "2026-07", force: true }  → ดึงทับทั้งเดือน (ปุ่ม "ซิงก์ใหม่")
+//   POST { scope: "today" }                          → อัปเดตการ์ดครูมาวันนี้ (ผู้ล็อกอินทุกคน)
 //
 // กติกาความนิ่งของข้อมูล: วันนิ่ง = วันก่อนหน้า หรือ วันนี้ที่เลยเวลา auto clock-out (18:00) แล้ว
 //   → ก่อน 18:00 วันนี้ถูกดึงใหม่ทุกครั้ง · หลัง 18:00 ไม่ต้องดึงซ้ำ
@@ -53,6 +54,15 @@ function monthBounds(yearMonth: string) {
   return { start, end };
 }
 const minDate = (a: string, b: string) => (a < b ? a : b);
+function isoWeekday(dateStr: string): number {
+  const weekday = new Date(dateStr + "T00:00:00Z").getUTCDay();
+  return weekday === 0 ? 7 : weekday;
+}
+function isPastTime(nowBkk: Date, timeStr: string): boolean {
+  const [hour, minute] = String(timeStr).split(":").map(Number);
+  return nowBkk.getUTCHours() > hour ||
+    (nowBkk.getUTCHours() === hour && nowBkk.getUTCMinutes() >= (minute || 0));
+}
 
 // ---------- Jibble ----------
 async function getJibbleToken(): Promise<string> {
@@ -197,6 +207,66 @@ async function syncPeople(db: any, token: string) {
   };
 }
 
+// ---------- ยุบ TimeEntries เป็น work_attendance (ใช้ร่วมกันทั้ง month และ today) ----------
+type StaffLink = { id: string; jibble_person_id: string | null };
+type AttendanceRow = {
+  staff_id: string;
+  work_date: string;
+  first_in: string | null;
+  last_out: string | null;
+  first_in_local: string | null;
+  auto_out: boolean;
+  source: string;
+  synced_at: string;
+};
+
+function collapseTimeEntries(
+  entries: any[],
+  staffList: StaffLink[],
+  syncedAt: string,
+): AttendanceRow[] {
+  const byJibbleId = new Map<string, string>(
+    staffList
+      .filter((staff) => staff.jibble_person_id)
+      .map((staff) => [staff.jibble_person_id!, staff.id]),
+  );
+
+  type Agg = { firstIn?: string; lastOut?: string; autoOut: boolean };
+  const agg = new Map<string, Agg>();
+  for (const entry of entries) {
+    if (entry.status !== "Active") continue;
+    const staffId = byJibbleId.get(entry.personId);
+    if (!staffId || !entry.belongsToDate) continue;
+    const key = `${staffId}|${String(entry.belongsToDate).slice(0, 10)}`;
+    const current = agg.get(key) ?? { autoOut: false };
+    if (entry.type === "In") {
+      if (!current.firstIn || entry.localTime < current.firstIn) current.firstIn = entry.localTime;
+    } else if (entry.type === "Out") {
+      if (!current.lastOut || entry.localTime > current.lastOut) {
+        current.lastOut = entry.localTime;
+        // AutoOut = ระบบเด้งออกให้ = "ลืมกด logout" ไม่ใช่ "ทำงานถึงเวลานั้น"
+        current.autoOut = entry.clientType === "AutoOut";
+      }
+    }
+    agg.set(key, current);
+  }
+
+  return [...agg.entries()].map(([key, value]) => {
+    const [staffId, workDate] = key.split("|");
+    return {
+      staff_id: staffId,
+      work_date: workDate,
+      first_in: value.firstIn ?? null,
+      last_out: value.lastOut ?? null,
+      // localTime มี offset +07:00 แล้ว ตัดเวลาตรง ๆ ปลอดภัยกว่าคำนวณ timezone ใหม่
+      first_in_local: value.firstIn ? value.firstIn.slice(11, 19) : null,
+      auto_out: value.autoOut,
+      source: "jibble",
+      synced_at: syncedAt,
+    };
+  });
+}
+
 // ---------- ซิงก์เวลาเข้า-ออกของเดือนหนึ่ง ----------
 async function syncMonth(db: any, token: string, yearMonth: string, force: boolean) {
   const { start: monthStart, end: monthEnd } = monthBounds(yearMonth);
@@ -207,9 +277,7 @@ async function syncMonth(db: any, token: string, yearMonth: string, force: boole
   const { data: finalSetting } = await db
     .from("hr_settings").select("value").eq("key", "day_final_time").maybeSingle();
   const finalTime = finalSetting?.value ?? "18:00";
-  const [fh, fm] = finalTime.split(":").map(Number);
-  const pastFinalTime =
-    nowBkk.getUTCHours() > fh || (nowBkk.getUTCHours() === fh && nowBkk.getUTCMinutes() >= (fm || 0));
+  const pastFinalTime = isPastTime(nowBkk, finalTime);
 
   // วันสุดท้ายที่ข้อมูล "นิ่ง" แล้ว
   const finalDay = pastFinalTime ? today : addDays(today, -1);
@@ -228,49 +296,10 @@ async function syncMonth(db: any, token: string, yearMonth: string, force: boole
       "$orderby": "time asc",
     }, token);
 
-    // แผนที่ jibble_person_id → staff.id (คนที่ไม่มีในทะเบียนจะถูกข้าม)
     const { data: staffList, error: staffErr } = await db
       .from("staff").select("id,jibble_person_id").not("jibble_person_id", "is", null);
     if (staffErr) throw new Error("อ่านทะเบียนบุคลากรไม่สำเร็จ: " + staffErr.message);
-    const byJibbleId = new Map<string, string>(
-      (staffList ?? []).map((s: any) => [s.jibble_person_id, s.id]),
-    );
-
-    // ยุบ event ทีละครั้ง (In/Out) ให้เหลือ 1 แถวต่อคนต่อวัน
-    type Agg = { firstIn?: string; lastOut?: string; autoOut: boolean };
-    const agg = new Map<string, Agg>();
-    for (const e of entries) {
-      if (e.status !== "Active") continue;
-      const staffId = byJibbleId.get(e.personId);
-      if (!staffId || !e.belongsToDate) continue;
-      const key = `${staffId}|${String(e.belongsToDate).slice(0, 10)}`;
-      const cur = agg.get(key) ?? { autoOut: false };
-      if (e.type === "In") {
-        if (!cur.firstIn || e.localTime < cur.firstIn) cur.firstIn = e.localTime;
-      } else if (e.type === "Out") {
-        if (!cur.lastOut || e.localTime > cur.lastOut) {
-          cur.lastOut = e.localTime;
-          // AutoOut = ระบบเด้งออกให้ = "ลืมกด logout" ไม่ใช่ "ทำงานถึงเวลานั้น"
-          cur.autoOut = e.clientType === "AutoOut";
-        }
-      }
-      agg.set(key, cur);
-    }
-
-    const rows = [...agg.entries()].map(([key, v]) => {
-      const [staffId, workDate] = key.split("|");
-      return {
-        staff_id: staffId,
-        work_date: workDate,
-        first_in: v.firstIn ?? null,
-        last_out: v.lastOut ?? null,
-        // ตัดเวลาจากสตริง localTime ตรง ๆ (มี offset +07:00 ติดมาแล้ว) ปลอดภัยกว่าคำนวณ timezone เอง
-        first_in_local: v.firstIn ? v.firstIn.slice(11, 19) : null,
-        auto_out: v.autoOut,
-        source: "jibble",
-        synced_at: new Date().toISOString(),
-      };
-    });
+    const rows = collapseTimeEntries(entries, staffList ?? [], new Date().toISOString());
 
     if (rows.length) {
       const { error } = await db.from("work_attendance")
@@ -300,6 +329,164 @@ async function syncMonth(db: any, token: string, yearMonth: string, force: boole
   };
 }
 
+// ---------- การ์ด "ครูมาวันนี้" ----------
+function shuffled<T>(rows: T[]): T[] {
+  const out = [...rows];
+  for (let index = out.length - 1; index > 0; index--) {
+    const swapWith = Math.floor(Math.random() * (index + 1));
+    [out[index], out[swapWith]] = [out[swapWith], out[index]];
+  }
+  return out;
+}
+
+async function syncToday(db: any, isHr: boolean) {
+  const nowBkk = nowInBangkok();
+  const today = ymd(nowBkk);
+  const weekday = isoWeekday(today);
+
+  const [scheduleRes, holidayRes, settingsRes] = await Promise.all([
+    db.from("work_schedule")
+      .select("weekday,is_working_day")
+      .eq("weekday", weekday)
+      .maybeSingle(),
+    db.from("work_holidays")
+      .select("holiday_date")
+      .eq("holiday_date", today)
+      .maybeSingle(),
+    db.from("hr_settings")
+      .select("key,value")
+      .in("key", ["day_final_time", "today_refresh_minutes"]),
+  ]);
+  if (scheduleRes.error) throw new Error("อ่านตารางงานไม่สำเร็จ: " + scheduleRes.error.message);
+  if (holidayRes.error) throw new Error("อ่านวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+  if (settingsRes.error) throw new Error("อ่านค่าตั้งงานบุคคลไม่สำเร็จ: " + settingsRes.error.message);
+  if (!scheduleRes.data) throw new Error("ยังไม่มีตารางงานของวันนี้ กรุณาซิงก์ข้อมูลบุคลากรก่อน");
+
+  // วันหยุดต้องจบตรงนี้ ไม่ขอ token และไม่ยิง Jibble
+  if (scheduleRes.data.is_working_day !== true || holidayRes.data) {
+    return { isHoliday: true, fetched: false, rowsSynced: 0, fetchedAt: null };
+  }
+
+  const settings = new Map<string, string>(
+    (settingsRes.data ?? []).map((row: any) => [row.key, row.value]),
+  );
+  // ค่าเริ่มต้น 5 นาทีเป็นตัวเลขที่ผู้ใช้ยืนยันแล้ว เก็บลง hr_settings ครั้งเดียว
+  // จากนั้นทุกครั้งอ่านจากตาราง ไม่ฝังค่านี้ไว้ในตรรกะ throttle
+  if (!settings.has("today_refresh_minutes")) {
+    const { error } = await db.from("hr_settings").insert({
+      key: "today_refresh_minutes",
+      value: "5",
+    });
+    if (error && error.code !== "23505") {
+      throw new Error("ตั้งค่ารอบอัปเดตข้อมูลวันนี้ไม่สำเร็จ: " + error.message);
+    }
+    settings.set("today_refresh_minutes", "5");
+  }
+  const refreshMinutes = Number(settings.get("today_refresh_minutes"));
+  if (!Number.isFinite(refreshMinutes) || refreshMinutes < 0) {
+    throw new Error("ค่า today_refresh_minutes ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป");
+  }
+  const finalTime = String(settings.get("day_final_time") ?? "18:00").slice(0, 5);
+  const pastFinalTime = isPastTime(nowBkk, finalTime);
+
+  const { data: latestLog, error: logError } = await db.from("jibble_sync_log")
+    .select("started_at,finished_at")
+    .eq("scope", "today")
+    .eq("ok", true)
+    .order("finished_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (logError) throw new Error("อ่านประวัติการอัปเดตวันนี้ไม่สำเร็จ: " + logError.message);
+
+  const latestAt = latestLog?.finished_at ?? latestLog?.started_at ?? null;
+  const freshAfter = Date.now() - refreshMinutes * 60_000;
+  const cacheIsFresh = !!latestAt && new Date(latestAt).getTime() >= freshAfter;
+  const finalMoment = new Date(`${today}T${finalTime}:00+07:00`).getTime();
+  const hasFinalCache = !!latestAt && new Date(latestAt).getTime() >= finalMoment;
+
+  const { data: staffList, error: staffError } = await db.from("staff")
+    .select("id,jibble_person_id,exempt,allowed_late_time")
+    .eq("is_active", true);
+  if (staffError) throw new Error("อ่านทะเบียนบุคลากรไม่สำเร็จ: " + staffError.message);
+
+  let fetched = false;
+  let rowsSynced = 0;
+  // ก่อนปิดวัน refresh ตามช่วงที่ตั้งไว้; หลังปิดวันดึงอีกครั้งเดียวให้ได้ข้อมูลสุดท้ายของวัน
+  const shouldFetch = pastFinalTime ? !hasFinalCache : !cacheIsFresh;
+  if (shouldFetch) {
+    const token = await getJibbleToken();
+    const entries = await fetchAll(`${JIBBLE_TIME}/TimeEntries`, {
+      "$select": "personId,belongsToDate,type,localTime,clientType,status",
+      "$filter": `belongsToDate ge ${today} and belongsToDate le ${today}`,
+      "$orderby": "time asc",
+    }, token);
+    const syncedAt = new Date().toISOString();
+    const attendanceRows = collapseTimeEntries(entries, staffList ?? [], syncedAt);
+    if (attendanceRows.length) {
+      const { error } = await db.from("work_attendance")
+        .upsert(attendanceRows, { onConflict: "staff_id,work_date" });
+      if (error) throw new Error("บันทึกเวลาเข้า-ออกวันนี้ไม่สำเร็จ: " + error.message);
+    }
+    fetched = true;
+    rowsSynced = attendanceRows.length;
+  }
+
+  const attendanceRes = await db.from("work_attendance")
+    .select("staff_id,first_in_local,auto_out,synced_at")
+    .eq("work_date", today);
+  if (attendanceRes.error) throw new Error("อ่านเวลาเข้า-ออกวันนี้ไม่สำเร็จ: " + attendanceRes.error.message);
+
+  const attendanceByStaff = new Map<string, any>(
+    (attendanceRes.data ?? []).map((row: any) => [row.staff_id, row]),
+  );
+  // "ข้อมูล ณ ..." ต้องมาจากเวลาที่เขียนข้อมูลจริง ไม่ใช่เวลาที่มีคนเปิด dashboard
+  const fetchedAt = (attendanceRes.data ?? [])
+    .map((row: any) => row.synced_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? null;
+
+  if (!isHr) {
+    const total = (staffList ?? []).length;
+    const checkedIn = (staffList ?? []).filter((staff: any) =>
+      staff.exempt === true || !!attendanceByStaff.get(staff.id)?.first_in_local
+    ).length;
+    // สำคัญ: basic กรองที่ server และไม่ประกอบ rows ขึ้น response แม้แต่ field เดียว
+    return { mode: "basic", total, checkedIn, fetchedAt, fetched, rowsSynced };
+  }
+
+  // ใบลาใช้เฉพาะโหมด full — ครูทั่วไปไม่ควรเสีย query นี้ทุกครั้งที่เปิด dashboard
+  const leavesRes = await db.from("staff_leaves")
+    .select("staff_id,day_portion")
+    .lte("start_date", today)
+    .gte("end_date", today);
+  if (leavesRes.error) throw new Error("อ่านข้อมูลลาวันนี้ไม่สำเร็จ: " + leavesRes.error.message);
+  const leaveByStaff = new Map<string, any>();
+  for (const leave of (leavesRes.data ?? [])) {
+    if (!leaveByStaff.has(leave.staff_id)) leaveByStaff.set(leave.staff_id, leave);
+  }
+
+  const anonymousRows = (staffList ?? []).map((staff: any) => {
+    const attendance = attendanceByStaff.get(staff.id);
+    const leave = leaveByStaff.get(staff.id);
+    return {
+      exempt: staff.exempt === true,
+      allowed_late_time: staff.allowed_late_time ?? null,
+      first_in_local: attendance?.first_in_local ?? null,
+      auto_out: attendance?.auto_out === true,
+      on_leave: !!leave,
+      leave_portion: leave?.day_portion ?? null,
+    };
+  });
+  return {
+    mode: "full",
+    rows: shuffled(anonymousRows),
+    fetchedAt,
+    fetched,
+    rowsSynced,
+  };
+}
+
 // ---------- ทางเข้าหลัก ----------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -313,50 +500,79 @@ Deno.serve(async (req) => {
   );
 
   try {
-    // ---- ตรวจสิทธิ์: ต้องล็อกอิน และต้องเป็น admin หรือฝ่ายบุคคลที่ได้รับอนุญาต ----
-    // ใช้ token ของผู้ใช้เรียก has_department() เพื่อให้ RLS/auth.uid() ทำงานตามบริบทผู้ใช้จริง
+    // ---- ตรวจสิทธิ์ ----
+    // today: ผู้ล็อกอินทุกคนเรียกได้ แต่คืนรูปแบบตามสิทธิ์
+    // people/month: คง gate เดิมไว้ ต้องเป็น admin หรือฝ่ายบุคคลที่ได้รับอนุญาต
     const authHeader = req.headers.get("Authorization") ?? "";
     if (!authHeader.startsWith("Bearer ")) return json({ error: "ต้องล็อกอินก่อน" }, 401);
 
+    const body = await req.json().catch(() => ({}));
+    scope = body.scope ?? "";
     const asUser = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
       { global: { headers: { Authorization: authHeader } } },
     );
+    const { data: userData, error: userError } = await asUser.auth.getUser();
+    if (userError || !userData.user) return json({ error: "เซสชันหมดอายุ กรุณาล็อกอินใหม่" }, 401);
+
     const { data: allowed, error: permError } = await asUser.rpc("has_department", {
       p_department: "บุคลากร",
     });
     if (permError) return json({ error: "ตรวจสิทธิ์ไม่สำเร็จ: " + permError.message }, 500);
-    if (allowed !== true) return json({ error: "ไม่มีสิทธิ์ซิงก์ข้อมูลฝ่ายบุคคล" }, 403);
-
-    const body = await req.json().catch(() => ({}));
-    scope = body.scope ?? "";
-    const token = await getJibbleToken();
+    if (scope !== "today" && allowed !== true) {
+      return json({ error: "ไม่มีสิทธิ์ซิงก์ข้อมูลฝ่ายบุคคล" }, 403);
+    }
 
     let result: Record<string, unknown>;
-    if (scope === "people") {
+    if (scope === "today") {
+      result = await syncToday(service, allowed === true);
+    } else if (scope === "people") {
+      const token = await getJibbleToken();
       result = await syncPeople(service, token);
     } else if (scope === "month") {
       const yearMonth = String(body.yearMonth ?? "");
       if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
         return json({ error: "ต้องระบุ yearMonth เป็นรูปแบบ YYYY-MM" }, 400);
       }
+      const token = await getJibbleToken();
       scope = yearMonth;
       result = await syncMonth(service, token, yearMonth, body.force === true);
     } else {
-      return json({ error: 'scope ต้องเป็น "people" หรือ "month"' }, 400);
+      return json({ error: 'scope ต้องเป็น "people", "month" หรือ "today"' }, 400);
     }
 
-    await service.from("jibble_sync_log").insert({
-      started_at: started,
-      finished_at: new Date().toISOString(),
-      ok: true,
-      scope,
-      rows_synced: Number(result.attendanceRows ?? result.people ?? 0),
-      message: JSON.stringify(result),
-    });
+    // jibble_sync_log อ่านได้โดยผู้ล็อกอินทุกคน จึงห้ามเขียน anonymous rows ของโหมด full ลง message
+    const logMessage = scope === "today"
+      ? JSON.stringify({
+        mode: result.mode ?? null,
+        isHoliday: result.isHoliday === true,
+        total: result.mode === "basic"
+          ? Number(result.total ?? 0)
+          : Array.isArray(result.rows) ? result.rows.length : 0,
+        checkedIn: result.mode === "basic" ? Number(result.checkedIn ?? 0) : undefined,
+        fetchedAt: result.fetchedAt ?? null,
+      })
+      : JSON.stringify(result);
+    // today เขียน success log เฉพาะเมื่อยิง Jibble จริง เพื่อไม่ให้ cache hit ต่ออายุ throttle
+    if (scope !== "today" || result.fetched === true) {
+      await service.from("jibble_sync_log").insert({
+        started_at: started,
+        finished_at: new Date().toISOString(),
+        ok: true,
+        scope,
+        rows_synced: scope === "today"
+          ? Number(result.rowsSynced ?? 0)
+          : Number(result.attendanceRows ?? result.people ?? 0),
+        message: logMessage,
+      });
+    }
 
-    return json({ ok: true, ...result });
+    // fetched/rowsSynced เป็น metadata ภายในสำหรับ handler ไม่ต้องเพิ่มลง API response
+    const responseResult = { ...result };
+    delete responseResult.fetched;
+    delete responseResult.rowsSynced;
+    return json({ ok: true, ...responseResult });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // บันทึกความล้มเหลวไว้เสมอ — serverless พังเงียบได้ ต้องเห็นว่าพลาดตอนไหนเพราะอะไร

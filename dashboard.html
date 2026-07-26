@@ -76,6 +76,28 @@
   .panel-title .symbol { color: var(--amber); }
   .panel-title.danger .symbol { color: var(--danger); }
   .panel-note { color: var(--muted); font-size: 12px; text-align: right; }
+  .panel-link { color: var(--teal); font-weight: 700; text-decoration: none; white-space: nowrap; }
+  .panel-link:hover { text-decoration: underline; }
+  .dashboard-list { padding: 8px 12px 12px; }
+  .dashboard-item { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px 8px; margin: 0 -5px; border-radius: 12px; border-bottom: 1px solid #edf2f2; transition: background-color .18s var(--ease); }
+  .dashboard-item:hover { background: var(--teal-soft); }
+  .dashboard-item:last-child { border-bottom: 0; }
+  .item-main { min-width: 0; }
+  .item-title { overflow-wrap: anywhere; font-weight: 700; }
+  .item-meta { margin-top: 3px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .item-side { color: var(--teal); font-size: 13px; font-weight: 700; text-align: right; white-space: nowrap; }
+  .item-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .item-badge { display: inline-flex; padding: 2px 8px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 11px; font-weight: 700; }
+  .item-badge.status { color: var(--blue); background: #eaf2ff; }
+  .panel-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line); color: var(--muted); background: rgba(247,251,250,.75); font-size: 12px; }
+  .staff-basic { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin-top: 3px; }
+  .staff-basic strong { color: var(--amber); font-size: 30px; line-height: 1; }
+  .staff-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 6px; margin-top: 7px; }
+  .staff-stat { min-width: 0; padding: 7px 4px; border-radius: 9px; text-align: center; background: #f7f9f9; }
+  .staff-stat b { display: block; color: var(--amber); font-size: 21px; line-height: 1.1; }
+  .staff-stat span { display: block; color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .metric-state { margin-top: 3px; color: var(--amber); font-size: 19px; font-weight: 700; line-height: 1.25; }
+  .metric-note.error { color: var(--danger); background: var(--danger-soft); }
   .student-list { padding: 8px 12px 12px; }
   .student-row { display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 11px 8px; margin: 0 -5px; border-radius: 12px; border-bottom: 1px solid #edf2f2; transition: background-color .18s var(--ease); }
   .student-row:hover { background: var(--teal-soft); }
@@ -172,7 +194,7 @@
     <a class="side-link" href="academic/index.html">▣ &nbsp;ฝ่ายวิชาการ</a>
     <span class="side-link disabled" aria-disabled="true">฿ &nbsp;ฝ่ายการเงิน</span>
     <a class="side-link" href="personnel/index.html">♙ &nbsp;ฝ่ายบุคคล</a>
-    <span class="side-link disabled" aria-disabled="true">▤ &nbsp;บริหารทั่วไป</span>
+    <a class="side-link" href="general-affairs/index.html">▤ &nbsp;บริหารทั่วไป</a>
     <a class="side-link" id="link-permissions" href="permissions.html" hidden>⚙ &nbsp;จัดการสิทธิ์</a>
     <div class="side-footer">ระบบติดตามนักเรียน</div>
   </aside>
@@ -186,84 +208,261 @@
       <a class="dept-tab" href="academic/index.html">วิชาการ</a>
       <span class="dept-tab" aria-disabled="true">การเงิน</span>
       <a class="dept-tab" href="personnel/index.html">บุคคล</a>
-      <span class="dept-tab" aria-disabled="true">บริหารทั่วไป</span>
+      <a class="dept-tab" href="general-affairs/index.html">บริหารทั่วไป</a>
     </nav>
     <main>
       <div class="page-head">
-        <div><h1>ภาพรวมโรงเรียน</h1><p class="subhead">ติดตามนักเรียนที่ควรได้รับความช่วยเหลือก่อน</p></div>
+        <div><h1>ภาพรวมโรงเรียน</h1><p class="subhead">ข้อมูลวันนี้และงานที่กำลังจะถึง</p></div>
         <span class="year-chip" id="year-chip">กำลังโหลดปี…</span>
       </div>
       <section class="metrics" aria-label="ตัวเลขภาพรวม">
         <article class="metric">
           <div class="metric-icon">◉</div>
-          <div><div class="metric-label">มาเรียนวันนี้</div><div class="metric-value">—</div><span class="metric-note">v1 · รอเชื่อมข้อมูลรายวัน</span></div>
+          <div><div class="metric-label">นักเรียนมาวันนี้</div><div class="metric-value" id="student-today-value">—</div><span class="metric-note" id="student-today-note">กำลังโหลด…</span></div>
         </article>
         <article class="metric amber">
-          <div class="metric-icon">!</div>
-          <div><div class="metric-label">เสี่ยงติด มส.</div><div class="metric-value" id="risk-count">—</div><span class="metric-note" id="risk-note">มัธยม · ขาดสะสมตั้งแต่ 10%</span></div>
+          <div class="metric-icon">♙</div>
+          <div><div class="metric-label">ครูมาวันนี้</div><div id="staff-today-content"><div class="metric-state">กำลังอัปเดต…</div></div><span class="metric-note" id="staff-today-note">กำลังเชื่อมต่อ Jibble</span></div>
         </article>
         <article class="metric danger">
-          <div class="metric-icon">×</div>
-          <div><div class="metric-label">ขาดบ่อย</div><div class="metric-value" id="frequent-count">—</div><span class="metric-note" id="frequent-note">ประถม · เตือนเร็วกว่าเกณฑ์ มส.</span></div>
+          <div class="metric-icon">▦</div>
+          <div><div class="metric-label">ห้องที่ยังไม่เช็คชื่อ</div><div class="metric-value" id="rooms-unchecked-value">—</div><span class="metric-note" id="rooms-unchecked-note">กำลังโหลด…</span></div>
         </article>
       </section>
       <section class="panels">
         <article class="panel">
-          <div class="panel-head"><h2 class="panel-title"><span class="symbol">⚠</span>นักเรียนมัธยมที่เสี่ยงติด มส.</h2><span class="panel-note">เรียงตามความเสี่ยง</span></div>
-          <div class="student-list" id="risk-list"><div class="load-note">กำลังประมวลผลข้อมูลการเข้าเรียน…</div></div>
+          <div class="panel-head"><h2 class="panel-title"><span class="symbol">◷</span>ปฏิทินปฏิบัติงาน</h2><a class="panel-link" href="academic/calendar.html">ดูทั้งหมด</a></div>
+          <div class="dashboard-list" id="calendar-list"><div class="load-note">กำลังโหลดกำหนดการ…</div></div>
+          <div class="panel-footer"><span id="calendar-footer">รายการที่อยู่ในช่วงแจ้งเตือน</span><a class="panel-link" href="academic/calendar.html">จัดการปฏิทิน</a></div>
         </article>
         <article class="panel">
-          <div class="panel-head"><h2 class="panel-title danger"><span class="symbol">●</span>นักเรียนประถมที่ขาดบ่อย</h2><span class="panel-note" id="frequent-panel-note">เกณฑ์เฝ้าระวังของประถม</span></div>
-          <div class="student-list" id="frequent-list"><div class="load-note">กำลังประมวลผลข้อมูลการเข้าเรียน…</div></div>
+          <div class="panel-head"><h2 class="panel-title"><span class="symbol">◆</span>โครงการ/กิจกรรมเดือนนี้</h2><a class="panel-link" href="academic/projects.html">ดูทั้งหมด</a></div>
+          <div class="dashboard-list" id="project-list"><div class="load-note">กำลังโหลดโครงการ…</div></div>
+          <div class="panel-footer"><span id="project-footer">กำลังสรุปงบประมาณ…</span><a class="panel-link" href="academic/projects.html">จัดการโครงการ</a></div>
         </article>
       </section>
-      <section class="urgent"><span class="urgent-icon">📣</span><div><h2>ติดตามด่วนวันนี้</h2><p>รายชื่อแสดงตรงนี้ทันที เพราะจำนวนผู้ที่ควรติดตามมักมีไม่มาก กด “ฝ่ายวิชาการ” เพื่อไปทำงานต่อในรายวิชา</p></div></section>
     </main>
     <nav class="bottom-nav" aria-label="เมนูด้านล่าง">
       <a class="active" href="dashboard.html"><b>⌂</b>ภาพรวม</a>
       <a href="academic/index.html"><b>▣</b>วิชาการ</a>
       <span><b>฿</b>การเงิน</span>
       <a href="personnel/index.html"><b>♙</b>บุคคล</a>
-      <span><b>▤</b>ทั่วไป</span>
+      <a href="general-affairs/index.html"><b>▤</b>ทั่วไป</a>
     </nav>
   </div>
 </div>
 <script type="module">
-  import { sb, requireAuth, getProfile, getActiveYear, setActiveYear, distinctYears, getSetting, loadAcademicOverviewData, buildAcademicOverview, getMyProfilePresentation, profileInitials } from "./supabase-client.js?v=20260725-4";
+  import {
+    sb, requireAuth, getProfile,
+    getActiveYear, setActiveYear, distinctYears,
+    getSetting, getMyProfilePresentation,
+    loadDailyAttendanceToday, summarizeDailyAttendance,
+    loadTodayStaffSummary,
+    loadAcademicCalendar, pickCalendarUpcoming,
+    loadAcademicProjects, filterProjectsInMonth, projectResponsibleName,
+    bangkokNow, toDateStr
+  } from "./supabase-client.js?v=20260726-3";
 
-  const riskCount = document.getElementById("risk-count");
-  const frequentCount = document.getElementById("frequent-count");
-  const riskList = document.getElementById("risk-list");
-  const frequentList = document.getElementById("frequent-list");
+  const studentTodayValue = document.getElementById("student-today-value");
+  const studentTodayNote = document.getElementById("student-today-note");
+  const staffTodayContent = document.getElementById("staff-today-content");
+  const staffTodayNote = document.getElementById("staff-today-note");
+  const roomsUncheckedValue = document.getElementById("rooms-unchecked-value");
+  const roomsUncheckedNote = document.getElementById("rooms-unchecked-note");
+  const calendarList = document.getElementById("calendar-list");
+  const calendarFooter = document.getElementById("calendar-footer");
+  const projectList = document.getElementById("project-list");
+  const projectFooter = document.getElementById("project-footer");
   const yearChip = document.getElementById("year-chip");
 
   function escapeHtml(value) {
-    return String(value || "").replace(/[&<>"']/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" })[char]);
+    return String(value ?? "").replace(/[&<>"']/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" })[char]);
   }
 
-  function labelForSubject(subject) {
-    return [subject.code, subject.name].filter(Boolean).join(" · ") || "ไม่ระบุชื่อวิชา";
+  function capture(promise) {
+    return promise.then(value => ({ value }), error => ({ error }));
   }
 
-  // ชั้น/ห้องของ "ปีที่เลือก" มาจาก student_year_placements ผ่านตรรกะกลาง
-  // (เดิมอ่าน students.grade_level = ชั้นปัจจุบัน ซึ่งเพี้ยนทันทีเมื่อดูปีเก่าหลังเลื่อนชั้น)
-  function studentClass(row) {
-    return [row.grade, row.classroom].filter(Boolean).join(" ") || "ไม่ระบุชั้น";
+  function resultValue(result) {
+    if (result.error) throw result.error;
+    return result.value;
   }
 
-  function renderRows(target, flagged, threshold) {
-    if (!flagged.length) {
-      target.innerHTML = `<div class='empty'>ยังไม่พบนักเรียนที่ขาดสะสมตั้งแต่ ${threshold}% ของคาบทั้งหมด</div>`;
+  function errorMessage(error) {
+    return "โหลดข้อมูลไม่สำเร็จ: " + (error?.message || "ไม่ทราบสาเหตุ");
+  }
+
+  function setMetricError(valueElement, noteElement, error) {
+    valueElement.textContent = "—";
+    noteElement.textContent = errorMessage(error);
+    noteElement.classList.add("error");
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return "—";
+    return new Date(dateStr + "T00:00:00Z").toLocaleDateString("th-TH", {
+      day: "numeric", month: "short", year: "2-digit", timeZone: "UTC"
+    });
+  }
+
+  function formatRange(startDate, endDate) {
+    const end = endDate || startDate;
+    return startDate === end ? formatDate(startDate) : formatDate(startDate) + " – " + formatDate(end);
+  }
+
+  function formatMoney(value) {
+    return Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }) + " บาท";
+  }
+
+  function formatFetchedAt(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString("th-TH", {
+      hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok"
+    });
+  }
+
+  function renderStudentMetric(result) {
+    try {
+      const summary = resultValue(result);
+      studentTodayNote.classList.remove("error");
+      if (summary.state === "holiday") {
+        studentTodayValue.textContent = "—";
+        studentTodayNote.textContent = "วันนี้เป็นวันหยุด";
+      } else if (summary.state === "no-rooms") {
+        studentTodayValue.textContent = "—";
+        studentTodayNote.textContent = "ยังไม่มีข้อมูลห้องเรียน";
+      } else if (summary.state === "none") {
+        studentTodayValue.textContent = "—";
+        studentTodayNote.textContent = "ยังไม่มีห้องไหนเช็คชื่อ";
+      } else {
+        const unchecked = Math.max(0, summary.roomsTotal - summary.roomsChecked);
+        studentTodayValue.textContent = summary.present + summary.late;
+        studentTodayNote.textContent =
+          `ขาด ${summary.absent} · ลา ${summary.leave} · ` +
+          (unchecked ? `ยังไม่เช็ค ${unchecked} ห้อง` : "เช็คครบทุกห้อง");
+      }
+    } catch (error) {
+      setMetricError(studentTodayValue, studentTodayNote, error);
+    }
+  }
+
+  function renderRoomsMetric(result) {
+    try {
+      const summary = resultValue(result);
+      roomsUncheckedNote.classList.remove("error");
+      if (summary.state === "holiday") {
+        roomsUncheckedValue.textContent = "—";
+        roomsUncheckedNote.textContent = "วันนี้เป็นวันหยุด";
+      } else if (summary.state === "no-rooms") {
+        roomsUncheckedValue.textContent = "—";
+        roomsUncheckedNote.textContent = "ยังไม่มีข้อมูลห้องเรียน";
+      } else {
+        const unchecked = Math.max(0, summary.roomsTotal - summary.roomsChecked);
+        roomsUncheckedValue.textContent = unchecked;
+        roomsUncheckedNote.textContent = summary.state === "none"
+          ? "ยังไม่มีห้องไหนเช็คชื่อ"
+          : unchecked
+            ? `เช็คแล้ว ${summary.roomsChecked} จาก ${summary.roomsTotal} ห้อง`
+            : "เช็คครบทุกห้อง";
+      }
+    } catch (error) {
+      setMetricError(roomsUncheckedValue, roomsUncheckedNote, error);
+    }
+  }
+
+  function renderCalendarPanel(result) {
+    try {
+      const rows = resultValue(result);
+      calendarFooter.textContent = `อยู่ในช่วงแจ้งเตือน ${rows.length} รายการ`;
+      if (!rows.length) {
+        calendarList.innerHTML =
+          '<div class="empty">ช่วงนี้ยังไม่มีกำหนดการของฝ่ายวิชาการ<br><a class="panel-link" href="academic/calendar.html">เปิดปฏิทินปฏิบัติงาน</a></div>';
+        return;
+      }
+      calendarList.innerHTML = rows.map(row => `<div class="dashboard-item">
+        <div class="item-main">
+          <div class="item-title">${escapeHtml(row.title)}</div>
+          <div class="item-meta">${escapeHtml(formatRange(row.start_date, row.end_date))}${row.owner_note ? " · " + escapeHtml(row.owner_note) : ""}</div>
+          <div class="item-badges"><span class="item-badge">${escapeHtml(row.category)}</span><span class="item-badge status">${escapeHtml(row.timing)}</span></div>
+        </div>
+      </div>`).join("");
+    } catch (error) {
+      calendarFooter.textContent = "อัปเดตปฏิทินไม่สำเร็จ";
+      calendarList.innerHTML = `<div class="empty" style="color:var(--danger)">${escapeHtml(errorMessage(error))}</div>`;
+    }
+  }
+
+  function renderProjectPanel(result) {
+    try {
+      const rows = resultValue(result);
+      const budget = rows.reduce((sum, row) => sum + Number(row.budget_planned || 0), 0);
+      projectFooter.textContent = `เดือนนี้ ${rows.length} รายการ · งบตั้งไว้รวม ${formatMoney(budget)}`;
+      if (!rows.length) {
+        projectList.innerHTML =
+          '<div class="empty">เดือนนี้ยังไม่มีโครงการหรือกิจกรรม<br><a class="panel-link" href="academic/projects.html">เปิดหน้าโครงการ/กิจกรรม</a></div>';
+        return;
+      }
+      projectList.innerHTML = rows.map(row => {
+        const responsible = projectResponsibleName(row) || "ยังไม่ระบุ";
+        const budgetText = row.budget_planned == null ? "" : `<div class="item-side">${escapeHtml(formatMoney(row.budget_planned))}</div>`;
+        return `<div class="dashboard-item">
+          <div class="item-main">
+            <div class="item-title">${escapeHtml(row.name)}</div>
+            <div class="item-meta">${escapeHtml(formatRange(row.start_date, row.end_date))} · ผู้รับผิดชอบ: ${escapeHtml(responsible)}</div>
+            <div class="item-badges"><span class="item-badge">${escapeHtml(row.kind)}</span><span class="item-badge status">${escapeHtml(row.status)}</span></div>
+          </div>
+          ${budgetText}
+        </div>`;
+      }).join("");
+    } catch (error) {
+      projectFooter.textContent = "อัปเดตโครงการไม่สำเร็จ";
+      projectList.innerHTML = `<div class="empty" style="color:var(--danger)">${escapeHtml(errorMessage(error))}</div>`;
+    }
+  }
+
+  function renderStaffSummary(summary) {
+    staffTodayNote.classList.remove("error");
+    if (summary.isHoliday) {
+      staffTodayContent.innerHTML = '<div class="metric-state">วันนี้เป็นวันหยุด</div>';
+      staffTodayNote.textContent = "ไม่นับสถานะการทำงาน";
       return;
     }
-    target.innerHTML = flagged.map(item => {
-      const detail = item.subjects.slice(0, 2).map(risk => labelForSubject(risk.subject)).join(" · ");
-      return `<div class="student-row">
-        <span class="student-avatar">${escapeHtml(profileInitials(item.student.name))}</span>
-        <div><div class="student-name">${escapeHtml(item.student.name)}<span class="grade-badge">${escapeHtml(studentClass(item))}</span></div><div class="student-detail">${escapeHtml(detail)}</div></div>
-        <div class="risk-value${item.critical ? " critical" : ""}">${item.maxPercent.toFixed(1)}%<br><span style="font-weight:500">ขาด ${item.maxMissed} คาบ</span></div>
-      </div>`;
-    }).join("");
+    if (summary.fetchedAt === null) {
+      staffTodayContent.innerHTML = '<div class="metric-state">ยังไม่มีใครลงเวลา</div>';
+      staffTodayNote.textContent = "ดึงข้อมูลสำเร็จ แต่ยังไม่มีเวลาเข้า";
+      return;
+    }
+    const fetchedTime = formatFetchedAt(summary.fetchedAt);
+    if (summary.mode === "basic") {
+      staffTodayContent.innerHTML = `<div class="staff-basic"><span>ลงเวลาแล้ว</span><strong>${summary.checkedIn}</strong><span>จาก</span><strong>${summary.total}</strong><span>คน</span></div>`;
+      staffTodayNote.textContent = fetchedTime ? `ข้อมูล ณ ${fetchedTime} น.` : "อัปเดตข้อมูลแล้ว";
+      return;
+    }
+    if (summary.mode !== "full") throw new Error("รูปแบบข้อมูลครูมาวันนี้ไม่ถูกต้อง");
+    staffTodayContent.innerHTML = `<div class="staff-breakdown">
+      <div class="staff-stat"><b>${summary.present}</b><span>มา</span></div>
+      <div class="staff-stat"><b>${summary.late}</b><span>สาย</span></div>
+      <div class="staff-stat"><b>${summary.leave}</b><span>ลา</span></div>
+      <div class="staff-stat"><b>${summary.absent}</b><span>ขาด</span></div>
+    </div>`;
+    const pending = summary.pending ? `ยังไม่ครบวัน ${summary.pending} คน` : "";
+    const fetched = fetchedTime ? `ข้อมูล ณ ${fetchedTime} น.` : "อัปเดตข้อมูลแล้ว";
+    staffTodayNote.textContent = [pending, fetched].filter(Boolean).join(" · ");
+  }
+
+  async function loadStaffCard() {
+    staffTodayContent.innerHTML = '<div class="metric-state">กำลังอัปเดต…</div>';
+    staffTodayNote.textContent = "กำลังเชื่อมต่อ Jibble";
+    staffTodayNote.classList.remove("error");
+    try {
+      renderStaffSummary(await loadTodayStaffSummary());
+    } catch (error) {
+      staffTodayContent.innerHTML = '<div class="metric-state">—</div>';
+      staffTodayNote.textContent = "อัปเดตไม่ได้: " + (error?.message || "ไม่ทราบสาเหตุ");
+      staffTodayNote.classList.add("error");
+    }
   }
 
   async function renderAccount(session) {
@@ -294,6 +493,9 @@
     if (!session) return;
     renderAccount(session).catch(() => {});
     renderAdminLinks(session).catch(() => {});
+    // Jibble ช้าที่สุดและมีสถานะโหลดของตัวเอง จึงจงใจไม่รวมใน Promise.all ของการ์ดอื่น
+    loadStaffCard();
+
     const { data: yearRows, error } = await sb.from("subjects").select("year");
     if (error) throw error;
     const years = distinctYears(yearRows || []);
@@ -301,30 +503,58 @@
     if (year) setActiveYear(year);
     yearChip.textContent = year ? "ปีการศึกษา " + year : "ยังไม่มีปีการศึกษา";
 
-    // เกณฑ์ประถมอ่านจากค่าตั้งค่าส่วนกลาง (แก้ได้ที่หน้าภาพรวมวิชาการ) ห้าม hardcode
-    const savedPercent = Number(await getSetting("primary_absence_warn_percent"));
-    const primaryWarnPercent = Number.isFinite(savedPercent) && savedPercent > 0 ? savedPercent : 5;
+    if (!year) {
+      const noYear = { error: new Error("ยังไม่มีปีการศึกษา") };
+      renderStudentMetric(noYear);
+      renderRoomsMetric(noYear);
+      renderCalendarPanel(noYear);
+      renderProjectPanel(noYear);
+      return;
+    }
 
-    // ตรรกะเดียวกับหน้าภาพรวมวิชาการ (supabase-client.js) — ไม่มีสูตรของ dashboard เองแล้ว
-    const overview = year
-      ? buildAcademicOverview(await loadAcademicOverviewData(year), { primaryWarnPercent })
-      : buildAcademicOverview(null, { primaryWarnPercent });
+    const today = toDateStr(bangkokNow());
+    const yearMonth = today.slice(0, 7);
+    // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
+    // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
+    const [dailyResult, calendarResult, projectResult] = await Promise.all([
+      capture(loadDailyAttendanceToday(year, today)),
+      capture(Promise.all([
+        loadAcademicCalendar(year),
+        getSetting("academic_calendar_lead_days")
+      ])),
+      capture(loadAcademicProjects(year))
+    ]);
 
-    // เดิมการ์ด "ขาดบ่อย" แสดงรายชื่อชุดเดียวกับ "เสี่ยงติด มส." เป๊ะ ๆ (ตัวเลขซ้ำสองที่)
-    // ตอนนี้แยกจริง: มัธยมใช้เกณฑ์ มส. ส่วนประถมใช้เกณฑ์เฝ้าระวังที่เตือนเร็วกว่า
-    const secondary = overview.flaggedRows.filter(row => !row.isPrimary);
-    const primary = overview.flaggedRows.filter(row => row.isPrimary);
+    let dailySummaryResult;
+    try {
+      const daily = resultValue(dailyResult);
+      dailySummaryResult = {
+        value: summarizeDailyAttendance(daily.rows, daily.rooms, { isHoliday: daily.isHoliday })
+      };
+    } catch (error) {
+      dailySummaryResult = { error };
+    }
+    renderStudentMetric(dailySummaryResult);
+    renderRoomsMetric(dailySummaryResult);
 
-    riskCount.textContent = secondary.length;
-    frequentCount.textContent = primary.length;
-    document.getElementById("risk-note").textContent =
-      "มัธยม · ขาดสะสมตั้งแต่ " + overview.thresholds.secondaryWarn + "%";
-    document.getElementById("frequent-note").textContent =
-      "ประถม · ขาดสะสมตั้งแต่ " + overview.thresholds.primaryWarn + "%";
-    document.getElementById("frequent-panel-note").textContent =
-      "ตั้งแต่ " + overview.thresholds.primaryWarn + "%";
-    renderRows(riskList, secondary, overview.thresholds.secondaryWarn);
-    renderRows(frequentList, primary, overview.thresholds.primaryWarn);
+    let upcomingResult;
+    try {
+      const [rows, leadDays] = resultValue(calendarResult);
+      upcomingResult = { value: pickCalendarUpcoming(rows, today, leadDays) };
+    } catch (error) {
+      upcomingResult = { error };
+    }
+    renderCalendarPanel(upcomingResult);
+
+    let monthlyProjectsResult;
+    try {
+      monthlyProjectsResult = {
+        value: filterProjectsInMonth(resultValue(projectResult), yearMonth)
+      };
+    } catch (error) {
+      monthlyProjectsResult = { error };
+    }
+    renderProjectPanel(monthlyProjectsResult);
   }
 
   function startDashboardMotion() {
@@ -337,10 +567,11 @@
 
   startDashboardMotion();
   init().catch(error => {
-    riskCount.textContent = "—"; frequentCount.textContent = "—";
-    const message = "โหลดข้อมูลไม่สำเร็จ: " + escapeHtml(error.message || "ไม่ทราบสาเหตุ");
-    riskList.innerHTML = `<div class='empty' style='color:var(--danger)'>${message}</div>`;
-    frequentList.innerHTML = `<div class='empty' style='color:var(--danger)'>${message}</div>`;
+    const failed = { error };
+    renderStudentMetric(failed);
+    renderRoomsMetric(failed);
+    renderCalendarPanel(failed);
+    renderProjectPanel(failed);
   });
 </script>
 </body>

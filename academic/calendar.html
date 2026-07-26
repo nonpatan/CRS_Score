@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ปฏิทินปฏิบัติงาน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.55;
+  }
+  .wrap { max-width:760px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; overflow:hidden;
+    border:1px solid var(--line); border-radius:12px; background:var(--white);
+  }
+  .section-head {
+    display:flex; align-items:flex-start; justify-content:space-between;
+    gap:12px; margin-bottom:14px;
+  }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .filters, .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .form-grid .wide { grid-column:1/-1; }
+  .field { min-width:0; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input, select, textarea {
+    width:100%; min-width:0; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white);
+    font:inherit; font-size:16px;
+  }
+  textarea { min-height:88px; resize:vertical; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  .field-note, .muted { color:var(--muted); font-size:13px; }
+  .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:14px; }
+  button {
+    min-height:40px; padding:9px 14px; border:0; border-radius:8px;
+    font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary { color:#fff; background:var(--teal); }
+  button.ghost { color:var(--teal); background:var(--teal-soft); }
+  button.danger { color:var(--danger); background:var(--danger-soft); }
+  button:disabled { opacity:.55; cursor:default; }
+  .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .summary-line { margin-top:8px; color:var(--muted); font-size:13px; }
+  .table { width:100%; min-width:0; }
+  .table-head, .calendar-row {
+    display:grid; grid-template-columns:minmax(155px,.8fr) minmax(220px,1.6fr) minmax(150px,.8fr) auto;
+    gap:12px; align-items:start;
+  }
+  .table-head {
+    padding:0 8px 8px; color:var(--muted); border-bottom:1px solid var(--line);
+    font-size:12px; font-weight:700;
+  }
+  .calendar-row { padding:14px 8px; border-bottom:1px solid var(--line); }
+  .calendar-row:last-child { border-bottom:0; }
+  .row-title { font-weight:700; overflow-wrap:anywhere; }
+  .row-meta { margin-top:3px; color:var(--muted); font-size:13px; overflow-wrap:anywhere; }
+  .chip {
+    display:inline-flex; max-width:100%; padding:3px 9px; border-radius:999px;
+    color:var(--teal); background:var(--teal-soft); font-size:12px; font-weight:700;
+  }
+  .actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+  .actions button { min-height:34px; padding:6px 10px; font-size:13px; }
+  .empty { padding:28px 10px; color:var(--muted); text-align:center; }
+  .setting-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:end; }
+  #toast {
+    position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
+    padding:11px 18px; border-radius:10px; color:#fff; background:#1f2a2e;
+    font-weight:600; opacity:0; pointer-events:none; transform:translateX(-50%);
+    transition:opacity .18s;
+  }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:700px) {
+    .filters, .form-grid { grid-template-columns:1fr; }
+    .form-grid .wide { grid-column:auto; }
+    .table-head { display:none; }
+    .calendar-row {
+      grid-template-columns:1fr; gap:8px; margin-bottom:10px; padding:13px;
+      border:1px solid var(--line); border-radius:10px; background:#fff;
+    }
+    .calendar-row:last-child { border-bottom:1px solid var(--line); }
+    .actions { justify-content:flex-start; }
+  }
+  @media (max-width:420px) {
+    .section-head, .setting-row { grid-template-columns:1fr; }
+    .section-head { display:grid; }
+    .section-head button, .setting-row button { width:100%; }
+    .toolbar > button { flex:1 1 120px; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ปฏิทินปฏิบัติงาน</h1>
+    <p>กำหนดงาน สอบ ประชุม และวันส่งข้อมูลของฝ่ายวิชาการในที่เดียว</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260726-1"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card">
+      <div class="filters">
+        <div class="field">
+          <label for="filter-year">ปีการศึกษา</label>
+          <select id="filter-year"><option value="">กำลังโหลด…</option></select>
+        </div>
+        <div class="field">
+          <label for="filter-month">เดือนที่แสดง</label>
+          <input id="filter-month" type="month">
+        </div>
+      </div>
+      <div class="summary-line" id="scope-note">กำลังโหลดข้อมูล…</div>
+    </section>
+
+    <section class="card" id="access-note" hidden></section>
+
+    <section class="card" id="setting-card" hidden>
+      <div class="section-head">
+        <div>
+          <h2>ค่ากลางการแจ้งล่วงหน้า</h2>
+          <p>รายการที่เว้นช่อง “แจ้งล่วงหน้า” จะใช้ค่านี้</p>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="field">
+          <label for="default-lead">แจ้งล่วงหน้า (วัน)</label>
+          <input id="default-lead" type="number" min="0" max="60" step="1" inputmode="numeric">
+          <div class="field-note" id="default-lead-note"></div>
+        </div>
+        <button class="primary" id="save-setting">บันทึกค่ากลาง</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>รายการปฏิทิน</h2>
+          <p id="list-count">—</p>
+        </div>
+        <button class="primary" id="add-item" hidden>เพิ่มกำหนดการ</button>
+      </div>
+      <div class="table">
+        <div class="table-head"><span>ช่วงวันที่</span><span>งาน</span><span>การแจ้งเตือน</span><span>จัดการ</span></div>
+        <div id="calendar-list"><div class="empty">กำลังโหลด…</div></div>
+      </div>
+    </section>
+
+    <section class="card" id="form-card" hidden>
+      <div class="section-head">
+        <div>
+          <h2 id="form-title">เพิ่มกำหนดการ</h2>
+          <p>รายการวันเดียวให้เลือกวันเริ่มและวันสิ้นสุดเป็นวันเดียวกัน</p>
+        </div>
+      </div>
+      <form id="calendar-form">
+        <div class="form-grid">
+          <div class="field wide">
+            <label for="f-title">ชื่องาน</label>
+            <input id="f-title" type="text" maxlength="300" required>
+          </div>
+          <div class="field">
+            <label for="f-start">วันเริ่ม</label>
+            <input id="f-start" type="date" required>
+          </div>
+          <div class="field">
+            <label for="f-end">วันสิ้นสุด</label>
+            <input id="f-end" type="date" required>
+          </div>
+          <div class="field">
+            <label for="f-category">หมวด</label>
+            <select id="f-category">
+              <option>งานประจำ</option><option>สอบ</option><option>ส่งงาน/ส่งคะแนน</option>
+              <option>ประชุม/อบรม</option><option>กิจกรรม</option><option>อื่น ๆ</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-owner">ผู้รับผิดชอบ</label>
+            <input id="f-owner" type="text" maxlength="300" placeholder="เช่น ครูประจำชั้น ป.1–6">
+          </div>
+          <div class="field">
+            <label for="f-lead">แจ้งล่วงหน้าเฉพาะรายการ (วัน)</label>
+            <input id="f-lead" type="number" min="0" max="60" step="1" inputmode="numeric" placeholder="เว้นว่างเพื่อใช้ค่ากลาง">
+          </div>
+          <div class="field wide">
+            <label for="f-detail">รายละเอียด</label>
+            <textarea id="f-detail" maxlength="4000"></textarea>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="primary" id="save-item" type="submit">บันทึก</button>
+          <button class="ghost" id="cancel-item" type="button">ยกเลิก</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, getProfile, checkDepartment,
+  getActiveYear, setActiveYear, getAcademicYears,
+  getSetting, setSetting, loadAcademicCalendar,
+  bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260726-2";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  const fmtDate = value => value ? new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+  }) : "—";
+  const toast = (message, error = false) => {
+    const box = el("toast");
+    box.textContent = message;
+    box.classList.toggle("err", error);
+    box.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => box.classList.remove("show"), 3200);
+  };
+
+  el("btn-signout")?.addEventListener("click", event => {
+    event.preventDefault();
+    signOut();
+  });
+
+  const [profile, canEdit] = await Promise.all([
+    getProfile(session.user.id),
+    checkDepartment("วิชาการ")
+  ]);
+  const isAdmin = profile?.role === "admin";
+  let years = [];
+  let rows = [];
+  let editingId = null;
+  let defaultLeadDays = null;
+
+  if (canEdit) {
+    el("setting-card").hidden = false;
+    el("add-item").hidden = false;
+  } else {
+    el("access-note").hidden = false;
+    el("access-note").innerHTML =
+      '<div class="banner info"><b>โหมดดูอย่างเดียว</b><br>ทุกคนเปิดดูปฏิทินได้ การเพิ่มหรือแก้ไขสงวนไว้สำหรับผู้ดูแลระบบและผู้ได้รับสิทธิ์ฝ่ายวิชาการ</div>';
+  }
+
+  async function loadYears() {
+    years = await getAcademicYears();
+    if (!years.length) {
+      el("filter-year").innerHTML = '<option value="">— ยังไม่ได้กำหนดปีการศึกษา —</option>';
+      el("scope-note").textContent = "ยังไม่มีปีการศึกษา กรุณากำหนดปีที่หน้าตั้งค่างานบุคคลก่อน";
+      return "";
+    }
+    const values = years.map(row => row.year).sort().reverse();
+    const saved = getActiveYear();
+    const selected = values.includes(saved) ? saved : values[0];
+    el("filter-year").innerHTML = values.map(year =>
+      `<option value="${esc(year)}">ปีการศึกษา ${esc(year)}</option>`
+    ).join("");
+    el("filter-year").value = selected;
+    setActiveYear(selected);
+    return selected;
+  }
+
+  function monthOverlaps(row, yearMonth) {
+    if (!yearMonth) return true;
+    const [year, month] = yearMonth.split("-").map(Number);
+    const monthStart = yearMonth + "-01";
+    const monthEnd = toDateStr(new Date(Date.UTC(year, month, 0)));
+    return row.start_date <= monthEnd && row.end_date >= monthStart;
+  }
+
+  function render() {
+    const month = el("filter-month").value;
+    const visible = rows.filter(row => monthOverlaps(row, month));
+    el("list-count").textContent = `${visible.length} รายการ`;
+    el("scope-note").textContent = month
+      ? `แสดงรายการที่คาบเกี่ยวเดือน ${new Date(month + "-01T00:00:00Z").toLocaleDateString("th-TH", { month:"long", year:"numeric", timeZone:"UTC" })}`
+      : "แสดงรายการทั้งปีการศึกษา";
+    if (!visible.length) {
+      el("calendar-list").innerHTML = '<div class="empty">ยังไม่มีกำหนดการในช่วงที่เลือก</div>';
+      return;
+    }
+    el("calendar-list").innerHTML = visible.map(row => {
+      const dateText = row.start_date === row.end_date
+        ? fmtDate(row.start_date)
+        : `${fmtDate(row.start_date)} – ${fmtDate(row.end_date)}`;
+      const leadText = row.lead_days == null
+        ? (defaultLeadDays == null ? "ใช้ค่ากลาง (ยังไม่ได้ตั้ง)" : `ใช้ค่ากลาง ${defaultLeadDays} วัน`)
+        : `${row.lead_days} วัน`;
+      return `<article class="calendar-row">
+        <div><b>${esc(dateText)}</b><div class="row-meta"><span class="chip">${esc(row.category)}</span></div></div>
+        <div><div class="row-title">${esc(row.title)}</div>
+          ${row.owner_note ? `<div class="row-meta">ผู้รับผิดชอบ: ${esc(row.owner_note)}</div>` : ""}
+          ${row.detail ? `<div class="row-meta">${esc(row.detail)}</div>` : ""}</div>
+        <div><div>${esc(leadText)}</div><div class="row-meta">ก่อนวันเริ่ม</div></div>
+        <div class="actions">
+          ${canEdit ? `<button class="ghost" data-edit="${row.id}">แก้ไข</button>` : ""}
+          ${isAdmin ? `<button class="danger" data-delete="${row.id}">ลบ</button>` : ""}
+        </div>
+      </article>`;
+    }).join("");
+  }
+
+  async function loadSetting() {
+    const raw = await getSetting("academic_calendar_lead_days");
+    const value = raw === null || raw === "" ? null : Number(raw);
+    defaultLeadDays = Number.isInteger(value) && value >= 0 && value <= 60 ? value : null;
+    el("default-lead").value = defaultLeadDays ?? "";
+    el("default-lead-note").textContent = defaultLeadDays == null
+      ? "ยังไม่ได้ตั้งค่ากลาง รายการที่เว้นว่างจะยังคำนวณวันเตือนไม่ได้"
+      : `รายการที่ไม่ได้กำหนดเองจะแจ้งล่วงหน้า ${defaultLeadDays} วัน`;
+  }
+
+  async function loadRows() {
+    const year = el("filter-year").value;
+    if (!year) {
+      rows = [];
+      render();
+      return;
+    }
+    el("calendar-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    try {
+      rows = await loadAcademicCalendar(year);
+      render();
+    } catch (error) {
+      el("calendar-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+    }
+  }
+
+  function openForm(row = null) {
+    if (!canEdit) return;
+    editingId = row?.id || null;
+    el("form-title").textContent = row ? "แก้กำหนดการ" : "เพิ่มกำหนดการ";
+    el("f-title").value = row?.title || "";
+    el("f-start").value = row?.start_date || "";
+    el("f-end").value = row?.end_date || row?.start_date || "";
+    el("f-category").value = row?.category || "งานประจำ";
+    el("f-owner").value = row?.owner_note || "";
+    el("f-lead").value = row?.lead_days ?? "";
+    el("f-detail").value = row?.detail || "";
+    el("form-card").hidden = false;
+    el("form-card").scrollIntoView({ behavior:"smooth", block:"start" });
+    el("f-title").focus({ preventScroll:true });
+  }
+
+  function closeForm() {
+    editingId = null;
+    el("calendar-form").reset();
+    el("form-card").hidden = true;
+  }
+
+  el("add-item").addEventListener("click", () => openForm());
+  el("cancel-item").addEventListener("click", closeForm);
+  el("f-start").addEventListener("change", () => {
+    if (!el("f-end").value || el("f-end").value < el("f-start").value) {
+      el("f-end").value = el("f-start").value;
+    }
+  });
+  el("filter-month").addEventListener("change", render);
+  el("filter-year").addEventListener("change", async () => {
+    setActiveYear(el("filter-year").value);
+    closeForm();
+    await loadRows();
+  });
+
+  el("save-setting").addEventListener("click", async () => {
+    const value = Number(el("default-lead").value);
+    if (!Number.isInteger(value) || value < 0 || value > 60) {
+      return toast("ค่ากลางต้องเป็นจำนวนเต็ม 0–60 วัน", true);
+    }
+    const button = el("save-setting");
+    button.disabled = true;
+    const ok = await setSetting("academic_calendar_lead_days", String(value));
+    button.disabled = false;
+    if (!ok) return toast("บันทึกค่ากลางไม่สำเร็จ", true);
+    defaultLeadDays = value;
+    el("default-lead-note").textContent = `รายการที่ไม่ได้กำหนดเองจะแจ้งล่วงหน้า ${value} วัน`;
+    render();
+    toast("บันทึกค่ากลางแล้ว");
+  });
+
+  el("calendar-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const start = el("f-start").value;
+    const end = el("f-end").value;
+    if (end < start) return toast("วันสิ้นสุดต้องไม่ก่อนวันเริ่ม", true);
+    const leadRaw = el("f-lead").value.trim();
+    const leadDays = leadRaw === "" ? null : Number(leadRaw);
+    if (leadDays !== null && (!Number.isInteger(leadDays) || leadDays < 0 || leadDays > 60)) {
+      return toast("แจ้งล่วงหน้าต้องเป็นจำนวนเต็ม 0–60 วัน หรือเว้นว่าง", true);
+    }
+    const payload = {
+      year: el("filter-year").value,
+      title: el("f-title").value.trim(),
+      start_date: start,
+      end_date: end,
+      category: el("f-category").value,
+      owner_note: el("f-owner").value.trim() || null,
+      lead_days: leadDays,
+      detail: el("f-detail").value.trim() || null,
+      updated_at: new Date().toISOString()
+    };
+    if (!payload.title) return toast("กรุณากรอกชื่องาน", true);
+    const button = el("save-item");
+    button.disabled = true;
+    const query = editingId
+      ? sb.from("academic_calendar").update(payload).eq("id", editingId)
+      : sb.from("academic_calendar").insert({ ...payload, created_by:session.user.id });
+    const { error } = await query;
+    button.disabled = false;
+    if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
+    toast(editingId ? "แก้กำหนดการแล้ว" : "เพิ่มกำหนดการแล้ว");
+    closeForm();
+    await loadRows();
+  });
+
+  el("calendar-list").addEventListener("click", async event => {
+    const edit = event.target.closest("[data-edit]");
+    if (edit) return openForm(rows.find(row => row.id === edit.dataset.edit));
+    const remove = event.target.closest("[data-delete]");
+    if (!remove) return;
+    const row = rows.find(item => item.id === remove.dataset.delete);
+    if (!row || !confirm(`ลบ “${row.title}” ใช่ไหม? การลบกู้คืนไม่ได้`)) return;
+    remove.disabled = true;
+    const { error } = await sb.from("academic_calendar").delete().eq("id", row.id);
+    if (error) {
+      remove.disabled = false;
+      return toast("ลบไม่สำเร็จ: " + error.message, true);
+    }
+    toast("ลบกำหนดการแล้ว");
+    await loadRows();
+  });
+
+  const today = toDateStr(bangkokNow());
+  el("filter-month").value = today.slice(0,7);
+  await loadSetting();
+  await loadYears();
+  await loadRows();
+}
+</script>
+</body>
+</html>

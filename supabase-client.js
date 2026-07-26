@@ -1099,6 +1099,340 @@ export function buildAcademicOverview(raw, options = {}) {
 }
 
 // ============================================================
+// ข้อมูลกลางสำหรับ Dashboard ใหม่ + โมดูลวิชาการ/บริหารทั่วไป
+// ------------------------------------------------------------
+// แยกการโหลดข้อมูลออกจากการคำนวณ เพื่อให้สูตรสรุปทดสอบได้โดยไม่แตะฐานข้อมูลหรือ DOM
+// ⛔ daily_attendance เป็นเช็คชื่อรายวันของครูประจำชั้น ไม่เกี่ยวกับ attendance_sessions
+//    และห้ามนำไปคิดเกรด/มส. เด็ดขาด
+// ============================================================
+
+// จับ placement เป็นรายการห้องมาตรฐาน — ผู้เรียกทุกหน้าต้องได้ field และลำดับชุดเดียวกัน
+export function roomsFromPlacements(placements, year) {
+  const roomMap = new Map();
+  for (const p of (placements || [])) {
+    if (!p.grade_level || !p.classroom) continue;
+    const key = p.grade_level + "\u0000" + p.classroom;
+    if (!roomMap.has(key)) {
+      roomMap.set(key, {
+        year,
+        grade_level: p.grade_level,
+        classroom: p.classroom,
+        studentCount: 0
+      });
+    }
+    roomMap.get(key).studentCount += 1;
+  }
+
+  return [...roomMap.values()].sort((a, b) => {
+    const gradeDiff = GRADE_ORDER.indexOf(a.grade_level) - GRADE_ORDER.indexOf(b.grade_level);
+    if (gradeDiff) return gradeDiff;
+    return String(a.classroom).localeCompare(String(b.classroom), "th");
+  });
+}
+
+// เช็คชื่อรายวันของวันที่ระบุ + ห้องที่มีนักเรียนตาม placement ของปีนั้น
+// isHoliday อิงตารางงาน/วันหยุดชุดเดียวกับฝ่ายบุคคล; ถ้ายังไม่มีตารางงานจะไม่เดาว่าเป็นวันหยุด
+export async function loadDailyAttendanceToday(year, dateStr) {
+  if (!year || !dateStr) {
+    return { year, dateStr, rows: [], rooms: [], isHoliday: false };
+  }
+
+  const weekday = isoWeekday(dateStr);
+  const [rowsRes, placementsRes, scheduleRes, holidayRes] = await Promise.all([
+    fetchAllRows(() => sb.from("daily_attendance")
+      .select("id,attend_date,year,grade_level,classroom,student_id,status,note,recorded_by,recorded_at,updated_at")
+      .eq("year", year)
+      .eq("attend_date", dateStr)),
+    getStudentPlacements(year),
+    sb.from("work_schedule")
+      .select("weekday,is_working_day")
+      .eq("weekday", weekday)
+      .maybeSingle(),
+    sb.from("work_holidays")
+      .select("holiday_date")
+      .eq("holiday_date", dateStr)
+      .maybeSingle()
+  ]);
+
+  for (const res of [rowsRes, placementsRes, scheduleRes, holidayRes]) {
+    if (res.error) throw new Error("โหลดข้อมูลเช็คชื่อรายวันไม่สำเร็จ: " + res.error.message);
+  }
+
+  const rooms = roomsFromPlacements(placementsRes.data, year);
+  const hasSchedule = !!scheduleRes.data;
+  const isHoliday = !!holidayRes.data || (hasSchedule && scheduleRes.data.is_working_day !== true);
+
+  return {
+    year,
+    dateStr,
+    rows: rowsRes.data || [],
+    rooms,
+    isHoliday
+  };
+}
+
+// คำนวณล้วน — options.isHoliday ต้องมาจาก loadDailyAttendanceToday()
+export function summarizeDailyAttendance(rows, rooms, options = {}) {
+  const attendanceRows = Array.isArray(rows) ? rows : [];
+  const roomRows = Array.isArray(rooms) ? rooms : [];
+  const counts = { present: 0, late: 0, leave: 0, absent: 0 };
+  const checkedRooms = new Set();
+
+  for (const row of attendanceRows) {
+    if (row.status === "มา") counts.present += 1;
+    else if (row.status === "มาสาย") counts.late += 1;
+    else if (row.status === "ลาป่วย" || row.status === "ลากิจ") counts.leave += 1;
+    else if (row.status === "ขาด") counts.absent += 1;
+
+    if (row.grade_level && row.classroom) {
+      checkedRooms.add(row.grade_level + "\u0000" + row.classroom);
+    }
+  }
+
+  const roomsTotal = roomRows.length;
+  const validRoomKeys = new Set(
+    roomRows.map(r => r.grade_level + "\u0000" + r.classroom)
+  );
+  const roomsChecked = [...checkedRooms].filter(key => validRoomKeys.has(key)).length;
+  let state = "none";
+  if (options.isHoliday === true) state = "holiday";
+  else if (roomsTotal === 0) state = "no-rooms";
+  else if (roomsChecked === 0) state = "none";
+  else if (roomsChecked < roomsTotal) state = "partial";
+  else state = "complete";
+
+  return {
+    ...counts,
+    roomsChecked,
+    roomsTotal,
+    state
+  };
+}
+
+export async function loadAcademicCalendar(year) {
+  if (!year) return [];
+  const { data, error } = await sb.from("academic_calendar")
+    .select("*")
+    .eq("year", year)
+    .order("start_date")
+    .order("title");
+  if (error) throw new Error("โหลดปฏิทินฝ่ายวิชาการไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export const DEFAULT_CALENDAR_LEAD_DAYS = 7;
+
+// คำนวณล้วน — แสดงตั้งแต่วันแจ้งเตือนจนถึงวันสิ้นสุด พร้อมป้ายสถานะ
+export function pickCalendarUpcoming(rows, dateStr, defaultLeadDays) {
+  if (!dateStr) return [];
+  const configuredLead = Number(defaultLeadDays);
+  // app_settings ยังเป็นความจริงหลักและชนะเสมอ ค่าคงที่นี้ใช้เฉพาะตอนอ่านค่ากลางไม่ได้
+  // เพื่อกันรายการที่ lead_days = NULL หายจาก dashboard แบบเงียบ ๆ ไม่ใช่ hardcode ค่าที่ตั้งได้
+  const fallbackLead = defaultLeadDays !== null && defaultLeadDays !== "" &&
+    Number.isFinite(configuredLead) && configuredLead >= 0
+    ? configuredLead
+    : DEFAULT_CALENDAR_LEAD_DAYS;
+  return (rows || []).filter(row => {
+    if (!row.start_date || !row.end_date) return false;
+    const lead = row.lead_days == null ? fallbackLead : Number(row.lead_days);
+    if (!Number.isFinite(lead) || lead < 0) return false;
+    return addDaysStr(row.start_date, -lead) <= dateStr && dateStr <= row.end_date;
+  }).map(row => {
+    const daysUntil = Math.round(
+      (new Date(row.start_date + "T00:00:00Z") - new Date(dateStr + "T00:00:00Z")) / 86_400_000
+    );
+    let timing = "กำลังดำเนินการ";
+    if (daysUntil === 0) timing = "วันนี้";
+    else if (daysUntil > 0) timing = `อีก ${daysUntil} วัน`;
+    return { ...row, timing, daysUntil };
+  }).sort((a, b) =>
+    String(a.start_date).localeCompare(String(b.start_date)) ||
+    String(a.title || "").localeCompare(String(b.title || ""), "th")
+  );
+}
+
+// ชื่อผู้รับผิดชอบโครงการ: ใช้ชื่อสดจาก staff ก่อน ถ้า RLS ทำให้ครูทั่วไปอ่าน staff
+// แถวนั้นไม่ได้ ให้ถอยมาใช้สำเนาที่เก็บไว้กับโครงการ ฟังก์ชันนี้ใช้ร่วมกันทั้งหน้ารายการ
+// และการ์ด dashboard เพื่อไม่ให้สองหน้าตัดสินชื่อคนละแบบ
+export function projectResponsibleName(project) {
+  return project?.responsible_staff?.full_name || project?.responsible_name || "";
+}
+
+export async function loadAcademicProjects(year) {
+  if (!year) return [];
+  const { data: projects, error: projectError } = await sb.from("academic_projects")
+    .select("*")
+    .eq("year", year)
+    .order("start_date")
+    .order("name");
+  if (projectError) throw new Error("โหลดโครงการฝ่ายวิชาการไม่สำเร็จ: " + projectError.message);
+  if (!projects || projects.length === 0) return [];
+
+  const projectIds = projects.map(p => p.id);
+  const staffIds = [...new Set(projects.map(p => p.responsible_staff_id).filter(Boolean))];
+  const [linksRes, okrLinksRes, okrsRes, staffRes] = await Promise.all([
+    sb.from("academic_project_links")
+      .select("*")
+      .in("project_id", projectIds)
+      .order("sort_order"),
+    sb.from("academic_project_okrs")
+      .select("project_id,okr_id")
+      .in("project_id", projectIds),
+    sb.from("school_okrs")
+      .select("*")
+      .eq("year", year)
+      .order("sort_order"),
+    staffIds.length
+      ? sb.from("staff").select("id,full_name").in("id", staffIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  for (const res of [linksRes, okrLinksRes, okrsRes, staffRes]) {
+    if (res.error) throw new Error("โหลดรายละเอียดโครงการไม่สำเร็จ: " + res.error.message);
+  }
+
+  const linksByProject = new Map();
+  for (const link of (linksRes.data || [])) {
+    if (!linksByProject.has(link.project_id)) linksByProject.set(link.project_id, []);
+    linksByProject.get(link.project_id).push(link);
+  }
+  const okrById = new Map((okrsRes.data || []).map(okr => [okr.id, okr]));
+  const okrsByProject = new Map();
+  for (const link of (okrLinksRes.data || [])) {
+    const okr = okrById.get(link.okr_id);
+    if (!okr) continue;
+    if (!okrsByProject.has(link.project_id)) okrsByProject.set(link.project_id, []);
+    okrsByProject.get(link.project_id).push(okr);
+  }
+  const staffById = new Map((staffRes.data || []).map(staff => [staff.id, staff]));
+
+  return projects.map(project => {
+    const liveStaff = staffById.get(project.responsible_staff_id) || null;
+    return {
+      ...project,
+      responsible_staff: liveStaff,
+      responsible_display_name: projectResponsibleName({
+        ...project,
+        responsible_staff: liveStaff
+      }),
+      links: linksByProject.get(project.id) || [],
+      okrs: okrsByProject.get(project.id) || []
+    };
+  });
+}
+
+// คำนวณล้วน — ช่วงโครงการคาบเกี่ยวเดือน และไม่แสดงรายการที่ยกเลิก
+export function filterProjectsInMonth(rows, yearMonth) {
+  if (!/^\d{4}-\d{2}$/.test(String(yearMonth || ""))) return [];
+  const [year, month] = yearMonth.split("-").map(Number);
+  const monthStart = `${yearMonth}-01`;
+  const monthEnd = toDateStr(new Date(Date.UTC(year, month, 0)));
+  const statusOrder = new Map([
+    ["กำลังดำเนินการ", 0],
+    ["วางแผน", 1],
+    ["เสร็จสิ้น", 2]
+  ]);
+
+  return (rows || []).filter(project => {
+    if (project.status === "ยกเลิก" || !project.start_date) return false;
+    const endDate = project.end_date || project.start_date;
+    return project.start_date <= monthEnd && endDate >= monthStart;
+  }).sort((a, b) =>
+    (statusOrder.get(a.status) ?? 99) - (statusOrder.get(b.status) ?? 99) ||
+    String(a.start_date).localeCompare(String(b.start_date)) ||
+    String(a.name || "").localeCompare(String(b.name || ""), "th")
+  );
+}
+
+// เรียก Jibble สดผ่าน Edge Function scope "today"
+// basic: server คืนเฉพาะ checkedIn/total เท่านั้น · full: นับด้วย computeDayStatus() ตัวเดิม
+export async function loadTodayStaffSummary() {
+  const today = toDateStr(bangkokNow());
+  const [result, scheduleRes, holidayRes, settings] = await Promise.all([
+    syncJibble("today"),
+    sb.from("work_schedule").select("*"),
+    sb.from("work_holidays").select("*").eq("holiday_date", today),
+    getHrSettings()
+  ]);
+
+  if (result?.isHoliday) {
+    return { isHoliday: true, mode: result.mode || null, fetchedAt: result.fetchedAt || null };
+  }
+  if (result?.mode === "basic") {
+    return {
+      isHoliday: false,
+      mode: "basic",
+      total: Number(result.total) || 0,
+      checkedIn: Number(result.checkedIn) || 0,
+      fetchedAt: result.fetchedAt || null
+    };
+  }
+  if (result?.mode !== "full" || !Array.isArray(result.rows)) {
+    throw new Error("ข้อมูลครูมาวันนี้มีรูปแบบไม่ถูกต้อง");
+  }
+  if (scheduleRes.error) throw new Error("โหลดตารางงานไม่สำเร็จ: " + scheduleRes.error.message);
+  if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+
+  const schedule = new Map((scheduleRes.data || []).map(row => [row.weekday, row]));
+  const attendance = new Map();
+  const leaves = [];
+  const staffRows = result.rows.map((row, index) => {
+    const id = `anonymous-${index}`;
+    if (row.first_in_local) {
+      attendance.set(id + "|" + today, {
+        staff_id: id,
+        work_date: today,
+        first_in_local: row.first_in_local,
+        auto_out: row.auto_out === true
+      });
+    }
+    if (row.on_leave) {
+      leaves.push({
+        staff_id: id,
+        start_date: today,
+        end_date: today,
+        day_portion: row.leave_portion || "full",
+        leave_type: "ลา"
+      });
+    }
+    return {
+      id,
+      exempt: row.exempt === true,
+      allowed_late_time: row.allowed_late_time || null,
+      is_active: true
+    };
+  });
+  const ctx = {
+    staff: staffRows,
+    attendance,
+    holidays: new Set((holidayRes.data || []).map(row => row.holiday_date)),
+    schedule,
+    leaves,
+    settings
+  };
+  const counts = { present: 0, late: 0, leave: 0, absent: 0, pending: 0 };
+  const statuses = staffRows.map(staff => computeDayStatus(staff, today, ctx));
+  for (const row of statuses) {
+    if (Object.hasOwn(counts, row.status)) counts[row.status] += 1;
+  }
+  const isHoliday = statuses.length > 0 && statuses.every(row => row.status === "holiday");
+
+  return {
+    isHoliday,
+    mode: "full",
+    total: staffRows.length,
+    ...counts,
+    fetchedAt: result.fetchedAt || null
+  };
+}
+
+export async function listStaffPicker() {
+  const { data, error } = await sb.rpc("staff_picker");
+  if (error) throw new Error("โหลดรายชื่อผู้รับผิดชอบไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+// ============================================================
 // ตรรกะเวลาทำงานของฝ่ายบุคคล — "แก้ที่นี่ที่เดียว"
 // ------------------------------------------------------------
 // ทุกหน้า (work-summary / my-work / index ของฝ่ายบุคคล) ต้องเรียกฟังก์ชันชุดนี้

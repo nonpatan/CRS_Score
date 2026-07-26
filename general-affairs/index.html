@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ภาพรวมบริหารทั่วไป — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.55;
+  }
+  .wrap { max-width:860px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; overflow:hidden;
+    border:1px solid var(--line); border-radius:12px; background:var(--white);
+  }
+  .section-head {
+    display:flex; align-items:flex-start; justify-content:space-between;
+    gap:12px; margin-bottom:14px;
+  }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .section-head a { color:var(--teal); font-size:14px; font-weight:600; white-space:nowrap; }
+  .metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+  .metric { padding:14px; border-radius:12px; background:#f4f8f7; }
+  .metric .label { color:var(--muted); font-size:13px; }
+  .metric .value { margin-top:2px; font-size:28px; font-weight:700; line-height:1.15; }
+  .metric.warn { background:var(--amber-soft); }
+  .metric.warn .value { color:var(--amber); }
+  .metric.ok { background:var(--teal-soft); }
+  .metric.ok .value { color:var(--teal); }
+  .status-line {
+    display:flex; flex-wrap:wrap; gap:7px; margin-top:12px;
+    color:var(--muted); font-size:13px;
+  }
+  .status-line span { padding:4px 9px; border-radius:999px; background:#f5f7f7; }
+  .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner a { color:inherit; font-weight:700; }
+  .room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .room-row {
+    display:flex; align-items:center; gap:12px; min-width:0;
+    padding:12px; border:1px solid var(--line); border-radius:11px; background:#fff;
+  }
+  .room-row.checked { border-color:rgba(15,110,86,.28); background:#f7fcfa; }
+  .room-icon {
+    display:grid; place-items:center; width:38px; height:38px; flex:0 0 auto;
+    border-radius:11px; color:var(--amber); background:var(--amber-soft); font-weight:700;
+  }
+  .room-row.checked .room-icon { color:var(--teal); background:var(--teal-soft); }
+  .room-copy { min-width:0; flex:1; }
+  .room-copy b { display:block; overflow-wrap:anywhere; }
+  .room-copy span { color:var(--muted); font-size:12px; }
+  .room-state { color:var(--amber); font-size:12px; font-weight:700; white-space:nowrap; }
+  .room-row.checked .room-state { color:var(--teal); }
+  .empty { padding:28px 10px; color:var(--muted); text-align:center; }
+  [hidden] { display:none !important; }
+  @media (max-width:700px) { .room-grid { grid-template-columns:1fr; } }
+  @media (max-width:520px) {
+    .metrics { grid-template-columns:1fr; }
+    .section-head { display:block; }
+    .section-head a { display:inline-block; margin-top:6px; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ภาพรวมบริหารทั่วไป</h1>
+    <p>ติดตามการเช็คชื่อประจำวันทั้งโรงเรียน และเห็นห้องที่ต้องตามได้ทันที</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260726-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="state-card" class="card">
+      <div class="section-head">
+        <div>
+          <h2>การเช็คชื่อวันนี้</h2>
+          <p id="date-note">กำลังหาปีการศึกษา…</p>
+        </div>
+        <a href="daily-attendance.html">ไปหน้าเช็คชื่อ</a>
+      </div>
+      <div id="state-banner" hidden></div>
+      <div class="metrics" id="metrics">
+        <div class="metric ok"><div class="label">นักเรียนมา</div><div class="value" id="metric-present">—</div></div>
+        <div class="metric"><div class="label">ห้องที่เช็คแล้ว</div><div class="value" id="metric-checked">—</div></div>
+        <div class="metric warn"><div class="label">ห้องที่ยังไม่เช็ค</div><div class="value" id="metric-unchecked">—</div></div>
+      </div>
+      <div class="status-line" id="status-line"></div>
+    </section>
+
+    <section id="placement-warning" class="card" hidden></section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2>สถานะรายห้อง</h2>
+          <p id="room-note">กำลังโหลด…</p>
+        </div>
+        <a href="homeroom.html">กำหนดครูประจำชั้น</a>
+      </div>
+      <div class="room-grid" id="room-grid"><div class="empty">กำลังโหลด…</div></div>
+    </section>
+  </main>
+</div>
+
+<script type="module">
+import {
+  requireAuth, signOut, getAcademicYears, academicYearOf, getStudentPlacements,
+  getActiveStudents, loadDailyAttendanceToday, summarizeDailyAttendance,
+  bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260726-3";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const keyOf = row => row.grade_level + "\u0000" + row.classroom;
+const formatTime = iso => iso
+  ? new Intl.DateTimeFormat("th-TH", {
+      timeZone:"Asia/Bangkok", hour:"2-digit", minute:"2-digit", hour12:false
+    }).format(new Date(iso)) + " น."
+  : "—";
+const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"long", year:"numeric", timeZone:"Asia/Bangkok"
+}).format(new Date(dateStr + "T00:00:00+07:00"));
+
+function showBanner(html, type = "warn") {
+  el("state-banner").hidden = false;
+  el("state-banner").innerHTML = `<div class="banner ${type}">${html}</div>`;
+}
+
+async function loadOverview() {
+  const dateStr = toDateStr(bangkokNow());
+  const years = await getAcademicYears();
+  const year = academicYearOf(dateStr, years);
+  if (!year) {
+    el("date-note").textContent = thaiDate(dateStr);
+    showBanner("<b>ยังไม่พบปีการศึกษาที่ครอบคลุมวันนี้</b><br>กรุณาเพิ่มปีการศึกษาที่หน้าตั้งค่างานบุคคล", "bad");
+    el("metrics").hidden = true;
+    el("room-grid").innerHTML = '<div class="empty">ยังไม่มีข้อมูลห้องเรียน</div>';
+    return;
+  }
+  el("date-note").textContent = `${thaiDate(dateStr)} · ปีการศึกษา ${year}`;
+  const [daily, placementRes, activeStudents] = await Promise.all([
+    loadDailyAttendanceToday(year, dateStr),
+    getStudentPlacements(year),
+    getActiveStudents()
+  ]);
+  if (placementRes.error) throw new Error("โหลด placement ไม่สำเร็จ: " + placementRes.error.message);
+  const summary = summarizeDailyAttendance(daily.rows, daily.rooms, { isHoliday:daily.isHoliday });
+  el("metric-present").textContent = summary.state === "holiday" ? "—" : summary.present;
+  el("metric-checked").textContent = summary.state === "holiday" ? "—" : `${summary.roomsChecked}/${summary.roomsTotal}`;
+  el("metric-unchecked").textContent = summary.state === "holiday" ? "—" : Math.max(0, summary.roomsTotal - summary.roomsChecked);
+  el("status-line").innerHTML = summary.state === "holiday" ? "" :
+    `<span>มา ${summary.present}</span><span>มาสาย ${summary.late}</span>` +
+    `<span>ลา ${summary.leave}</span><span>ขาด ${summary.absent}</span>`;
+
+  if (summary.state === "holiday") {
+    showBanner("<b>วันนี้เป็นวันหยุดตามตารางงาน</b><br>ระบบไม่ตีความห้องที่ยังไม่มีข้อมูลว่า “ยังไม่เช็ค”", "info");
+  } else if (summary.state === "no-rooms") {
+    showBanner('<b>ยังไม่มีข้อมูลห้องเรียนของปีนี้</b><br>กรุณาจัดชั้น/ห้องที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a>');
+  } else if (summary.state === "none") {
+    showBanner("<b>ยังไม่มีห้องไหนเช็คชื่อวันนี้</b><br>เมื่อครูประจำชั้นบันทึก ห้องนั้นจะเปลี่ยนสถานะทันที");
+  } else if (summary.state === "partial") {
+    showBanner(`<b>เช็คแล้ว ${summary.roomsChecked} จาก ${summary.roomsTotal} ห้อง</b><br>ตัวเลขนักเรียนยังไม่ครบทั้งโรงเรียนจนกว่าจะเช็คทุกห้อง`);
+  } else {
+    showBanner("<b>ทุกห้องเช็คชื่อครบแล้ว</b><br>ตัวเลขวันนี้ครบทั้งโรงเรียน", "info");
+  }
+
+  const placedIds = new Set((placementRes.data || []).map(p => p.student_id));
+  const missingCount = (activeStudents || []).filter(s => !placedIds.has(s.id)).length;
+  el("placement-warning").hidden = missingCount === 0;
+  el("placement-warning").innerHTML = missingCount
+    ? `<div class="banner warn" style="margin:0"><b>มีนักเรียน ${missingCount} คนที่ยังไม่มีชั้น/ห้องในปี ${esc(year)}</b><br>` +
+      `คนกลุ่มนี้ไม่รวมในยอดวันนี้ กรุณาจัดห้องที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a></div>`
+    : "";
+
+  const rowsByRoom = new Map();
+  for (const row of daily.rows || []) {
+    const key = keyOf(row);
+    if (!rowsByRoom.has(key)) rowsByRoom.set(key, []);
+    rowsByRoom.get(key).push(row);
+  }
+  el("room-note").textContent = `${summary.roomsTotal} ห้อง · เช็คแล้ว ${summary.roomsChecked} ห้อง`;
+  el("room-grid").innerHTML = daily.rooms.length ? daily.rooms.map(room => {
+    const rows = rowsByRoom.get(keyOf(room)) || [];
+    const latest = [...rows].sort((a, b) =>
+      String(b.updated_at || b.recorded_at).localeCompare(String(a.updated_at || a.recorded_at))
+    )[0];
+    const checked = rows.length > 0;
+    const meta = checked
+      ? `บันทึก ${rows.length}/${room.studentCount} คน · ${formatTime(latest?.updated_at || latest?.recorded_at)}`
+      : `${room.studentCount} คน · รอครูประจำชั้น`;
+    return `<article class="room-row${checked ? " checked" : ""}">
+      <div class="room-icon">${checked ? "✓" : "!"}</div>
+      <div class="room-copy"><b>${esc(room.grade_level)} · ${esc(room.classroom)}</b><span>${esc(meta)}</span></div>
+      <span class="room-state">${checked ? "เช็คแล้ว" : "ยังไม่เช็ค"}</span>
+    </article>`;
+  }).join("") : '<div class="empty">ยังไม่มีห้องเรียนในปีนี้</div>';
+}
+
+const session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    await loadOverview();
+  } catch (error) {
+    el("metrics").hidden = true;
+    showBanner(`<b>โหลดภาพรวมไม่สำเร็จ</b><br>${esc(error.message)}`, "bad");
+    el("room-grid").innerHTML = '<div class="empty">กรุณาลองใหม่อีกครั้ง</div>';
+  }
+}
+</script>
+</body>
+</html>

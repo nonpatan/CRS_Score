@@ -1836,3 +1836,329 @@ create policy staff_select on staff for select
 -- ย้อนกลับ:
 -- drop policy if exists staff_select on staff;
 -- create policy staff_select on staff for select using (auth.role() = 'authenticated');
+
+
+-- ============================================================
+-- Migration: ปฏิทินปฏิบัติงานฝ่ายวิชาการ + โครงการ/กิจกรรม + OKR โรงเรียน (ออกแบบ 2026-07-26)
+-- ------------------------------------------------------------
+-- ⚠️ ยังไม่ได้รันบน Supabase — ออกแบบไว้ให้ Sol ทำต่อ (ดู academic/ARCHITECTURE.md
+--    หัวข้อ "ปฏิทินปฏิบัติงาน + โครงการ/กิจกรรม") ผู้ใช้ต้องเป็นคนรันเองใน SQL editor
+--
+-- สิทธิ์ (ผู้ใช้เคาะ 2026-07-26): select = ผู้ล็อกอินทุกคน · insert/update = admin หรือ
+-- คนที่ได้สิทธิ์ฝ่ายวิชาการ · delete = admin เท่านั้น — ตรงกับกติกากลาง "เพิ่ม/แก้ได้ แต่ลบไม่ได้"
+-- (has_department() คืน true ให้ admin อยู่แล้ว จึงไม่ต้องเขียน is_admin() ซ้ำในเงื่อนไข)
+-- ============================================================
+
+-- ---------- 1) OKR ของโรงเรียน (ใช้ร่วมได้ทุกฝ่าย ไม่ใช่ของวิชาการอย่างเดียว) ----------
+-- ⛔ ห้ามเดาเนื้อหา OKR — ต้องให้ผู้ใช้กรอกของจริงเองที่หน้าเว็บก่อนใช้งาน
+create table if not exists school_okrs (
+  id          uuid primary key default gen_random_uuid(),
+  year        text not null,                    -- ปีการศึกษา เช่น '2569'
+  code        text,                             -- รหัสย่อ เช่น 'O1', 'O1-KR2'
+  objective   text not null,                    -- Objective
+  key_result  text,                             -- Key Result (ว่างได้ ถ้าเก็บแค่ระดับ Objective)
+  sort_order  smallint not null default 0,
+  active      boolean not null default true,
+  created_at  timestamptz not null default now(),
+
+  constraint school_okrs_code_unique unique (year, code)
+);
+create index if not exists school_okrs_year_idx on school_okrs (year, sort_order);
+
+-- ---------- 2) ปฏิทินปฏิบัติงานฝ่ายวิชาการ ----------
+-- ผู้รับผิดชอบเก็บเป็น "ข้อความ" ไม่ผูก staff เพราะรายการปฏิทินมักระบุเป็นกลุ่ม
+-- ("ครูประจำชั้น ป.1–6", "ครูวัดผล") และ staff_select ถูกจำกัดไว้แล้ว (ครูทั่วไปอ่านทะเบียนไม่ได้)
+create table if not exists academic_calendar (
+  id           uuid primary key default gen_random_uuid(),
+  year         text not null,                   -- ปีการศึกษา (ตรงกับ subjects.year / academic_years.year)
+  title        text not null,
+  detail       text,
+  start_date   date not null,
+  end_date     date not null,                   -- งานวันเดียว = ใส่วันเดียวกับ start_date
+  category     text not null default 'งานประจำ',
+  -- แจ้งล่วงหน้ากี่วันก่อนถึงกำหนด · NULL = ใช้ค่ากลางจาก app_settings (ห้าม hardcode ในโค้ด)
+  lead_days    smallint,
+  owner_note   text,                            -- ผู้รับผิดชอบ (ข้อความอิสระ)
+  created_by   uuid references auth.users(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+
+  constraint academic_calendar_range_ok check (end_date >= start_date),
+  constraint academic_calendar_lead_ok  check (lead_days is null or lead_days between 0 and 60),
+  constraint academic_calendar_category_ok
+    check (category in ('งานประจำ', 'สอบ', 'ส่งงาน/ส่งคะแนน', 'ประชุม/อบรม', 'กิจกรรม', 'อื่น ๆ'))
+);
+create index if not exists academic_calendar_year_idx on academic_calendar (year, start_date);
+
+-- ค่ากลาง: แจ้งล่วงหน้ากี่วัน (ผู้ใช้ระบุ "ประมาณ 1 สัปดาห์" → 7) แก้ได้ที่หน้าปฏิทิน
+insert into app_settings (key, value) values ('academic_calendar_lead_days', '7')
+on conflict (key) do nothing;
+
+-- ---------- 3) โครงการ/กิจกรรมของฝ่ายวิชาการ ----------
+-- responsible_name = สำเนาชื่อ ณ วันที่บันทึก จำเป็นเพราะ staff_select ให้ครูทั่วไปอ่านได้
+-- เฉพาะแถวของตัวเอง → ถ้าเก็บแค่ staff_id ครูทั่วไปจะเห็นช่องผู้รับผิดชอบว่างเปล่า
+-- หน้าเว็บอ่านชื่อสดจาก staff ก่อนเสมอ (คนที่มีสิทธิ์) แล้วค่อยถอยมาใช้สำเนานี้
+create table if not exists academic_projects (
+  id                    uuid primary key default gen_random_uuid(),
+  year                  text not null,
+  name                  text not null,
+  kind                  text not null default 'โครงการ',
+  status                text not null default 'วางแผน',
+  start_date            date not null,
+  end_date              date,                   -- ว่าง = งานวันเดียว (ใช้ start_date แทน)
+  responsible_staff_id  uuid references staff(id) on delete set null,
+  responsible_name      text,
+  budget_planned        numeric(12,2),          -- งบที่ตั้งไว้ (ว่าง = ไม่ใช้งบ)
+  budget_actual         numeric(12,2),          -- งบที่ใช้จริง (กรอกทีหลังตอนปิดโครงการ)
+  standard_note         text,                   -- มาตรฐาน/กลยุทธ์ที่สนอง (นอกเหนือจาก OKR)
+  detail                text,
+  created_by            uuid references auth.users(id) on delete set null,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+
+  constraint academic_projects_kind_ok   check (kind in ('โครงการ', 'กิจกรรม')),
+  constraint academic_projects_status_ok check (status in ('วางแผน', 'กำลังดำเนินการ', 'เสร็จสิ้น', 'ยกเลิก')),
+  constraint academic_projects_range_ok  check (end_date is null or end_date >= start_date),
+  constraint academic_projects_budget_ok check (
+    (budget_planned is null or budget_planned >= 0) and
+    (budget_actual  is null or budget_actual  >= 0)
+  )
+);
+create index if not exists academic_projects_year_idx on academic_projects (year, start_date);
+
+-- โครงการ 1 โครงการสนองได้หลาย OKR (เคสจริงของโรงเรียนมักสนองหลายข้อ) จึงแยกเป็นตารางเชื่อม
+create table if not exists academic_project_okrs (
+  project_id  uuid not null references academic_projects(id) on delete cascade,
+  okr_id      uuid not null references school_okrs(id) on delete cascade,
+  primary key (project_id, okr_id)
+);
+
+-- ไฟล์แนบ = เก็บ "ลิงก์" ไม่อัปโหลดไฟล์ (ผู้ใช้เลือกแล้ว 2026-07-26)
+-- เหตุผล: Supabase free tier ไม่มี backup และพื้นที่จำกัด · โรงเรียนใช้ Google Drive อยู่แล้ว
+create table if not exists academic_project_links (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references academic_projects(id) on delete cascade,
+  label       text not null,
+  url         text not null,
+  sort_order  smallint not null default 0,
+  created_at  timestamptz not null default now(),
+
+  constraint academic_project_links_url_ok check (url ~* '^https?://')
+);
+create index if not exists academic_project_links_project_idx on academic_project_links (project_id, sort_order);
+
+-- ---------- 4) RLS ของ 5 ตารางใหม่ ----------
+alter table school_okrs             enable row level security;
+alter table academic_calendar       enable row level security;
+alter table academic_projects       enable row level security;
+alter table academic_project_okrs   enable row level security;
+alter table academic_project_links  enable row level security;
+
+drop policy if exists school_okrs_select on school_okrs;
+create policy school_okrs_select on school_okrs for select using (auth.role() = 'authenticated');
+drop policy if exists school_okrs_insert on school_okrs;
+create policy school_okrs_insert on school_okrs for insert with check (has_department('วิชาการ'));
+drop policy if exists school_okrs_update on school_okrs;
+create policy school_okrs_update on school_okrs for update
+  using (has_department('วิชาการ')) with check (has_department('วิชาการ'));
+drop policy if exists school_okrs_delete on school_okrs;
+create policy school_okrs_delete on school_okrs for delete using (is_admin());
+
+drop policy if exists academic_calendar_select on academic_calendar;
+create policy academic_calendar_select on academic_calendar for select using (auth.role() = 'authenticated');
+drop policy if exists academic_calendar_insert on academic_calendar;
+create policy academic_calendar_insert on academic_calendar for insert with check (has_department('วิชาการ'));
+drop policy if exists academic_calendar_update on academic_calendar;
+create policy academic_calendar_update on academic_calendar for update
+  using (has_department('วิชาการ')) with check (has_department('วิชาการ'));
+drop policy if exists academic_calendar_delete on academic_calendar;
+create policy academic_calendar_delete on academic_calendar for delete using (is_admin());
+
+drop policy if exists academic_projects_select on academic_projects;
+create policy academic_projects_select on academic_projects for select using (auth.role() = 'authenticated');
+drop policy if exists academic_projects_insert on academic_projects;
+create policy academic_projects_insert on academic_projects for insert with check (has_department('วิชาการ'));
+drop policy if exists academic_projects_update on academic_projects;
+create policy academic_projects_update on academic_projects for update
+  using (has_department('วิชาการ')) with check (has_department('วิชาการ'));
+drop policy if exists academic_projects_delete on academic_projects;
+create policy academic_projects_delete on academic_projects for delete using (is_admin());
+
+drop policy if exists academic_project_okrs_select on academic_project_okrs;
+create policy academic_project_okrs_select on academic_project_okrs for select using (auth.role() = 'authenticated');
+drop policy if exists academic_project_okrs_insert on academic_project_okrs;
+create policy academic_project_okrs_insert on academic_project_okrs for insert with check (has_department('วิชาการ'));
+-- ตารางเชื่อมไม่มีคอลัมน์ให้แก้ (PK ทั้งคู่) จึงมีแค่ insert/delete
+-- delete ต้องให้ฝ่ายวิชาการทำได้ ไม่งั้น "แก้รายการ OKR ของโครงการ" จะทำไม่ได้เลย
+-- (ยกเว้นจากกติกา "ลบได้เฉพาะ admin" โดยตั้งใจ — ลบแถวเชื่อมไม่ได้ทำให้ข้อมูลจริงหาย)
+drop policy if exists academic_project_okrs_delete on academic_project_okrs;
+create policy academic_project_okrs_delete on academic_project_okrs for delete using (has_department('วิชาการ'));
+
+drop policy if exists academic_project_links_select on academic_project_links;
+create policy academic_project_links_select on academic_project_links for select using (auth.role() = 'authenticated');
+drop policy if exists academic_project_links_insert on academic_project_links;
+create policy academic_project_links_insert on academic_project_links for insert with check (has_department('วิชาการ'));
+drop policy if exists academic_project_links_update on academic_project_links;
+create policy academic_project_links_update on academic_project_links for update
+  using (has_department('วิชาการ')) with check (has_department('วิชาการ'));
+drop policy if exists academic_project_links_delete on academic_project_links;
+create policy academic_project_links_delete on academic_project_links for delete using (has_department('วิชาการ'));
+
+-- ---------- 5) ตัวเลือกผู้รับผิดชอบ — เห็นได้เฉพาะคนที่มีสิทธิ์ฝ่าย ----------
+-- ทำไมต้องมี: 2026-07-25 ปิดช่องโหว่ staff_select ให้ครูทั่วไปอ่านทะเบียนบุคลากรไม่ได้แล้ว
+-- แต่คนที่ได้สิทธิ์ "ฝ่ายวิชาการ" (ไม่ใช่ฝ่ายบุคคล) ก็อ่านไม่ได้ด้วย → เลือกผู้รับผิดชอบไม่ได้
+-- คืนเฉพาะ id + ชื่อ + ตำแหน่ง เท่านั้น (ไม่มีอีเมล/เวลาเข้าสาย/สถานะอนุโลม)
+create or replace function staff_picker()
+-- ตั้งชื่อคอลัมน์ผลลัพธ์เป็น staff_position เพราะ position เป็นคำสงวนของ SQL (POSITION(...))
+-- has_login: คนที่ยังไม่ผูกบัญชีล็อกอินจะทำงานบางอย่างไม่ได้ (เช่นเป็นครูประจำชั้นแล้วเช็คชื่อ)
+-- หน้าเว็บต้องขึ้นป้ายเตือนตั้งแต่ตอนเลือก ไม่ใช่ให้ไปเจอ error ตอนกดบันทึก
+returns table (id uuid, full_name text, staff_position text, has_login boolean)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select s.id, s.full_name, s.position, (s.user_id is not null)
+  from staff s
+  where s.is_active
+    and (has_department('วิชาการ') or has_department('บุคลากร') or has_department('บริหารทั่วไป'))
+  order by s.full_name;
+$$;
+revoke all on function staff_picker() from public, anon;
+grant execute on function staff_picker() to authenticated;
+
+-- ============================================================
+-- ย้อนกลับ migration นี้ทั้งบล็อก
+-- ============================================================
+-- drop function if exists staff_picker();
+-- drop table if exists academic_project_links;
+-- drop table if exists academic_project_okrs;
+-- drop table if exists academic_projects;
+-- drop table if exists academic_calendar;
+-- drop table if exists school_okrs;
+-- delete from app_settings where key = 'academic_calendar_lead_days';
+
+
+-- ============================================================
+-- การ์ด "ครูที่มาวันนี้" บน dashboard — ❌ ไม่ใช้ RPC ในฐานข้อมูล (ตัดสินใจ 2026-07-26)
+-- ------------------------------------------------------------
+-- เคยออกแบบเป็น security definer `today_staff_presence()` ที่อ่าน work_attendance
+-- แต่ยกเลิกไป เพราะ work_attendance ของ "วันนี้" จะมีข้อมูลก็ต่อเมื่อมีคนฝ่ายบุคคลเปิดหน้า
+-- personnel/index.html (จุดเดียวที่เรียก syncJibble) → เช้าไหนยังไม่มีใครเปิด dashboard
+-- จะบอกว่า "ยังไม่มีใครลงเวลา" ทั้งที่ครูมากันแล้ว
+--
+-- ใช้ Edge Function `jibble-sync` scope ใหม่แทน (ดึงจาก Jibble สดตอนนั้น + คืนแถวนิรนาม)
+-- → ไม่ต้องเพิ่ม security definer ตัวใหม่ในฐานข้อมูลเลย
+-- รายละเอียด: personnel/PLAN.md หัวข้อ "การ์ดครูมาวันนี้บน dashboard ส่วนกลาง"
+-- ============================================================
+
+
+-- ============================================================
+-- Migration: เช็คชื่อรายวันโดยครูประจำชั้น (ฝ่ายบริหารทั่วไป) — ออกแบบ 2026-07-26
+-- ------------------------------------------------------------
+-- ⚠️ ยังไม่ได้รันบน Supabase — ผู้ใช้ต้องเป็นคนรันเอง
+-- เหตุผล ขอบเขต และกับดัก อยู่ที่ general-affairs/PLAN.md (ไฟล์นี้เก็บแต่โครงสร้าง)
+--
+-- ⛔ เส้นแบ่งสำคัญ: เช็ครายวันชุดนี้ **ไม่กระทบเกรด/มส. เลย** (ผู้ใช้ยืนยัน 2026-07-26)
+--    มส. คิดจาก attendance_sessions/attendance_records ของรายวิชาเท่านั้น เหมือนเดิมทุกอย่าง
+--    ห้ามให้ daily_attendance ไหลเข้า computeMissedPeriods()/computeSubjectResult()
+-- ============================================================
+
+-- ---------- 1) ครูประจำชั้น (1 ห้องมีได้หลายคน — ผู้ใช้เคาะ) ----------
+create table if not exists homeroom_teachers (
+  id           uuid primary key default gen_random_uuid(),
+  year         text not null,                   -- ครูประจำชั้นเปลี่ยนทุกปี + ต้องดูย้อนหลังได้
+  grade_level  text not null,
+  classroom    text not null,
+  staff_id     uuid not null references staff(id) on delete cascade,
+  created_at   timestamptz not null default now(),
+
+  constraint homeroom_teachers_unique unique (year, grade_level, classroom, staff_id)
+);
+create index if not exists homeroom_teachers_room_idx on homeroom_teachers (year, grade_level, classroom);
+create index if not exists homeroom_teachers_staff_idx on homeroom_teachers (staff_id);
+
+-- ---------- 2) ผลเช็คชื่อรายวัน (วันละ 1 สถานะต่อคน) ----------
+-- เก็บ year/grade_level/classroom ซ้ำไว้ในแถวโดยตั้งใจ (ดูเหตุผล 2 ข้อใน PLAN.md):
+-- RLS ตรวจได้โดยไม่ต้อง join placements ทุกแถว + เป็นบันทึกของวันนั้นจริงเมื่อเด็กย้ายห้องกลางปี
+create table if not exists daily_attendance (
+  id           uuid primary key default gen_random_uuid(),
+  attend_date  date not null,
+  year         text not null,                   -- ปีการศึกษาของวันนั้น (academicYearOf ฝั่ง JS)
+  grade_level  text not null,
+  classroom    text not null,
+  student_id   uuid not null references students(id) on delete cascade,
+  status       text not null default 'มา',
+  note         text,
+  recorded_by  uuid references auth.users(id) on delete set null,
+  recorded_at  timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+
+  -- ชุดสถานะเดียวกับ attendance_records เป๊ะ ๆ (ผู้ใช้เคาะ) — ถ้าจะเพิ่มสถานะ ต้องแก้ทั้งสองที่พร้อมกัน
+  constraint daily_attendance_status_ok check (status in ('มา', 'ขาด', 'ลาป่วย', 'ลากิจ', 'มาสาย')),
+  -- วันละ 1 ครั้ง: เช็คซ้ำ = upsert ทับของเดิม ไม่เกิดแถวซ้ำ
+  constraint daily_attendance_unique unique (student_id, attend_date)
+);
+create index if not exists daily_attendance_date_idx on daily_attendance (attend_date);
+create index if not exists daily_attendance_room_idx on daily_attendance (attend_date, year, grade_level, classroom);
+
+-- ---------- 3) ตัวช่วยตรวจสิทธิ์: เป็นครูประจำชั้นของห้องนี้ไหม ----------
+-- security definer เพราะต้องอ่าน staff.user_id ซึ่ง staff_select จำกัดไว้ให้เห็นเฉพาะแถวตัวเอง
+-- has_department('บริหารทั่วไป') คลุม is_admin() อยู่แล้ว จึงไม่ต้องเขียนซ้ำ
+create or replace function is_homeroom_of(p_year text, p_grade text, p_classroom text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select has_department('บริหารทั่วไป') or exists (
+    select 1
+    from homeroom_teachers h
+    join staff s on s.id = h.staff_id
+    where h.year = p_year
+      and h.grade_level = p_grade
+      and h.classroom = p_classroom
+      and s.user_id = auth.uid()
+  );
+$$;
+revoke all on function is_homeroom_of(text, text, text) from public, anon;
+grant execute on function is_homeroom_of(text, text, text) to authenticated;
+
+-- ---------- 4) RLS ----------
+alter table homeroom_teachers enable row level security;
+alter table daily_attendance  enable row level security;
+
+-- ครูต้องรู้ว่าตัวเองเป็นครูประจำชั้นห้องไหน จึงต้องอ่านตารางนี้ได้ (มีแค่ชื่อห้อง+staff_id ไม่มีข้อมูลส่วนตัว)
+drop policy if exists homeroom_teachers_select on homeroom_teachers;
+create policy homeroom_teachers_select on homeroom_teachers for select using (auth.role() = 'authenticated');
+drop policy if exists homeroom_teachers_insert on homeroom_teachers;
+create policy homeroom_teachers_insert on homeroom_teachers for insert with check (has_department('บริหารทั่วไป'));
+drop policy if exists homeroom_teachers_update on homeroom_teachers;
+create policy homeroom_teachers_update on homeroom_teachers for update
+  using (has_department('บริหารทั่วไป')) with check (has_department('บริหารทั่วไป'));
+-- ยกเว้นกติกา "ลบได้เฉพาะ admin" โดยตั้งใจ: ย้ายครูประจำชั้นระหว่างปีเป็นงานปกติของฝ่าย
+-- และการลบแถวนี้ไม่ทำให้ผลเช็คชื่อที่บันทึกไปแล้วหายแม้แต่แถวเดียว
+drop policy if exists homeroom_teachers_delete on homeroom_teachers;
+create policy homeroom_teachers_delete on homeroom_teachers for delete using (has_department('บริหารทั่วไป'));
+
+-- อ่านได้ทุกคนที่ล็อกอิน — ตั้งใจให้ตรงกับ attendance_records_select ที่เป็นแบบนี้อยู่แล้ว
+-- (ไม่งั้นตัวเลขบน dashboard ของครูทั่วไปจะไม่ตรงกับของหัวหน้าฝ่าย)
+drop policy if exists daily_attendance_select on daily_attendance;
+create policy daily_attendance_select on daily_attendance for select using (auth.role() = 'authenticated');
+drop policy if exists daily_attendance_insert on daily_attendance;
+create policy daily_attendance_insert on daily_attendance for insert
+  with check (is_homeroom_of(year, grade_level, classroom));
+drop policy if exists daily_attendance_update on daily_attendance;
+create policy daily_attendance_update on daily_attendance for update
+  using (is_homeroom_of(year, grade_level, classroom))
+  with check (is_homeroom_of(year, grade_level, classroom));
+drop policy if exists daily_attendance_delete on daily_attendance;
+create policy daily_attendance_delete on daily_attendance for delete using (is_admin());
+
+-- ============================================================
+-- ย้อนกลับ migration นี้ทั้งบล็อก
+-- ============================================================
+-- drop function if exists is_homeroom_of(text, text, text);
+-- drop table if exists daily_attendance;
+-- drop table if exists homeroom_teachers;

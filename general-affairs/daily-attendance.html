@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เช็คชื่อรายวัน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.55;
+  }
+  .wrap { max-width:820px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; overflow:hidden;
+    border:1px solid var(--line); border-radius:12px; background:var(--white);
+  }
+  .filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .field { min-width:0; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input, select {
+    width:100%; min-width:0; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button {
+    min-height:42px; padding:9px 14px; border:0; border-radius:9px;
+    font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary { color:#fff; background:var(--teal); }
+  button:disabled { opacity:.55; cursor:default; }
+  .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner a { color:inherit; font-weight:700; }
+  .room-note { margin-top:9px; color:var(--muted); font-size:13px; }
+  .summary {
+    display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:8px; margin-bottom:14px;
+  }
+  .summary-item { padding:10px; border-radius:10px; background:#f4f8f7; text-align:center; }
+  .summary-item b { display:block; font-size:22px; line-height:1.15; }
+  .summary-item span { color:var(--muted); font-size:12px; }
+  .section-head {
+    display:flex; align-items:flex-start; justify-content:space-between;
+    gap:12px; margin-bottom:12px;
+  }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .student-list { border-top:1px solid var(--line); }
+  .student-row {
+    display:grid; grid-template-columns:minmax(160px,1fr) minmax(130px,.55fr) minmax(150px,.7fr);
+    gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line);
+  }
+  .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
+  .student-meta { display:block; color:var(--muted); font-size:12px; font-weight:400; }
+  .status-select[data-status="ขาด"] { color:var(--danger); background:var(--danger-soft); }
+  .status-select[data-status="ลาป่วย"],
+  .status-select[data-status="ลากิจ"],
+  .status-select[data-status="มาสาย"] { color:var(--amber); background:var(--amber-soft); }
+  .save-bar {
+    position:sticky; bottom:10px; display:flex; align-items:center; justify-content:space-between;
+    gap:12px; margin-top:14px; padding:12px; border:1px solid rgba(15,110,86,.16);
+    border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 10px 28px rgba(25,77,73,.14);
+  }
+  .save-bar span { color:var(--muted); font-size:13px; }
+  .empty { padding:28px 10px; color:var(--muted); text-align:center; }
+  #toast {
+    position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
+    padding:11px 18px; border-radius:10px; color:#fff; background:#1f2a2e;
+    font-weight:600; opacity:0; pointer-events:none; transform:translateX(-50%);
+    transition:opacity .18s;
+  }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:640px) {
+    .filters { grid-template-columns:1fr; }
+    .student-row { grid-template-columns:minmax(0,1fr) 124px; }
+    .student-row .note-input { grid-column:1/-1; }
+  }
+  @media (max-width:420px) {
+    .summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .section-head { display:block; }
+    .save-bar { align-items:stretch; flex-direction:column; }
+    .save-bar button { width:100%; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>เช็คชื่อรายวัน</h1>
+    <p>ครูประจำชั้นเช็ควันละครั้ง — ทุกคนตั้งต้นเป็น “มา” เปลี่ยนเฉพาะคนที่ไม่ได้มา</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260726-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card">
+      <div class="filters">
+        <div class="field">
+          <label for="attend-date">วันที่เช็คชื่อ</label>
+          <input id="attend-date" type="date">
+        </div>
+        <div class="field">
+          <label for="room-select">ห้องเรียน</label>
+          <select id="room-select" disabled><option value="">กำลังโหลด…</option></select>
+        </div>
+      </div>
+      <div class="room-note" id="year-note">กำลังหาปีการศึกษาของวันที่…</div>
+    </section>
+
+    <section id="placement-warning" class="card" hidden></section>
+    <section id="access-message" class="card" hidden></section>
+
+    <section id="attendance-card" class="card" hidden>
+      <div class="section-head">
+        <div>
+          <h2 id="room-title">รายชื่อนักเรียน</h2>
+          <p id="checked-note">ยังไม่เคยเช็คห้องนี้ในวันที่เลือก</p>
+        </div>
+      </div>
+      <div class="summary" aria-label="สรุปสถานะปัจจุบัน">
+        <div class="summary-item"><b id="sum-present">0</b><span>มา</span></div>
+        <div class="summary-item"><b id="sum-absent">0</b><span>ขาด</span></div>
+        <div class="summary-item"><b id="sum-leave">0</b><span>ลา</span></div>
+        <div class="summary-item"><b id="sum-late">0</b><span>มาสาย</span></div>
+      </div>
+      <div class="student-list" id="student-list"></div>
+      <div class="save-bar">
+        <span id="save-note">ตรวจสถานะให้ครบก่อนบันทึกทั้งห้อง</span>
+        <button class="primary" id="save-attendance">บันทึกเช็คชื่อ</button>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
+  summarizeDailyAttendance, bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260726-4";
+
+const el = id => document.getElementById(id);
+const today = toDateStr(bangkokNow());
+const STATUS_OPTIONS = ["มา", "ขาด", "ลาป่วย", "ลากิจ", "มาสาย"];
+const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const studentCompare = (a, b) =>
+  String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) ||
+  String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+const formatTime = iso => iso
+  ? new Intl.DateTimeFormat("th-TH", {
+      timeZone:"Asia/Bangkok", hour:"2-digit", minute:"2-digit", hour12:false
+    }).format(new Date(iso)) + " น."
+  : "—";
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").classList.toggle("err", isError);
+  el("toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el("toast").classList.remove("show"), 3200);
+}
+
+let session = null;
+let years = [];
+let canManage = false;
+let currentYear = "";
+let placements = [];
+let availableRooms = [];
+let roster = [];
+let stateByStudent = new Map();
+let selectedRoom = null;
+
+function showAccess(html, type = "warn") {
+  el("access-message").hidden = false;
+  el("access-message").innerHTML = `<div class="banner ${type}" style="margin:0">${html}</div>`;
+}
+function clearAccess() {
+  el("access-message").hidden = true;
+  el("access-message").innerHTML = "";
+}
+function hideAttendance() {
+  el("attendance-card").hidden = true;
+  selectedRoom = null;
+  roster = [];
+  stateByStudent.clear();
+}
+
+async function loadYearContext(dateStr) {
+  hideAttendance();
+  clearAccess();
+  currentYear = academicYearOf(dateStr, years);
+  if (!currentYear) {
+    el("year-note").textContent = "ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่นี้";
+    el("room-select").innerHTML = '<option value="">— ยังไม่มีปีการศึกษา —</option>';
+    el("room-select").disabled = true;
+    return;
+  }
+  el("year-note").textContent = `วันที่นี้อยู่ในปีการศึกษา ${currentYear}`;
+  el("room-select").innerHTML = '<option value="">กำลังโหลดห้อง…</option>';
+  el("room-select").disabled = true;
+
+  const [placementRes, activeStudents, homeroomRes, ownStaffRes] = await Promise.all([
+    getStudentPlacements(currentYear),
+    getActiveStudents(),
+    sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
+    sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle()
+  ]);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (homeroomRes.error) throw new Error("โหลดข้อมูลครูประจำชั้นไม่สำเร็จ: " + homeroomRes.error.message);
+
+  placements = placementRes.data || [];
+  const placedIds = new Set(placements.map(p => p.student_id));
+  const missingCount = (activeStudents || []).filter(s => !placedIds.has(s.id)).length;
+  el("placement-warning").hidden = missingCount === 0;
+  el("placement-warning").innerHTML = missingCount
+    ? `<div class="banner warn" style="margin:0"><b>มีนักเรียน ${missingCount} คนที่ยังไม่มีชั้น/ห้องในปีการศึกษา ${esc(currentYear)}</b><br>` +
+      `นักเรียนกลุ่มนี้จะไม่ปรากฏในรายชื่อเช็คชื่อ กรุณาจัดห้องที่หน้า ` +
+      `<a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a></div>`
+    : "";
+
+  const allRooms = roomsFromPlacements(placements, currentYear);
+  const ownStaffId = ownStaffRes.data?.id || null;
+  const assignedKeys = new Set(
+    (homeroomRes.data || [])
+      .filter(row => ownStaffId && row.staff_id === ownStaffId)
+      .map(roomKey)
+  );
+  availableRooms = canManage ? allRooms : allRooms.filter(room => assignedKeys.has(roomKey(room)));
+
+  if (!canManage && !ownStaffId) {
+    el("room-select").innerHTML = '<option value="">— ไม่มีห้องที่รับผิดชอบ —</option>';
+    showAccess("<b>ยังไม่พบบัญชีบุคลากรที่ผูกกับการเข้าสู่ระบบนี้</b><br>กรุณาติดต่อฝ่ายบริหารทั่วไปให้ตรวจการผูกบัญชีและครูประจำชั้น");
+    return;
+  }
+  if (!availableRooms.length) {
+    el("room-select").innerHTML = '<option value="">— ไม่มีห้องที่รับผิดชอบ —</option>';
+    const message = canManage
+      ? `<b>ปีการศึกษา ${esc(currentYear)} ยังไม่มีข้อมูลห้องเรียน</b><br>กรุณาจัดชั้น/ห้องให้นักเรียนที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a>`
+      : `<b>คุณยังไม่ได้เป็นครูประจำชั้นของห้องใดในปีการศึกษา ${esc(currentYear)}</b><br>กรุณาติดต่อฝ่ายบริหารทั่วไปเพื่อกำหนดห้องหรือแก้ไขข้อมูลครูประจำชั้น`;
+    showAccess(message);
+    return;
+  }
+
+  el("room-select").innerHTML =
+    (availableRooms.length === 1 ? "" : '<option value="">— เลือกห้อง —</option>') +
+    availableRooms.map((room, index) =>
+      `<option value="${index}">${esc(room.grade_level)} · ${esc(room.classroom)}</option>`
+    ).join("");
+  el("room-select").disabled = false;
+  if (availableRooms.length === 1) {
+    el("room-select").value = "0";
+    await loadRoom(0);
+  }
+}
+
+async function recorderLabel(userId) {
+  if (!userId) return "ไม่ระบุผู้บันทึก";
+  const { data } = await sb.from("profiles").select("name,email").eq("id", userId).maybeSingle();
+  return data?.name || data?.email || "บัญชีผู้ใช้";
+}
+
+function renderSummary() {
+  if (!selectedRoom) return;
+  const rows = roster.map(p => ({
+    grade_level:selectedRoom.grade_level,
+    classroom:selectedRoom.classroom,
+    status:stateByStudent.get(p.student_id)?.status || "มา"
+  }));
+  const summary = summarizeDailyAttendance(rows, [{
+    year:currentYear,
+    grade_level:selectedRoom.grade_level,
+    classroom:selectedRoom.classroom,
+    studentCount:roster.length
+  }]);
+  el("sum-present").textContent = summary.present;
+  el("sum-absent").textContent = summary.absent;
+  el("sum-leave").textContent = summary.leave;
+  el("sum-late").textContent = summary.late;
+}
+
+function renderRoster() {
+  el("student-list").innerHTML = roster.map(p => {
+    const student = p.student || {};
+    const item = stateByStudent.get(p.student_id) || { status:"มา", note:"" };
+    return `<div class="student-row">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
+        <span class="student-meta">เลขที่ ${esc(student.student_no || "—")}</span>
+      </div>
+      <select class="status-select" data-student="${esc(p.student_id)}" data-status="${esc(item.status)}" aria-label="สถานะของ ${esc(student.name || "นักเรียน")}">
+        ${STATUS_OPTIONS.map(status => `<option${status === item.status ? " selected" : ""}>${status}</option>`).join("")}
+      </select>
+      <input class="note-input" data-note-student="${esc(p.student_id)}" type="text" maxlength="300" value="${esc(item.note)}" placeholder="หมายเหตุ (ถ้ามี)" aria-label="หมายเหตุของ ${esc(student.name || "นักเรียน")}">
+    </div>`;
+  }).join("");
+  renderSummary();
+}
+
+async function loadRoom(index) {
+  hideAttendance();
+  clearAccess();
+  selectedRoom = availableRooms[Number(index)] || null;
+  if (!selectedRoom) return;
+  const dateStr = el("attend-date").value;
+  const dailyData = await loadDailyAttendanceToday(currentYear, dateStr);
+  const existing = (dailyData.rows || []).filter(row =>
+    row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom
+  );
+  roster = placements.filter(p =>
+    p.grade_level === selectedRoom.grade_level && p.classroom === selectedRoom.classroom
+  ).sort(studentCompare);
+  if (!roster.length) {
+    showAccess(`<b>${esc(selectedRoom.grade_level)} · ${esc(selectedRoom.classroom)} ไม่มีนักเรียนใน placement ของปี ${esc(currentYear)}</b><br>` +
+      `กรุณาตรวจที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a>`);
+    return;
+  }
+  const existingByStudent = new Map(existing.map(row => [row.student_id, row]));
+  stateByStudent = new Map(roster.map(p => {
+    const old = existingByStudent.get(p.student_id);
+    return [p.student_id, { status:old?.status || "มา", note:old?.note || "" }];
+  }));
+
+  el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${roster.length} คน)`;
+  if (existing.length) {
+    const latest = [...existing].sort((a, b) =>
+      String(b.updated_at || b.recorded_at).localeCompare(String(a.updated_at || a.recorded_at))
+    )[0];
+    const who = await recorderLabel(latest.recorded_by);
+    el("checked-note").textContent = `ห้องนี้เช็คแล้วเมื่อ ${formatTime(latest.updated_at || latest.recorded_at)} โดย ${who} — แก้แล้วบันทึกทับได้`;
+  } else {
+    el("checked-note").textContent = "ยังไม่เคยเช็คห้องนี้ในวันที่เลือก — ทุกคนตั้งต้นเป็น “มา”";
+  }
+  el("save-note").textContent = dailyData.isHoliday
+    ? "วันที่เลือกเป็นวันหยุดตามตารางงาน กรุณาตรวจให้แน่ใจก่อนบันทึก"
+    : `บันทึก ${roster.length} คนพร้อมกัน`;
+  renderRoster();
+  el("attendance-card").hidden = false;
+}
+
+el("student-list").addEventListener("change", event => {
+  const select = event.target.closest("[data-student]");
+  if (!select) return;
+  const item = stateByStudent.get(select.dataset.student);
+  if (!item) return;
+  item.status = select.value;
+  select.dataset.status = select.value;
+  renderSummary();
+});
+el("student-list").addEventListener("input", event => {
+  const input = event.target.closest("[data-note-student]");
+  if (!input) return;
+  const item = stateByStudent.get(input.dataset.noteStudent);
+  if (item) item.note = input.value;
+});
+el("room-select").addEventListener("change", async () => {
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { showAccess(`<b>โหลดรายชื่อไม่สำเร็จ</b><br>${esc(error.message)}`, "bad"); }
+});
+el("attend-date").addEventListener("change", async () => {
+  const dateStr = el("attend-date").value;
+  if (!dateStr || dateStr > today) {
+    el("attend-date").value = today;
+    toast("ไม่สามารถเช็คชื่อวันในอนาคตได้", true);
+  }
+  try { await loadYearContext(el("attend-date").value); }
+  catch (error) { showAccess(`<b>โหลดข้อมูลไม่สำเร็จ</b><br>${esc(error.message)}`, "bad"); }
+});
+el("save-attendance").addEventListener("click", async () => {
+  if (!selectedRoom || !roster.length) return;
+  const dateStr = el("attend-date").value;
+  if (!dateStr || dateStr > today) return toast("ไม่สามารถบันทึกวันในอนาคตได้", true);
+  const button = el("save-attendance");
+  button.disabled = true;
+  button.textContent = "กำลังบันทึก…";
+  const now = new Date().toISOString();
+  const payload = roster.map(p => {
+    const item = stateByStudent.get(p.student_id) || { status:"มา", note:"" };
+    return {
+      attend_date:dateStr,
+      year:currentYear,
+      grade_level:selectedRoom.grade_level,
+      classroom:selectedRoom.classroom,
+      student_id:p.student_id,
+      status:item.status,
+      note:item.note.trim() || null,
+      recorded_by:session.user.id,
+      updated_at:now
+    };
+  });
+  const { error } = await sb.from("daily_attendance")
+    .upsert(payload, { onConflict:"student_id,attend_date" });
+  button.disabled = false;
+  button.textContent = "บันทึกเช็คชื่อ";
+  if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
+  toast(`บันทึกเช็คชื่อ ${roster.length} คนแล้ว`);
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { toast("บันทึกแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + error.message, true); }
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  el("attend-date").max = today;
+  el("attend-date").value = today;
+  try {
+    [years, canManage] = await Promise.all([
+      getAcademicYears(),
+      checkDepartment("บริหารทั่วไป")
+    ]);
+    await loadYearContext(today);
+  } catch (error) {
+    showAccess(`<b>เปิดหน้าเช็คชื่อไม่สำเร็จ</b><br>${esc(error.message)}`, "bad");
+  }
+}
+</script>
+</body>
+</html>

@@ -325,11 +325,19 @@ function showToast(msg, ok) {
 
 // รับ next ได้เฉพาะหน้าภายในระบบที่ระบุไว้ ป้องกันลิงก์ login.html?next=https://เว็บปลอม
 // ซึ่งอาจใช้ส่งครูต่อไปยังหน้า phishing หลังล็อกอินสำเร็จ
-const ACADEMIC_PAGES = new Set([
-  "index.html", "entry.html", "attendance.html", "summary.html", "manage.html", "students.html",
-  "retention.html", "warning.html", "rollover.html", "competency-manage.html",
-  "competency-entry.html"
-]);
+const MODULE_PAGES = {
+  academic: new Set([
+    "index.html", "entry.html", "attendance.html", "summary.html", "manage.html", "students.html",
+    "retention.html", "warning.html", "rollover.html", "competency-manage.html",
+    "competency-entry.html", "calendar.html", "projects.html"
+  ]),
+  personnel: new Set([
+    "index.html", "leave.html", "staff.html", "hr-settings.html", "work-summary.html", "my-work.html"
+  ]),
+  "general-affairs": new Set([
+    "index.html", "daily-attendance.html", "homeroom.html"
+  ])
+};
 const ROOT_PAGES = new Set(["dashboard.html", "profile.html"]);
 
 function getSafeNextPage() {
@@ -343,12 +351,24 @@ function getSafeNextPage() {
     if (target.origin === location.origin && target.pathname.startsWith(appPath) && ROOT_PAGES.has(relativePath)) {
       return relativePath + target.search;
     }
-    const legacyPage = relativePath.startsWith("academic/") ? "" : relativePath;
-    const academicPage = relativePath.startsWith("academic/") ? relativePath.slice("academic/".length) : "";
+    const parts = relativePath.split("/");
+    if (
+      target.origin === location.origin &&
+      target.pathname.startsWith(appPath) &&
+      parts.length === 2 &&
+      MODULE_PAGES[parts[0]]?.has(parts[1])
+    ) {
+      return relativePath + target.search;
+    }
+    const legacyPage = parts.length === 1 ? relativePath : "";
     // "index.html" ที่รากเว็บคือหน้าเด้งเข้า login ไม่ใช่หน้าภาพรวมวิชาการ — ห้ามแมปข้ามให้
     // (หน้าอื่นที่รากเว็บเป็น URL เก่าของหน้าวิชาการจริง จึงยังแมปต่อได้เหมือนเดิม)
-    const page = academicPage || (legacyPage === "index.html" ? "" : legacyPage);
-    if (target.origin !== location.origin || !target.pathname.startsWith(appPath) || !ACADEMIC_PAGES.has(page)) {
+    const page = legacyPage === "index.html" ? "" : legacyPage;
+    if (
+      target.origin !== location.origin ||
+      !target.pathname.startsWith(appPath) ||
+      !MODULE_PAGES.academic.has(page)
+    ) {
       return "dashboard.html";
     }
     return "academic/" + page + target.search;
