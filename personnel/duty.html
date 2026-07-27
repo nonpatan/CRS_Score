@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตารางเวรรับนักเรียน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+          --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
+          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; --blue-soft:#e8f0fb; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { font-size:20px; font-weight:600; margin:4px 0; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
+  header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
+                border-radius:99px; border:1px solid var(--line);
+                box-shadow:0 4px 12px rgba(0,0,0,.05); margin:0 0 24px; align-items:center; }
+  header .nav a { color:var(--muted); text-decoration:none; font-weight:500;
+                  padding:8px 16px; border-radius:99px; font-size:14px; }
+  header .nav a.active { background:var(--teal); color:var(--white); }
+  header .nav #btn-signout { margin-left:auto; color:var(--danger); background:#fff0f0; }
+
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px; }
+  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+                   text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
+  .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
+  .banner.info { background:var(--teal-soft); color:var(--teal); }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  .toolbar { display:grid; grid-template-columns:minmax(180px,280px) minmax(220px,1fr); gap:12px;
+             align-items:end; }
+  label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
+  select, input[type="month"] { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+    border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  select:focus, input:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button { font-family:inherit; font-size:14px; font-weight:600; padding:9px 12px;
+           border:none; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); }
+  button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  button.small { font-size:12.5px; padding:5px 8px; }
+  button:disabled, select:disabled { opacity:.5; cursor:default; }
+  .field-note { color:var(--muted); font-size:13px; margin-top:5px; }
+
+  .pattern-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .pattern-day { border:1px solid var(--line); border-radius:10px; padding:12px; min-width:0; }
+  .pattern-head { display:flex; justify-content:space-between; align-items:center; gap:8px;
+                  margin-bottom:8px; }
+  .pattern-head b { color:var(--teal); }
+  .chips { display:flex; flex-wrap:wrap; gap:7px; min-height:28px; margin-bottom:9px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:5px 8px;
+          border-radius:99px; background:var(--teal-soft); color:var(--teal); font-size:13px; }
+  .chip.bad { background:var(--danger-soft); color:var(--danger); }
+  .chip.warn { background:var(--amber-soft); color:var(--amber); }
+  .chip .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chip button { padding:1px 5px; min-width:24px; background:rgba(255,255,255,.7); color:inherit; }
+  .empty { color:var(--muted); font-size:13px; }
+
+  .duty-day { border:1px solid var(--line); border-radius:11px; padding:13px; margin-bottom:10px; }
+  .duty-day.today { border-color:var(--teal); box-shadow:0 0 0 2px var(--teal-soft); }
+  .day-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+              margin-bottom:10px; }
+  .day-title { font-weight:600; }
+  .day-title small { display:block; color:var(--muted); font-weight:400; }
+  .roster-chip { display:inline-flex; flex-direction:column; gap:2px; max-width:100%;
+                 padding:7px 9px; border:1px solid var(--line); border-radius:10px; background:#fbfdfd; }
+  .roster-chip.good { border-color:#a8d8c8; background:var(--teal-soft); color:var(--teal); }
+  .roster-chip.bad { border-color:#efb8b8; background:var(--danger-soft); color:var(--danger); }
+  .roster-chip.warn { border-color:#ebd29e; background:var(--amber-soft); color:var(--amber); }
+  .roster-main { display:flex; align-items:center; gap:7px; min-width:0; }
+  .roster-main .name { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .roster-actions { display:flex; gap:5px; margin-left:auto; }
+  .roster-status { font-size:12px; color:inherit; }
+  .add-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; }
+
+  #swap-card { border-color:var(--teal); }
+  .swap-grid { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; align-items:end; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
+           border-radius:10px; background:#1f2a2e; color:#fff; font-weight:600; opacity:0;
+           pointer-events:none; transition:opacity .18s; z-index:60; max-width:calc(100vw - 32px); }
+  #toast.show { opacity:1; } #toast.err { background:var(--danger); }
+
+  @media (min-width:880px) {
+    .pattern-grid { grid-template-columns:repeat(5,minmax(0,1fr)); }
+  }
+  @media (max-width:620px) {
+    .toolbar, .swap-grid { grid-template-columns:1fr; }
+    .toolbar button, .swap-grid button { width:100%; }
+    .pattern-grid { grid-template-columns:1fr; }
+    .day-head { display:block; }
+    .day-head .field-note { margin-top:4px; }
+    .add-row { grid-template-columns:1fr; }
+    .add-row button { width:100%; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ตารางเวรรับนักเรียน</h1>
+    <p>กำหนดรูปแบบประจำสัปดาห์ แล้วสร้างและสลับเวรจริงรายวัน</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="leave.html">บันทึกการลา</a>
+      <a href="duty.html">ตารางเวรรับนักเรียน</a>
+      <a href="staff.html">ทะเบียนบุคลากร</a>
+      <a href="hr-settings.html">ตั้งค่างานบุคคล</a>
+      <a href="work-summary.html">สรุปเวลาทำงาน</a>
+      <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260727-2"></script>
+  </header>
+
+  <div id="gate" class="card" style="display:none"></div>
+
+  <main id="content" style="display:none">
+    <div class="card">
+      <div class="section-title">เวรของเดือน</div>
+      <div class="banner info" id="duty-rule">ครูเวรต้องลงเวลาก่อน 07:15 น. โดยไม่มีช่วงผ่อนผัน</div>
+      <div class="toolbar">
+        <div>
+          <label for="month">เดือน</label>
+          <input id="month" type="month">
+        </div>
+        <button id="btn-generate" class="primary">สร้างเวรเดือนนี้จากรูปแบบ</button>
+      </div>
+      <div class="field-note">
+        ระบบข้ามวันหยุดและวันไม่ทำงาน และจะไม่ทับเวรเดิมที่เคยสลับไว้แล้ว
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">รูปแบบประจำสัปดาห์</div>
+      <div class="banner warn">
+        รูปแบบนี้เป็นแม่แบบเท่านั้น การเปลี่ยนรูปแบบจะไม่แก้ตารางจริงของเดือนที่สร้างไปแล้ว
+      </div>
+      <div id="pattern-grid" class="pattern-grid"></div>
+    </div>
+
+    <div id="swap-card" class="card" hidden>
+      <div class="section-title">สลับเวร</div>
+      <div class="field-note" id="swap-label" style="margin-bottom:8px">—</div>
+      <div class="swap-grid">
+        <div>
+          <label for="swap-staff">เปลี่ยนเป็น</label>
+          <select id="swap-staff"></select>
+        </div>
+        <button id="btn-confirm-swap" class="primary">ยืนยันการสลับ</button>
+        <button id="btn-cancel-swap" class="ghost">ยกเลิก</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">ตารางจริงรายวัน</div>
+      <div id="days"></div>
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import {
+  requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, personnelAccessDeniedHtml,
+  loadWorkContext, computeDayStatus, getDutyPattern, saveDutyPattern, removeDutyPattern,
+  saveDutyRosterEntry, removeDutyRosterEntry, generateDutyRosterFromPattern,
+  bangkokNow, toDateStr, eachDate, isoWeekday
+} from "../supabase-client.js?v=20260727-3";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const escapeHtml = value => String(value ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  const toastEl = el("toast");
+  let toastTimer = null;
+  const toast = (message, error = false) => {
+    toastEl.textContent = message;
+    toastEl.classList.toggle("err", error);
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3500);
+  };
+  el("btn-signout")?.addEventListener("click", event => {
+    event.preventDefault();
+    signOut();
+  });
+
+  const canManage = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canManage);
+  if (!canManage) {
+    el("gate").style.display = "";
+    el("gate").innerHTML = personnelAccessDeniedHtml();
+  } else {
+    el("content").style.display = "";
+    const today = toDateStr(bangkokNow());
+    const THAI_DAY = {
+      1:"จันทร์", 2:"อังคาร", 3:"พุธ", 4:"พฤหัสบดี",
+      5:"ศุกร์", 6:"เสาร์", 7:"อาทิตย์"
+    };
+    const THAI_SHORT = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+    let ctx = null;
+    let pattern = [];
+    let staffById = new Map();
+    let activeStaff = [];
+    let range = null;
+    let swapState = null;
+
+    el("month").value = today.slice(0, 7);
+
+    function monthRange(yearMonth) {
+      if (!/^\d{4}-\d{2}$/.test(yearMonth)) return null;
+      const [year, month] = yearMonth.split("-").map(Number);
+      return {
+        from: yearMonth + "-01",
+        to: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
+      };
+    }
+
+    function staffLabel(staff) {
+      const flags = [];
+      if (staff.exempt) flags.push("ไม่ต้องลงเวลา");
+      if (staff.allowed_late_time) flags.push("อนุโลมถาวร");
+      return staff.full_name + (flags.length ? ` ⚠ ${flags.join(" · ")}` : "");
+    }
+
+    function warningFor(staff, dutyDate = null) {
+      const warnings = [];
+      if (staff?.exempt) {
+        warnings.push("บุคลากรคนนี้ไม่ต้องลงเวลา ระบบจึงตรวจเวลาเข้าเวรจริงไม่ได้");
+      }
+      if (staff?.allowed_late_time) {
+        warnings.push(`บุคลากรคนนี้มีอนุโลมถาวรถึง ${String(staff.allowed_late_time).slice(0,5)} น. แต่วันเวรจะไม่ใช้ค่านี้`);
+      }
+      if (dutyDate && (ctx.latePermissions || []).some(row =>
+        row.staff_id === staff?.id && row.permit_date === dutyDate)) {
+        warnings.push("บุคลากรคนนี้มีใบขอเข้าสายของวันดังกล่าวอยู่แล้ว ใบเดิมจะไม่มีผลเมื่อเป็นวันเวร");
+      }
+      return warnings;
+    }
+
+    function confirmWarnings(staff, dutyDate = null) {
+      const warnings = warningFor(staff, dutyDate);
+      if (!warnings.length) return true;
+      return window.confirm("คำเตือนก่อนจัดเวร\n\n• " + warnings.join("\n• ") + "\n\nยืนยันว่าจะจัดเวรต่อหรือไม่?");
+    }
+
+    function staffOptions(excluded = new Set()) {
+      return activeStaff
+        .filter(staff => !excluded.has(staff.id))
+        .map(staff => `<option value="${staff.id}">${escapeHtml(staffLabel(staff))}</option>`)
+        .join("");
+    }
+
+    function rosterFor(dutyDate) {
+      return (ctx.dutyRoster || []).filter(row => row.duty_date === dutyDate);
+    }
+
+    function renderPattern() {
+      const workingDays = [...ctx.schedule.values()]
+        .filter(row => row.is_working_day)
+        .sort((a, b) => a.weekday - b.weekday);
+      el("pattern-grid").innerHTML = workingDays.length
+        ? workingDays.map(day => {
+            const rows = pattern.filter(row => Number(row.weekday) === Number(day.weekday));
+            const excluded = new Set(rows.map(row => row.staff_id));
+            const chips = rows.length
+              ? rows.map(row => {
+                  const staff = staffById.get(row.staff_id);
+                  if (!staff) return "";
+                  return `<span class="chip${staff.exempt || staff.allowed_late_time ? " warn" : ""}">
+                    <span class="name">${escapeHtml(staff.full_name)}</span>
+                    <button type="button" title="ถอดจากรูปแบบ"
+                      data-remove-pattern="${row.staff_id}" data-weekday="${day.weekday}">×</button>
+                  </span>`;
+                }).join("")
+              : '<span class="empty">ยังไม่มีคน</span>';
+            const options = staffOptions(excluded);
+            return `<section class="pattern-day">
+              <div class="pattern-head"><b>${THAI_DAY[day.weekday]}</b><span class="field-note">${rows.length} คน</span></div>
+              <div class="chips">${chips}</div>
+              <select data-add-pattern="${day.weekday}" ${options ? "" : "disabled"}>
+                <option value="">+ เพิ่มคนในรูปแบบ</option>${options}
+              </select>
+            </section>`;
+          }).join("")
+        : '<div class="banner warn" style="grid-column:1/-1">ยังไม่มีตารางวันทำงานจาก Jibble กรุณาซิงก์ข้อมูลบุคลากรก่อน</div>';
+    }
+
+    function dutyStatus(staff, dutyDate) {
+      if (dutyDate > today) return { css: "", text: "เวรล่วงหน้า" };
+      const result = computeDayStatus(staff, dutyDate, ctx);
+      if (result.firstIn) {
+        const time = String(result.firstIn).slice(0, 5);
+        if (result.status === "late") {
+          return { css: "bad", text: `ลงเวลา ${time} น. · สายเวร ${result.lateMinutes} นาที` };
+        }
+        return { css: "good", text: `ลงเวลา ${time} น. · ทันเวลาเวร` };
+      }
+      if (result.status === "leave") return { css: "warn", text: `ลา (${result.leaveType})` };
+      if (result.status === "absent") return { css: "bad", text: "ไม่มีเวลาเข้า · ขาดเวร" };
+      if (result.status === "pending") return { css: "warn", text: "ยังไม่ลงเวลา · รอครบวัน" };
+      if (result.exempt) return { css: "warn", text: "อนุโลมไม่ต้องลงเวลา · ตรวจเวลาเวรไม่ได้" };
+      return { css: "", text: result.status || "—" };
+    }
+
+    function renderDays() {
+      const workingDates = eachDate(range.from, range.to).filter(date => {
+        const schedule = ctx.schedule.get(isoWeekday(date));
+        return schedule?.is_working_day && !ctx.holidays.has(date);
+      });
+      el("days").innerHTML = workingDates.length
+        ? workingDates.map(date => {
+            const rows = rosterFor(date);
+            const excluded = new Set(rows.map(row => row.staff_id));
+            const d = new Date(date + "T00:00:00Z");
+            const dateLabel = d.toLocaleDateString("th-TH", {
+              day:"numeric", month:"long", year:"numeric", timeZone:"UTC"
+            });
+            const chips = rows.length
+              ? rows.map(row => {
+                  const staff = staffById.get(row.staff_id);
+                  if (!staff) return "";
+                  const status = dutyStatus(staff, date);
+                  return `<span class="roster-chip ${status.css}">
+                    <span class="roster-main">
+                      <span class="name">${escapeHtml(staff.full_name)}</span>
+                      <span class="roster-actions">
+                        <button type="button" class="small" data-swap-date="${date}"
+                          data-swap-staff="${staff.id}">สลับ</button>
+                        <button type="button" class="small" data-remove-date="${date}"
+                          data-remove-staff="${staff.id}">ถอด</button>
+                      </span>
+                    </span>
+                    <span class="roster-status">${escapeHtml(status.text)}</span>
+                  </span>`;
+                }).join("")
+              : '<span class="empty">ยังไม่มีคนเข้าเวร</span>';
+            const options = staffOptions(excluded);
+            return `<section class="duty-day${date === today ? " today" : ""}">
+              <div class="day-head">
+                <div class="day-title">${THAI_SHORT[d.getUTCDay()]}. ${escapeHtml(dateLabel)}
+                  <small>${date === today ? "วันนี้" : date}</small>
+                </div>
+                <div class="field-note">${rows.length} คน</div>
+              </div>
+              <div class="chips">${chips}</div>
+              <div class="add-row">
+                <select data-day-select="${date}" ${options ? "" : "disabled"}>
+                  <option value="">— เลือกบุคลากร —</option>${options}
+                </select>
+                <button type="button" class="ghost" data-add-date="${date}" ${options ? "" : "disabled"}>เพิ่มเวรวันนี้</button>
+              </div>
+            </section>`;
+          }).join("")
+        : '<div class="empty">เดือนนี้ไม่มีวันทำงานตามตาราง Jibble</div>';
+    }
+
+    async function loadData() {
+      range = monthRange(el("month").value);
+      if (!range) return;
+      el("days").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+      try {
+        [ctx, pattern] = await Promise.all([
+          loadWorkContext(range.from, range.to),
+          getDutyPattern()
+        ]);
+        staffById = new Map(ctx.staff.map(staff => [staff.id, staff]));
+        activeStaff = ctx.staff.filter(staff => staff.is_active);
+        el("duty-rule").textContent =
+          `ครูเวรต้องลงเวลาไม่เกิน ${String(ctx.settings.dutyStartTime).slice(0,5)} น. โดยไม่มีช่วงผ่อนผัน และใบขอเข้าสายไม่มีผล`;
+        renderPattern();
+        renderDays();
+      } catch (error) {
+        toast(error.message || "โหลดตารางเวรไม่สำเร็จ", true);
+        el("days").innerHTML = '<div class="banner warn">โหลดข้อมูลไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+      }
+    }
+
+    el("month").addEventListener("change", () => {
+      swapState = null;
+      el("swap-card").hidden = true;
+      loadData();
+    });
+
+    el("btn-generate").addEventListener("click", async () => {
+      const button = el("btn-generate");
+      button.disabled = true;
+      try {
+        const result = await generateDutyRosterFromPattern(range.from, range.to, session.user.id);
+        await loadData();
+        toast(`สร้างเวรใหม่ ${result.inserted} แถว จาก ${result.candidates} แถวในรูปแบบ · เวรเดิมไม่ถูกทับ`);
+      } catch (error) {
+        toast(error.message || "สร้างเวรไม่สำเร็จ", true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    el("pattern-grid").addEventListener("change", async event => {
+      const select = event.target.closest("[data-add-pattern]");
+      if (!select || !select.value) return;
+      const staff = staffById.get(select.value);
+      if (!confirmWarnings(staff)) { select.value = ""; return; }
+      select.disabled = true;
+      try {
+        await saveDutyPattern(select.value, select.dataset.addPattern);
+        pattern = await getDutyPattern();
+        renderPattern();
+        toast("เพิ่มในรูปแบบประจำสัปดาห์แล้ว");
+      } catch (error) {
+        toast(error.message || "บันทึกรูปแบบไม่สำเร็จ", true);
+        select.disabled = false;
+      }
+    });
+
+    el("pattern-grid").addEventListener("click", async event => {
+      const button = event.target.closest("[data-remove-pattern]");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        await removeDutyPattern(button.dataset.removePattern, button.dataset.weekday);
+        pattern = await getDutyPattern();
+        renderPattern();
+        toast("ถอดออกจากรูปแบบแล้ว · ตารางจริงที่สร้างไว้ไม่เปลี่ยน");
+      } catch (error) {
+        toast(error.message || "ถอดจากรูปแบบไม่สำเร็จ", true);
+        button.disabled = false;
+      }
+    });
+
+    el("days").addEventListener("click", async event => {
+      const addButton = event.target.closest("[data-add-date]");
+      if (addButton) {
+        const date = addButton.dataset.addDate;
+        const select = el("days").querySelector(`[data-day-select="${date}"]`);
+        const staff = staffById.get(select?.value);
+        if (!staff) return toast("กรุณาเลือกบุคลากร", true);
+        if (!confirmWarnings(staff, date)) return;
+        addButton.disabled = true;
+        try {
+          await saveDutyRosterEntry(date, staff.id, session.user.id);
+          await loadData();
+          toast("เพิ่มเวรแล้ว");
+        } catch (error) {
+          toast(error.message || "เพิ่มเวรไม่สำเร็จ", true);
+          addButton.disabled = false;
+        }
+        return;
+      }
+
+      const removeButton = event.target.closest("[data-remove-date]");
+      if (removeButton) {
+        const staff = staffById.get(removeButton.dataset.removeStaff);
+        if (!window.confirm(`ยืนยันถอด ${staff?.full_name || "บุคลากร"} ออกจากเวรวันที่ ${removeButton.dataset.removeDate}?`)) return;
+        removeButton.disabled = true;
+        try {
+          await removeDutyRosterEntry(removeButton.dataset.removeDate, removeButton.dataset.removeStaff);
+          await loadData();
+          toast("ถอดเวรแล้ว");
+        } catch (error) {
+          toast(error.message || "ถอดเวรไม่สำเร็จ", true);
+          removeButton.disabled = false;
+        }
+        return;
+      }
+
+      const swapButton = event.target.closest("[data-swap-date]");
+      if (swapButton) {
+        const date = swapButton.dataset.swapDate;
+        const oldStaff = staffById.get(swapButton.dataset.swapStaff);
+        const excluded = new Set(rosterFor(date).map(row => row.staff_id));
+        const options = staffOptions(excluded);
+        if (!options) return toast("ไม่มีบุคลากรคนอื่นให้สลับ", true);
+        swapState = { date, oldStaffId: swapButton.dataset.swapStaff };
+        el("swap-label").textContent = `วันที่ ${date} · สลับแทน ${oldStaff?.full_name || "บุคลากร"}`;
+        el("swap-staff").innerHTML = '<option value="">— เลือกคนใหม่ —</option>' + options;
+        el("swap-card").hidden = false;
+        el("swap-card").scrollIntoView({ behavior:"smooth", block:"center" });
+      }
+    });
+
+    el("btn-cancel-swap").addEventListener("click", () => {
+      swapState = null;
+      el("swap-card").hidden = true;
+    });
+
+    el("btn-confirm-swap").addEventListener("click", async () => {
+      if (!swapState) return;
+      const newStaff = staffById.get(el("swap-staff").value);
+      if (!newStaff) return toast("กรุณาเลือกคนใหม่", true);
+      if (!confirmWarnings(newStaff, swapState.date)) return;
+      const button = el("btn-confirm-swap");
+      button.disabled = true;
+      try {
+        // เพิ่มคนใหม่ก่อน แล้วค่อยถอดคนเดิม เพื่อไม่ทำเวรหายถ้าการเพิ่มล้มเหลว
+        await saveDutyRosterEntry(swapState.date, newStaff.id, session.user.id);
+        await removeDutyRosterEntry(swapState.date, swapState.oldStaffId);
+        swapState = null;
+        el("swap-card").hidden = true;
+        await loadData();
+        toast("สลับเวรแล้ว");
+      } catch (error) {
+        toast(error.message || "สลับเวรไม่สำเร็จ", true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    await loadData();
+  }
+}
+</script>
+</body>
+</html>

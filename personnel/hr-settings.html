@@ -90,7 +90,7 @@
 <div class="wrap">
   <header>
     <h1>ตั้งค่างานบุคคล</h1>
-    <p>เกณฑ์เข้าสาย ปีการศึกษา และโควตาวันลา</p>
+    <p>เกณฑ์เข้าสาย เวลาเข้าเวร ปีการศึกษา และโควตาวันลา</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -100,7 +100,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260727-1"></script>
+    <script src="../app-shell.js?v=20260727-2"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -127,6 +127,16 @@
       <div class="field-note" id="grace-note">—</div>
     </div>
     <button id="btn-save-grace" class="primary">บันทึกค่าผ่อนผัน</button>
+    <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
+      <div class="field">
+        <label for="duty-start-time">เวลาเข้าเวรรับนักเรียน</label>
+        <input id="duty-start-time" type="time" step="60" required>
+        <div class="field-note">
+          วันเวรใช้เวลานี้แทนเกณฑ์ปกติทั้งหมด โดยไม่บวกช่วงผ่อนผันและไม่ใช้ใบขอเข้าสาย
+        </div>
+      </div>
+      <button id="btn-save-duty-time" class="primary">บันทึกเวลาเข้าเวร</button>
+    </div>
     <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
       <div class="field">
         <label for="late-permission-until">อนุญาตให้ขอเข้าสายถึงเวลา</label>
@@ -210,7 +220,7 @@
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getAcademicYears, getLeaveTypes, getLeaveQuotas,
-         getStaffPositions } from "../supabase-client.js?v=20260727-2";
+         getStaffPositions } from "../supabase-client.js?v=20260727-3";
 
 const session = await requireAuth();
 if (session) {
@@ -270,6 +280,7 @@ if (session) {
       : "ยังไม่มีข้อมูล";
     el("v-final").textContent = settings.dayFinalTime + " น.";
     el("grace").value = settings.lateGraceMinutes;
+    el("duty-start-time").value = String(settings.dutyStartTime || "").slice(0, 5);
     el("late-permission-until").value = permitSettingRes.data?.value
       ? String(permitSettingRes.data.value).slice(0, 5)
       : "";
@@ -292,6 +303,18 @@ if (session) {
     const { error } = await sb.from("hr_settings").upsert({ key: "late_grace_minutes", value: v }, { onConflict: "key" });
     if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
     toast("บันทึกค่าผ่อนผันแล้ว");
+    loadWorkTime();
+  });
+
+  el("btn-save-duty-time").addEventListener("click", async () => {
+    const value = el("duty-start-time").value.trim();
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+      return toast("เวลาเข้าเวรต้องเป็นรูปแบบ HH:MM ที่ถูกต้อง เช่น 07:15", true);
+    }
+    const { error } = await sb.from("hr_settings")
+      .upsert({ key: "duty_start_time", value }, { onConflict: "key" });
+    if (error) return toast("บันทึกเวลาเข้าเวรไม่สำเร็จ กรุณาลองใหม่", true);
+    toast("บันทึกเวลาเข้าเวรแล้ว");
     loadWorkTime();
   });
 

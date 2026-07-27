@@ -49,6 +49,10 @@
            background:var(--teal-soft); margin-bottom:14px; }
   .today .big { font-size:20px; font-weight:700; color:var(--teal); }
   .today .sub { color:var(--muted); font-size:14px; }
+  .duty-alert { margin-top:8px; padding:7px 10px; border-radius:8px;
+                background:var(--amber-soft); color:var(--amber); font-size:13px; font-weight:600; }
+  .duty-tag { display:inline-block; margin-left:5px; padding:1px 7px; border-radius:99px;
+              background:var(--amber-soft); color:var(--amber); font-size:12px; font-weight:600; }
 
   .stats { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
   @media (min-width:560px) { .stats { grid-template-columns:repeat(4,1fr); } }
@@ -80,7 +84,7 @@
 <div class="wrap">
   <header>
     <h1>ข้อมูลการทำงานของฉัน</h1>
-    <p>สรุปการมา สาย ขาด และสิทธิ์วันลาคงเหลือของคุณ</p>
+    <p>สรุปการมา สาย ขาด เวรรับนักเรียน และสิทธิ์วันลาคงเหลือของคุณ</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -90,7 +94,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260727-1"></script>
+    <script src="../app-shell.js?v=20260727-2"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -130,7 +134,7 @@
 import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260727-1";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260727-3";
 
 const session = await requireAuth();
 if (session) {
@@ -177,21 +181,29 @@ if (session) {
     async function renderPermitCard() {
       const body = el("permit-body");
       const monthStart = today.slice(0, 7) + "-01";
-      const [settingRes, permitsRes] = await Promise.all([
-        sb.from("hr_settings").select("value").eq("key", "late_permission_until").maybeSingle(),
+      const [settingsRes, permitsRes, dutyRes] = await Promise.all([
+        sb.from("hr_settings").select("key,value")
+          .in("key", ["late_permission_until", "duty_start_time"]),
         sb.from("late_permissions")
           .select("id,permit_date,until_time,reason")
           .eq("staff_id", me.id)
           .gte("permit_date", monthStart)
           .lte("permit_date", today)
-          .order("permit_date")
+          .order("permit_date"),
+        sb.from("duty_roster")
+          .select("duty_date")
+          .eq("staff_id", me.id)
+          .eq("duty_date", today)
+          .maybeSingle()
       ]);
-      if (settingRes.error || permitsRes.error) {
+      if (settingsRes.error || permitsRes.error || dutyRes.error) {
         body.innerHTML = '<div class="banner warn">โหลดข้อมูลคำขอไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
         return;
       }
 
-      const limit = settingRes.data?.value || "";
+      const settingMap = new Map((settingsRes.data || []).map(row => [row.key, row.value]));
+      const limit = settingMap.get("late_permission_until") || "";
+      const dutyStart = String(settingMap.get("duty_start_time") || "07:15").slice(0, 5);
       const limitSeconds = timeToSeconds(limit);
       if (limitSeconds === null) {
         body.innerHTML = '<div class="banner warn">เวลาที่อนุญาตยังตั้งค่าไม่ถูกต้อง กรุณาแจ้งฝ่ายบุคคล</div>';
@@ -201,6 +213,20 @@ if (session) {
       const permits = permitsRes.data || [];
       const todayPermit = permits.find(row => row.permit_date === today);
       const countText = `<div class="field-note">เดือนนี้ขอไปแล้ว ${permits.length} ครั้ง</div>`;
+      if (dutyRes.data) {
+        const existing = todayPermit
+          ? `<div class="banner warn"><b>มีใบขอของวันนี้อยู่ก่อนจัดเวร แต่ใบนี้ไม่มีผลในวันเวร</b><br>
+               คุณยกเลิกใบเดิมได้ด้านล่าง</div>
+             <button type="button" class="danger" id="btn-cancel-permit" style="margin:0 0 10px">
+               ยกเลิกคำขอวันนี้
+             </button>`
+          : "";
+        body.innerHTML = `
+          <div class="banner warn"><b>วันนี้คุณเป็นเวร ต้องลงเวลาไม่เกิน ${dutyStart} น.</b><br>
+            วันเวรขออนุญาตเข้าสายไม่ได้ และไม่ใช้ช่วงผ่อนผันหรืออนุโลมถาวร</div>
+          ${existing}${countText}`;
+        return;
+      }
       if (todayPermit) {
         const reason = todayPermit.reason
           ? `<div class="field-note">เหตุผล: ${escapeHtml(todayPermit.reason)}</div>`
@@ -242,8 +268,20 @@ if (session) {
     el("permit-card").addEventListener("click", async event => {
       if (permitBusy) return;
       if (event.target.closest("#btn-request-permit")) {
-        const settingRes = await sb.from("hr_settings")
-          .select("value").eq("key", "late_permission_until").maybeSingle();
+        const [settingRes, dutyRes] = await Promise.all([
+          sb.from("hr_settings").select("value").eq("key", "late_permission_until").maybeSingle(),
+          sb.from("duty_roster").select("duty_date")
+            .eq("staff_id", me.id).eq("duty_date", today).maybeSingle()
+        ]);
+        if (dutyRes.error) {
+          el("permit-body").innerHTML =
+            '<div class="banner warn">ตรวจเวรของวันนี้ไม่สำเร็จ กรุณาลองเปิดหน้าใหม่ก่อนบันทึกคำขอ</div>';
+          return;
+        }
+        if (dutyRes.data) {
+          await renderPermitCard();
+          return;
+        }
         const limit = settingRes.data?.value || "";
         const limitSeconds = timeToSeconds(limit);
         if (settingRes.error || limitSeconds === null) {
@@ -307,7 +345,10 @@ if (session) {
         <div class="stat"><b>${s.workDays}</b><span>วันทำงาน</span></div>
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
         <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
-        <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>`;
+        <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
+        <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
+        <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
+        <div class="stat bad"><b>${s.dutyMissed}</b><span>ลา/ขาดเวร</span></div>`;
 
       const quotas = await getLeaveQuotas(year);
       const codes = new Set([...Object.keys(quotas), ...Object.keys(s.leaveByType)]);
@@ -346,7 +387,10 @@ if (session) {
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
         <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
-        <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>`;
+        <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
+        <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
+        <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
+        <div class="stat bad"><b>${s.dutyMissed}</b><span>ลา/ขาดเวร</span></div>`;
 
       el("month-days").innerHTML = s.rows.length ? s.rows.map(r => {
         const d = new Date(r.date + "T00:00:00Z");
@@ -357,7 +401,8 @@ if (session) {
         const time = r.firstIn ? String(r.firstIn).slice(0, 5) + " น." : "";
         const extra = r.lateMinutes ? ` (สาย ${r.lateMinutes} นาที)` : "";
         return `<div class="day-row"><span class="d">${dl}</span>
-          <span class="s ${r.status}">${text}${extra}</span><span class="t">${time}</span></div>`;
+          <span class="s ${r.status}">${text}${extra}${r.onDuty ? '<span class="duty-tag">เวร</span>' : ""}</span>
+          <span class="t">${time}</span></div>`;
       }).join("") : '<div class="muted-empty">ไม่มีข้อมูลในเดือนนี้</div>';
 
       // สถานะของวันนี้ (แสดงเด่นด้านบน)
@@ -371,7 +416,11 @@ if (session) {
         .toLocaleDateString("th-TH", { day: "numeric", month: "long", timeZone: "UTC" });
       el("today-box").innerHTML = `<div class="today">
         <div><div class="big">${text}</div>
-        <div class="sub">วันนี้ ${dToday}${r.firstIn ? " · ลงเวลา " + String(r.firstIn).slice(0,5) + " น." : ""}</div></div>
+        <div class="sub">วันนี้ ${dToday}${r.firstIn ? " · ลงเวลา " + String(r.firstIn).slice(0,5) + " น." : ""}</div>
+        ${r.onDuty
+          ? `<div class="duty-alert">วันนี้คุณเป็นเวร ต้องลงเวลาไม่เกิน ${String(ctxToday.settings.dutyStartTime).slice(0,5)} น.</div>`
+          : ""}
+        </div>
       </div>`;
     }
 

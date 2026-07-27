@@ -1377,6 +1377,7 @@ export async function loadTodayStaffSummary() {
   const attendance = new Map();
   const leaves = [];
   const latePermissions = [];
+  const dutyRoster = [];
   const staffRows = result.rows.map((row, index) => {
     const id = `anonymous-${index}`;
     if (row.first_in_local) {
@@ -1403,6 +1404,9 @@ export async function loadTodayStaffSummary() {
         until_time: row.permit_until
       });
     }
+    if (row.on_duty === true) {
+      dutyRoster.push({ staff_id: id, duty_date: today });
+    }
     return {
       id,
       exempt: row.exempt === true,
@@ -1417,6 +1421,8 @@ export async function loadTodayStaffSummary() {
     schedule,
     leaves,
     latePermissions,
+    dutyRoster,
+    dutyByKey: new Set(dutyRoster.map(row => row.staff_id + "|" + row.duty_date)),
     settings
   };
   const counts = { present: 0, late: 0, leave: 0, absent: 0, pending: 0 };
@@ -1442,6 +1448,112 @@ export async function listStaffPicker() {
 }
 
 // ============================================================
+// เวรรับนักเรียนตอนเช้า
+// ------------------------------------------------------------
+// duty_pattern = แม่แบบรายสัปดาห์ · duty_roster = ตารางจริงรายวันที่รายงานอ่าน
+// การสร้างจากแม่แบบต้องข้ามวันหยุด/วันไม่ทำงาน และห้ามทับแถวที่สลับมือไว้แล้ว
+// ============================================================
+export async function getDutyPattern() {
+  const { data, error } = await sb.from("duty_pattern")
+    .select("staff_id,weekday")
+    .order("weekday")
+    .order("staff_id");
+  if (error) throw new Error("โหลดรูปแบบเวรไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function getDutyRoster(from, to) {
+  let query = sb.from("duty_roster")
+    .select("duty_date,staff_id,note,created_by,created_at")
+    .order("duty_date")
+    .order("staff_id");
+  if (from) query = query.gte("duty_date", from);
+  if (to) query = query.lte("duty_date", to);
+  const { data, error } = await query;
+  if (error) throw new Error("โหลดตารางเวรไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function saveDutyPattern(staffId, weekday) {
+  const { error } = await sb.from("duty_pattern").upsert({
+    staff_id: staffId,
+    weekday: Number(weekday)
+  }, { onConflict: "staff_id,weekday", ignoreDuplicates: true });
+  if (error) throw new Error("บันทึกรูปแบบเวรไม่สำเร็จ: " + error.message);
+}
+
+export async function removeDutyPattern(staffId, weekday) {
+  const { error } = await sb.from("duty_pattern")
+    .delete()
+    .eq("staff_id", staffId)
+    .eq("weekday", Number(weekday));
+  if (error) throw new Error("ลบรูปแบบเวรไม่สำเร็จ: " + error.message);
+}
+
+export async function saveDutyRosterEntry(dutyDate, staffId, createdBy, note = null) {
+  const { error } = await sb.from("duty_roster").upsert({
+    duty_date: dutyDate,
+    staff_id: staffId,
+    note: note || null,
+    created_by: createdBy || null
+  }, { onConflict: "duty_date,staff_id", ignoreDuplicates: true });
+  if (error) throw new Error("เพิ่มเวรไม่สำเร็จ: " + error.message);
+}
+
+export async function removeDutyRosterEntry(dutyDate, staffId) {
+  const { error } = await sb.from("duty_roster")
+    .delete()
+    .eq("duty_date", dutyDate)
+    .eq("staff_id", staffId);
+  if (error) throw new Error("ถอดเวรไม่สำเร็จ: " + error.message);
+}
+
+export async function generateDutyRosterFromPattern(from, to, createdBy) {
+  const [pattern, scheduleRes, holidayRes] = await Promise.all([
+    getDutyPattern(),
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to)
+  ]);
+  if (scheduleRes.error) throw new Error("โหลดวันทำงานไม่สำเร็จ: " + scheduleRes.error.message);
+  if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+
+  const workingWeekdays = new Set((scheduleRes.data || [])
+    .filter(row => row.is_working_day)
+    .map(row => Number(row.weekday)));
+  const holidays = new Set((holidayRes.data || []).map(row => row.holiday_date));
+  const patternByWeekday = new Map();
+  for (const row of pattern) {
+    const weekday = Number(row.weekday);
+    if (!patternByWeekday.has(weekday)) patternByWeekday.set(weekday, []);
+    patternByWeekday.get(weekday).push(row.staff_id);
+  }
+
+  const candidates = [];
+  for (const dutyDate of eachDate(from, to)) {
+    const weekday = isoWeekday(dutyDate);
+    if (!workingWeekdays.has(weekday) || holidays.has(dutyDate)) continue;
+    for (const staffId of (patternByWeekday.get(weekday) || [])) {
+      candidates.push({
+        duty_date: dutyDate,
+        staff_id: staffId,
+        created_by: createdBy || null
+      });
+    }
+  }
+  if (!candidates.length) return { candidates: 0, inserted: 0 };
+
+  // ignoreDuplicates = SQL "on conflict do nothing" — ห้ามทับเวรที่สลับมือไว้แล้ว
+  const { data, error } = await sb.from("duty_roster")
+    .upsert(candidates, {
+      onConflict: "duty_date,staff_id",
+      ignoreDuplicates: true
+    })
+    .select("duty_date,staff_id");
+  if (error) throw new Error("สร้างเวรจากรูปแบบไม่สำเร็จ: " + error.message);
+  return { candidates: candidates.length, inserted: (data || []).length };
+}
+
+// ============================================================
 // ตรรกะเวลาทำงานของฝ่ายบุคคล — "แก้ที่นี่ที่เดียว"
 // ------------------------------------------------------------
 // ทุกหน้า (work-summary / my-work / index ของฝ่ายบุคคล) ต้องเรียกฟังก์ชันชุดนี้
@@ -1458,7 +1570,8 @@ export async function listStaffPicker() {
 //   7. ไม่มีเวลาเข้าเลยหลังปิดวัน                 → 'absent'
 //
 //   normalCutoff = staff.allowed_late_time (ถ้ามี)  มิฉะนั้น  ตารางงาน.start_time + late_grace_minutes
-//   cutoff = max(normalCutoff, เวลาในใบขออนุญาตเข้าสายรายวัน)
+//   วันปกติ: cutoff = max(normalCutoff, เวลาในใบขออนุญาตเข้าสายรายวัน)
+//   วันเวร:  cutoff = duty_start_time แบบแทนที่ทั้งหมด (ไม่ผ่อนผัน/ไม่อนุโลม/ไม่ใช้ใบขอ)
 // ============================================================
 
 export const WORK_STATUS_LABEL = {
@@ -1473,7 +1586,8 @@ export async function getHrSettings() {
   (data || []).forEach(r => { map[r.key] = r.value; });
   return {
     lateGraceMinutes: Number(map.late_grace_minutes ?? 5),
-    dayFinalTime: map.day_final_time || "18:00"
+    dayFinalTime: map.day_final_time || "18:00",
+    dutyStartTime: map.duty_start_time || "07:15"
   };
 }
 
@@ -1509,7 +1623,7 @@ function timeToMinutes(t) {
 
 // ---------- โหลดข้อมูลที่ต้องใช้คำนวณทั้งช่วง ----------
 export async function loadWorkContext(from, to) {
-  const [staffRes, attRes, holRes, schedRes, leaveRes, permitRes, settings] = await Promise.all([
+  const [staffRes, attRes, holRes, schedRes, leaveRes, permitRes, dutyRes, settings] = await Promise.all([
     sb.from("staff").select("*").order("full_name"),
     sb.from("work_attendance").select("*").gte("work_date", from).lte("work_date", to),
     sb.from("work_holidays").select("*").gte("holiday_date", from).lte("holiday_date", to),
@@ -1517,6 +1631,7 @@ export async function loadWorkContext(from, to) {
     // ใบลาที่ "คาบเกี่ยว" ช่วงนี้ (เริ่มก่อนช่วงแต่ยังไม่จบ ก็ต้องเอามาด้วย)
     sb.from("staff_leaves").select("*").lte("start_date", to).gte("end_date", from),
     sb.from("late_permissions").select("*").gte("permit_date", from).lte("permit_date", to),
+    sb.from("duty_roster").select("*").gte("duty_date", from).lte("duty_date", to),
     getHrSettings()
   ]);
 
@@ -1533,6 +1648,8 @@ export async function loadWorkContext(from, to) {
     schedule,
     leaves: leaveRes.data || [],
     latePermissions: permitRes.data || [],
+    dutyRoster: dutyRes.data || [],
+    dutyByKey: new Set((dutyRes.data || []).map(row => row.staff_id + "|" + row.duty_date)),
     settings
   };
 }
@@ -1540,19 +1657,24 @@ export async function loadWorkContext(from, to) {
 // ---------- ตัดสินสถานะของคนหนึ่งในวันหนึ่ง ----------
 export function computeDayStatus(staff, dateStr, ctx) {
   const sched = ctx.schedule.get(isoWeekday(dateStr));
+  const dutyKey = staff.id + "|" + dateStr;
+  const onDuty = ctx.dutyByKey instanceof Set
+    ? ctx.dutyByKey.has(dutyKey)
+    : (ctx.dutyRoster || []).some(row =>
+        row.staff_id === staff.id && row.duty_date === dateStr);
 
   // 1) ไม่ใช่วันทำงาน หรือเป็นวันหยุดที่โรงเรียนประกาศ
   if (!sched || !sched.is_working_day || ctx.holidays.has(dateStr)) {
-    return { status: "holiday", weight: 0 };
+    return { status: "holiday", weight: 0, onDuty };
   }
 
   // 2) วันในอนาคตยังสรุปไม่ได้
   const now = bangkokNow();
   const today = toDateStr(now);
-  if (dateStr > today) return { status: "pending", weight: 0 };
+  if (dateStr > today) return { status: "pending", weight: 0, onDuty };
 
   // 3) คนที่ได้รับการอนุโลม ไม่ต้องลงเวลา ถือว่ามาทุกวันทำงาน
-  if (staff.exempt) return { status: "present", weight: 1, exempt: true };
+  if (staff.exempt) return { status: "present", weight: 1, exempt: true, onDuty };
 
   // 4) ใบลา — ครึ่งวันนับ 0.5 (โครงสร้างบังคับให้ครึ่งวันเป็นวันเดียวอยู่แล้ว)
   const leave = ctx.leaves.find(l =>
@@ -1560,7 +1682,7 @@ export function computeDayStatus(staff, dateStr, ctx) {
   if (leave) {
     return {
       status: "leave", weight: leave.day_portion === "full" ? 1 : 0.5,
-      leaveType: leave.leave_type, portion: leave.day_portion, reason: leave.reason
+      leaveType: leave.leave_type, portion: leave.day_portion, reason: leave.reason, onDuty
     };
   }
 
@@ -1573,16 +1695,24 @@ export function computeDayStatus(staff, dateStr, ctx) {
     const permit = (ctx.latePermissions || []).find(p =>
       p.staff_id === staff.id && p.permit_date === dateStr);
     const permitUntil = permit ? timeToMinutes(permit.until_time) : null;
-    const cutoff = permitUntil === null
-      ? normalCutoff
-      : Math.max(normalCutoff, permitUntil);
+    // วันเวรใช้เวลาเวร "แทนที่" ทั้งหมด: ไม่บวก grace · ไม่สนอนุโลมถาวร · ไม่สนใบขอรายวัน
+    // วันปกติยังคง max() เดิม เพื่อไม่ลดสิทธิ์ของคนที่มี allowed_late_time ช้ากว่าใบขอ
+    const cutoff = onDuty
+      ? timeToMinutes(ctx.settings.dutyStartTime)
+      : permitUntil === null
+        ? normalCutoff
+        : Math.max(normalCutoff, permitUntil);
     const arrived = timeToMinutes(rec.first_in_local);
     const isLate = arrived > cutoff;
     return {
       status: isLate ? "late" : "present", weight: 1,
       firstIn: rec.first_in_local, autoOut: rec.auto_out,
       lateMinutes: isLate ? arrived - cutoff : 0,
-      latePermissionUsed: !isLate && permitUntil !== null && arrived > normalCutoff
+      latePermissionUsed: onDuty
+        ? false
+        : !isLate && permitUntil !== null && arrived > normalCutoff,
+      onDuty,
+      dutyStartTime: onDuty ? ctx.settings.dutyStartTime : null
     };
   }
 
@@ -1590,12 +1720,12 @@ export function computeDayStatus(staff, dateStr, ctx) {
   if (dateStr === today) {
     const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
     if (nowMin < timeToMinutes(ctx.settings.dayFinalTime)) {
-      return { status: "pending", weight: 0 };
+      return { status: "pending", weight: 0, onDuty };
     }
   }
 
   // 7) ไม่มีร่องรอยการลงเวลาเลยหลังปิดวัน
-  return { status: "absent", weight: 1 };
+  return { status: "absent", weight: 1, onDuty };
 }
 
 // ---------- สรุปของคนหนึ่งตลอดช่วง ----------
@@ -1604,6 +1734,7 @@ export function summarizeStaff(staff, from, to, ctx) {
   const sum = {
     staff, workDays: 0, present: 0, late: 0, lateMinutes: 0, absent: 0,
     leaveDays: 0, leaveByType: {}, pendingDays: 0,
+    dutyDays: 0, dutyLate: 0, dutyMissed: 0,
     permitRequested: (ctx.latePermissions || []).filter(p =>
       p.staff_id === staff.id && from <= p.permit_date && p.permit_date <= to).length,
     permitUsed: 0, rows: []
@@ -1612,6 +1743,13 @@ export function summarizeStaff(staff, from, to, ctx) {
     const r = computeDayStatus(staff, d, ctx);
     sum.rows.push({ date: d, ...r });
     if (r.latePermissionUsed) sum.permitUsed++;
+    // วันหยุดไม่นับเป็นวันเวร แม้แถวเวรจะยังค้างอยู่ (เช่นประกาศหยุดหลังสร้างเวรไปแล้ว)
+    // ไม่งั้น "วันเวร N" จะบวกวันที่ไม่มีใครต้องมารับนักเรียนจริง
+    if (r.onDuty && r.status !== "holiday") {
+      sum.dutyDays++;
+      if (r.status === "late") sum.dutyLate++;
+      if (r.status === "leave" || r.status === "absent") sum.dutyMissed++;
+    }
     if (r.status === "holiday") continue;
     if (r.status === "pending") { sum.pendingDays++; continue; }
 
