@@ -27,8 +27,15 @@
 
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:16px; margin-bottom:16px; }
-  select, input[type="month"] { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+  select, input[type="month"], input[type="text"] { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  input:disabled { background:#f4f6f6; color:var(--muted); }
+  button { width:100%; font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
+           border:none; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  button:disabled { opacity:.5; cursor:default; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
   .field { margin-bottom:14px; } .field:last-child { margin-bottom:0; }
   .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
@@ -83,7 +90,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-4"></script>
+    <script src="../app-shell.js?v=20260727-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -95,6 +102,11 @@
         <label for="month">ดูข้อมูลเดือน</label>
         <input id="month" type="month">
       </div>
+    </div>
+
+    <div class="card" id="permit-card">
+      <div class="section-title">ขออนุญาตเข้าสายวันนี้</div>
+      <div id="permit-body"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
     <div class="card">
@@ -118,7 +130,7 @@
 import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260725-4";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260727-1";
 
 const session = await requireAuth();
 if (session) {
@@ -143,6 +155,139 @@ if (session) {
 
     const years = await getAcademicYears();
     const THAI_WD = ["อา","จ","อ","พ","พฤ","ศ","ส"];
+    let permitBusy = false;
+
+    const escapeHtml = value => String(value ?? "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    function timeToSeconds(value) {
+      const match = String(value || "").match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+      if (!match) return null;
+      const hour = Number(match[1]), minute = Number(match[2]), second = Number(match[3] || 0);
+      if (hour > 23 || minute > 59 || second > 59) return null;
+      return hour * 3600 + minute * 60 + second;
+    }
+    const shortTime = value => String(value || "").slice(0, 5);
+    function isPastPermissionLimit(limitSeconds) {
+      const now = bangkokNow();
+      const nowSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
+      return nowSeconds > limitSeconds;
+    }
+
+    async function renderPermitCard() {
+      const body = el("permit-body");
+      const monthStart = today.slice(0, 7) + "-01";
+      const [settingRes, permitsRes] = await Promise.all([
+        sb.from("hr_settings").select("value").eq("key", "late_permission_until").maybeSingle(),
+        sb.from("late_permissions")
+          .select("id,permit_date,until_time,reason")
+          .eq("staff_id", me.id)
+          .gte("permit_date", monthStart)
+          .lte("permit_date", today)
+          .order("permit_date")
+      ]);
+      if (settingRes.error || permitsRes.error) {
+        body.innerHTML = '<div class="banner warn">โหลดข้อมูลคำขอไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        return;
+      }
+
+      const limit = settingRes.data?.value || "";
+      const limitSeconds = timeToSeconds(limit);
+      if (limitSeconds === null) {
+        body.innerHTML = '<div class="banner warn">เวลาที่อนุญาตยังตั้งค่าไม่ถูกต้อง กรุณาแจ้งฝ่ายบุคคล</div>';
+        return;
+      }
+
+      const permits = permitsRes.data || [];
+      const todayPermit = permits.find(row => row.permit_date === today);
+      const countText = `<div class="field-note">เดือนนี้ขอไปแล้ว ${permits.length} ครั้ง</div>`;
+      if (todayPermit) {
+        const reason = todayPermit.reason
+          ? `<div class="field-note">เหตุผล: ${escapeHtml(todayPermit.reason)}</div>`
+          : '<div class="field-note">ไม่ได้ระบุเหตุผล</div>';
+        body.innerHTML = `
+          <div class="banner info"><b>บันทึกคำขอวันนี้แล้ว</b><br>
+            อนุญาตให้เข้าสายได้ถึง ${shortTime(todayPermit.until_time)} น.</div>
+          ${reason}${countText}
+          <button type="button" class="danger" id="btn-cancel-permit" style="margin-top:12px">ยกเลิกคำขอวันนี้</button>`;
+        return;
+      }
+
+      const permanentSeconds = timeToSeconds(me.allowed_late_time);
+      if (permanentSeconds !== null && permanentSeconds >= limitSeconds) {
+        body.innerHTML = `
+          <div class="banner info"><b>ได้รับอนุโลมถึง ${shortTime(me.allowed_late_time)} อยู่แล้ว ไม่ต้องขอ</b><br>
+            ระบบจะใช้เวลาอนุโลมถาวรที่ดีกว่าให้โดยอัตโนมัติ</div>${countText}`;
+        return;
+      }
+
+      const pastLimit = isPastPermissionLimit(limitSeconds);
+      body.innerHTML = `
+        <div class="banner ${pastLimit ? "warn" : "info"}">
+          ${pastLimit
+            ? "<b>หมดเวลาขอแล้ว</b><br>แจ้งฝ่ายบุคคลเพื่อบันทึกย้อนหลังให้ภายในวันนี้"
+            : `<b>ขอได้ถึง ${shortTime(limit)} น. ของวันนี้</b><br>ใบนี้เลื่อนเฉพาะเกณฑ์สาย ถ้าไม่มีเวลาเข้ายังนับตามเดิม`}
+        </div>
+        <div class="field">
+          <label for="permit-reason">เหตุผลสั้น ๆ (ไม่บังคับ)</label>
+          <input id="permit-reason" type="text" maxlength="200" autocomplete="off"
+                 placeholder="เช่น ไปพบแพทย์"${pastLimit ? " disabled" : ""}>
+        </div>
+        <button type="button" class="primary" id="btn-request-permit"${pastLimit ? " disabled" : ""}>
+          ขออนุญาตเข้าสายถึง ${shortTime(limit)} น.
+        </button>
+        ${countText}`;
+    }
+
+    el("permit-card").addEventListener("click", async event => {
+      if (permitBusy) return;
+      if (event.target.closest("#btn-request-permit")) {
+        const settingRes = await sb.from("hr_settings")
+          .select("value").eq("key", "late_permission_until").maybeSingle();
+        const limit = settingRes.data?.value || "";
+        const limitSeconds = timeToSeconds(limit);
+        if (settingRes.error || limitSeconds === null) {
+          el("permit-body").innerHTML = '<div class="banner warn">เวลาที่อนุญาตยังตั้งค่าไม่ถูกต้อง กรุณาแจ้งฝ่ายบุคคล</div>';
+          return;
+        }
+        if (isPastPermissionLimit(limitSeconds)) {
+          await renderPermitCard();
+          return;
+        }
+        permitBusy = true;
+        const reason = el("permit-reason")?.value.trim() || null;
+        const { error } = await sb.from("late_permissions").insert({
+          staff_id: me.id,
+          permit_date: today,
+          until_time: limit,
+          reason,
+          created_by: session.user.id
+        });
+        permitBusy = false;
+        if (error) {
+          el("permit-body").innerHTML =
+            '<div class="banner warn">บันทึกคำขอไม่สำเร็จ หากเลยเวลาที่อนุญาตแล้วให้แจ้งฝ่ายบุคคลเพื่อบันทึกให้</div>';
+          return;
+        }
+        await renderPermitCard();
+        await renderMonth();
+        await renderYear();
+      }
+      if (event.target.closest("#btn-cancel-permit")) {
+        permitBusy = true;
+        const { error } = await sb.from("late_permissions")
+          .delete().eq("staff_id", me.id).eq("permit_date", today);
+        permitBusy = false;
+        if (error) {
+          el("permit-body").innerHTML =
+            '<div class="banner warn">ยกเลิกคำขอไม่สำเร็จ กรุณาลองใหม่ หรือติดต่อฝ่ายบุคคล</div>';
+          return;
+        }
+        await renderPermitCard();
+        await renderMonth();
+        await renderYear();
+      }
+    });
 
     async function renderYear() {
       const year = academicYearOf(today, years);
@@ -231,6 +376,7 @@ if (session) {
     }
 
     el("month").addEventListener("change", renderMonth);
+    await renderPermitCard();
     await renderMonth();
     await renderYear();
   }

@@ -28,7 +28,7 @@
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:16px; margin-bottom:16px; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
-  select, input[type="month"], input[type="search"] {
+  select, input[type="month"], input[type="search"], input[type="text"] {
     width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
   select:focus, input:focus { outline:2px solid var(--teal); outline-offset:1px; }
@@ -96,7 +96,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-4"></script>
+    <script src="../app-shell.js?v=20260727-1"></script>
   </header>
 
   <div class="card">
@@ -125,6 +125,27 @@
     <div class="field-note" id="status">—</div>
   </div>
 
+  <div class="card">
+    <div class="section-title">บันทึกคำขอเข้าสายที่แจ้งไว้วันนี้</div>
+    <div class="banner info">
+      ใช้เมื่อบุคลากรแจ้งไว้ก่อนเวลาแต่ลืมกดขอเอง ฝ่ายบุคคลบันทึกให้ได้ภายในวันนี้แม้เลยเวลาขอแล้ว
+      — เวอร์ชันนี้ยังไม่รองรับการเลือกวันย้อนหลังข้ามวัน
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="permit-staff">บุคลากร</label>
+        <select id="permit-staff"><option value="">กำลังโหลดรายชื่อ…</option></select>
+      </div>
+      <div class="field">
+        <label for="permit-reason">เหตุผลสั้น ๆ (ไม่บังคับ)</label>
+        <input id="permit-reason" type="text" maxlength="200" autocomplete="off"
+               placeholder="เช่น ไปพบแพทย์">
+      </div>
+    </div>
+    <button id="btn-save-permit" class="ghost">บันทึกคำขอให้วันนี้</button>
+    <div class="field-note" id="permit-entry-note">เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล</div>
+  </div>
+
   <div id="report" style="display:none">
     <div class="card">
       <div class="section-title" id="overview-title">ภาพรวม</div>
@@ -144,7 +165,7 @@
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>ชื่อ</th><th>วันทำงาน</th><th>มา</th><th>สาย</th><th>ขาด</th><th>ลา</th></tr></thead>
+          <thead><tr><th>ชื่อ</th><th>วันทำงาน</th><th>มา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ขอเข้าสาย</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -153,6 +174,7 @@
 
     <div id="detail-card" class="card" style="display:none">
       <div class="section-title" id="detail-title">รายละเอียดรายคน</div>
+      <div id="detail-permit"></div>
       <div id="detail-stats" class="stats" style="margin-bottom:14px"></div>
       <div id="detail-days"></div>
     </div>
@@ -165,7 +187,7 @@
 import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          loadWorkContext, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260725-4";
+         getAcademicYears, academicYearRange, bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260727-1";
 
 const session = await requireAuth();
 if (session) {
@@ -272,6 +294,15 @@ if (session) {
       el("status").textContent = "กำลังคำนวณ…";
       ctx = await loadWorkContext(range.from, range.to);
       summaries = summarizeAll(range.from, range.to, ctx);
+      const selectedStaff = el("permit-staff").value;
+      const activeStaff = ctx.staff.filter(staff => staff.is_active);
+      el("permit-staff").innerHTML =
+        '<option value="">— เลือกบุคลากร —</option>' +
+        activeStaff.map(staff =>
+          `<option value="${staff.id}">${staff.full_name}</option>`).join("");
+      if (activeStaff.some(staff => staff.id === selectedStaff)) {
+        el("permit-staff").value = selectedStaff;
+      }
 
       el("overview-title").textContent = `ภาพรวม — ${range.label}`;
       el("s-staff").textContent = summaries.length;
@@ -332,8 +363,12 @@ if (session) {
         </td>
         <td class="${s.absent ? "bad" : ""}">${s.absent}</td>
         <td>${s.leaveDays}</td>
+        <td>
+          <span class="cell-main">ขอ ${s.permitRequested}</span>
+          <span class="cell-sub">ใช้จริง ${s.permitUsed}</span>
+        </td>
       </tr>`).join("")
-      : '<tr><td colspan="6" class="muted-empty">ไม่พบข้อมูล</td></tr>';
+      : '<tr><td colspan="7" class="muted-empty">ไม่พบข้อมูล</td></tr>';
   }
   el("q").addEventListener("input", renderTable);
 
@@ -346,6 +381,8 @@ if (session) {
     if (!s) return;
 
     el("detail-title").textContent = "รายละเอียด — " + s.staff.full_name;
+    el("detail-permit").innerHTML =
+      `<div class="banner info"><b>ขออนุญาตเข้าสาย:</b> ขอ ${s.permitRequested} ครั้ง · ใช้จริง ${s.permitUsed} ครั้ง</div>`;
     const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
     el("detail-stats").innerHTML = `
       <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
@@ -373,6 +410,33 @@ if (session) {
   el("btn-resync").addEventListener("click", () => {
     if (!canSync) return toast("การซิงก์ต้องมีสิทธิ์ฝ่ายบุคลากร", true);
     loadReport(true);
+  });
+
+  el("btn-save-permit").addEventListener("click", async () => {
+    const staffId = el("permit-staff").value;
+    if (!staffId) return toast("กรุณาเลือกบุคลากร", true);
+    const button = el("btn-save-permit");
+    button.disabled = true;
+    const settingRes = await sb.from("hr_settings")
+      .select("value").eq("key", "late_permission_until").maybeSingle();
+    const limit = String(settingRes.data?.value || "").slice(0, 5);
+    if (settingRes.error || !/^([01]\d|2[0-3]):[0-5]\d$/.test(limit)) {
+      button.disabled = false;
+      return toast("เวลาที่อนุญาตยังตั้งค่าไม่ถูกต้อง กรุณาแก้ที่หน้าตั้งค่างานบุคคล", true);
+    }
+    const today = toDateStr(bangkokNow());
+    const { error } = await sb.from("late_permissions").upsert({
+      staff_id: staffId,
+      permit_date: today,
+      until_time: limit,
+      reason: el("permit-reason").value.trim() || null,
+      created_by: session.user.id
+    }, { onConflict: "staff_id,permit_date" });
+    button.disabled = false;
+    if (error) return toast("บันทึกคำขอไม่สำเร็จ กรุณาลองใหม่", true);
+    el("permit-reason").value = "";
+    toast(`บันทึกคำขอเข้าสายถึง ${limit} น. ให้แล้ว`);
+    await loadReport(false);
   });
 
   await loadReport(false);

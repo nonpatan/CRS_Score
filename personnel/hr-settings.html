@@ -80,7 +80,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-4"></script>
+    <script src="../app-shell.js?v=20260727-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -107,6 +107,16 @@
       <div class="field-note" id="grace-note">—</div>
     </div>
     <button id="btn-save-grace" class="primary">บันทึกค่าผ่อนผัน</button>
+    <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
+      <div class="field">
+        <label for="late-permission-until">อนุญาตให้ขอเข้าสายถึงเวลา</label>
+        <input id="late-permission-until" type="time" step="60" required>
+        <div class="field-note">
+          ครูขอได้ถึงเวลานี้ของวันนั้น ระบบจะสำเนาค่านี้เก็บไว้ในแต่ละใบขอ
+        </div>
+      </div>
+      <button id="btn-save-permission-time" class="primary">บันทึกเวลาที่อนุญาตให้ขอ</button>
+    </div>
   </div>
 
   <div class="card">
@@ -153,7 +163,7 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-         getAcademicYears, getLeaveTypes, getLeaveQuotas } from "../supabase-client.js?v=20260725-4";
+         getAcademicYears, getLeaveTypes, getLeaveQuotas } from "../supabase-client.js?v=20260727-1";
 
 const session = await requireAuth();
 if (session) {
@@ -191,8 +201,13 @@ if (session) {
 
   // ---------- เวลาทำงาน ----------
   async function loadWorkTime() {
-    settings = await getHrSettings();
-    const { data: sched } = await sb.from("work_schedule").select("*").order("weekday");
+    const [loadedSettings, schedRes, permitSettingRes] = await Promise.all([
+      getHrSettings(),
+      sb.from("work_schedule").select("*").order("weekday"),
+      sb.from("hr_settings").select("value").eq("key", "late_permission_until").maybeSingle()
+    ]);
+    settings = loadedSettings;
+    const sched = schedRes.data || [];
     const working = (sched || []).filter(r => r.is_working_day);
 
     el("v-start").textContent = working.length ? String(working[0].start_time).slice(0,5) + " น." : "ยังไม่มีข้อมูล";
@@ -201,6 +216,9 @@ if (session) {
       : "ยังไม่มีข้อมูล";
     el("v-final").textContent = settings.dayFinalTime + " น.";
     el("grace").value = settings.lateGraceMinutes;
+    el("late-permission-until").value = permitSettingRes.data?.value
+      ? String(permitSettingRes.data.value).slice(0, 5)
+      : "";
     updateGraceNote();
   }
   function updateGraceNote() {
@@ -220,6 +238,18 @@ if (session) {
     const { error } = await sb.from("hr_settings").upsert({ key: "late_grace_minutes", value: v }, { onConflict: "key" });
     if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
     toast("บันทึกค่าผ่อนผันแล้ว");
+    loadWorkTime();
+  });
+
+  el("btn-save-permission-time").addEventListener("click", async () => {
+    const value = el("late-permission-until").value.trim();
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+      return toast("เวลาต้องเป็นรูปแบบ HH:MM ที่ถูกต้อง เช่น 08:00", true);
+    }
+    const { error } = await sb.from("hr_settings")
+      .upsert({ key: "late_permission_until", value }, { onConflict: "key" });
+    if (error) return toast("บันทึกเวลาไม่สำเร็จ กรุณาลองใหม่", true);
+    toast("บันทึกเวลาที่อนุญาตให้ขอแล้ว");
     loadWorkTime();
   });
 

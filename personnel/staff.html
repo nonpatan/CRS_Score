@@ -67,6 +67,7 @@
   .inline { display: flex; align-items: center; gap: 8px; }
   .inline input[type="checkbox"] { width: 20px; height: 20px; }
   .inline label { margin: 0; font-size: 14.5px; font-weight: 500; }
+  .permanent-warning { margin:8px 0 0; }
 
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
            padding: 11px 18px; border-radius: 10px; background: #1f2a2e; color: #fff;
@@ -91,7 +92,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260725-4"></script>
+    <script src="../app-shell.js?v=20260727-1"></script>
   </header>
 
   <div id="main">
@@ -151,7 +152,7 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble, getLastSyncLog,
-         applyPersonnelMenuAccess, personnelAccessDeniedHtml } from "../supabase-client.js?v=20260725-4";
+         applyPersonnelMenuAccess, personnelAccessDeniedHtml } from "../supabase-client.js?v=20260727-1";
 
 const session = await requireAuth();
 if (session) {
@@ -236,7 +237,7 @@ if (session) {
       const chips = [];
       if (!s.is_active) chips.push('<span class="chip off">ออกแล้ว</span>');
       if (s.exempt) chips.push('<span class="chip exempt">อนุโลม</span>');
-      if (s.allowed_late_time) chips.push(`<span class="chip late">เข้าได้ถึง ${String(s.allowed_late_time).slice(0,5)}</span>`);
+      if (s.allowed_late_time) chips.push(`<span class="chip late">อนุโลมถาวร ${String(s.allowed_late_time).slice(0,5)}</span>`);
       if (!s.jibble_person_id) chips.push('<span class="chip nojibble">ไม่มีใน Jibble</span>');
 
       const meta = [s.jibble_code, s.position, s.email].filter(Boolean).join(" · ");
@@ -248,9 +249,14 @@ if (session) {
               <input type="text" data-f="position" value="${s.position ? String(s.position).replace(/"/g, "&quot;") : ""}" placeholder="เช่น ครูผู้สอน">
             </div>
             <div class="field">
-              <label>อนุญาตเข้าสายถึง</label>
+              <label>อนุโลมเวลาเข้างานถาวร (เฉพาะผู้บริหาร)</label>
               <input type="time" data-f="allowed_late_time" value="${s.allowed_late_time ? String(s.allowed_late_time).slice(0,5) : ""}">
-              <div class="field-note">ว่าง = ใช้เวลากลาง</div>
+              <div class="field-note">ครูทั่วไปเว้นว่างไว้ — ถ้าติดธุระเป็นครั้ง ๆ ให้ครูขออนุญาตเข้าสายเองที่หน้าข้อมูลการทำงานของฉัน</div>
+              <div class="banner warn permanent-warning" data-permanent-warning
+                   style="${s.allowed_late_time ? "" : "display:none"}">
+                ⚠ ค่านี้มีผลทุกวันตลอดไป คนนี้จะไม่ถูกนับสายจนกว่าจะลบค่าออก
+                ถ้าเป็นธุระครั้งเดียว ให้ครูขออนุญาตเข้าสายที่หน้าข้อมูลการทำงานของฉัน
+              </div>
             </div>
           </div>
           <div class="field">
@@ -302,6 +308,11 @@ if (session) {
   // ---------- เหตุการณ์ ----------
   el("q").addEventListener("input", render);
   el("show-inactive").addEventListener("change", render);
+  el("list").addEventListener("input", ev => {
+    if (!ev.target.matches('[data-f="allowed_late_time"]')) return;
+    const warning = ev.target.closest(".field")?.querySelector("[data-permanent-warning]");
+    if (warning) warning.style.display = ev.target.value ? "" : "none";
+  });
   el("list").addEventListener("click", ev => {
     const btn = ev.target.closest("[data-save]");
     if (btn) saveStaff(btn.dataset.save, btn);

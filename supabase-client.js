@@ -1376,6 +1376,7 @@ export async function loadTodayStaffSummary() {
   const schedule = new Map((scheduleRes.data || []).map(row => [row.weekday, row]));
   const attendance = new Map();
   const leaves = [];
+  const latePermissions = [];
   const staffRows = result.rows.map((row, index) => {
     const id = `anonymous-${index}`;
     if (row.first_in_local) {
@@ -1395,6 +1396,13 @@ export async function loadTodayStaffSummary() {
         leave_type: "ลา"
       });
     }
+    if (row.permit_until) {
+      latePermissions.push({
+        staff_id: id,
+        permit_date: today,
+        until_time: row.permit_until
+      });
+    }
     return {
       id,
       exempt: row.exempt === true,
@@ -1408,6 +1416,7 @@ export async function loadTodayStaffSummary() {
     holidays: new Set((holidayRes.data || []).map(row => row.holiday_date)),
     schedule,
     leaves,
+    latePermissions,
     settings
   };
   const counts = { present: 0, late: 0, leave: 0, absent: 0, pending: 0 };
@@ -1448,7 +1457,8 @@ export async function listStaffPicker() {
 //   6. วันนี้ที่ยังไม่ถึงเวลาปิดวัน (18:00)        → 'pending'  ยังไม่ครบวัน ห้ามนับว่าขาด
 //   7. ไม่มีเวลาเข้าเลยหลังปิดวัน                 → 'absent'
 //
-//   cutoff = staff.allowed_late_time (ถ้ามี)  มิฉะนั้น  ตารางงาน.start_time + late_grace_minutes
+//   normalCutoff = staff.allowed_late_time (ถ้ามี)  มิฉะนั้น  ตารางงาน.start_time + late_grace_minutes
+//   cutoff = max(normalCutoff, เวลาในใบขออนุญาตเข้าสายรายวัน)
 // ============================================================
 
 export const WORK_STATUS_LABEL = {
@@ -1499,13 +1509,14 @@ function timeToMinutes(t) {
 
 // ---------- โหลดข้อมูลที่ต้องใช้คำนวณทั้งช่วง ----------
 export async function loadWorkContext(from, to) {
-  const [staffRes, attRes, holRes, schedRes, leaveRes, settings] = await Promise.all([
+  const [staffRes, attRes, holRes, schedRes, leaveRes, permitRes, settings] = await Promise.all([
     sb.from("staff").select("*").order("full_name"),
     sb.from("work_attendance").select("*").gte("work_date", from).lte("work_date", to),
     sb.from("work_holidays").select("*").gte("holiday_date", from).lte("holiday_date", to),
     sb.from("work_schedule").select("*"),
     // ใบลาที่ "คาบเกี่ยว" ช่วงนี้ (เริ่มก่อนช่วงแต่ยังไม่จบ ก็ต้องเอามาด้วย)
     sb.from("staff_leaves").select("*").lte("start_date", to).gte("end_date", from),
+    sb.from("late_permissions").select("*").gte("permit_date", from).lte("permit_date", to),
     getHrSettings()
   ]);
 
@@ -1521,6 +1532,7 @@ export async function loadWorkContext(from, to) {
     holidays: new Set((holRes.data || []).map(r => r.holiday_date)),
     schedule,
     leaves: leaveRes.data || [],
+    latePermissions: permitRes.data || [],
     settings
   };
 }
@@ -1555,14 +1567,22 @@ export function computeDayStatus(staff, dateStr, ctx) {
   // 5) มีเวลาเข้า → เทียบกับเวลาที่อนุญาต (วันนี้แสดงผลที่รู้แล้วได้ทันที ไม่ต้องรอปิดวัน)
   const rec = ctx.attendance.get(staff.id + "|" + dateStr);
   if (rec && rec.first_in_local) {
-    const cutoff = staff.allowed_late_time
+    const normalCutoff = staff.allowed_late_time
       ? timeToMinutes(staff.allowed_late_time)
       : timeToMinutes(sched.start_time) + ctx.settings.lateGraceMinutes;
+    const permit = (ctx.latePermissions || []).find(p =>
+      p.staff_id === staff.id && p.permit_date === dateStr);
+    const permitUntil = permit ? timeToMinutes(permit.until_time) : null;
+    const cutoff = permitUntil === null
+      ? normalCutoff
+      : Math.max(normalCutoff, permitUntil);
     const arrived = timeToMinutes(rec.first_in_local);
+    const isLate = arrived > cutoff;
     return {
-      status: arrived > cutoff ? "late" : "present", weight: 1,
+      status: isLate ? "late" : "present", weight: 1,
       firstIn: rec.first_in_local, autoOut: rec.auto_out,
-      lateMinutes: arrived > cutoff ? arrived - cutoff : 0
+      lateMinutes: isLate ? arrived - cutoff : 0,
+      latePermissionUsed: !isLate && permitUntil !== null && arrived > normalCutoff
     };
   }
 
@@ -1583,11 +1603,15 @@ export function summarizeStaff(staff, from, to, ctx) {
   const days = eachDate(from, to);
   const sum = {
     staff, workDays: 0, present: 0, late: 0, lateMinutes: 0, absent: 0,
-    leaveDays: 0, leaveByType: {}, pendingDays: 0, rows: []
+    leaveDays: 0, leaveByType: {}, pendingDays: 0,
+    permitRequested: (ctx.latePermissions || []).filter(p =>
+      p.staff_id === staff.id && from <= p.permit_date && p.permit_date <= to).length,
+    permitUsed: 0, rows: []
   };
   for (const d of days) {
     const r = computeDayStatus(staff, d, ctx);
     sum.rows.push({ date: d, ...r });
+    if (r.latePermissionUsed) sum.permitUsed++;
     if (r.status === "holiday") continue;
     if (r.status === "pending") { sum.pendingDays++; continue; }
 
