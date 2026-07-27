@@ -68,6 +68,19 @@
   .inline input[type="checkbox"] { width: 20px; height: 20px; }
   .inline label { margin: 0; font-size: 14.5px; font-weight: 500; }
   .permanent-warning { margin:8px 0 0; }
+  .position-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+                      gap:8px; padding:10px; border:1px solid var(--line); border-radius:8px;
+                      background:#f9fbfb; }
+  .position-option { display:flex; align-items:flex-start; gap:8px; margin:0; padding:6px 8px;
+                     border-radius:7px; background:var(--white); border:1px solid var(--line);
+                     font-size:14px; font-weight:500; cursor:pointer; }
+  .position-option input { width:19px; height:19px; flex:0 0 auto; margin-top:2px; }
+  .position-option .inactive-note { color:var(--muted); font-size:12px; display:block; }
+  .position-missing { color:var(--amber); font-weight:500; }
+  @media (max-width:420px) {
+    .row2 { display:block; }
+    .position-options { grid-template-columns:1fr; }
+  }
 
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
            padding: 11px 18px; border-radius: 10px; background: #1f2a2e; color: #fff;
@@ -132,16 +145,17 @@
       </div>
       <div class="row2">
         <div class="field">
-          <label for="new-position">ตำแหน่ง</label>
-          <input id="new-position" type="text" placeholder="เช่น ครูผู้สอน">
-        </div>
-        <div class="field">
           <label for="new-exempt-wrap">อนุโลมไม่ลงเวลา</label>
           <div class="inline" id="new-exempt-wrap" style="min-height:44px">
             <input type="checkbox" id="new-exempt" checked>
             <label for="new-exempt">ถือว่ามาทุกวันทำงาน</label>
           </div>
         </div>
+      </div>
+      <div class="field">
+        <label>ตำแหน่ง (เลือกได้หลายตำแหน่ง)</label>
+        <div id="new-position-list" class="position-options"></div>
+        <div class="field-note">ถ้ายังไม่มีรายการที่ต้องการ ให้เพิ่มที่หน้าตั้งค่างานบุคคลก่อน</div>
       </div>
       <button id="btn-add" class="primary">เพิ่มบุคลากร</button>
     </div>
@@ -152,7 +166,8 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble, getLastSyncLog,
-         applyPersonnelMenuAccess, personnelAccessDeniedHtml } from "../supabase-client.js?v=20260727-1";
+         applyPersonnelMenuAccess, personnelAccessDeniedHtml,
+         getStaffPositions } from "../supabase-client.js?v=20260727-2";
 
 const session = await requireAuth();
 if (session) {
@@ -166,6 +181,9 @@ if (session) {
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => elToast.classList.remove("show"), 3000);
   }
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
 
   document.getElementById("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
@@ -183,6 +201,8 @@ if (session) {
   } else {
   let staffList = [];
   let profiles = [];
+  let positions = [];
+  let staffPositionCodes = new Map();
 
   if (!canEdit) {
     el("gate").style.display = "";
@@ -197,14 +217,27 @@ if (session) {
 
   // ---------- โหลดข้อมูล ----------
   async function loadAll() {
-    const [staffRes, profileRes] = await Promise.all([
-      sb.from("staff").select("*").order("full_name"),
-      sb.from("profiles").select("id,email,name").order("email")
-    ]);
-    if (staffRes.error) { toast("โหลดรายชื่อไม่สำเร็จ: " + staffRes.error.message, true); return; }
-    staffList = staffRes.data || [];
-    profiles = profileRes.data || [];
-    render();
+    try {
+      const [staffRes, profileRes, loadedPositions, mapRes] = await Promise.all([
+        sb.from("staff").select("*").order("full_name"),
+        sb.from("profiles").select("id,email,name").order("email"),
+        getStaffPositions(true),
+        sb.from("staff_position_map").select("staff_id,position_code")
+      ]);
+      if (staffRes.error || profileRes.error || mapRes.error) throw new Error("load");
+      staffList = staffRes.data || [];
+      profiles = profileRes.data || [];
+      positions = loadedPositions;
+      staffPositionCodes = new Map();
+      (mapRes.data || []).forEach(row => {
+        if (!staffPositionCodes.has(row.staff_id)) staffPositionCodes.set(row.staff_id, new Set());
+        staffPositionCodes.get(row.staff_id).add(row.position_code);
+      });
+      renderNewPositionOptions();
+      render();
+    } catch {
+      toast("โหลดทะเบียนบุคลากรไม่สำเร็จ กรุณาลองเปิดหน้านี้ใหม่", true);
+    }
   }
 
   async function refreshSyncStatus() {
@@ -217,13 +250,52 @@ if (session) {
   }
 
   // ---------- แสดงผล ----------
+  function sortedPositionCodes(codes) {
+    const order = new Map(positions.map((position, index) => [
+      position.code,
+      [Number(position.sort_order) || 0, index]
+    ]));
+    return [...codes].sort((a, b) => {
+      const ao = order.get(a) || [32767, 0];
+      const bo = order.get(b) || [32767, 0];
+      return ao[0] - bo[0] || ao[1] - bo[1] || a.localeCompare(b, "th");
+    });
+  }
+
+  function positionOptionsHtml(selectedCodes) {
+    const selected = new Set(selectedCodes || []);
+    const available = positions.filter(position => position.active || selected.has(position.code));
+    if (!available.length) {
+      return '<span class="position-missing">ยังไม่มีรายการตำแหน่งที่ใช้งานอยู่</span>';
+    }
+    return available.map(position => `
+      <label class="position-option">
+        <input type="checkbox" data-position-code="${esc(position.code)}"
+               ${selected.has(position.code) ? "checked" : ""}>
+        <span>${esc(position.code)}
+          ${position.active ? "" : '<span class="inactive-note">ปิดใช้งานแล้ว — ถอดออกได้</span>'}
+        </span>
+      </label>`).join("");
+  }
+
+  function renderNewPositionOptions() {
+    el("new-position-list").innerHTML = positionOptionsHtml([]);
+  }
+
+  function selectedPositionCodes(container) {
+    return [...container.querySelectorAll("[data-position-code]:checked")]
+      .map(input => input.dataset.positionCode);
+  }
+
   function render() {
     const q = el("q").value.trim().toLowerCase();
     const showInactive = el("show-inactive").checked;
     const rows = staffList.filter(s => {
       if (!showInactive && !s.is_active) return false;
       if (!q) return true;
-      return [s.full_name, s.email, s.jibble_code].some(v => (v || "").toLowerCase().includes(q));
+      const positionText = sortedPositionCodes(staffPositionCodes.get(s.id) || []).join(" ");
+      return [s.full_name, s.email, s.jibble_code, positionText]
+        .some(v => (v || "").toLowerCase().includes(q));
     });
 
     el("count").textContent = `แสดง ${rows.length} คน จากทั้งหมด ${staffList.length} คน`;
@@ -234,20 +306,28 @@ if (session) {
     }
 
     el("list").innerHTML = rows.map(s => {
+      const selectedCodes = staffPositionCodes.get(s.id) || new Set();
+      const positionText = sortedPositionCodes(selectedCodes).join(" · ");
       const chips = [];
       if (!s.is_active) chips.push('<span class="chip off">ออกแล้ว</span>');
       if (s.exempt) chips.push('<span class="chip exempt">อนุโลม</span>');
       if (s.allowed_late_time) chips.push(`<span class="chip late">อนุโลมถาวร ${String(s.allowed_late_time).slice(0,5)}</span>`);
       if (!s.jibble_person_id) chips.push('<span class="chip nojibble">ไม่มีใน Jibble</span>');
 
-      const meta = [s.jibble_code, s.position, s.email].filter(Boolean).join(" · ");
+      const metaParts = [
+        s.jibble_code ? esc(s.jibble_code) : "",
+        positionText
+          ? esc(positionText)
+          : '<span class="position-missing">ยังไม่ได้กำหนดตำแหน่ง</span>',
+        s.email ? esc(s.email) : ""
+      ].filter(Boolean);
       const editor = canEdit ? `
         <div class="staff-edit" data-editor="${s.id}">
+          <div class="field">
+            <label>ตำแหน่ง (เลือกได้หลายตำแหน่ง)</label>
+            <div class="position-options">${positionOptionsHtml(selectedCodes)}</div>
+          </div>
           <div class="row2">
-            <div class="field">
-              <label>ตำแหน่ง</label>
-              <input type="text" data-f="position" value="${s.position ? String(s.position).replace(/"/g, "&quot;") : ""}" placeholder="เช่น ครูผู้สอน">
-            </div>
             <div class="field">
               <label>อนุโลมเวลาเข้างานถาวร (เฉพาะผู้บริหาร)</label>
               <input type="time" data-f="allowed_late_time" value="${s.allowed_late_time ? String(s.allowed_late_time).slice(0,5) : ""}">
@@ -263,7 +343,7 @@ if (session) {
             <label>บัญชีล็อกอินของคนนี้</label>
             <select data-f="user_id">
               <option value="">— ไม่ผูกบัญชี —</option>
-              ${profiles.map(p => `<option value="${p.id}"${p.id === s.user_id ? " selected" : ""}>${p.email || p.name || p.id}</option>`).join("")}
+              ${profiles.map(p => `<option value="${esc(p.id)}"${p.id === s.user_id ? " selected" : ""}>${esc(p.email || p.name || p.id)}</option>`).join("")}
             </select>
             <div class="field-note">ผูกแล้วเจ้าตัวจะเปิดดูข้อมูลการทำงานของตัวเองได้</div>
           </div>
@@ -276,30 +356,86 @@ if (session) {
 
       return `<div class="staff-row">
         <div class="staff-head">
-          <span class="staff-name">${s.full_name}</span>${chips.join(" ")}
+          <span class="staff-name">${esc(s.full_name)}</span>${chips.join(" ")}
         </div>
-        ${meta ? `<div class="staff-meta">${meta}</div>` : ""}
+        <div class="staff-meta">${metaParts.join(" · ")}</div>
         ${editor}
       </div>`;
     }).join("");
   }
 
   // ---------- บันทึกรายคน ----------
+  async function syncPositionMap(staffId, desiredCodes) {
+    const current = staffPositionCodes.get(staffId) || new Set();
+    const desired = new Set(desiredCodes);
+    const added = [...desired].filter(code => !current.has(code));
+    const removed = [...current].filter(code => !desired.has(code));
+
+    if (added.length) {
+      const { error } = await sb.from("staff_position_map")
+        .insert(added.map(positionCode => ({ staff_id: staffId, position_code: positionCode })));
+      if (error) return { ok:false, added:[], removed:[] };
+    }
+    if (removed.length) {
+      const { error } = await sb.from("staff_position_map")
+        .delete()
+        .eq("staff_id", staffId)
+        .in("position_code", removed);
+      if (error) {
+        if (added.length) {
+          await sb.from("staff_position_map")
+            .delete()
+            .eq("staff_id", staffId)
+            .in("position_code", added);
+        }
+        return { ok:false, added:[], removed:[] };
+      }
+    }
+    return { ok:true, added, removed };
+  }
+
+  async function rollbackPositionMap(staffId, changed) {
+    if (changed.added.length) {
+      await sb.from("staff_position_map")
+        .delete()
+        .eq("staff_id", staffId)
+        .in("position_code", changed.added);
+    }
+    if (changed.removed.length) {
+      await sb.from("staff_position_map")
+        .insert(changed.removed.map(positionCode => ({
+          staff_id: staffId,
+          position_code: positionCode
+        })));
+    }
+  }
+
   async function saveStaff(staffId, button) {
     const box = document.querySelector(`[data-editor="${staffId}"]`);
     if (!box) return;
     const get = f => box.querySelector(`[data-f="${f}"]`);
     const payload = {
-      position: get("position").value.trim() || null,
       allowed_late_time: get("allowed_late_time").value || null,
       user_id: get("user_id").value || null,
       exempt: get("exempt").checked,
       updated_at: new Date().toISOString()
     };
+    const desiredCodes = selectedPositionCodes(box);
     button.disabled = true;
+    const changed = await syncPositionMap(staffId, desiredCodes);
+    if (!changed.ok) {
+      button.disabled = false;
+      toast("บันทึกตำแหน่งไม่สำเร็จ กรุณาลองใหม่", true);
+      return;
+    }
     const { error } = await sb.from("staff").update(payload).eq("id", staffId);
     button.disabled = false;
-    if (error) { toast("บันทึกไม่สำเร็จ: " + error.message, true); return; }
+    if (error) {
+      await rollbackPositionMap(staffId, changed);
+      toast("บันทึกข้อมูลบุคลากรไม่สำเร็จ กรุณาลองใหม่", true);
+      return;
+    }
+    staffPositionCodes.set(staffId, new Set(desiredCodes));
     Object.assign(staffList.find(s => s.id === staffId) || {}, payload);
     toast("บันทึกแล้ว");
     render();
@@ -338,17 +474,37 @@ if (session) {
   el("btn-add")?.addEventListener("click", async () => {
     const name = el("new-name").value.trim();
     if (!name) { toast("กรุณากรอกชื่อ-นามสกุล", true); return; }
+    const desiredCodes = selectedPositionCodes(el("new-position-list"));
     const btn = el("btn-add");
     btn.disabled = true;
-    const { error } = await sb.from("staff").insert({
+    const { data: inserted, error } = await sb.from("staff").insert({
       full_name: name,
-      position: el("new-position").value.trim() || null,
       exempt: el("new-exempt").checked,
       is_active: true
-    });
+    }).select("id").single();
+    if (error) {
+      btn.disabled = false;
+      toast("เพิ่มบุคลากรไม่สำเร็จ กรุณาลองใหม่", true);
+      return;
+    }
+    if (desiredCodes.length) {
+      const { error: mapError } = await sb.from("staff_position_map")
+        .insert(desiredCodes.map(positionCode => ({
+          staff_id: inserted.id,
+          position_code: positionCode
+        })));
+      if (mapError) {
+        btn.disabled = false;
+        toast("เพิ่มบุคลากรแล้ว แต่บันทึกตำแหน่งไม่สำเร็จ กรุณาเลือกตำแหน่งให้อีกครั้ง", true);
+        await loadAll();
+        return;
+      }
+    }
     btn.disabled = false;
-    if (error) { toast("เพิ่มไม่สำเร็จ: " + error.message, true); return; }
-    el("new-name").value = ""; el("new-position").value = "";
+    el("new-name").value = "";
+    el("new-position-list").querySelectorAll("[data-position-code]").forEach(input => {
+      input.checked = false;
+    });
     toast("เพิ่มบุคลากรแล้ว");
     loadAll();
   });

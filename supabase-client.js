@@ -1679,3 +1679,13 @@ export async function getLeaveTypes() {
   const { data } = await sb.from("leave_types").select("*").eq("active", true).order("sort_order");
   return data || [];
 }
+
+// รายการตำแหน่งควบคุมกลาง — หน้าแก้ทะเบียนต้องขอรวมรายการที่ปิดใช้แล้วด้วย
+// เพื่อให้ยังเห็นและถอดตำแหน่งเดิมของคนที่ถืออยู่ได้
+export async function getStaffPositions(includeInactive = false) {
+  let query = sb.from("staff_positions").select("*").order("sort_order").order("code");
+  if (!includeInactive) query = query.eq("active", true);
+  const { data, error } = await query;
+  if (error) throw new Error("โหลดรายการตำแหน่งไม่สำเร็จ");
+  return data || [];
+}
