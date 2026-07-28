@@ -77,6 +77,10 @@
   .s.absent { color:var(--danger); } .s.leave { color:var(--blue); }
   .s.holiday, .s.pending { color:var(--muted); font-weight:400; }
   .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
+  .my-duty-row { padding:10px 0; border-bottom:1px solid var(--line); }
+  .my-duty-row:last-child { border-bottom:none; }
+  .my-duty-row b { display:block; }
+  .my-duty-meta { color:var(--muted); font-size:14px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
 </head>
@@ -84,7 +88,7 @@
 <div class="wrap">
   <header>
     <h1>ข้อมูลการทำงานของฉัน</h1>
-    <p>สรุปการมา สาย ขาด เวรรับนักเรียน และสิทธิ์วันลาคงเหลือของคุณ</p>
+    <p id="page-description">สรุปการมา สาย ขาด งานที่ผูกเกณฑ์เข้างาน และสิทธิ์วันลาคงเหลือของคุณ</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -94,12 +98,17 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260727-2"></script>
+    <script src="../app-shell.js?v=20260728-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
 
   <div id="content" style="display:none">
+    <div class="card">
+      <div class="section-title">เวรของฉัน</div>
+      <div id="my-duty-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
     <div class="card">
       <div id="today-box"></div>
       <div class="field">
@@ -133,8 +142,8 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260727-3";
+         getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260728-1";
 
 const session = await requireAuth();
 if (session) {
@@ -158,6 +167,11 @@ if (session) {
     el("month").value = today.slice(0, 7);
 
     const years = await getAcademicYears();
+    const dutyTypeCatalog = await getDutyTypes(true);
+    const attendanceDutyType = dutyTypeCatalog.find(type => type.affects_attendance);
+    el("page-description").textContent = attendanceDutyType
+      ? `สรุปการมา สาย ขาด “${attendanceDutyType.code}” และสิทธิ์วันลาคงเหลือของคุณ`
+      : "สรุปการมา สาย ขาด และสิทธิ์วันลาคงเหลือของคุณ";
     const THAI_WD = ["อา","จ","อ","พ","พฤ","ศ","ส"];
     let permitBusy = false;
 
@@ -178,12 +192,48 @@ if (session) {
       return nowSeconds > limitSeconds;
     }
 
+    async function renderMyDuties() {
+      const { data, error } = await sb.from("duty_roster")
+        .select("duty_date,duty_type,duty_types!inner(code,start_time,end_time,sort_order)")
+        .eq("staff_id", me.id)
+        .gte("duty_date", today)
+        .order("duty_date")
+        .order("duty_type");
+      if (error) {
+        el("my-duty-list").innerHTML =
+          '<div class="banner warn">โหลดเวรของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        return;
+      }
+      const rows = [...(data || [])].sort((a, b) =>
+        a.duty_date.localeCompare(b.duty_date) ||
+        (Number(a.duty_types?.sort_order) || 0) - (Number(b.duty_types?.sort_order) || 0) ||
+        a.duty_type.localeCompare(b.duty_type, "th"));
+      el("my-duty-list").innerHTML = rows.length ? rows.map(row => {
+        const type = row.duty_types || {};
+        const date = new Date(row.duty_date + "T00:00:00Z")
+          .toLocaleDateString("th-TH", {
+            weekday:"short", day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+          });
+        const start = shortTime(type.start_time);
+        const end = shortTime(type.end_time);
+        const time = !start ? "ยังไม่ได้กำหนดเวลา"
+          : end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
+        return `<div class="my-duty-row"><b>${escapeHtml(date)} · ${escapeHtml(row.duty_type)}</b>
+          <div class="my-duty-meta">${escapeHtml(time)}</div></div>`;
+      // ⚠️ ห้ามเขียนว่า "ยังไม่มีตารางเวรในระบบ" — หน้านี้พิสูจน์ไม่ได้ว่าเป็นเพราะยังไม่ได้สร้าง
+      // หรือสร้างแล้วแต่ไม่มีชื่อเรา (RLS ให้ครูอ่าน duty_roster เฉพาะแถวตัวเอง และอ่าน
+      // duty_month_sync ไม่ได้เลย) จึงต้องพูดเท่าที่รู้จริงแล้วชี้ทางไปถามฝ่ายบุคคล
+      }).join("") : `<div class="muted-empty">ยังไม่มีเวรของคุณตั้งแต่วันนี้เป็นต้นไป<br>
+          <span class="field-note">ถ้าคิดว่าควรมี ให้สอบถามฝ่ายบุคคล — อาจยังไม่ได้สร้างตารางเวรของเดือนถัดไป</span>
+        </div>`;
+    }
+
     async function renderPermitCard() {
       const body = el("permit-body");
       const monthStart = today.slice(0, 7) + "-01";
       const [settingsRes, permitsRes, dutyRes] = await Promise.all([
         sb.from("hr_settings").select("key,value")
-          .in("key", ["late_permission_until", "duty_start_time"]),
+          .in("key", ["late_permission_until"]),
         sb.from("late_permissions")
           .select("id,permit_date,until_time,reason")
           .eq("staff_id", me.id)
@@ -191,9 +241,10 @@ if (session) {
           .lte("permit_date", today)
           .order("permit_date"),
         sb.from("duty_roster")
-          .select("duty_date")
+          .select("duty_date,duty_type,duty_types!inner(code,start_time,affects_attendance)")
           .eq("staff_id", me.id)
           .eq("duty_date", today)
+          .eq("duty_types.affects_attendance", true)
           .maybeSingle()
       ]);
       if (settingsRes.error || permitsRes.error || dutyRes.error) {
@@ -203,7 +254,8 @@ if (session) {
 
       const settingMap = new Map((settingsRes.data || []).map(row => [row.key, row.value]));
       const limit = settingMap.get("late_permission_until") || "";
-      const dutyStart = String(settingMap.get("duty_start_time") || "07:15").slice(0, 5);
+      const dutyStart = shortTime(dutyRes.data?.duty_types?.start_time);
+      const dutyName = dutyRes.data?.duty_type || "งานที่ผูกเกณฑ์เข้างาน";
       const limitSeconds = timeToSeconds(limit);
       if (limitSeconds === null) {
         body.innerHTML = '<div class="banner warn">เวลาที่อนุญาตยังตั้งค่าไม่ถูกต้อง กรุณาแจ้งฝ่ายบุคคล</div>';
@@ -222,7 +274,7 @@ if (session) {
              </button>`
           : "";
         body.innerHTML = `
-          <div class="banner warn"><b>วันนี้คุณเป็นเวร ต้องลงเวลาไม่เกิน ${dutyStart} น.</b><br>
+          <div class="banner warn"><b>วันนี้คุณมีงาน “${escapeHtml(dutyName)}” ต้องลงเวลาไม่เกิน ${dutyStart} น.</b><br>
             วันเวรขออนุญาตเข้าสายไม่ได้ และไม่ใช้ช่วงผ่อนผันหรืออนุโลมถาวร</div>
           ${existing}${countText}`;
         return;
@@ -270,8 +322,10 @@ if (session) {
       if (event.target.closest("#btn-request-permit")) {
         const [settingRes, dutyRes] = await Promise.all([
           sb.from("hr_settings").select("value").eq("key", "late_permission_until").maybeSingle(),
-          sb.from("duty_roster").select("duty_date")
-            .eq("staff_id", me.id).eq("duty_date", today).maybeSingle()
+          sb.from("duty_roster")
+            .select("duty_date,duty_types!inner(affects_attendance)")
+            .eq("staff_id", me.id).eq("duty_date", today)
+            .eq("duty_types.affects_attendance", true).maybeSingle()
         ]);
         if (dutyRes.error) {
           el("permit-body").innerHTML =
@@ -418,13 +472,16 @@ if (session) {
         <div><div class="big">${text}</div>
         <div class="sub">วันนี้ ${dToday}${r.firstIn ? " · ลงเวลา " + String(r.firstIn).slice(0,5) + " น." : ""}</div>
         ${r.onDuty
-          ? `<div class="duty-alert">วันนี้คุณเป็นเวร ต้องลงเวลาไม่เกิน ${String(ctxToday.settings.dutyStartTime).slice(0,5)} น.</div>`
+          ? `<div class="duty-alert">วันนี้คุณมีงาน “${escapeHtml(
+              ctxToday.attendanceDutyByKey.get(me.id + "|" + today)?.duty_type || "งานที่ผูกเกณฑ์เข้างาน"
+            )}” ต้องลงเวลาไม่เกิน ${shortTime(r.dutyStartTime)} น.</div>`
           : ""}
         </div>
       </div>`;
     }
 
     el("month").addEventListener("change", renderMonth);
+    await renderMyDuties();
     await renderPermitCard();
     await renderMonth();
     await renderYear();

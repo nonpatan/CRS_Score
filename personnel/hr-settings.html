@@ -71,12 +71,19 @@
   .check-label { display:flex; align-items:center; gap:7px; margin:0; font-size:14px; }
   .check-label input { width:19px; height:19px; }
   .position-row.inactive { background:#f8f9f9; margin:0 -8px; padding-left:8px; padding-right:8px; }
+  .duty-fields { display:grid; grid-template-columns:minmax(180px,1fr) 120px 120px 90px; gap:10px; }
+  .duty-row { padding:12px 0; border-bottom:1px solid var(--line); }
+  .duty-row:last-child { border-bottom:none; }
+  .duty-row.inactive { background:#f8f9f9; margin:0 -8px; padding-left:8px; padding-right:8px; }
+  .duty-name { font-weight:600; }
   @media (max-width:720px) {
     .catalog-grid { grid-template-columns:1fr; }
+    .duty-fields { grid-template-columns:1fr 1fr; }
   }
   @media (max-width:420px) {
-    .row2, .position-fields { display:block; }
+    .row2, .position-fields, .duty-fields { display:block; }
     .position-fields .field { margin-bottom:10px; }
+    .duty-fields .field { margin-bottom:10px; }
     .position-actions button { flex:1; }
   }
   #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
@@ -90,7 +97,7 @@
 <div class="wrap">
   <header>
     <h1>ตั้งค่างานบุคคล</h1>
-    <p>เกณฑ์เข้าสาย เวลาเข้าเวร ปีการศึกษา และโควตาวันลา</p>
+    <p>เกณฑ์เข้าสาย ปีการศึกษา รายการควบคุม และโควตาวันลา</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -100,7 +107,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260727-2"></script>
+    <script src="../app-shell.js?v=20260728-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -126,17 +133,6 @@
       <input id="grace" type="number" min="0" max="120" step="1">
       <div class="field-note" id="grace-note">—</div>
     </div>
-    <button id="btn-save-grace" class="primary">บันทึกค่าผ่อนผัน</button>
-    <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
-      <div class="field">
-        <label for="duty-start-time">เวลาเข้าเวรรับนักเรียน</label>
-        <input id="duty-start-time" type="time" step="60" required>
-        <div class="field-note">
-          วันเวรใช้เวลานี้แทนเกณฑ์ปกติทั้งหมด โดยไม่บวกช่วงผ่อนผันและไม่ใช้ใบขอเข้าสาย
-        </div>
-      </div>
-      <button id="btn-save-duty-time" class="primary">บันทึกเวลาเข้าเวร</button>
-    </div>
     <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
       <div class="field">
         <label for="late-permission-until">อนุญาตให้ขอเข้าสายถึงเวลา</label>
@@ -145,8 +141,8 @@
           ครูขอได้ถึงเวลานี้ของวันนั้น ระบบจะสำเนาค่านี้เก็บไว้ในแต่ละใบขอ
         </div>
       </div>
-      <button id="btn-save-permission-time" class="primary">บันทึกเวลาที่อนุญาตให้ขอ</button>
     </div>
+    <button id="btn-save-time-settings" class="primary">บันทึกการตั้งค่าเวลา</button>
   </div>
 
   <div class="card single-card">
@@ -168,27 +164,24 @@
     <button id="btn-add-year" class="ghost small">เพิ่ม/แก้ปีการศึกษา</button>
   </div>
 
-  <div class="card single-card">
-    <div class="section-title">โควตาวันลา</div>
-    <div class="field">
-      <label for="quota-year">โควตาของปีการศึกษา</label>
-      <select id="quota-year"></select>
-    </div>
-    <div id="quota-list"></div>
-    <button id="btn-save-quota" class="primary">บันทึกโควตา</button>
-
-  </div>
-
   <div class="catalog-grid">
     <div class="card">
       <div class="section-title">ประเภทการลา</div>
-      <div class="banner info">รายการนี้ใช้ในหน้าบันทึกการลาและโควตาวันลา</div>
-      <div class="field">
-        <label for="new-type">เพิ่มประเภทการลาใหม่</label>
-        <input id="new-type" type="text" placeholder="เช่น ลาพักผ่อน, ลาบวช">
-        <div class="field-note">เพิ่มแล้วจะมีให้เลือกในหน้าบันทึกการลา และตั้งโควตาได้ที่นี่</div>
+      <div class="banner info">จัดลำดับหรือปิดใช้ได้ แต่เปลี่ยนชื่อไม่ได้ เพราะใบลาเก่าอ้างอิงชื่อเดิม</div>
+      <div id="leave-type-list"></div>
+      <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
+        <div class="position-fields">
+          <div class="field">
+            <label for="new-type">เพิ่มประเภทการลาใหม่</label>
+            <input id="new-type" type="text" placeholder="เช่น ลาพักผ่อน, ลาบวช">
+          </div>
+          <div class="field">
+            <label for="new-type-order">ลำดับ</label>
+            <input id="new-type-order" type="number" min="0" max="32767" step="1" value="10">
+          </div>
+        </div>
+        <button id="btn-add-type" class="ghost small">เพิ่มประเภทการลา</button>
       </div>
-      <button id="btn-add-type" class="ghost small">เพิ่มประเภทการลา</button>
     </div>
 
     <div class="card">
@@ -212,6 +205,45 @@
       </div>
     </div>
   </div>
+
+  <div class="card single-card">
+    <div class="section-title">โควตาวันลา</div>
+    <div class="field">
+      <label for="quota-year">โควตาของปีการศึกษา</label>
+      <select id="quota-year"></select>
+    </div>
+    <div id="quota-list"></div>
+    <button id="btn-save-quota" class="primary">บันทึกโควตา</button>
+  </div>
+
+  <div class="card">
+    <div class="section-title">งานเวร</div>
+    <div class="banner info">
+      เวลาอยู่ที่งานเวรแต่ละงาน งานที่ผูกเกณฑ์เข้างานมีได้เพียงงานเดียว และใช้เวลานั้นตัดสินมา/สาย
+    </div>
+    <div id="duty-type-list"></div>
+    <div style="margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)">
+      <div class="duty-fields">
+        <div class="field">
+          <label for="new-duty-name">เพิ่มงานเวร</label>
+          <input id="new-duty-name" type="text" placeholder="ชื่องาน">
+        </div>
+        <div class="field">
+          <label for="new-duty-start">เวลาเริ่ม</label>
+          <input id="new-duty-start" type="time" step="60">
+        </div>
+        <div class="field">
+          <label for="new-duty-end">เวลาจบ</label>
+          <input id="new-duty-end" type="time" step="60">
+        </div>
+        <div class="field">
+          <label for="new-duty-order">ลำดับ</label>
+          <input id="new-duty-order" type="number" min="0" max="32767" step="1" value="10">
+        </div>
+      </div>
+      <button id="btn-add-duty" class="ghost small">เพิ่มงานเวร</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -220,7 +252,7 @@
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getAcademicYears, getLeaveTypes, getLeaveQuotas,
-         getStaffPositions } from "../supabase-client.js?v=20260727-3";
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260728-1";
 
 const session = await requireAuth();
 if (session) {
@@ -261,7 +293,8 @@ if (session) {
   }
 
   const THAI_DAY = { 1:"จันทร์", 2:"อังคาร", 3:"พุธ", 4:"พฤหัสบดี", 5:"ศุกร์", 6:"เสาร์", 7:"อาทิตย์" };
-  let years = [], types = [], positions = [], positionUsage = {}, settings = null;
+  let years = [], types = [], leaveTypes = [], positions = [], positionUsage = {};
+  let dutyTypes = [], dutyUsage = {};
 
   // ---------- เวลาทำงาน ----------
   async function loadWorkTime() {
@@ -270,7 +303,7 @@ if (session) {
       sb.from("work_schedule").select("*").order("weekday"),
       sb.from("hr_settings").select("value").eq("key", "late_permission_until").maybeSingle()
     ]);
-    settings = loadedSettings;
+    const settings = loadedSettings;
     const sched = schedRes.data || [];
     const working = (sched || []).filter(r => r.is_working_day);
 
@@ -280,7 +313,6 @@ if (session) {
       : "ยังไม่มีข้อมูล";
     el("v-final").textContent = settings.dayFinalTime + " น.";
     el("grace").value = settings.lateGraceMinutes;
-    el("duty-start-time").value = String(settings.dutyStartTime || "").slice(0, 5);
     el("late-permission-until").value = permitSettingRes.data?.value
       ? String(permitSettingRes.data.value).slice(0, 5)
       : "";
@@ -298,36 +330,25 @@ if (session) {
   }
   el("grace").addEventListener("input", updateGraceNote);
 
-  el("btn-save-grace").addEventListener("click", async () => {
-    const v = String(Math.max(0, Number(el("grace").value || 0)));
-    const { error } = await sb.from("hr_settings").upsert({ key: "late_grace_minutes", value: v }, { onConflict: "key" });
-    if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
-    toast("บันทึกค่าผ่อนผันแล้ว");
-    loadWorkTime();
-  });
-
-  el("btn-save-duty-time").addEventListener("click", async () => {
-    const value = el("duty-start-time").value.trim();
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
-      return toast("เวลาเข้าเวรต้องเป็นรูปแบบ HH:MM ที่ถูกต้อง เช่น 07:15", true);
+  el("btn-save-time-settings").addEventListener("click", async () => {
+    // ตรวจทุกช่องให้ผ่านก่อนส่งคำสั่งเดียว เพื่อไม่ให้ฐานข้อมูลถูกเขียนไปครึ่งหนึ่ง
+    const graceRaw = el("grace").value.trim();
+    const grace = Number(graceRaw);
+    const permissionUntil = el("late-permission-until").value.trim();
+    if (!/^\d+$/.test(graceRaw) || !Number.isInteger(grace) || grace < 0 || grace > 120) {
+      return toast("ค่าผ่อนผันต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 120 นาที", true);
     }
-    const { error } = await sb.from("hr_settings")
-      .upsert({ key: "duty_start_time", value }, { onConflict: "key" });
-    if (error) return toast("บันทึกเวลาเข้าเวรไม่สำเร็จ กรุณาลองใหม่", true);
-    toast("บันทึกเวลาเข้าเวรแล้ว");
-    loadWorkTime();
-  });
-
-  el("btn-save-permission-time").addEventListener("click", async () => {
-    const value = el("late-permission-until").value.trim();
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(permissionUntil)) {
       return toast("เวลาต้องเป็นรูปแบบ HH:MM ที่ถูกต้อง เช่น 08:00", true);
     }
     const { error } = await sb.from("hr_settings")
-      .upsert({ key: "late_permission_until", value }, { onConflict: "key" });
-    if (error) return toast("บันทึกเวลาไม่สำเร็จ กรุณาลองใหม่", true);
-    toast("บันทึกเวลาที่อนุญาตให้ขอแล้ว");
-    loadWorkTime();
+      .upsert([
+        { key: "late_grace_minutes", value: String(grace) },
+        { key: "late_permission_until", value: permissionUntil }
+      ], { onConflict: "key" });
+    if (error) return toast("บันทึกการตั้งค่าเวลาไม่สำเร็จ กรุณาลองใหม่", true);
+    toast("บันทึกการตั้งค่าเวลาแล้ว");
+    await loadWorkTime();
   });
 
   // ---------- ปีการศึกษา ----------
@@ -399,15 +420,71 @@ if (session) {
     loadQuotas();
   });
 
+  async function loadLeaveTypes() {
+    try {
+      leaveTypes = await getLeaveTypes(true);
+      el("leave-type-list").innerHTML = leaveTypes.length
+        ? leaveTypes.map(type => `<div class="position-row${type.active ? "" : " inactive"}"
+              data-leave-type="${esc(type.code)}">
+            <div class="position-fields">
+              <div class="field">
+                <label>ชื่อประเภทการลา</label>
+                <input type="text" value="${esc(type.code)}" disabled>
+              </div>
+              <div class="field">
+                <label>ลำดับ</label>
+                <input type="number" min="0" max="32767" step="1" data-leave-order
+                       value="${Number(type.sort_order) || 0}">
+              </div>
+            </div>
+            <div class="position-actions">
+              <label class="check-label">
+                <input type="checkbox" data-leave-active${type.active ? " checked" : ""}>
+                ใช้งานอยู่
+              </label>
+              <span class="usage">ชื่อเดิมแก้ไม่ได้ เพื่อรักษาใบลาเก่า</span>
+              <button class="ghost small" type="button" data-save-leave>บันทึก</button>
+            </div>
+          </div>`).join("")
+        : '<div class="field-note">ยังไม่มีประเภทการลา</div>';
+      const nextOrder = leaveTypes.length
+        ? Math.min(32767, Math.max(...leaveTypes.map(row => Number(row.sort_order) || 0)) + 10)
+        : 10;
+      el("new-type-order").value = String(nextOrder);
+    } catch {
+      el("leave-type-list").innerHTML =
+        '<div class="banner warn">โหลดประเภทการลาไม่สำเร็จ กรุณาลองเปิดหน้านี้ใหม่</div>';
+    }
+  }
+
   el("btn-add-type").addEventListener("click", async () => {
     const code = el("new-type").value.trim();
+    const sortOrder = validSortOrder(el("new-type-order").value);
     if (!code) return toast("กรุณากรอกชื่อประเภทการลา", true);
+    if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
     const { error } = await sb.from("leave_types")
-      .upsert({ code, sort_order: (types.length + 1) * 10, active: true }, { onConflict: "code" });
+      .insert({ code, sort_order: sortOrder, active: true });
+    if (error?.code === "23505") return toast("มีประเภทการลาชื่อนี้อยู่แล้ว", true);
     if (error) return toast("เพิ่มไม่สำเร็จ: " + error.message, true);
     el("new-type").value = "";
     toast("เพิ่มประเภทการลาแล้ว");
-    loadQuotas();
+    await loadLeaveTypes();
+    await loadQuotas();
+  });
+
+  el("leave-type-list").addEventListener("click", async event => {
+    const row = event.target.closest("[data-leave-type]");
+    if (!row || !event.target.closest("[data-save-leave]")) return;
+    const sortOrder = validSortOrder(row.querySelector("[data-leave-order]").value);
+    const active = row.querySelector("[data-leave-active]").checked;
+    if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
+    const { error } = await sb.from("leave_types")
+      .update({ sort_order: sortOrder, active })
+      .eq("code", row.dataset.leaveType);
+    if (error) return toast("บันทึกประเภทการลาไม่สำเร็จ กรุณาลองใหม่", true);
+    toast("บันทึกประเภทการลาแล้ว");
+    await loadLeaveTypes();
+    await loadQuotas();
   });
 
   // ---------- ตำแหน่งบุคลากร ----------
@@ -528,9 +605,179 @@ if (session) {
     }
   });
 
+  // ---------- งานเวร ----------
+  const validTimeOrBlank = value =>
+    value === "" || /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+  async function loadDutyTypes() {
+    try {
+      const [loaded, rosterRes, patternRes] = await Promise.all([
+        getDutyTypes(true),
+        sb.from("duty_roster").select("duty_type"),
+        sb.from("duty_pattern").select("duty_type")
+      ]);
+      if (rosterRes.error || patternRes.error) throw new Error("usage");
+      dutyTypes = loaded;
+      dutyUsage = {};
+      [...(rosterRes.data || []), ...(patternRes.data || [])].forEach(row => {
+        dutyUsage[row.duty_type] = (dutyUsage[row.duty_type] || 0) + 1;
+      });
+      renderDutyTypes();
+      const nextOrder = dutyTypes.length
+        ? Math.min(32767, Math.max(...dutyTypes.map(row => Number(row.sort_order) || 0)) + 10)
+        : 10;
+      el("new-duty-order").value = String(nextOrder);
+    } catch {
+      el("duty-type-list").innerHTML =
+        '<div class="banner warn">โหลดรายการงานเวรไม่สำเร็จ กรุณาลองเปิดหน้านี้ใหม่</div>';
+    }
+  }
+
+  function renderDutyTypes() {
+    el("duty-type-list").innerHTML = dutyTypes.length
+      ? dutyTypes.map(type => `<div class="duty-row${type.active ? "" : " inactive"}"
+            data-duty-row data-original="${esc(type.code)}">
+          <div class="duty-fields">
+            <div class="field">
+              <label>ชื่องาน</label>
+              <input type="text" data-duty-name value="${esc(type.code)}">
+            </div>
+            <div class="field">
+              <label>เวลาเริ่ม</label>
+              <input type="time" step="60" data-duty-start value="${esc(String(type.start_time || "").slice(0,5))}">
+            </div>
+            <div class="field">
+              <label>เวลาจบ</label>
+              <input type="time" step="60" data-duty-end value="${esc(String(type.end_time || "").slice(0,5))}">
+            </div>
+            <div class="field">
+              <label>ลำดับ</label>
+              <input type="number" min="0" max="32767" step="1" data-duty-order
+                     value="${Number(type.sort_order) || 0}">
+            </div>
+          </div>
+          <div class="position-actions">
+            <label class="check-label">
+              <input type="checkbox" data-duty-active${type.active ? " checked" : ""}>
+              ใช้งานอยู่
+            </label>
+            <label class="check-label" title="${isAdmin ? "" : "แก้ธงนี้ได้เฉพาะผู้ดูแลระบบ"}">
+              <input type="checkbox" data-duty-attendance${type.affects_attendance ? " checked" : ""}
+                     ${isAdmin ? "" : "disabled"}>
+              ผูกเกณฑ์เข้างาน
+            </label>
+            <span class="usage">${dutyUsage[type.code] || 0} รายการใช้งาน</span>
+            <button class="ghost small" type="button" data-save-duty>บันทึก</button>
+            ${isAdmin ? '<button class="danger small" type="button" data-delete-duty>ลบ</button>' : ""}
+          </div>
+        </div>`).join("")
+      : '<div class="field-note">ยังไม่มีงานเวร</div>';
+  }
+
+  el("btn-add-duty").addEventListener("click", async () => {
+    const code = el("new-duty-name").value.trim();
+    const startTime = el("new-duty-start").value.trim();
+    const endTime = el("new-duty-end").value.trim();
+    const sortOrder = validSortOrder(el("new-duty-order").value);
+    if (!code) return toast("กรุณากรอกชื่องานเวร", true);
+    if (!validTimeOrBlank(startTime) || !validTimeOrBlank(endTime)) {
+      return toast("เวลาเริ่มและเวลาจบต้องเป็นรูปแบบ HH:MM หรือเว้นว่าง", true);
+    }
+    if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
+    const { error } = await sb.from("duty_types").insert({
+      code, start_time: startTime || null, end_time: endTime || null,
+      affects_attendance: false, sort_order: sortOrder, active: true
+    });
+    if (error?.code === "23505") return toast("มีงานเวรชื่อนี้อยู่แล้ว", true);
+    if (error) return toast("เพิ่มงานเวรไม่สำเร็จ กรุณาลองใหม่", true);
+    el("new-duty-name").value = "";
+    el("new-duty-start").value = "";
+    el("new-duty-end").value = "";
+    toast("เพิ่มงานเวรแล้ว");
+    await loadDutyTypes();
+  });
+
+  el("duty-type-list").addEventListener("click", async event => {
+    const row = event.target.closest("[data-duty-row]");
+    if (!row) return;
+    const original = row.dataset.original;
+    const current = dutyTypes.find(type => type.code === original);
+
+    if (event.target.closest("[data-save-duty]")) {
+      const code = row.querySelector("[data-duty-name]").value.trim();
+      const startTime = row.querySelector("[data-duty-start]").value.trim();
+      const endTime = row.querySelector("[data-duty-end]").value.trim();
+      const sortOrder = validSortOrder(row.querySelector("[data-duty-order]").value);
+      const active = row.querySelector("[data-duty-active]").checked;
+      const affectsAttendance = row.querySelector("[data-duty-attendance]").checked;
+      if (!code) return toast("ชื่องานเวรห้ามว่าง", true);
+      if (!validTimeOrBlank(startTime) || !validTimeOrBlank(endTime)) {
+        return toast("เวลาเริ่มและเวลาจบต้องเป็นรูปแบบ HH:MM หรือเว้นว่าง", true);
+      }
+      if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
+      if (affectsAttendance && !startTime) {
+        return toast("งานที่ผูกเกณฑ์เข้างานต้องกำหนดเวลาเริ่ม", true);
+      }
+      if (current?.affects_attendance && (!affectsAttendance || !active)) {
+        return toast("ต้องย้ายธงเกณฑ์เข้างานไปงานอื่นก่อน", true);
+      }
+
+      const otherAttendance = dutyTypes.find(type =>
+        type.affects_attendance && type.code !== original);
+      if (affectsAttendance && otherAttendance) {
+        if (!isAdmin) return toast("แก้ธงเกณฑ์เข้างานได้เฉพาะผู้ดูแลระบบ", true);
+        if (!confirm(`ย้ายธงเกณฑ์เข้างานจาก “${otherAttendance.code}” มาที่ “${code}” ใช่หรือไม่`)) return;
+        const clearRes = await sb.from("duty_types")
+          .update({ affects_attendance: false }).eq("code", otherAttendance.code);
+        if (clearRes.error) return toast("ย้ายธงเกณฑ์เข้างานไม่สำเร็จ กรุณาลองใหม่", true);
+        const saveRes = await sb.from("duty_types").update({
+          code, start_time: startTime || null, end_time: endTime || null,
+          sort_order: sortOrder, active, affects_attendance: true
+        }).eq("code", original);
+        if (saveRes.error) {
+          await sb.from("duty_types")
+            .update({ affects_attendance: true }).eq("code", otherAttendance.code);
+          return toast("ย้ายธงเกณฑ์เข้างานไม่สำเร็จ ระบบคืนธงเดิมแล้ว", true);
+        }
+      } else {
+        const { error } = await sb.from("duty_types").update({
+          code, start_time: startTime || null, end_time: endTime || null,
+          sort_order: sortOrder, active, affects_attendance: affectsAttendance
+        }).eq("code", original);
+        if (error?.code === "23505") return toast("ชื่องานซ้ำ หรือมีงานผูกเกณฑ์เข้างานอยู่แล้ว", true);
+        if (error) return toast("บันทึกงานเวรไม่สำเร็จ กรุณาลองใหม่", true);
+      }
+      toast("บันทึกงานเวรแล้ว");
+      await loadDutyTypes();
+      return;
+    }
+
+    if (event.target.closest("[data-delete-duty]")) {
+      if (!isAdmin) return;
+      if (current?.affects_attendance) {
+        return toast("ต้องย้ายธงเกณฑ์เข้างานไปงานอื่นก่อน", true);
+      }
+      if (!confirm(`ลบงานเวร “${original}” ใช่หรือไม่`)) return;
+      const { error } = await sb.from("duty_types").delete().eq("code", original);
+      if (error) {
+        const [rosterCount, patternCount] = await Promise.all([
+          sb.from("duty_roster").select("*", { count:"exact", head:true }).eq("duty_type", original),
+          sb.from("duty_pattern").select("*", { count:"exact", head:true }).eq("duty_type", original)
+        ]);
+        const count = (rosterCount.count || 0) + (patternCount.count || 0);
+        if (count > 0) return toast(`ยังมีเวรที่ใช้งานนี้อยู่ ${count} รายการ ต้องถอดออกก่อน`, true);
+        return toast("ลบงานเวรไม่สำเร็จ กรุณาลองใหม่", true);
+      }
+      toast("ลบงานเวรแล้ว");
+      await loadDutyTypes();
+    }
+  });
+
   await loadWorkTime();
   await loadYears();
+  await loadLeaveTypes();
   await loadPositions();
+  await loadDutyTypes();
   }
 }
 </script>

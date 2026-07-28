@@ -88,7 +88,7 @@
 <div class="wrap">
   <header>
     <h1>สรุปเวลาทำงาน</h1>
-    <p>ภาพรวมการมา สาย ขาด ลา และเวรรับนักเรียนของบุคลากรทั้งโรงเรียน</p>
+    <p id="report-description">ภาพรวมการมา สาย ขาด ลา และงานที่ผูกเกณฑ์เข้างานของบุคลากรทั้งโรงเรียน</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -98,7 +98,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260727-2"></script>
+    <script src="../app-shell.js?v=20260728-1"></script>
   </header>
 
   <div class="card">
@@ -192,7 +192,8 @@
 import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          loadWorkContext, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260727-3";
+         getAcademicYears, academicYearRange, getDutyTypes,
+         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260728-1";
 
 const session = await requireAuth();
 if (session) {
@@ -204,6 +205,9 @@ if (session) {
     elToast.classList.add("show"); clearTimeout(t);
     t = setTimeout(() => elToast.classList.remove("show"), 3500);
   };
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
   el("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
   const canSync = await checkDepartment("บุคลากร");
@@ -220,9 +224,18 @@ if (session) {
   } else {
   let years = [], summaries = [], ctx = null;
   let todayDutyStaff = new Set();
-  let dutyStartTime = "07:15";
+  let dutyStartTime = "";   // ค่าจริงมาจาก duty_types ตอนโหลด — ห้าม hardcode 07:15 ไว้ที่นี่
+  // งานที่ถือธงเกณฑ์อาจยังไม่ได้กรอกเวลา — ข้อความต้องอ่านรู้เรื่องทั้งสองแบบ
+  const dutyTimePhrase = () => dutyStartTime ? ` ต้องลงเวลาไม่เกิน ${dutyStartTime} น.` : "";
+  let attendanceDutyName = "งานที่ผูกเกณฑ์เข้างาน";
 
-  years = await getAcademicYears();
+  [years, attendanceDutyName] = await Promise.all([
+    getAcademicYears(),
+    getDutyTypes(true).then(rows =>
+      rows.find(type => type.affects_attendance)?.code || "งานที่ผูกเกณฑ์เข้างาน")
+  ]);
+  el("report-description").textContent =
+    `ภาพรวมการมา สาย ขาด ลา และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
   el("year").innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
   el("month").value = toDateStr(bangkokNow()).slice(0, 7);
 
@@ -237,7 +250,7 @@ if (session) {
     const onDuty = !!staffId && todayDutyStaff.has(staffId);
     el("btn-save-permit").disabled = onDuty;
     el("permit-entry-note").textContent = onDuty
-      ? `บุคลากรคนนี้เป็นเวรวันนี้ ต้องลงเวลาไม่เกิน ${dutyStartTime} น. จึงบันทึกคำขอเข้าสายไม่ได้`
+      ? `บุคลากรคนนี้มีงาน “${attendanceDutyName}” วันนี้${dutyTimePhrase()} จึงบันทึกคำขอเข้าสายไม่ได้`
       : "เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล";
   }
   el("permit-staff").addEventListener("change", updatePermitEntryState);
@@ -313,11 +326,16 @@ if (session) {
       summaries = summarizeAll(range.from, range.to, ctx);
       const today = toDateStr(bangkokNow());
       const todayDutyRes = await sb.from("duty_roster")
-        .select("staff_id")
-        .eq("duty_date", today);
+        .select("staff_id,duty_types!inner(affects_attendance)")
+        .eq("duty_date", today)
+        .eq("duty_types.affects_attendance", true);
       if (todayDutyRes.error) throw new Error("โหลดเวรของวันนี้ไม่สำเร็จ: " + todayDutyRes.error.message);
       todayDutyStaff = new Set((todayDutyRes.data || []).map(row => row.staff_id));
-      dutyStartTime = String(ctx.settings.dutyStartTime || "07:15").slice(0, 5);
+      const attendanceType = ctx.dutyTypes.find(type => type.affects_attendance);
+      attendanceDutyName = attendanceType?.code || "งานที่ผูกเกณฑ์เข้างาน";
+      dutyStartTime = String(attendanceType?.start_time || "").slice(0, 5);
+      el("report-description").textContent =
+        `ภาพรวมการมา สาย ขาด ลา และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
       const selectedStaff = el("permit-staff").value;
       const activeStaff = ctx.staff.filter(staff => staff.is_active);
       el("permit-staff").innerHTML =
@@ -415,7 +433,7 @@ if (session) {
     el("detail-title").textContent = "รายละเอียด — " + s.staff.full_name;
     el("detail-permit").innerHTML =
       `<div class="banner info"><b>ขออนุญาตเข้าสาย:</b> ขอ ${s.permitRequested} ครั้ง · ใช้จริง ${s.permitUsed} ครั้ง</div>
-       <div class="banner warn"><b>เวรรับนักเรียน:</b> ${s.dutyDays} วัน · สายเวร ${s.dutyLate} · ลา/ขาดเวร ${s.dutyMissed}</div>`;
+       <div class="banner warn"><b>${esc(attendanceDutyName)}:</b> ${s.dutyDays} วัน · สายเวร ${s.dutyLate} · ลา/ขาดเวร ${s.dutyMissed}</div>`;
     const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
     el("detail-stats").innerHTML = `
       <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
@@ -456,9 +474,10 @@ if (session) {
     button.disabled = true;
     const today = toDateStr(bangkokNow());
     const dutyRes = await sb.from("duty_roster")
-      .select("staff_id")
+      .select("staff_id,duty_types!inner(affects_attendance)")
       .eq("staff_id", staffId)
       .eq("duty_date", today)
+      .eq("duty_types.affects_attendance", true)
       .maybeSingle();
     if (dutyRes.error) {
       button.disabled = false;
@@ -467,7 +486,7 @@ if (session) {
     if (dutyRes.data) {
       todayDutyStaff.add(staffId);
       updatePermitEntryState();
-      return toast(`คนนี้เป็นเวรวันนี้ ต้องลงเวลาไม่เกิน ${dutyStartTime} น. จึงขอเข้าสายไม่ได้`, true);
+      return toast(`คนนี้มีงาน “${attendanceDutyName}” วันนี้${dutyTimePhrase()} จึงขอเข้าสายไม่ได้`, true);
     }
     const settingRes = await sb.from("hr_settings")
       .select("value").eq("key", "late_permission_until").maybeSingle();
