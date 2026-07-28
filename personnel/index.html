@@ -74,6 +74,7 @@
   .dot.present { background: var(--teal); }
   .dot.late { background: #e2a017; }
   .dot.leave { background: var(--blue); }
+  .dot.offsite { background: #7b61a8; }
   .dot.absent { background: #d65353; }
   .dot.pending { background: var(--slate); }
   .today-note { margin-top: 13px; padding: 9px 11px; border-radius: 9px;
@@ -104,7 +105,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260728-1"></script>
+    <script src="../app-shell.js?v=20260728-2"></script>
   </header>
 
   <div class="card">
@@ -146,6 +147,10 @@
           <span>ลา</span>
         </div>
         <div class="legend-item">
+          <div class="legend-value"><span class="dot offsite"></span><b id="today-offsite">—</b></div>
+          <span>ออกปฏิบัติหน้าที่</span>
+        </div>
+        <div class="legend-item">
           <div class="legend-value"><span class="dot absent"></span><b id="today-absent">—</b></div>
           <span>ขาด</span>
         </div>
@@ -162,7 +167,7 @@
 <script type="module">
 import { sb, requireAuth, signOut, getLastSyncLog, checkDepartment, syncJibble,
          applyPersonnelMenuAccess,
-         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260728-1";
+         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260728-2";
 
 const session = await requireAuth();
 if (session) {
@@ -176,14 +181,17 @@ if (session) {
 
   const COLORS = {
     present: "#0f6e56", late: "#e2a017", leave: "#1f5aa8",
-    absent: "#d65353", pending: "#718087"
+    offsite: "#7b61a8", absent: "#d65353", pending: "#718087"
   };
-  const LABELS = { present: "มา", late: "มาสาย", leave: "ลา", absent: "ขาด", pending: "รอครบวัน" };
+  const LABELS = {
+    present: "มา", late: "มาสาย", leave: "ลา",
+    offsite: "ปฏิบัติหน้าที่นอกสถานที่", absent: "ขาด", pending: "รอครบวัน"
+  };
 
   function renderToday(ctx, today, syncWarning = "") {
     const active = ctx.staff.filter(s => s.is_active);
     const rows = active.map(staff => computeDayStatus(staff, today, ctx));
-    const counts = { present: 0, late: 0, leave: 0, absent: 0, pending: 0 };
+    const counts = { present: 0, late: 0, leave: 0, offsite: 0, absent: 0, pending: 0 };
     rows.forEach(r => { if (Object.hasOwn(counts, r.status)) counts[r.status]++; });
 
     Object.entries(counts).forEach(([status, count]) => {
@@ -201,7 +209,7 @@ if (session) {
     } else {
       let cursor = 0;
       const parts = [];
-      for (const status of ["present", "late", "leave", "absent", "pending"]) {
+      for (const status of ["present", "late", "leave", "offsite", "absent", "pending"]) {
         if (!counts[status]) continue;
         const start = cursor;
         cursor += counts[status] / chartTotal * 100;

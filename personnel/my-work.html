@@ -27,7 +27,7 @@
 
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:16px; margin-bottom:16px; }
-  select, input[type="month"], input[type="text"] { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+  select, input[type="month"], input[type="text"], input[type="url"] { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
   input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
   input:disabled { background:#f4f6f6; color:var(--muted); }
@@ -75,12 +75,26 @@
   .day-row .t { color:var(--muted); font-size:14px; }
   .s.present { color:var(--teal); } .s.late { color:var(--amber); }
   .s.absent { color:var(--danger); } .s.leave { color:var(--blue); }
+  .s.offsite { color:#67469a; }
   .s.holiday, .s.pending { color:var(--muted); font-weight:400; }
   .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
   .my-duty-row { padding:10px 0; border-bottom:1px solid var(--line); }
   .my-duty-row:last-child { border-bottom:none; }
   .my-duty-row b { display:block; }
   .my-duty-meta { color:var(--muted); font-size:14px; }
+  .field-duty-row { padding:13px 0; border-bottom:1px solid var(--line); }
+  .field-duty-row:last-child { border-bottom:none; }
+  .field-duty-row b { display:block; }
+  .report-entry { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:start; margin-top:9px; }
+  .report-entry button { width:auto; white-space:nowrap; }
+  .report-status { min-height:20px; color:var(--muted); font-size:13px; margin-top:4px; }
+  .report-status.err { color:var(--danger); }
+  .report-status.ok { color:var(--teal); }
+  .report-link { color:var(--teal); font-weight:600; text-decoration:none; }
+  @media (max-width:500px) {
+    .report-entry { grid-template-columns:1fr; }
+    .report-entry button { width:100%; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
 </head>
@@ -98,7 +112,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260728-1"></script>
+    <script src="../app-shell.js?v=20260728-2"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -107,6 +121,14 @@
     <div class="card">
       <div class="section-title">เวรของฉัน</div>
       <div id="my-duty-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card" id="field-duty-card">
+      <div class="section-title">ออกปฏิบัติหน้าที่ / อบรมของฉัน</div>
+      <div class="banner warn">
+        ก่อนส่งลิงก์ โปรดตั้งสิทธิ์แชร์ไฟล์ใน Google Drive ให้ฝ่ายบุคคลเปิดดูได้
+      </div>
+      <div id="my-field-duty-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
     <div class="card">
@@ -143,7 +165,8 @@
 import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260728-1";
+         getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260728-2";
 
 const session = await requireAuth();
 if (session) {
@@ -174,6 +197,7 @@ if (session) {
       : "สรุปการมา สาย ขาด และสิทธิ์วันลาคงเหลือของคุณ";
     const THAI_WD = ["อา","จ","อ","พ","พฤ","ศ","ส"];
     let permitBusy = false;
+    const reportBusy = new Set();
 
     const escapeHtml = value => String(value ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -186,6 +210,12 @@ if (session) {
       return hour * 3600 + minute * 60 + second;
     }
     const shortTime = value => String(value || "").slice(0, 5);
+    const validHttpUrl = value => {
+      try {
+        const url = new URL(String(value || "").trim());
+        return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+      } catch { return ""; }
+    };
     function isPastPermissionLimit(limitSeconds) {
       const now = bangkokNow();
       const nowSeconds = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
@@ -227,6 +257,82 @@ if (session) {
           <span class="field-note">ถ้าคิดว่าควรมี ให้สอบถามฝ่ายบุคคล — อาจยังไม่ได้สร้างตารางเวรของเดือนถัดไป</span>
         </div>`;
     }
+
+    async function renderMyFieldDuties() {
+      const box = el("my-field-duty-list");
+      try {
+        const duties = await getStaffFieldDuties({ staffId: me.id });
+        const reports = await getTrainingReports(duties.map(row => row.id));
+        const reportByDuty = new Map(reports.map(row => [row.field_duty_id, row]));
+        box.innerHTML = duties.length ? duties.map(row => {
+          const report = reportByDuty.get(row.id);
+          const start = new Date(row.start_date + "T00:00:00Z").toLocaleDateString("th-TH", {
+            day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+          });
+          const end = new Date(row.end_date + "T00:00:00Z").toLocaleDateString("th-TH", {
+            day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+          });
+          const range = row.start_date === row.end_date ? start : `${start} – ${end}`;
+          const reportUrl = validHttpUrl(report?.report_url);
+          return `<div class="field-duty-row" data-field-duty="${row.id}" data-has-report="${report ? "1" : "0"}">
+            <b>${escapeHtml(range)} · ${escapeHtml(row.kind)}</b>
+            <div class="my-duty-meta">${escapeHtml(row.title)}</div>
+            <div class="report-entry">
+              <input type="url" data-report-url value="${escapeHtml(reportUrl)}"
+                placeholder="https://drive.google.com/…" aria-label="ลิงก์รายงานสรุป ${escapeHtml(row.title)}">
+              <button type="button" class="primary" data-save-report>${report ? "บันทึกการแก้ไข" : "ส่งลิงก์รายงาน"}</button>
+            </div>
+            <div class="report-status ${report ? "ok" : ""}" data-report-status>${
+              report && reportUrl
+                ? `ส่งแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}" target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`
+                : "ยังไม่ได้ส่งลิงก์รายงาน"
+            }</div>
+          </div>`;
+        }).join("") : '<div class="muted-empty">ยังไม่มีรายการออกปฏิบัติหน้าที่หรืออบรมของคุณ</div>';
+      } catch {
+        box.innerHTML = '<div class="banner warn">โหลดรายการออกปฏิบัติหน้าที่ไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+      }
+    }
+
+    el("field-duty-card").addEventListener("click", async event => {
+      const button = event.target.closest("[data-save-report]");
+      if (!button) return;
+      const row = button.closest("[data-field-duty]");
+      const fieldDutyId = row?.dataset.fieldDuty;
+      if (!fieldDutyId || reportBusy.has(fieldDutyId)) return;
+      const input = row.querySelector("[data-report-url]");
+      const status = row.querySelector("[data-report-status]");
+      const reportUrl = validHttpUrl(input.value);
+      status.className = "report-status";
+      if (!reportUrl) {
+        status.textContent = "กรุณากรอกลิงก์ที่ขึ้นต้นด้วย http:// หรือ https://";
+        status.classList.add("err");
+        input.focus();
+        return;
+      }
+      reportBusy.add(fieldDutyId);
+      button.disabled = true;
+      status.textContent = "กำลังบันทึก…";
+      try {
+        if (row.dataset.hasReport === "1") {
+          await updateTrainingReport(fieldDutyId, reportUrl);
+        } else {
+          await createTrainingReport(fieldDutyId, reportUrl);
+          row.dataset.hasReport = "1";
+          button.textContent = "บันทึกการแก้ไข";
+        }
+        input.value = reportUrl;
+        status.innerHTML = `บันทึกแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}"
+          target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`;
+        status.classList.add("ok");
+      } catch {
+        status.textContent = "บันทึกลิงก์ไม่สำเร็จ กรุณาตรวจลิงก์และลองใหม่";
+        status.classList.add("err");
+      } finally {
+        reportBusy.delete(fieldDutyId);
+        button.disabled = false;
+      }
+    });
 
     async function renderPermitCard() {
       const body = el("permit-body");
@@ -400,9 +506,10 @@ if (session) {
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
         <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
+        <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
         <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
         <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-        <div class="stat bad"><b>${s.dutyMissed}</b><span>ลา/ขาดเวร</span></div>`;
+        <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
 
       const quotas = await getLeaveQuotas(year);
       const codes = new Set([...Object.keys(quotas), ...Object.keys(s.leaveByType)]);
@@ -442,15 +549,17 @@ if (session) {
         <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
         <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
+        <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
         <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
         <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-        <div class="stat bad"><b>${s.dutyMissed}</b><span>ลา/ขาดเวร</span></div>`;
+        <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
 
       el("month-days").innerHTML = s.rows.length ? s.rows.map(r => {
         const d = new Date(r.date + "T00:00:00Z");
         const dl = `${d.getUTCDate()} ${d.toLocaleDateString("th-TH", { month: "short", timeZone: "UTC" })} ${THAI_WD[d.getUTCDay()]}.`;
         let text = WORK_STATUS_LABEL[r.status];
         if (r.status === "leave") text = `ลา (${r.leaveType}${r.portion !== "full" ? " ครึ่งวัน" : ""})`;
+        if (r.status === "offsite") text = `${escapeHtml(r.kind)} — ${escapeHtml(r.title)}`;
         if (r.status === "present" && r.exempt) text = "มา (อนุโลม)";
         const time = r.firstIn ? String(r.firstIn).slice(0, 5) + " น." : "";
         const extra = r.lateMinutes ? ` (สาย ${r.lateMinutes} นาที)` : "";
@@ -465,6 +574,7 @@ if (session) {
       let text = WORK_STATUS_LABEL[r.status];
       if (r.status === "late") text = `สาย ${r.lateMinutes} นาที`;
       if (r.status === "leave") text = `ลา (${r.leaveType})`;
+      if (r.status === "offsite") text = `${escapeHtml(r.kind)} — ${escapeHtml(r.title)}`;
       if (r.status === "present" && r.exempt) text = "มา (อนุโลม)";
       const dToday = new Date(today + "T00:00:00Z")
         .toLocaleDateString("th-TH", { day: "numeric", month: "long", timeZone: "UTC" });
@@ -482,6 +592,7 @@ if (session) {
 
     el("month").addEventListener("change", renderMonth);
     await renderMyDuties();
+    await renderMyFieldDuties();
     await renderPermitCard();
     await renderMonth();
     await renderYear();

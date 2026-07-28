@@ -129,12 +129,13 @@
       // หน้าที่เป็นงานของฝ่ายบุคคลโดยเฉพาะ — ครูทั่วไปเห็นได้แค่ "ข้อมูลการทำงานของฉัน"
       // ซ่อนไว้ก่อนเสมอ (fail-closed) แล้วให้หน้าเว็บเรียก applyPersonnelMenuAccess() เปิดให้
       // ถ้าลืมเรียก คนมีสิทธิ์จะเห็นเมนูไม่ครบ (สังเกตได้ทันที) ดีกว่าเผลอเปิดให้คนไม่มีสิทธิ์
-      hrOnly: ["index.html", "leave.html", "duty.html", "staff.html", "hr-settings.html", "work-summary.html"],
+      hrOnly: ["index.html", "leave.html", "field-duty.html", "duty.html", "staff.html", "hr-settings.html", "work-summary.html"],
       groups: [
         {
           label: "บันทึก",
           items: [
             ["leave.html", "บันทึกการลา"],
+            ["field-duty.html", "บันทึกออกปฏิบัติหน้าที่"],
             ["duty.html", "ตารางเวร"]
           ]
         },
@@ -158,6 +159,11 @@
           title: "บันทึกการลา",
           description: "เลือกบุคลากร ช่วงวันที่ และประเภทการลา ก่อนบันทึก",
           steps: ["เลือกคน", "ระบุวันลา", "บันทึก"]
+        },
+        "field-duty.html": {
+          title: "บันทึกออกปฏิบัติหน้าที่",
+          description: "เลือกบุคลากร ช่วงวันที่ ประเภท และหัวข้อ พร้อมติดตามลิงก์รายงานสรุป",
+          steps: ["เลือกคน", "ระบุรายละเอียด", "ติดตามรายงาน"]
         },
         "duty.html": {
           title: "จัดตารางเวร",

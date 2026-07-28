@@ -73,6 +73,7 @@
   .day-row .t { color:var(--muted); font-size:14px; }
   .s.present { color:var(--teal); } .s.late { color:var(--amber); }
   .s.absent { color:var(--danger); } .s.leave { color:var(--blue); }
+  .s.offsite { color:#67469a; }
   .s.holiday, .s.pending { color:var(--muted); font-weight:400; }
   .duty-tag { display:inline-block; margin-left:5px; padding:1px 7px; border-radius:99px;
               background:var(--amber-soft); color:var(--amber); font-size:12px; font-weight:600; }
@@ -88,7 +89,7 @@
 <div class="wrap">
   <header>
     <h1>สรุปเวลาทำงาน</h1>
-    <p id="report-description">ภาพรวมการมา สาย ขาด ลา และงานที่ผูกเกณฑ์เข้างานของบุคลากรทั้งโรงเรียน</p>
+    <p id="report-description">ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และงานที่ผูกเกณฑ์เข้างานของบุคลากรทั้งโรงเรียน</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -98,7 +99,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260728-1"></script>
+    <script src="../app-shell.js?v=20260728-2"></script>
   </header>
 
   <div class="card">
@@ -157,9 +158,10 @@
         <div class="stat warn"><b id="s-late">—</b><span id="s-late-minutes">รวม — นาที</span></div>
         <div class="stat bad"><b id="s-absent">—</b><span>ขาด (วัน)</span></div>
         <div class="stat warn"><b id="s-leave">—</b><span>ลา (วัน)</span></div>
+        <div class="stat"><b id="s-offsite">—</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
         <div class="stat"><b id="s-duty">—</b><span>เวร (วัน)</span></div>
         <div class="stat warn"><b id="s-duty-late">—</b><span>สายเวร</span></div>
-        <div class="stat bad"><b id="s-duty-missed">—</b><span>ลา/ขาดเวร</span></div>
+        <div class="stat bad"><b id="s-duty-missed">—</b><span>พลาดเวร</span></div>
       </div>
     </div>
 
@@ -170,7 +172,7 @@
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>ชื่อ</th><th>วันทำงาน</th><th>มา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>เวร</th><th>ขอเข้าสาย</th></tr></thead>
+          <thead><tr><th>ชื่อ</th><th>วันทำงาน</th><th>มา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ออกนอกสถานที่</th><th>เวร</th><th>ขอเข้าสาย</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -193,7 +195,7 @@ import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          loadWorkContext, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
          getAcademicYears, academicYearRange, getDutyTypes,
-         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260728-1";
+         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260728-2";
 
 const session = await requireAuth();
 if (session) {
@@ -235,7 +237,7 @@ if (session) {
       rows.find(type => type.affects_attendance)?.code || "งานที่ผูกเกณฑ์เข้างาน")
   ]);
   el("report-description").textContent =
-    `ภาพรวมการมา สาย ขาด ลา และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
+    `ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
   el("year").innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
   el("month").value = toDateStr(bangkokNow()).slice(0, 7);
 
@@ -335,7 +337,7 @@ if (session) {
       attendanceDutyName = attendanceType?.code || "งานที่ผูกเกณฑ์เข้างาน";
       dutyStartTime = String(attendanceType?.start_time || "").slice(0, 5);
       el("report-description").textContent =
-        `ภาพรวมการมา สาย ขาด ลา และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
+        `ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
       const selectedStaff = el("permit-staff").value;
       const activeStaff = ctx.staff.filter(staff => staff.is_active);
       el("permit-staff").innerHTML =
@@ -355,6 +357,7 @@ if (session) {
       el("s-late-minutes").textContent = `รวม ${totalLateMinutes} นาที`;
       el("s-absent").textContent = summaries.reduce((a, s) => a + s.absent, 0);
       el("s-leave").textContent = summaries.reduce((a, s) => a + s.leaveDays, 0);
+      el("s-offsite").textContent = summaries.reduce((a, s) => a + s.offsiteDays, 0);
       el("s-duty").textContent = summaries.reduce((a, s) => a + s.dutyDays, 0);
       el("s-duty-late").textContent = summaries.reduce((a, s) => a + s.dutyLate, 0);
       el("s-duty-missed").textContent = summaries.reduce((a, s) => a + s.dutyMissed, 0);
@@ -384,7 +387,8 @@ if (session) {
         const r = summaries.find(x => x.staff.id === s.id)?.rows.find(x => x.date === d);
         if (!r || r.status === "holiday" || r.status === "pending") continue;
         working++;
-        if (r.status === "present" || r.status === "late" || r.status === "leave") came++;
+        if (r.status === "present" || r.status === "late" ||
+            r.status === "leave" || r.status === "offsite") came++;
       }
       if (working > 0 && came / working < 0.5) suspicious.push({ d, came, working });
     }
@@ -409,6 +413,7 @@ if (session) {
         </td>
         <td class="${s.absent ? "bad" : ""}">${s.absent}</td>
         <td>${s.leaveDays}</td>
+        <td>${s.offsiteDays}</td>
         <td>
           <span class="cell-main">${s.dutyDays} วัน</span>
           <span class="cell-sub">สาย ${s.dutyLate} · พลาด ${s.dutyMissed}</span>
@@ -418,7 +423,7 @@ if (session) {
           <span class="cell-sub">ใช้จริง ${s.permitUsed}</span>
         </td>
       </tr>`).join("")
-      : '<tr><td colspan="8" class="muted-empty">ไม่พบข้อมูล</td></tr>';
+      : '<tr><td colspan="9" class="muted-empty">ไม่พบข้อมูล</td></tr>';
   }
   el("q").addEventListener("input", renderTable);
 
@@ -433,22 +438,24 @@ if (session) {
     el("detail-title").textContent = "รายละเอียด — " + s.staff.full_name;
     el("detail-permit").innerHTML =
       `<div class="banner info"><b>ขออนุญาตเข้าสาย:</b> ขอ ${s.permitRequested} ครั้ง · ใช้จริง ${s.permitUsed} ครั้ง</div>
-       <div class="banner warn"><b>${esc(attendanceDutyName)}:</b> ${s.dutyDays} วัน · สายเวร ${s.dutyLate} · ลา/ขาดเวร ${s.dutyMissed}</div>`;
+       <div class="banner warn"><b>${esc(attendanceDutyName)}:</b> ${s.dutyDays} วัน · สายเวร ${s.dutyLate} · พลาดเวร ${s.dutyMissed}</div>`;
     const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
     el("detail-stats").innerHTML = `
       <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
       <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
       <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
       <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
+      <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
       <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
       <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-      <div class="stat bad"><b>${s.dutyMissed}</b><span>ลา/ขาดเวร</span></div>`;
+      <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
 
     el("detail-days").innerHTML = s.rows.map(r => {
       const d = new Date(r.date + "T00:00:00Z");
       const label = `${d.getUTCDate()} ${d.toLocaleDateString("th-TH", { month: "short", timeZone: "UTC" })} ${THAI_WD[d.getUTCDay()]}.`;
       let text = WORK_STATUS_LABEL[r.status];
       if (r.status === "leave") text = `ลา (${r.leaveType}${r.portion !== "full" ? " ครึ่งวัน" : ""})`;
+      if (r.status === "offsite") text = `${esc(r.kind)} — ${esc(r.title)}`;
       if (r.status === "present" && r.exempt) text = "มา (อนุโลม)";
       const time = r.firstIn ? String(r.firstIn).slice(0, 5) + " น." : "";
       const extra = r.lateMinutes ? ` (สาย ${r.lateMinutes} นาที)` : "";

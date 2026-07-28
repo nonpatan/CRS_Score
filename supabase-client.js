@@ -1377,6 +1377,7 @@ export async function loadTodayStaffSummary() {
   const schedule = new Map((scheduleRes.data || []).map(row => [row.weekday, row]));
   const attendance = new Map();
   const leaves = [];
+  const fieldDuties = [];
   const latePermissions = [];
   const dutyRoster = [];
   const attendanceDutyType = dutyTypes.find(row =>
@@ -1398,6 +1399,15 @@ export async function loadTodayStaffSummary() {
         end_date: today,
         day_portion: row.leave_portion || "full",
         leave_type: "ลา"
+      });
+    }
+    if (row.on_field_duty === true) {
+      fieldDuties.push({
+        staff_id: id,
+        start_date: today,
+        end_date: today,
+        kind: "ปฏิบัติหน้าที่นอกสถานที่",
+        title: "ออกปฏิบัติหน้าที่"
       });
     }
     if (row.permit_until) {
@@ -1434,6 +1444,7 @@ export async function loadTodayStaffSummary() {
     holidays: new Set((holidayRes.data || []).map(row => row.holiday_date)),
     schedule,
     leaves,
+    fieldDuties,
     latePermissions,
     dutyRoster,
     dutyTypes,
@@ -1442,7 +1453,7 @@ export async function loadTodayStaffSummary() {
     dutyByKey: new Set(attendanceDutyByKey.keys()),
     settings
   };
-  const counts = { present: 0, late: 0, leave: 0, absent: 0, pending: 0 };
+  const counts = { present: 0, late: 0, leave: 0, offsite: 0, absent: 0, pending: 0 };
   const statuses = staffRows.map(staff => computeDayStatus(staff, today, ctx));
   for (const row of statuses) {
     if (Object.hasOwn(counts, row.status)) counts[row.status] += 1;
@@ -1606,6 +1617,87 @@ export async function generateDutyRosterFromPattern(from, to, createdBy) {
 }
 
 // ============================================================
+// ออกปฏิบัติหน้าที่นอกสถานที่ / อบรม
+// ------------------------------------------------------------
+// รายละเอียดงานเป็นของฝ่ายบุคคล ส่วนลิงก์รายงานแยกตารางเพื่อให้ครูแก้ได้
+// โดยไม่เปิดสิทธิ์ให้แก้วันที่ ประเภท หรือหัวข้อของงาน
+// ============================================================
+export async function getStaffFieldDuties({ from = null, to = null, staffId = null } = {}) {
+  let query = sb.from("staff_field_duties")
+    .select("*")
+    .order("start_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  // ดึงแบบ "คาบเกี่ยวช่วง" เช่นเดียวกับใบลา ห้ามใช้ between
+  if (to) query = query.lte("start_date", to);
+  if (from) query = query.gte("end_date", from);
+  if (staffId) query = query.eq("staff_id", staffId);
+  const { data, error } = await query;
+  if (error) throw new Error("โหลดรายการออกปฏิบัติหน้าที่ไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function createStaffFieldDuty(fields) {
+  const { data, error } = await sb.from("staff_field_duties")
+    .insert(fields)
+    .select("*")
+    .single();
+  if (error) throw new Error("บันทึกการออกปฏิบัติหน้าที่ไม่สำเร็จ: " + error.message);
+  return data;
+}
+
+export async function updateStaffFieldDuty(id, fields) {
+  const { data, error } = await sb.from("staff_field_duties")
+    .update(fields)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error("แก้ไขการออกปฏิบัติหน้าที่ไม่สำเร็จ: " + error.message);
+  return data;
+}
+
+export async function deleteStaffFieldDuty(id) {
+  const { error } = await sb.from("staff_field_duties").delete().eq("id", id);
+  if (error) throw new Error("ลบการออกปฏิบัติหน้าที่ไม่สำเร็จ: " + error.message);
+}
+
+export async function getTrainingReports(fieldDutyIds = null) {
+  if (Array.isArray(fieldDutyIds) && fieldDutyIds.length === 0) return [];
+  let query = sb.from("training_reports")
+    .select("field_duty_id,report_url,submitted_at,updated_at")
+    .order("updated_at", { ascending: false });
+  if (Array.isArray(fieldDutyIds)) query = query.in("field_duty_id", fieldDutyIds);
+  const { data, error } = await query;
+  if (error) throw new Error("โหลดลิงก์รายงานสรุปไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function createTrainingReport(fieldDutyId, reportUrl) {
+  const { data, error } = await sb.from("training_reports")
+    .insert({ field_duty_id: fieldDutyId, report_url: reportUrl })
+    .select("field_duty_id,report_url,submitted_at,updated_at")
+    .single();
+  if (error) throw new Error("บันทึกลิงก์รายงานสรุปไม่สำเร็จ");
+  return data;
+}
+
+export async function updateTrainingReport(fieldDutyId, reportUrl) {
+  const { data, error } = await sb.from("training_reports")
+    .update({ report_url: reportUrl, updated_at: new Date().toISOString() })
+    .eq("field_duty_id", fieldDutyId)
+    .select("field_duty_id,report_url,submitted_at,updated_at")
+    .single();
+  if (error) throw new Error("แก้ไขลิงก์รายงานสรุปไม่สำเร็จ");
+  return data;
+}
+
+export async function deleteTrainingReport(fieldDutyId) {
+  const { error } = await sb.from("training_reports")
+    .delete()
+    .eq("field_duty_id", fieldDutyId);
+  if (error) throw new Error("ลบลิงก์รายงานสรุปไม่สำเร็จ");
+}
+
+// ============================================================
 // ตรรกะเวลาทำงานของฝ่ายบุคคล — "แก้ที่นี่ที่เดียว"
 // ------------------------------------------------------------
 // ทุกหน้า (work-summary / my-work / index ของฝ่ายบุคคล) ต้องเรียกฟังก์ชันชุดนี้
@@ -1617,6 +1709,7 @@ export async function generateDutyRosterFromPattern(from, to, createdBy) {
 //   2. วันในอนาคต                               → 'pending'  ยังไม่ถึงวันทำงาน
 //   3. คนอนุโลม (exempt)                        → 'present'  ถือว่ามาเสมอ
 //   4. มีใบลาครอบวันนั้น                         → 'leave'    (เต็มวัน 1.0 / ครึ่งวัน 0.5)
+//   4.5 ออกปฏิบัติหน้าที่/อบรม                    → 'offsite'  ทำงานเต็มวันแต่ไม่ได้อยู่โรงเรียน
 //   5. มีเวลาเข้า  → เทียบ cutoff → 'present' หรือ 'late'
 //   6. วันนี้ที่ยังไม่ถึงเวลาปิดวัน (18:00)        → 'pending'  ยังไม่ครบวัน ห้ามนับว่าขาด
 //   7. ไม่มีเวลาเข้าเลยหลังปิดวัน                 → 'absent'
@@ -1629,7 +1722,7 @@ export async function generateDutyRosterFromPattern(from, to, createdBy) {
 
 export const WORK_STATUS_LABEL = {
   holiday: "วันหยุด", pending: "ยังไม่ครบวัน", present: "มา",
-  late: "สาย", leave: "ลา", absent: "ขาด"
+  late: "สาย", leave: "ลา", offsite: "ปฏิบัติหน้าที่นอกสถานที่", absent: "ขาด"
 };
 
 // อ่านค่าตั้งงานบุคคลทั้งหมดเป็น object เดียว
@@ -1675,13 +1768,15 @@ function timeToMinutes(t) {
 
 // ---------- โหลดข้อมูลที่ต้องใช้คำนวณทั้งช่วง ----------
 export async function loadWorkContext(from, to) {
-  const [staffRes, attRes, holRes, schedRes, leaveRes, permitRes, dutyRes, dutyTypeRes, settings] = await Promise.all([
+  const [staffRes, attRes, holRes, schedRes, leaveRes, fieldDutyRes, permitRes, dutyRes, dutyTypeRes, settings] = await Promise.all([
     sb.from("staff").select("*").order("full_name"),
     sb.from("work_attendance").select("*").gte("work_date", from).lte("work_date", to),
     sb.from("work_holidays").select("*").gte("holiday_date", from).lte("holiday_date", to),
     sb.from("work_schedule").select("*"),
     // ใบลาที่ "คาบเกี่ยว" ช่วงนี้ (เริ่มก่อนช่วงแต่ยังไม่จบ ก็ต้องเอามาด้วย)
     sb.from("staff_leaves").select("*").lte("start_date", to).gte("end_date", from),
+    // งานนอกสถานที่ที่ "คาบเกี่ยว" ช่วงนี้ — ห้ามใช้ between เพราะรายการข้ามเดือนจะหาย
+    sb.from("staff_field_duties").select("*").lte("start_date", to).gte("end_date", from),
     sb.from("late_permissions").select("*").gte("permit_date", from).lte("permit_date", to),
     sb.from("duty_roster").select("*").gte("duty_date", from).lte("duty_date", to),
     sb.from("duty_types").select("*").order("sort_order").order("code"),
@@ -1695,6 +1790,7 @@ export async function loadWorkContext(from, to) {
     [holRes, "โหลดวันหยุด"],
     [schedRes, "โหลดตารางวันทำงาน"],
     [leaveRes, "โหลดข้อมูลลา"],
+    [fieldDutyRes, "โหลดข้อมูลออกปฏิบัติหน้าที่"],
     [permitRes, "โหลดใบขอเข้าสาย"],
     [dutyRes, "โหลดตารางเวร"],
     [dutyTypeRes, "โหลดรายการงานเวร"]
@@ -1724,6 +1820,7 @@ export async function loadWorkContext(from, to) {
     holidays: new Set((holRes.data || []).map(r => r.holiday_date)),
     schedule,
     leaves: leaveRes.data || [],
+    fieldDuties: fieldDutyRes.data || [],
     latePermissions: permitRes.data || [],
     dutyRoster: dutyRes.data || [],
     dutyTypes,
@@ -1764,6 +1861,16 @@ export function computeDayStatus(staff, dateStr, ctx) {
     return {
       status: "leave", weight: leave.day_portion === "full" ? 1 : 0.5,
       leaveType: leave.leave_type, portion: leave.day_portion, reason: leave.reason, onDuty
+    };
+  }
+
+  // 4.5) ออกปฏิบัติหน้าที่/อบรม — เป็นการทำงานเต็มวัน ไม่ใช่ลา และไม่ต้องมีเวลาเข้า
+  const fieldDuty = (ctx.fieldDuties || []).find(row =>
+    row.staff_id === staff.id && row.start_date <= dateStr && dateStr <= row.end_date);
+  if (fieldDuty) {
+    return {
+      status: "offsite", weight: 1,
+      kind: fieldDuty.kind, title: fieldDuty.title, onDuty
     };
   }
 
@@ -1814,7 +1921,7 @@ export function summarizeStaff(staff, from, to, ctx) {
   const days = eachDate(from, to);
   const sum = {
     staff, workDays: 0, present: 0, late: 0, lateMinutes: 0, absent: 0,
-    leaveDays: 0, leaveByType: {}, pendingDays: 0,
+    leaveDays: 0, leaveByType: {}, offsiteDays: 0, pendingDays: 0,
     dutyDays: 0, dutyLate: 0, dutyMissed: 0,
     permitRequested: (ctx.latePermissions || []).filter(p =>
       p.staff_id === staff.id && from <= p.permit_date && p.permit_date <= to).length,
@@ -1829,7 +1936,7 @@ export function summarizeStaff(staff, from, to, ctx) {
     if (r.onDuty && r.status !== "holiday") {
       sum.dutyDays++;
       if (r.status === "late") sum.dutyLate++;
-      if (r.status === "leave" || r.status === "absent") sum.dutyMissed++;
+      if (r.status === "leave" || r.status === "offsite" || r.status === "absent") sum.dutyMissed++;
     }
     if (r.status === "holiday") continue;
     if (r.status === "pending") { sum.pendingDays++; continue; }
@@ -1842,6 +1949,7 @@ export function summarizeStaff(staff, from, to, ctx) {
       sum.present++;   // สายก็ถือว่ามาทำงาน
     }
     else if (r.status === "absent") sum.absent++;
+    else if (r.status === "offsite") sum.offsiteDays += r.weight;
     else if (r.status === "leave") {
       sum.leaveDays += r.weight;
       sum.leaveByType[r.leaveType] = (sum.leaveByType[r.leaveType] || 0) + r.weight;
