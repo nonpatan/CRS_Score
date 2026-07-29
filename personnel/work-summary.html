@@ -129,10 +129,10 @@
   </div>
 
   <div class="card">
-    <div class="section-title">บันทึกคำขอเข้าสายที่แจ้งไว้วันนี้</div>
+    <div class="section-title">บันทึกคำขอเข้าสายวันนี้หรือย้อนหลังในเดือนนี้</div>
     <div class="banner info">
-      ใช้เมื่อบุคลากรแจ้งไว้ก่อนเวลาแต่ลืมกดขอเอง ฝ่ายบุคคลบันทึกให้ได้ภายในวันนี้แม้เลยเวลาขอแล้ว
-      — เวอร์ชันนี้ยังไม่รองรับการเลือกวันย้อนหลังข้ามวัน
+      ใช้เมื่อบุคลากรแจ้งไว้ก่อนเวลาแต่ลืมกดขอเอง เลือกย้อนหลังได้ตั้งแต่วันที่ 1 ของเดือนปัจจุบัน
+      ถึงวันนี้เท่านั้น — เมื่อขึ้นเดือนใหม่แล้วจะบันทึกหรือแก้คำขอของเดือนก่อนไม่ได้
     </div>
     <div class="row2">
       <div class="field">
@@ -140,12 +140,16 @@
         <select id="permit-staff"><option value="">กำลังโหลดรายชื่อ…</option></select>
       </div>
       <div class="field">
+        <label for="permit-date">วันที่ขอเข้าสาย</label>
+        <input id="permit-date" type="date">
+      </div>
+      <div class="field">
         <label for="permit-reason">เหตุผลสั้น ๆ (ไม่บังคับ)</label>
         <input id="permit-reason" type="text" maxlength="200" autocomplete="off"
                placeholder="เช่น ไปพบแพทย์">
       </div>
     </div>
-    <button id="btn-save-permit" class="ghost">บันทึกคำขอให้วันนี้</button>
+    <button id="btn-save-permit" class="ghost">บันทึกคำขอตามวันที่เลือก</button>
     <div class="field-note" id="permit-entry-note">เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล</div>
   </div>
 
@@ -225,7 +229,13 @@ if (session) {
     document.querySelector(".wrap").appendChild(box);
   } else {
   let years = [], summaries = [], ctx = null;
-  let todayDutyStaff = new Set();
+  let permitStaff = [];
+  let permitDutyStaff = new Set();
+  let permitDutyReady = false;
+  let permitDutyRequest = 0;
+  // วันที่หลุดช่วงที่อนุญาต — เก็บเป็นสถานะ ไม่ใช่แค่เขียนข้อความทิ้งไว้
+  // ไม่งั้นพอผู้ใช้ไปเปลี่ยน dropdown บุคลากร updatePermitEntryState() จะทับข้อความนั้นหาย
+  let permitDateOutOfRange = false;
   let dutyStartTime = "";   // ค่าจริงมาจาก duty_types ตอนโหลด — ห้าม hardcode 07:15 ไว้ที่นี่
   // งานที่ถือธงเกณฑ์อาจยังไม่ได้กรอกเวลา — ข้อความต้องอ่านรู้เรื่องทั้งสองแบบ
   const dutyTimePhrase = () => dutyStartTime ? ` ต้องลงเวลาไม่เกิน ${dutyStartTime} น.` : "";
@@ -239,7 +249,18 @@ if (session) {
   el("report-description").textContent =
     `ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
   el("year").innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
-  el("month").value = toDateStr(bangkokNow()).slice(0, 7);
+  const refreshPermitDateBounds = resetOutOfRange => {
+    const today = toDateStr(bangkokNow());
+    const input = el("permit-date");
+    input.min = today.slice(0, 7) + "-01";
+    input.max = today;
+    if (!input.value || (resetOutOfRange && (input.value < input.min || input.value > input.max))) {
+      input.value = today;
+    }
+    return today;
+  };
+  const permitToday = refreshPermitDateBounds(false);
+  el("month").value = permitToday.slice(0, 7);
 
   el("mode").addEventListener("change", () => {
     const isYear = el("mode").value === "year";
@@ -247,15 +268,75 @@ if (session) {
     el("year-field").style.display = isYear ? "" : "none";
   });
 
+  const permitDateText = date => {
+    if (!date) return "วันที่เลือก";
+    return new Date(date + "T00:00:00Z").toLocaleDateString("th-TH", {
+      day: "numeric", month: "short", year: "numeric", timeZone: "UTC"
+    });
+  };
+
+  function renderPermitStaffOptions() {
+    const selectedStaff = el("permit-staff").value;
+    el("permit-staff").innerHTML =
+      '<option value="">— เลือกบุคลากร —</option>' +
+      permitStaff.map(staff =>
+        `<option value="${staff.id}">${esc(staff.full_name)}${permitDutyStaff.has(staff.id) ? " · เวรวันที่เลือก" : ""}</option>`).join("");
+    if (permitStaff.some(staff => staff.id === selectedStaff)) {
+      el("permit-staff").value = selectedStaff;
+    }
+  }
+
   function updatePermitEntryState() {
     const staffId = el("permit-staff").value;
-    const onDuty = !!staffId && todayDutyStaff.has(staffId);
-    el("btn-save-permit").disabled = onDuty;
-    el("permit-entry-note").textContent = onDuty
-      ? `บุคลากรคนนี้มีงาน “${attendanceDutyName}” วันนี้${dutyTimePhrase()} จึงบันทึกคำขอเข้าสายไม่ได้`
-      : "เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล";
+    const permitDate = el("permit-date").value;
+    const onDuty = !!staffId && permitDutyStaff.has(staffId);
+    el("btn-save-permit").disabled = !permitDate || !permitDutyReady || onDuty;
+    if (!permitDate) {
+      el("permit-entry-note").textContent = "กรุณาเลือกวันที่ขอเข้าสาย";
+    } else if (permitDateOutOfRange) {
+      el("permit-entry-note").textContent =
+        "เลือกวันที่ได้เฉพาะภายในเดือนปัจจุบันและไม่เกินวันนี้";
+    } else if (!permitDutyReady) {
+      el("permit-entry-note").textContent = "กำลังตรวจเวรของวันที่เลือก…";
+    } else if (onDuty) {
+      el("permit-entry-note").textContent =
+        `บุคลากรคนนี้มีงาน “${attendanceDutyName}” วันที่ ${permitDateText(permitDate)}${dutyTimePhrase()} จึงบันทึกคำขอเข้าสายไม่ได้`;
+    } else {
+      el("permit-entry-note").textContent =
+        "เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล · ย้อนหลังได้เฉพาะภายในเดือนปัจจุบัน";
+    }
+  }
+
+  async function loadPermitDuty(permitDate) {
+    const requestId = ++permitDutyRequest;
+    permitDutyReady = false;
+    permitDutyStaff = new Set();
+    permitDateOutOfRange = !!permitDate &&
+      (permitDate < el("permit-date").min || permitDate > el("permit-date").max);
+    renderPermitStaffOptions();
+    updatePermitEntryState();
+    if (!permitDate || permitDateOutOfRange) return;
+    const dutyRes = await sb.from("duty_roster")
+      .select("staff_id,duty_types!inner(affects_attendance)")
+      .eq("duty_date", permitDate)
+      .eq("duty_types.affects_attendance", true);
+    if (requestId !== permitDutyRequest) return;
+    if (dutyRes.error) {
+      el("permit-entry-note").textContent = "ตรวจเวรของวันที่เลือกไม่สำเร็จ กรุณาลองเลือกวันที่อีกครั้ง";
+      return toast("ตรวจเวรของวันที่เลือกไม่สำเร็จ กรุณาลองใหม่", true);
+    }
+    permitDutyStaff = new Set((dutyRes.data || []).map(row => row.staff_id));
+    permitDutyReady = true;
+    renderPermitStaffOptions();
+    updatePermitEntryState();
   }
   el("permit-staff").addEventListener("change", updatePermitEntryState);
+  el("permit-date").addEventListener("focus", () => {
+    const previous = el("permit-date").value;
+    refreshPermitDateBounds(true);
+    if (el("permit-date").value !== previous) loadPermitDuty(el("permit-date").value);
+  });
+  el("permit-date").addEventListener("change", () => loadPermitDuty(el("permit-date").value));
 
   // ---------- หาช่วงวันที่ตามรอบที่เลือก ----------
   function currentRange() {
@@ -326,28 +407,13 @@ if (session) {
       el("status").textContent = "กำลังคำนวณ…";
       ctx = await loadWorkContext(range.from, range.to);
       summaries = summarizeAll(range.from, range.to, ctx);
-      const today = toDateStr(bangkokNow());
-      const todayDutyRes = await sb.from("duty_roster")
-        .select("staff_id,duty_types!inner(affects_attendance)")
-        .eq("duty_date", today)
-        .eq("duty_types.affects_attendance", true);
-      if (todayDutyRes.error) throw new Error("โหลดเวรของวันนี้ไม่สำเร็จ: " + todayDutyRes.error.message);
-      todayDutyStaff = new Set((todayDutyRes.data || []).map(row => row.staff_id));
       const attendanceType = ctx.dutyTypes.find(type => type.affects_attendance);
       attendanceDutyName = attendanceType?.code || "งานที่ผูกเกณฑ์เข้างาน";
       dutyStartTime = String(attendanceType?.start_time || "").slice(0, 5);
       el("report-description").textContent =
         `ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
-      const selectedStaff = el("permit-staff").value;
-      const activeStaff = ctx.staff.filter(staff => staff.is_active);
-      el("permit-staff").innerHTML =
-        '<option value="">— เลือกบุคลากร —</option>' +
-        activeStaff.map(staff =>
-          `<option value="${staff.id}">${staff.full_name}${todayDutyStaff.has(staff.id) ? " · เวรวันนี้" : ""}</option>`).join("");
-      if (activeStaff.some(staff => staff.id === selectedStaff)) {
-        el("permit-staff").value = selectedStaff;
-      }
-      updatePermitEntryState();
+      permitStaff = ctx.staff.filter(staff => staff.is_active);
+      await loadPermitDuty(el("permit-date").value);
 
       el("overview-title").textContent = `ภาพรวม — ${range.label}`;
       el("s-staff").textContent = summaries.length;
@@ -477,23 +543,32 @@ if (session) {
   el("btn-save-permit").addEventListener("click", async () => {
     const staffId = el("permit-staff").value;
     if (!staffId) return toast("กรุณาเลือกบุคลากร", true);
+    refreshPermitDateBounds(false);
+    const permitDate = el("permit-date").value;
+    if (!permitDate || permitDate < el("permit-date").min || permitDate > el("permit-date").max) {
+      return toast("เลือกวันที่ได้เฉพาะภายในเดือนปัจจุบันและไม่เกินวันนี้", true);
+    }
     const button = el("btn-save-permit");
     button.disabled = true;
-    const today = toDateStr(bangkokNow());
     const dutyRes = await sb.from("duty_roster")
       .select("staff_id,duty_types!inner(affects_attendance)")
       .eq("staff_id", staffId)
-      .eq("duty_date", today)
+      .eq("duty_date", permitDate)
       .eq("duty_types.affects_attendance", true)
       .maybeSingle();
     if (dutyRes.error) {
       button.disabled = false;
-      return toast("ตรวจเวรของวันนี้ไม่สำเร็จ กรุณาลองใหม่", true);
+      return toast("ตรวจเวรของวันที่เลือกไม่สำเร็จ กรุณาลองใหม่", true);
     }
     if (dutyRes.data) {
-      todayDutyStaff.add(staffId);
+      permitDutyStaff.add(staffId);
+      permitDutyReady = true;
+      renderPermitStaffOptions();
       updatePermitEntryState();
-      return toast(`คนนี้มีงาน “${attendanceDutyName}” วันนี้${dutyTimePhrase()} จึงขอเข้าสายไม่ได้`, true);
+      return toast(
+        `คนนี้มีงาน “${attendanceDutyName}” วันที่ ${permitDateText(permitDate)}${dutyTimePhrase()} จึงขอเข้าสายไม่ได้`,
+        true
+      );
     }
     const settingRes = await sb.from("hr_settings")
       .select("value").eq("key", "late_permission_until").maybeSingle();
@@ -504,15 +579,21 @@ if (session) {
     }
     const { error } = await sb.from("late_permissions").upsert({
       staff_id: staffId,
-      permit_date: today,
+      permit_date: permitDate,
       until_time: limit,
       reason: el("permit-reason").value.trim() || null,
       created_by: session.user.id
     }, { onConflict: "staff_id,permit_date" });
     button.disabled = false;
-    if (error) return toast("บันทึกคำขอไม่สำเร็จ กรุณาลองใหม่", true);
+    if (error) {
+      const deniedByPolicy = error.code === "42501" ||
+        /row-level security|policy/i.test(String(error.message || ""));
+      return toast(deniedByPolicy
+        ? "บันทึกไม่ได้: คีย์ย้อนหลังได้เฉพาะภายในเดือนปฏิทินเดียวกัน และห้ามเลือกวันล่วงหน้า"
+        : "บันทึกคำขอไม่สำเร็จ กรุณาลองใหม่", true);
+    }
     el("permit-reason").value = "";
-    toast(`บันทึกคำขอเข้าสายถึง ${limit} น. ให้แล้ว`);
+    toast(`บันทึกคำขอวันที่ ${permitDateText(permitDate)} ถึง ${limit} น. ให้แล้ว`);
     await loadReport(false);
   });
 
