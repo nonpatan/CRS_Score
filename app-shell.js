@@ -129,20 +129,21 @@
       // หน้าที่เป็นงานของฝ่ายบุคคลโดยเฉพาะ — ครูทั่วไปเห็นได้แค่ "ข้อมูลการทำงานของฉัน"
       // ซ่อนไว้ก่อนเสมอ (fail-closed) แล้วให้หน้าเว็บเรียก applyPersonnelMenuAccess() เปิดให้
       // ถ้าลืมเรียก คนมีสิทธิ์จะเห็นเมนูไม่ครบ (สังเกตได้ทันที) ดีกว่าเผลอเปิดให้คนไม่มีสิทธิ์
-      hrOnly: ["index.html", "leave.html", "field-duty.html", "duty.html", "staff.html", "hr-settings.html", "work-summary.html"],
+      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "duty.html", "staff.html", "hr-settings.html", "work-summary.html"],
       groups: [
         {
           label: "บันทึก",
           items: [
             ["leave.html", "บันทึกการลา"],
             ["field-duty.html", "บันทึกออกปฏิบัติหน้าที่"],
-            ["duty.html", "ตารางเวร"]
+            ["late-permission.html", "บันทึกคำขอเข้าสาย"]
           ]
         },
         {
           label: "กำหนดค่า",
           items: [
             ["staff.html", "ทะเบียนบุคลากร"],
+            ["duty.html", "ตารางเวร"],
             ["hr-settings.html", "ตั้งค่างานบุคคล"]
           ]
         },
@@ -164,6 +165,11 @@
           title: "บันทึกออกปฏิบัติหน้าที่",
           description: "เลือกบุคลากร ช่วงวันที่ ประเภท และหัวข้อ พร้อมติดตามลิงก์รายงานสรุป",
           steps: ["เลือกคน", "ระบุรายละเอียด", "ติดตามรายงาน"]
+        },
+        "late-permission.html": {
+          title: "บันทึกคำขอเข้าสาย",
+          description: "บันทึกคำขอวันนี้หรือย้อนหลังในเดือนปัจจุบัน แล้วตรวจรายการผู้ขอเข้าสาย",
+          steps: ["เลือกคนและวันที่", "บันทึกคำขอ", "ตรวจรายการ"]
         },
         "duty.html": {
           title: "จัดตารางเวร",

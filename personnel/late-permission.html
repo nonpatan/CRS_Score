@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บันทึกคำขอเข้าสาย — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+          --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --amber:#8a5a00; --amber-soft:#fff4df; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; }
+  header h1 { font-size:20px; font-weight:600; margin:4px 0; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
+  header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
+                border-radius:99px; border:1px solid var(--line); margin:0 0 24px; align-items:center; }
+  header .nav a { color:var(--muted); text-decoration:none; font-weight:500;
+                  padding:8px 16px; border-radius:99px; font-size:14px; }
+  header .nav #btn-signout { margin-left:auto; color:var(--danger); background:#fff0f0; }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px; }
+  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+                   text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
+  .row2 { display:flex; gap:12px; flex-wrap:wrap; }
+  .row2 > * { flex:1 1 200px; }
+  .field { margin-bottom:14px; }
+  label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
+  select, input { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+                  border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  select:focus, input:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
+           border:none; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); }
+  button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.small { font-size:13px; padding:6px 10px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .field-note { color:var(--muted); font-size:13px; margin-top:5px; }
+  .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
+  .banner.info { background:var(--teal-soft); color:var(--teal); }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  .list-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+  .count { color:var(--muted); font-size:14px; white-space:nowrap; }
+  .permit-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px;
+                padding:12px 0; border-bottom:1px solid var(--line); align-items:center; }
+  .permit-row:last-child { border-bottom:none; }
+  .who { font-weight:600; }
+  .meta { color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
+  .chip { display:inline-block; margin-left:6px; padding:1px 8px; border-radius:99px;
+          background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; }
+  .muted-empty { color:var(--muted); text-align:center; padding:22px 0; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
+           border-radius:10px; background:#1f2a2e; color:#fff; font-weight:600; opacity:0;
+           pointer-events:none; transition:opacity .18s; z-index:60; max-width:calc(100vw - 32px); }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+  @media (max-width:520px) {
+    .permit-row { grid-template-columns:1fr; }
+    .permit-row button { justify-self:start; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>บันทึกคำขอเข้าสาย</h1>
+    <p>บันทึกแทนบุคลากรและตรวจรายการว่าใครขอเข้าสายในแต่ละเดือน</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="leave.html">บันทึกการลา</a>
+      <a href="late-permission.html">บันทึกคำขอเข้าสาย</a>
+      <a href="work-summary.html">สรุปเวลาทำงาน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260729-1"></script>
+  </header>
+
+  <div class="card">
+    <div class="section-title">บันทึกคำขอ</div>
+    <div class="banner info">
+      ใช้เมื่อบุคลากรแจ้งไว้แต่ลืมกดขอเอง เลือกได้ตั้งแต่วันที่ 1 ของเดือนปัจจุบันถึงวันนี้
+      เมื่อขึ้นเดือนใหม่แล้วจะบันทึกหรือแก้คำขอของเดือนก่อนไม่ได้
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="permit-staff">บุคลากร</label>
+        <select id="permit-staff"><option value="">กำลังโหลดรายชื่อ…</option></select>
+      </div>
+      <div class="field">
+        <label for="permit-date">วันที่ขอเข้าสาย</label>
+        <input id="permit-date" type="date">
+      </div>
+    </div>
+    <div class="field">
+      <label for="permit-reason">เหตุผลสั้น ๆ (ไม่บังคับ)</label>
+      <input id="permit-reason" type="text" maxlength="200" autocomplete="off"
+             placeholder="เช่น ไปพบแพทย์">
+    </div>
+    <button id="btn-save" class="primary">บันทึกคำขอ</button>
+    <div class="field-note" id="entry-note">เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล</div>
+  </div>
+
+  <div class="card">
+    <div class="list-head">
+      <div class="section-title">รายการผู้ขอเข้าสาย</div>
+      <span id="count" class="count">—</span>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="list-month">เดือนที่ต้องการดู</label>
+        <input id="list-month" type="month">
+      </div>
+      <div class="field">
+        <label for="q">ค้นหาชื่อ</label>
+        <input id="q" type="search" autocomplete="off" placeholder="พิมพ์ชื่อบุคลากร">
+      </div>
+    </div>
+    <div id="list"><div class="muted-empty">กำลังโหลดรายการ…</div></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
+         personnelAccessDeniedHtml, getDutyTypes, bangkokNow, toDateStr }
+  from "../supabase-client.js?v=20260728-2";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const toastBox = el("toast");
+  let toastTimer = null;
+  const toast = (message, isError) => {
+    toastBox.textContent = message;
+    toastBox.classList.toggle("err", !!isError);
+    toastBox.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastBox.classList.remove("show"), 3500);
+  };
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
+  const dateText = date => new Date(date + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+  });
+  const monthRange = month => {
+    const [year, number] = month.split("-").map(Number);
+    return {
+      from: month + "-01",
+      to: new Date(Date.UTC(year, number, 0)).toISOString().slice(0, 10)
+    };
+  };
+
+  el("btn-signout")?.addEventListener("click", event => {
+    event.preventDefault();
+    signOut();
+  });
+
+  const canEdit = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canEdit);
+  if (!canEdit) {
+    applyPersonnelMenuAccess(false);
+    document.querySelectorAll(".card").forEach(card => card.remove());
+    const box = document.createElement("div");
+    box.className = "card";
+    box.innerHTML = personnelAccessDeniedHtml();
+    document.querySelector(".wrap").appendChild(box);
+  } else {
+    let staff = [];
+    let permissions = [];
+    let dutyStaff = new Set();
+    let dutyReady = false;
+    let dutyRequest = 0;
+    let attendanceDutyName = "งานที่ผูกเกณฑ์เข้างาน";
+    let dutyStartTime = "";
+
+    const refreshDateBounds = resetInvalid => {
+      const today = toDateStr(bangkokNow());
+      const input = el("permit-date");
+      input.min = today.slice(0, 7) + "-01";
+      input.max = today;
+      if (!input.value || (resetInvalid && (input.value < input.min || input.value > input.max))) {
+        input.value = today;
+      }
+      return today;
+    };
+
+    function renderStaffOptions() {
+      const selected = el("permit-staff").value;
+      el("permit-staff").innerHTML = '<option value="">— เลือกบุคลากร —</option>' +
+        staff.filter(person => person.is_active).map(person =>
+          `<option value="${person.id}">${esc(person.full_name)}${dutyStaff.has(person.id) ? " · เวรวันที่เลือก" : ""}</option>`
+        ).join("");
+      if (staff.some(person => person.id === selected && person.is_active)) {
+        el("permit-staff").value = selected;
+      }
+    }
+
+    function updateEntryState() {
+      const date = el("permit-date").value;
+      const staffId = el("permit-staff").value;
+      const outOfRange = !!date && (date < el("permit-date").min || date > el("permit-date").max);
+      const onDuty = !!staffId && dutyStaff.has(staffId);
+      el("btn-save").disabled = !date || outOfRange || !dutyReady || onDuty;
+      if (!date) {
+        el("entry-note").textContent = "กรุณาเลือกวันที่ขอเข้าสาย";
+      } else if (outOfRange) {
+        el("entry-note").textContent = "เลือกวันที่ได้เฉพาะภายในเดือนปัจจุบันและไม่เกินวันนี้";
+      } else if (!dutyReady) {
+        el("entry-note").textContent = "กำลังตรวจเวรของวันที่เลือก…";
+      } else if (onDuty) {
+        const time = dutyStartTime ? ` ต้องลงเวลาไม่เกิน ${dutyStartTime} น.` : "";
+        el("entry-note").textContent =
+          `บุคลากรคนนี้มีงาน “${attendanceDutyName}” วันที่ ${dateText(date)}${time} จึงบันทึกคำขอเข้าสายไม่ได้`;
+      } else {
+        el("entry-note").textContent =
+          "เวลาที่อนุญาตจะใช้ค่ากลางจากหน้าตั้งค่างานบุคคล · บันทึกซ้ำคนเดิมในวันเดิมคือแก้ไขรายการเดิม";
+      }
+    }
+
+    async function loadDuty(date) {
+      const requestId = ++dutyRequest;
+      dutyReady = false;
+      dutyStaff = new Set();
+      renderStaffOptions();
+      updateEntryState();
+      if (!date || date < el("permit-date").min || date > el("permit-date").max) return;
+      const result = await sb.from("duty_roster")
+        .select("staff_id,duty_types!inner(affects_attendance)")
+        .eq("duty_date", date)
+        .eq("duty_types.affects_attendance", true);
+      if (requestId !== dutyRequest) return;
+      if (result.error) {
+        el("entry-note").textContent = "ตรวจเวรของวันที่เลือกไม่สำเร็จ กรุณาลองเลือกวันที่อีกครั้ง";
+        return toast("ตรวจเวรของวันที่เลือกไม่สำเร็จ กรุณาลองใหม่", true);
+      }
+      dutyStaff = new Set((result.data || []).map(row => row.staff_id));
+      dutyReady = true;
+      renderStaffOptions();
+      updateEntryState();
+    }
+
+    function renderList() {
+      const query = el("q").value.trim().toLowerCase();
+      const staffById = new Map(staff.map(person => [person.id, person]));
+      const rows = permissions.filter(row => {
+        const name = staffById.get(row.staff_id)?.full_name || "(ไม่พบชื่อ)";
+        return !query || name.toLowerCase().includes(query);
+      });
+      const people = new Set(rows.map(row => row.staff_id)).size;
+      el("count").textContent = `${rows.length} รายการ · ${people} คน`;
+      if (!rows.length) {
+        el("list").innerHTML = '<div class="muted-empty">ไม่พบคำขอเข้าสายในเดือนนี้</div>';
+        return;
+      }
+      el("list").innerHTML = rows.map(row => {
+        const name = staffById.get(row.staff_id)?.full_name || "(ไม่พบชื่อ)";
+        const reason = row.reason ? ` · ${esc(row.reason)}` : "";
+        return `<div class="permit-row">
+          <div>
+            <div class="who">${esc(name)}<span class="chip">ถึง ${esc(String(row.until_time).slice(0, 5))} น.</span></div>
+            <div class="meta">${dateText(row.permit_date)}${reason}</div>
+          </div>
+          <button type="button" class="ghost small" data-edit="${row.id}">นำมาแก้ไข</button>
+        </div>`;
+      }).join("");
+    }
+
+    async function loadList() {
+      const month = el("list-month").value;
+      if (!month) return;
+      el("list").innerHTML = '<div class="muted-empty">กำลังโหลดรายการ…</div>';
+      const range = monthRange(month);
+      const result = await sb.from("late_permissions").select("*")
+        .gte("permit_date", range.from).lte("permit_date", range.to)
+        .order("permit_date", { ascending:false }).order("created_at", { ascending:false });
+      if (result.error) {
+        permissions = [];
+        renderList();
+        return toast("โหลดรายการคำขอเข้าสายไม่สำเร็จ กรุณาลองใหม่", true);
+      }
+      permissions = result.data || [];
+      renderList();
+    }
+
+    const today = refreshDateBounds(false);
+    el("list-month").value = today.slice(0, 7);
+    const [staffResult, dutyTypes] = await Promise.all([
+      sb.from("staff").select("id,full_name,is_active").order("full_name"),
+      getDutyTypes(true)
+    ]);
+    if (staffResult.error) {
+      toast("โหลดรายชื่อบุคลากรไม่สำเร็จ กรุณาลองเปิดหน้าใหม่", true);
+    }
+    staff = staffResult.data || [];
+    const attendanceType = dutyTypes.find(type => type.affects_attendance);
+    attendanceDutyName = attendanceType?.code || attendanceDutyName;
+    dutyStartTime = String(attendanceType?.start_time || "").slice(0, 5);
+    renderStaffOptions();
+    await Promise.all([loadDuty(el("permit-date").value), loadList()]);
+
+    el("permit-staff").addEventListener("change", updateEntryState);
+    el("permit-date").addEventListener("focus", () => {
+      const previous = el("permit-date").value;
+      refreshDateBounds(true);
+      if (el("permit-date").value !== previous) loadDuty(el("permit-date").value);
+    });
+    el("permit-date").addEventListener("change", () => loadDuty(el("permit-date").value));
+    el("list-month").addEventListener("change", loadList);
+    el("q").addEventListener("input", renderList);
+
+    el("btn-save").addEventListener("click", async () => {
+      const staffId = el("permit-staff").value;
+      if (!staffId) return toast("กรุณาเลือกบุคลากร", true);
+      refreshDateBounds(false);
+      const permitDate = el("permit-date").value;
+      if (!permitDate || permitDate < el("permit-date").min || permitDate > el("permit-date").max) {
+        return toast("เลือกวันที่ได้เฉพาะภายในเดือนปัจจุบันและไม่เกินวันนี้", true);
+      }
+      const button = el("btn-save");
+      button.disabled = true;
+      const dutyResult = await sb.from("duty_roster")
+        .select("staff_id,duty_types!inner(affects_attendance)")
+        .eq("staff_id", staffId)
+        .eq("duty_date", permitDate)
+        .eq("duty_types.affects_attendance", true)
+        .maybeSingle();
+      if (dutyResult.error) {
+        button.disabled = false;
+        return toast("ตรวจเวรของวันที่เลือกไม่สำเร็จ กรุณาลองใหม่", true);
+      }
+      if (dutyResult.data) {
+        dutyStaff.add(staffId);
+        dutyReady = true;
+        renderStaffOptions();
+        updateEntryState();
+        return toast(`คนนี้มีงาน “${attendanceDutyName}” วันที่ ${dateText(permitDate)} จึงขอเข้าสายไม่ได้`, true);
+      }
+      const settingResult = await sb.from("hr_settings")
+        .select("value").eq("key", "late_permission_until").maybeSingle();
+      const limit = String(settingResult.data?.value || "").slice(0, 5);
+      if (settingResult.error || !/^([01]\d|2[0-3]):[0-5]\d$/.test(limit)) {
+        button.disabled = false;
+        return toast("เวลาที่อนุญาตยังตั้งค่าไม่ถูกต้อง กรุณาแก้ที่หน้าตั้งค่างานบุคคล", true);
+      }
+      const result = await sb.from("late_permissions").upsert({
+        staff_id:staffId,
+        permit_date:permitDate,
+        until_time:limit,
+        reason:el("permit-reason").value.trim() || null,
+        created_by:session.user.id
+      }, { onConflict:"staff_id,permit_date" });
+      button.disabled = false;
+      if (result.error) {
+        const denied = result.error.code === "42501" ||
+          /row-level security|policy/i.test(String(result.error.message || ""));
+        return toast(denied
+          ? "บันทึกไม่ได้: ย้อนหลังได้เฉพาะภายในเดือนปฏิทินเดียวกัน และห้ามเลือกวันล่วงหน้า"
+          : "บันทึกคำขอไม่สำเร็จ กรุณาลองใหม่", true);
+      }
+      el("permit-reason").value = "";
+      el("list-month").value = permitDate.slice(0, 7);
+      toast(`บันทึกคำขอวันที่ ${dateText(permitDate)} ถึง ${limit} น. ให้แล้ว`);
+      await loadList();
+      updateEntryState();
+    });
+
+    el("list").addEventListener("click", async event => {
+      const button = event.target.closest("[data-edit]");
+      if (!button) return;
+      const row = permissions.find(item => item.id === button.dataset.edit);
+      if (!row) return;
+      refreshDateBounds(false);
+      if (row.permit_date < el("permit-date").min || row.permit_date > el("permit-date").max) {
+        return toast("รายการเดือนก่อนดูได้อย่างเดียว เพราะปิดรอบรายงานแล้ว", true);
+      }
+      el("permit-staff").value = row.staff_id;
+      el("permit-date").value = row.permit_date;
+      el("permit-reason").value = row.reason || "";
+      await loadDuty(row.permit_date);
+      document.querySelector(".card").scrollIntoView({ behavior:"smooth", block:"start" });
+    });
+  }
+}
+</script>
+</body>
+</html>
