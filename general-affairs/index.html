@@ -33,19 +33,34 @@
   .section-head h2 { margin:0; font-size:18px; }
   .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
   .section-head a { color:var(--teal); font-size:14px; font-weight:600; white-space:nowrap; }
-  .metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+  .metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
   .metric { padding:14px; border-radius:12px; background:#f4f8f7; }
-  .metric .label { color:var(--muted); font-size:13px; }
-  .metric .value { margin-top:2px; font-size:28px; font-weight:700; line-height:1.15; }
-  .metric.warn { background:var(--amber-soft); }
-  .metric.warn .value { color:var(--amber); }
-  .metric.ok { background:var(--teal-soft); }
-  .metric.ok .value { color:var(--teal); }
-  .status-line {
-    display:flex; flex-wrap:wrap; gap:7px; margin-top:12px;
-    color:var(--muted); font-size:13px;
+  .metric-title {
+    margin-bottom:10px; color:var(--muted); font-size:13px; font-weight:600; text-align:center;
   }
-  .status-line span { padding:4px 9px; border-radius:999px; background:#f5f7f7; }
+  .donut-wrap {
+    display:flex; align-items:center; justify-content:center;
+    gap:16px; flex-wrap:wrap;
+  }
+  .donut-figure { position:relative; flex:0 0 auto; width:148px; height:148px; }
+  .donut-figure svg { width:100%; height:100%; display:block; }
+  .donut-center {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; pointer-events:none;
+  }
+  .donut-hero { font-size:28px; font-weight:700; line-height:1; letter-spacing:-.02em; }
+  .donut-hero-label { margin-top:3px; color:var(--muted); font-size:11px; }
+  .legend { flex:1 1 150px; min-width:0; list-style:none; margin:0; padding:0; }
+  .legend li {
+    display:flex; align-items:baseline; gap:8px;
+    padding:5px 0; font-size:14px;
+  }
+  .legend .swatch {
+    flex:0 0 auto; width:10px; height:10px; border-radius:3px; transform:translateY(1px);
+  }
+  .legend .legend-name { flex:1; min-width:0; }
+  .legend .legend-value { font-weight:600; white-space:nowrap; }
+  .legend .legend-share { color:var(--muted); font-size:13px; white-space:nowrap; }
   .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
   .banner.info { color:var(--teal); background:var(--teal-soft); }
   .banner.warn { color:var(--amber); background:var(--amber-soft); }
@@ -97,12 +112,40 @@
         <a href="daily-attendance.html">ไปหน้าเช็คชื่อ</a>
       </div>
       <div id="state-banner" hidden></div>
+      <!-- 2 วง = 2 หน่วยที่ต่างกัน แต่ละวงรวมกันได้ 100% ของตัวเอง (ห้องทั้งหมด / นักเรียนที่ถูกเช็คแล้ว)
+           ⛔ ห้ามยุบ 2 วงนี้เป็นวงเดียว — จำนวนห้องกับจำนวนคนบวกกันไม่ได้ -->
       <div class="metrics" id="metrics">
-        <div class="metric ok"><div class="label">นักเรียนมา</div><div class="value" id="metric-present">—</div></div>
-        <div class="metric"><div class="label">ห้องที่เช็คแล้ว</div><div class="value" id="metric-checked">—</div></div>
-        <div class="metric warn"><div class="label">ห้องที่ยังไม่เช็ค</div><div class="value" id="metric-unchecked">—</div></div>
+        <div class="metric">
+          <div class="metric-title">การเช็คชื่อรายห้อง</div>
+          <div class="donut-wrap">
+            <div class="donut-figure">
+              <svg id="rooms-donut" viewBox="0 0 180 180" role="img" aria-labelledby="rooms-donut-title">
+                <title id="rooms-donut-title">สัดส่วนห้องที่เช็คชื่อแล้วและยังไม่เช็ค</title>
+              </svg>
+              <div class="donut-center">
+                <div class="donut-hero" id="rooms-hero">—</div>
+                <div class="donut-hero-label">ห้องที่เช็คแล้ว</div>
+              </div>
+            </div>
+            <ul class="legend" id="rooms-legend"></ul>
+          </div>
+        </div>
+        <div class="metric">
+          <div class="metric-title">นักเรียนที่เช็คแล้ววันนี้</div>
+          <div class="donut-wrap">
+            <div class="donut-figure">
+              <svg id="students-donut" viewBox="0 0 180 180" role="img" aria-labelledby="students-donut-title">
+                <title id="students-donut-title">สัดส่วนนักเรียนตามสถานะการมาโรงเรียนวันนี้</title>
+              </svg>
+              <div class="donut-center">
+                <div class="donut-hero" id="students-hero">—</div>
+                <div class="donut-hero-label">นักเรียนมา</div>
+              </div>
+            </div>
+            <ul class="legend" id="students-legend"></ul>
+          </div>
+        </div>
       </div>
-      <div class="status-line" id="status-line"></div>
     </section>
 
     <section id="placement-warning" class="card" hidden></section>
@@ -125,7 +168,7 @@ import {
   requireAuth, signOut, getAcademicYears, academicYearOf, getStudentPlacements,
   getActiveStudents, loadDailyAttendanceToday, summarizeDailyAttendance,
   bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260726-3";
+} from "../supabase-client.js?v=20260730-1";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -146,6 +189,88 @@ function showBanner(html, type = "warn") {
   el("state-banner").innerHTML = `<div class="banner ${type}">${html}</div>`;
 }
 
+// สีของวงนักเรียน: เขียว/อำพัน/แดง ยกชุดที่ตรวจระยะห่างสีมาแล้วจาก academic/index.html
+// (ชุดสีปกติของแอป --amber กับ --danger ใกล้กันเกินไปเมื่อวางติดกันในวงกลม)
+// ลาใช้น้ำเงินชุดเดียวกับจุด "ลา" ของหน้าภาพรวมฝ่ายบุคคล เพื่อไม่ให้ 4 ชิ้นชนกัน
+const STATUS_COLORS = { present:"#12946f", late:"#c47f00", leave:"#1f5aa8", absent:"#9e2a35" };
+
+// ตัววาดโดนัทตัวเดียวใช้ทั้ง 2 วง — เพิ่มวงใหม่ห้ามก๊อปฟังก์ชันนี้ ให้ส่ง segments เข้ามาแทน
+// empty = true → วงเทาเปล่า + legend เป็น "—" (วันหยุด หรือยังไม่มีข้อมูลให้แบ่ง)
+function renderDonut({ svgId, legendId, heroId, titleId, title, hero, unit, segments, empty }) {
+  const svg = el(svgId);
+  const cx = 90, cy = 90, r = 62, thickness = 20, gap = 2;
+  const circumference = 2 * Math.PI * r;
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const drawn = empty ? [] : segments.filter(segment => segment.value > 0);
+
+  el(heroId).textContent = hero;
+  let arcs = "";
+  if (empty || total === 0) {
+    arcs = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${thickness}"></circle>`;
+  } else {
+    let offset = 0;
+    for (const segment of drawn) {
+      const length = (segment.value / total) * circumference;
+      const visible = drawn.length === 1 ? length : Math.max(.5, length - gap);
+      arcs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+        stroke="${segment.color}" stroke-width="${thickness}"
+        stroke-dasharray="${visible.toFixed(2)} ${(circumference - visible).toFixed(2)}"
+        stroke-dashoffset="${(-offset).toFixed(2)}"
+        transform="rotate(-90 ${cx} ${cy})"><title>${esc(segment.label)} ${segment.value} ${esc(unit)}</title></circle>`;
+      offset += length;
+    }
+  }
+  svg.innerHTML = `<title id="${titleId}">${esc(title)}</title>` + arcs;
+
+  // ตัวเลขกำกับทุกชิ้น — สีจึงไม่ใช่ช่องทางเดียวที่บอกความหมาย
+  el(legendId).innerHTML = segments.map(segment => {
+    const value = empty ? "—" : segment.value;
+    const shareText = empty ? "—" : `${total > 0 ? Math.round((segment.value / total) * 100) : 0}%`;
+    return `<li><span class="swatch" style="background:${segment.color}"></span>` +
+      `<span class="legend-name">${esc(segment.label)}</span>` +
+      `<span class="legend-value">${value} ${esc(unit)}</span>` +
+      `<span class="legend-share">${shareText}</span></li>`;
+  }).join("");
+}
+
+function renderMetricDonuts(summary) {
+  const holiday = summary.state === "holiday";
+  const roomsTotal = summary.roomsTotal;
+  const unchecked = Math.max(0, roomsTotal - summary.roomsChecked);
+
+  // "ยังไม่เช็ค" ใช้สีอำพัน (สีเตือนชุดเดิมของแอป) ไม่ใช่สีเส้น เพราะห้องที่ยังไม่เช็คคือของที่มีค่า
+  // ที่สุดของหน้านี้ — หัวหน้าฝ่ายต้องเห็นแล้วตามครูได้ทันเช้า · สีเทาอ่อนบนพื้นการ์ดอ่านเป็น
+  // "รางว่าง" และทำให้ "ยังไม่มีห้องไหนเช็ค" หน้าตาเหมือน "วันหยุด" เป๊ะ แยกได้แค่ตัวเลขกลางวง
+  // (วงเปล่าตอนวันหยุด/ไม่มีห้อง ยังใช้ var(--line) ต่อไป เพราะนั่นคือ "ไม่มีข้อมูล" จริง ๆ)
+  renderDonut({
+    svgId:"rooms-donut", legendId:"rooms-legend", heroId:"rooms-hero",
+    titleId:"rooms-donut-title", title:"สัดส่วนห้องที่เช็คชื่อแล้วและยังไม่เช็ค",
+    hero: holiday ? "—" : `${summary.roomsChecked}/${roomsTotal}`,
+    unit:"ห้อง",
+    segments:[
+      { label:"เช็คแล้ว", value:summary.roomsChecked, color:"var(--teal)" },
+      { label:"ยังไม่เช็ค", value:unchecked, color:"var(--amber)" }
+    ],
+    empty: holiday
+  });
+
+  // วงนี้แบ่ง "เฉพาะนักเรียนที่ถูกเช็คแล้ว" ไม่ใช่นักเรียนทั้งโรงเรียน — ห้องที่ครูยังไม่เช็ค
+  // ยังไม่มีข้อมูลของใครเลย จะเอามานับเป็น "ขาด" ไม่ได้ · แบนเนอร์ด้านบนบอกอยู่แล้วว่าเลขยังไม่ครบ
+  renderDonut({
+    svgId:"students-donut", legendId:"students-legend", heroId:"students-hero",
+    titleId:"students-donut-title", title:"สัดส่วนนักเรียนตามสถานะการมาโรงเรียนวันนี้",
+    hero: holiday ? "—" : String(summary.present),
+    unit:"คน",
+    segments:[
+      { label:"มา", value:summary.present, color:STATUS_COLORS.present },
+      { label:"มาสาย", value:summary.late, color:STATUS_COLORS.late },
+      { label:"ลา", value:summary.leave, color:STATUS_COLORS.leave },
+      { label:"ขาด", value:summary.absent, color:STATUS_COLORS.absent }
+    ],
+    empty: holiday
+  });
+}
+
 async function loadOverview() {
   const dateStr = toDateStr(bangkokNow());
   const years = await getAcademicYears();
@@ -159,18 +284,14 @@ async function loadOverview() {
   }
   el("date-note").textContent = `${thaiDate(dateStr)} · ปีการศึกษา ${year}`;
   const [daily, placementRes, activeStudents] = await Promise.all([
-    loadDailyAttendanceToday(year, dateStr),
+    loadDailyAttendanceToday(year, dateStr, years),
     getStudentPlacements(year),
     getActiveStudents()
   ]);
   if (placementRes.error) throw new Error("โหลด placement ไม่สำเร็จ: " + placementRes.error.message);
   const summary = summarizeDailyAttendance(daily.rows, daily.rooms, { isHoliday:daily.isHoliday });
-  el("metric-present").textContent = summary.state === "holiday" ? "—" : summary.present;
-  el("metric-checked").textContent = summary.state === "holiday" ? "—" : `${summary.roomsChecked}/${summary.roomsTotal}`;
-  el("metric-unchecked").textContent = summary.state === "holiday" ? "—" : Math.max(0, summary.roomsTotal - summary.roomsChecked);
-  el("status-line").innerHTML = summary.state === "holiday" ? "" :
-    `<span>มา ${summary.present}</span><span>มาสาย ${summary.late}</span>` +
-    `<span>ลา ${summary.leave}</span><span>ขาด ${summary.absent}</span>`;
+  // แถบชิป มา/มาสาย/ลา/ขาด ถูกถอดออกแล้ว — legend ของวงนักเรียนบอกตัวเลขชุดเดียวกันเป๊ะ
+  renderMetricDonuts(summary);
 
   if (summary.state === "holiday") {
     showBanner("<b>วันนี้เป็นวันหยุดตามตารางงาน</b><br>ระบบไม่ตีความห้องที่ยังไม่มีข้อมูลว่า “ยังไม่เช็ค”", "info");

@@ -64,7 +64,9 @@
     display:grid; grid-template-columns:minmax(160px,1fr) minmax(130px,.55fr) minmax(150px,.7fr);
     gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line);
   }
+  .student-row.inactive { opacity:.58; }
   .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
+  .inactive-label { color:var(--muted); font-size:13px; font-weight:500; white-space:nowrap; }
   .student-meta { display:block; color:var(--muted); font-size:12px; font-weight:400; }
   .status-select[data-status="ขาด"] { color:var(--danger); background:var(--danger-soft); }
   .status-select[data-status="ลาป่วย"],
@@ -154,8 +156,8 @@
 import {
   sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
-  summarizeDailyAttendance, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260726-4";
+  summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260730-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -191,6 +193,15 @@ let availableRooms = [];
 let roster = [];
 let stateByStudent = new Map();
 let selectedRoom = null;
+
+function checkablePlacements(list) {
+  const todayAcademicYear = academicYearOf(today, years);
+  return currentYear === todayAcademicYear ? activePlacements(list) : (list || []);
+}
+
+function isInactiveForSelectedYear(placement) {
+  return currentYear === academicYearOf(today, years) && isPlacementInactive(placement);
+}
 
 function showAccess(html, type = "warn") {
   el("access-message").hidden = false;
@@ -240,7 +251,7 @@ async function loadYearContext(dateStr) {
       `<a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a></div>`
     : "";
 
-  const allRooms = roomsFromPlacements(placements, currentYear);
+  const allRooms = roomsFromPlacements(checkablePlacements(placements), currentYear);
   const ownStaffId = ownStaffRes.data?.id || null;
   const assignedKeys = new Set(
     (homeroomRes.data || [])
@@ -283,7 +294,8 @@ async function recorderLabel(userId) {
 
 function renderSummary() {
   if (!selectedRoom) return;
-  const rows = roster.map(p => ({
+  const checkableRoster = checkablePlacements(roster);
+  const rows = checkableRoster.map(p => ({
     grade_level:selectedRoom.grade_level,
     classroom:selectedRoom.classroom,
     status:stateByStudent.get(p.student_id)?.status || "มา"
@@ -292,7 +304,7 @@ function renderSummary() {
     year:currentYear,
     grade_level:selectedRoom.grade_level,
     classroom:selectedRoom.classroom,
-    studentCount:roster.length
+    studentCount:checkableRoster.length
   }]);
   el("sum-present").textContent = summary.present;
   el("sum-absent").textContent = summary.absent;
@@ -304,14 +316,17 @@ function renderRoster() {
   el("student-list").innerHTML = roster.map(p => {
     const student = p.student || {};
     const item = stateByStudent.get(p.student_id) || { status:"มา", note:"" };
-    return `<div class="student-row">
-      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
+    const inactive = isInactiveForSelectedYear(p);
+    const inactiveLabel = student.left_school === true ? "ย้ายออก" : "จบแล้ว";
+    const disabled = inactive ? " disabled" : "";
+    return `<div class="student-row${inactive ? " inactive" : ""}">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${inactiveLabel})</span>` : ""}
         <span class="student-meta">เลขที่ ${esc(student.student_no || "—")}</span>
       </div>
-      <select class="status-select" data-student="${esc(p.student_id)}" data-status="${esc(item.status)}" aria-label="สถานะของ ${esc(student.name || "นักเรียน")}">
+      <select class="status-select" data-student="${esc(p.student_id)}" data-status="${esc(item.status)}" aria-label="สถานะของ ${esc(student.name || "นักเรียน")}"${disabled}>
         ${STATUS_OPTIONS.map(status => `<option${status === item.status ? " selected" : ""}>${status}</option>`).join("")}
       </select>
-      <input class="note-input" data-note-student="${esc(p.student_id)}" type="text" maxlength="300" value="${esc(item.note)}" placeholder="หมายเหตุ (ถ้ามี)" aria-label="หมายเหตุของ ${esc(student.name || "นักเรียน")}">
+      <input class="note-input" data-note-student="${esc(p.student_id)}" type="text" maxlength="300" value="${esc(item.note)}" placeholder="หมายเหตุ (ถ้ามี)" aria-label="หมายเหตุของ ${esc(student.name || "นักเรียน")}"${disabled}>
     </div>`;
   }).join("");
   renderSummary();
@@ -323,7 +338,7 @@ async function loadRoom(index) {
   selectedRoom = availableRooms[Number(index)] || null;
   if (!selectedRoom) return;
   const dateStr = el("attend-date").value;
-  const dailyData = await loadDailyAttendanceToday(currentYear, dateStr);
+  const dailyData = await loadDailyAttendanceToday(currentYear, dateStr, years);
   const existing = (dailyData.rows || []).filter(row =>
     row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom
   );
@@ -341,7 +356,8 @@ async function loadRoom(index) {
     return [p.student_id, { status:old?.status || "มา", note:old?.note || "" }];
   }));
 
-  el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${roster.length} คน)`;
+  const checkableCount = checkablePlacements(roster).length;
+  el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${checkableCount} คน)`;
   if (existing.length) {
     const latest = [...existing].sort((a, b) =>
       String(b.updated_at || b.recorded_at).localeCompare(String(a.updated_at || a.recorded_at))
@@ -353,7 +369,7 @@ async function loadRoom(index) {
   }
   el("save-note").textContent = dailyData.isHoliday
     ? "วันที่เลือกเป็นวันหยุดตามตารางงาน กรุณาตรวจให้แน่ใจก่อนบันทึก"
-    : `บันทึก ${roster.length} คนพร้อมกัน`;
+    : `บันทึก ${checkableCount} คนพร้อมกัน`;
   renderRoster();
   el("attendance-card").hidden = false;
 }
@@ -394,7 +410,7 @@ el("save-attendance").addEventListener("click", async () => {
   button.disabled = true;
   button.textContent = "กำลังบันทึก…";
   const now = new Date().toISOString();
-  const payload = roster.map(p => {
+  const payload = checkablePlacements(roster).map(p => {
     const item = stateByStudent.get(p.student_id) || { status:"มา", note:"" };
     return {
       attend_date:dateStr,
@@ -413,7 +429,7 @@ el("save-attendance").addEventListener("click", async () => {
   button.disabled = false;
   button.textContent = "บันทึกเช็คชื่อ";
   if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
-  toast(`บันทึกเช็คชื่อ ${roster.length} คนแล้ว`);
+  toast(`บันทึกเช็คชื่อ ${payload.length} คนแล้ว`);
   try { await loadRoom(el("room-select").value); }
   catch (error) { toast("บันทึกแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + error.message, true); }
 });

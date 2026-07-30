@@ -1107,6 +1107,16 @@ export function buildAcademicOverview(raw, options = {}) {
 // ============================================================
 
 // จับ placement เป็นรายการห้องมาตรฐาน — ผู้เรียกทุกหน้าต้องได้ field และลำดับชุดเดียวกัน
+// เด็กที่จบ/ย้ายออกยังต้องอยู่ใน placement เพื่อดูประวัติย้อนหลัง
+// แต่ปีการศึกษาปัจจุบันต้องตัดออกจากจำนวนคนที่เช็คชื่อได้จริง
+export function isPlacementInactive(placement) {
+  return placement?.student?.graduated === true || placement?.student?.left_school === true;
+}
+
+export function activePlacements(placements) {
+  return (placements || []).filter(placement => !isPlacementInactive(placement));
+}
+
 export function roomsFromPlacements(placements, year) {
   const roomMap = new Map();
   for (const p of (placements || [])) {
@@ -1132,13 +1142,16 @@ export function roomsFromPlacements(placements, year) {
 
 // เช็คชื่อรายวันของวันที่ระบุ + ห้องที่มีนักเรียนตาม placement ของปีนั้น
 // isHoliday อิงตารางงาน/วันหยุดชุดเดียวกับฝ่ายบุคคล; ถ้ายังไม่มีตารางงานจะไม่เดาว่าเป็นวันหยุด
-export async function loadDailyAttendanceToday(year, dateStr) {
+export async function loadDailyAttendanceToday(year, dateStr, academicYears = null) {
   if (!year || !dateStr) {
     return { year, dateStr, rows: [], rooms: [], isHoliday: false };
   }
 
   const weekday = isoWeekday(dateStr);
-  const [rowsRes, placementsRes, scheduleRes, holidayRes] = await Promise.all([
+  const yearsRequest = Array.isArray(academicYears)
+    ? Promise.resolve({ data: academicYears, error: null })
+    : sb.from("academic_years").select("year,start_date").order("year");
+  const [rowsRes, placementsRes, scheduleRes, holidayRes, yearsRes] = await Promise.all([
     fetchAllRows(() => sb.from("daily_attendance")
       .select("id,attend_date,year,grade_level,classroom,student_id,status,note,recorded_by,recorded_at,updated_at")
       .eq("year", year)
@@ -1151,14 +1164,19 @@ export async function loadDailyAttendanceToday(year, dateStr) {
     sb.from("work_holidays")
       .select("holiday_date")
       .eq("holiday_date", dateStr)
-      .maybeSingle()
+      .maybeSingle(),
+    yearsRequest
   ]);
 
-  for (const res of [rowsRes, placementsRes, scheduleRes, holidayRes]) {
+  for (const res of [rowsRes, placementsRes, scheduleRes, holidayRes, yearsRes]) {
     if (res.error) throw new Error("โหลดข้อมูลเช็คชื่อรายวันไม่สำเร็จ: " + res.error.message);
   }
 
-  const rooms = roomsFromPlacements(placementsRes.data, year);
+  const currentAcademicYear = academicYearOf(toDateStr(bangkokNow()), yearsRes.data || []);
+  const roomPlacements = year === currentAcademicYear
+    ? activePlacements(placementsRes.data)
+    : placementsRes.data;
+  const rooms = roomsFromPlacements(roomPlacements, year);
   const hasSchedule = !!scheduleRes.data;
   const isHoliday = !!holidayRes.data || (hasSchedule && scheduleRes.data.is_working_day !== true);
 
