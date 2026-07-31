@@ -140,6 +140,15 @@
   .student-line .val.critical { color: var(--danger); }
   .subject-note { color: var(--muted); font-size: 13px; }
 
+  /* หัวกลุ่มภาคเรียน — คั่นรายการวิชาให้อ่านทีละภาคเรียน */
+  .term-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    margin: 14px 0 2px; padding-bottom: 4px; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-weight: 600; color: var(--muted);
+  }
+  .term-head:first-child { margin-top: 6px; }
+  .term-head .term-count { font-weight: 500; white-space: nowrap; }
+
   .issue-row {
     display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
     padding: 8px 0; border-bottom: 1px solid var(--line);
@@ -257,7 +266,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, getProfile,
-  getActiveYear, setActiveYear, distinctYears,
+  getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
   getSetting, setSetting,
   loadAcademicOverviewData, buildAcademicOverview
 } from "../supabase-client.js?v=20260725-4";
@@ -284,7 +293,52 @@ let primaryWarnPercent = PRIMARY_DEFAULT;
 const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fmtPct = n => (Math.round(n * 10) / 10).toFixed(1);
 const subjLabel = s => (s.code ? esc(s.code) + " " : "") + esc(s.name) +
-  (s.grade_level ? " <span class='subject-note'>· " + esc(s.grade_level) + "</span>" : "");
+  (s.grade_level ? " <span class='subject-note'>· " + esc(s.grade_level) + "</span>" : "") +
+  (s.term ? " <span class='subject-note'>· เทอม " + esc(s.term) + "</span>" : "");
+
+// ---------- จัดกลุ่มรายวิชาตามภาคเรียน ----------
+// มัธยมนับคาบและตัดสิน มส. เป็นรายภาคเรียน วิชาเทอม 2 จึงไม่ควรอ่านปนกับเทอม 1
+// (เทอม 2 ยังไม่เริ่มสอนก็ขึ้น 0% เป็นเรื่องปกติ ไม่ใช่ของค้าง)
+// ประถมเก็บ term = null เสมอ จึงรวมเป็นกลุ่ม "ทั้งปี" กลุ่มเดียว
+const TERM_GROUPS = [
+  { key: "1",     label: "ภาคเรียนที่ 1" },
+  { key: "2",     label: "ภาคเรียนที่ 2" },
+  { key: "year",  label: "ทั้งปี (ประถม)" },
+  { key: "unset", label: "มัธยมที่ยังไม่ระบุภาคเรียน" }
+];
+const termKeyOf = s => (s && (s.term === "1" || s.term === "2")) ? s.term
+  : (String(s && s.level) === "มัธยม" ? "unset" : "year");
+
+function groupByTerm(items, getSubject = x => x) {
+  const buckets = new Map();
+  for (const item of items) {
+    const key = termKeyOf(getSubject(item));
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(item);
+  }
+  return TERM_GROUPS.filter(g => buckets.has(g.key))
+    .map(g => ({ key: g.key, label: g.label, items: buckets.get(g.key) }));
+}
+
+// หัวกลุ่มจะขึ้นก็ต่อเมื่อมีมากกว่า 1 ภาคเรียน — ลิสต์ที่มีแต่ประถม (หรือเทอมเดียว) หน้าตาเหมือนเดิม
+function renderTermGroups(groups, renderItems, headExtra) {
+  if (groups.length <= 1) return renderItems(groups.length ? groups[0].items : []);
+  return groups.map(g =>
+    "<div class='term-head'>" + esc(g.label) +
+      "<span class='term-count'>" + (headExtra ? headExtra(g) : g.items.length + " วิชา") + "</span>" +
+    "</div>" + renderItems(g.items)
+  ).join("");
+}
+
+// ในกลุ่มเดียวกันเรียงตามชั้น แล้วตามรหัสวิชา — เดิมเป็นลำดับที่ฐานข้อมูลคืนมา (ไม่มีความหมาย)
+const gradeIndexOf = grade => {
+  const idx = GRADE_ORDER.indexOf(grade);
+  return idx === -1 ? GRADE_ORDER.length : idx;
+};
+const byGradeThenCode = (a, b) =>
+  gradeIndexOf(a.grade_level) - gradeIndexOf(b.grade_level) ||
+  String(a.code || "").localeCompare(String(b.code || ""), "th") ||
+  String(a.name || "").localeCompare(String(b.name || ""), "th");
 
 function showState(msg) {
   elContent.hidden = true;
@@ -460,42 +514,48 @@ function renderReadiness(overview) {
     {
       title: "วิชาที่ยังไม่ตั้งจำนวนคาบ",
       why: "สูตร มส. ใช้คาบทั้งรอบเป็นตัวหาร วิชาที่ยังไม่ตั้ง จะไม่ขึ้นเตือนเลยแม้เด็กขาดหนัก",
-      items: r.noPeriods.map(s => subjLabel(s)),
+      subjects: r.noPeriods,
       fix: "แก้ที่ “จัดการโครงสร้าง”"
     },
     {
       title: "วิชาที่ยังไม่มีนักเรียนลงทะเบียน",
       why: "หน้ากรอกคะแนน/เช็คชื่อ/สรุปผล จะว่างเปล่าเหมือนไม่มีเด็กในวิชา",
-      items: r.noEnrollment.map(s => subjLabel(s)),
+      subjects: r.noEnrollment,
       fix: "กด “เพิ่มทั้งห้อง” ที่จัดการโครงสร้าง"
     },
     {
       title: "วิชาที่ยังไม่เคยเช็คชื่อเลย",
       why: "ไม่มีข้อมูลการขาดเรียน จึงเฝ้าระวัง มส. ของวิชานี้ไม่ได้",
-      items: r.noSession.map(s => subjLabel(s)),
+      subjects: r.noSession,
       fix: "เริ่มที่หน้า “เช็คชื่อ”"
     },
     {
       title: "วิชาที่ยังไม่มีเจ้าของ",
       why: "มีแต่ผู้ดูแลระบบที่แก้โครงสร้าง/คะแนนของวิชานี้ได้ ครูผู้สอนแก้เองไม่ได้",
-      items: r.noOwner.map(s => subjLabel(s)),
+      subjects: r.noOwner,
       fix: "ตั้งเจ้าของวิชาที่จัดการโครงสร้าง"
     },
     {
       title: "วิชาที่ยังไม่กรอกปีการศึกษา",
       why: "หายจากทุกรายงานที่กรองด้วยปี (รวมหน้านี้ด้วย)",
-      items: r.yearless.map(s => subjLabel(s)),
+      subjects: r.yearless,
       fix: "เติมปีที่จัดการโครงสร้าง"
     },
     {
       title: "นักเรียนที่ยังไม่มีชั้นของปีนี้",
       why: "รายงานที่อิงชั้นรายปีจะมองไม่เห็นเด็กกลุ่มนี้",
-      items: r.noPlacement.map(s => esc(s.name) + (s.grade_level ? " <span class='subject-note'>· ปัจจุบัน " + esc(s.grade_level) + "</span>" : "")),
+      // กลุ่มนี้เป็น "คน" ไม่ใช่วิชา จึงไม่มีภาคเรียนให้จัดกลุ่ม
+      lines: r.noPlacement.map(s => esc(s.name) + (s.grade_level ? " <span class='subject-note'>· ปัจจุบัน " + esc(s.grade_level) + "</span>" : "")),
       fix: "ตรวจที่หน้า “นักเรียน” หรือ “ขึ้นปีใหม่”"
     }
   ];
 
-  const problems = blocks.filter(b => b.items.length > 0);
+  const lineHtml = html => "<div class='student-line'><div>" + html + "</div></div>";
+  const subjectLines = list => [...list].sort(byGradeThenCode).map(s => lineHtml(subjLabel(s))).join("");
+
+  const problems = blocks
+    .map(b => ({ ...b, count: (b.subjects || b.lines).length }))
+    .filter(b => b.count > 0);
   if (problems.length === 0) {
     elReady.innerHTML = "<div class='hint'>ข้อมูลตั้งต้นครบทุกข้อ — รายงานทุกหน้าใช้ได้เต็มที่</div>";
     return;
@@ -504,10 +564,12 @@ function renderReadiness(overview) {
     "<div class='issue-row'>" +
       "<div class='issue-name'>" + esc(b.title) +
         "<span class='issue-why'>" + esc(b.why) + " · " + esc(b.fix) + "</span></div>" +
-      "<span class='pill warn'>" + b.items.length + "</span>" +
+      "<span class='pill warn'>" + b.count + "</span>" +
     "</div>" +
     "<details><summary>ดูรายการ</summary>" +
-      b.items.map(item => "<div class='student-line'><div>" + item + "</div></div>").join("") +
+      (b.subjects
+        ? renderTermGroups(groupByTerm(b.subjects), subjectLines)
+        : b.lines.map(lineHtml).join("")) +
     "</details>"
   ).join("");
 }
@@ -537,12 +599,26 @@ function renderCoverage(overview) {
       "</div><div class='bar " + cls + "'><span style='width:" + pct + "%'></span></div></div>";
   };
 
-  const slowest = overview.coverage.slice(0, 5);
-  const rest = overview.coverage.slice(5);
-  elCoverage.innerHTML = head + slowest.map(rowHtml).join("") +
-    (rest.length
-      ? "<details><summary>ดูอีก " + rest.length + " วิชา</summary>" + rest.map(rowHtml).join("") + "</details>"
-      : "");
+  // ในแต่ละภาคเรียนยังเรียงช้าสุดขึ้นก่อนเหมือนเดิม แสดง 5 อันดับแรก ที่เหลือพับไว้
+  const listHtml = list => {
+    const slowest = list.slice(0, 5);
+    const rest = list.slice(5);
+    return slowest.map(rowHtml).join("") +
+      (rest.length
+        ? "<details><summary>ดูอีก " + rest.length + " วิชา</summary>" + rest.map(rowHtml).join("") + "</details>"
+        : "");
+  };
+
+  // ตัวเลขหัวกลุ่ม = คาบที่เช็คแล้วรวมทั้งภาคเรียน หารด้วยคาบทั้งหมดของวิชาที่ตั้งจำนวนคาบไว้แล้ว
+  // (วิชาที่ยังไม่ตั้งจำนวนคาบไม่มีตัวหาร จึงนับได้แค่จำนวนวิชา ไม่เอามาคิด %)
+  const groupHead = g => {
+    let checked = 0, total = 0;
+    for (const c of g.items) { checked += c.checked; total += c.total; }
+    return g.items.length + " วิชา" + (total > 0 ? " · เช็คแล้ว " + fmtPct((checked / total) * 100) + "%" : "");
+  };
+
+  elCoverage.innerHTML = head +
+    renderTermGroups(groupByTerm(overview.coverage, c => c.subject), listHtml, groupHead);
 }
 
 // ---------- โหลด + วาดทั้งหน้า ----------
