@@ -119,6 +119,11 @@
 
   <div id="content" style="display:none">
     <div class="card">
+      <div class="section-title">งานที่ฉันต้องไปแทน</div>
+      <div id="my-coverage-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card">
       <div class="section-title">เวรของฉัน</div>
       <div id="my-duty-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
@@ -222,9 +227,53 @@ if (session) {
       return nowSeconds > limitSeconds;
     }
 
+    async function renderMyCoverage() {
+      const fromDate = new Date(today + "T00:00:00Z");
+      fromDate.setUTCDate(fromDate.getUTCDate() - 7);
+      const { data, error } = await sb.rpc("my_coverage_from", {
+        p_from: fromDate.toISOString().slice(0, 10)
+      });
+      if (error) {
+        el("my-coverage-list").innerHTML =
+          '<div class="banner warn">โหลดงานที่ต้องไปแทนไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        return;
+      }
+      const rows = [...(data || [])].sort((a, b) => {
+        const group = date => date === today ? 0 : date < today ? 1 : 2;
+        const groupDiff = group(a.cover_date) - group(b.cover_date);
+        if (groupDiff) return groupDiff;
+        const dateDiff = group(a.cover_date) === 1
+          ? b.cover_date.localeCompare(a.cover_date)
+          : a.cover_date.localeCompare(b.cover_date);
+        return dateDiff || String(a.kind).localeCompare(String(b.kind), "th");
+      });
+      el("my-coverage-list").innerHTML = rows.length ? rows.map(row => {
+        const date = new Date(row.cover_date + "T00:00:00Z")
+          .toLocaleDateString("th-TH", {
+            weekday:"short", day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+          });
+        const when = row.cover_date === today ? "วันนี้"
+          : row.cover_date < today ? "ผ่านมาแล้ว" : "ข้างหน้า";
+        const target = row.kind === "วิชา" ? row.subject_label
+          : row.kind === "ครูประจำชั้น" ? row.room_label : row.duty_type;
+        const worksheet = row.kind === "วิชา" && row.worksheet_note
+          ? `<div class="field-note">ใบงาน: ${escapeHtml(row.worksheet_note)}</div>` : "";
+        const action = row.kind === "เวร"
+          ? '<div class="field-note">ไม่ต้องกดอะไรในระบบ ไปยืนรับนักเรียนตามเวลาที่กำหนด</div>'
+          : `<div class="field-note"><a class="report-link" href="${
+              row.kind === "วิชา" ? "../academic/attendance.html" : "../general-affairs/daily-attendance.html"
+            }">ไปหน้าเช็คชื่อ</a> · ต้องเลือกวันที่ให้ตรงกับวันที่ถูกจัดให้แทน ไม่เช่นนั้นจะกดไม่ได้</div>`;
+        return `<div class="my-duty-row">
+          <b>${escapeHtml(date)} · ${escapeHtml(when)} · ${escapeHtml(row.kind)}</b>
+          <div class="my-duty-meta">${escapeHtml(target || "ไม่ระบุงาน")} · แทน ${escapeHtml(row.absent_name || "ไม่ระบุชื่อ")}</div>
+          ${worksheet}${action}
+        </div>`;
+      }).join("") : '<div class="muted-empty">ยังไม่มีงานที่ต้องไปแทน</div>';
+    }
+
     async function renderMyDuties() {
       const { data, error } = await sb.from("duty_roster")
-        .select("duty_date,duty_type,duty_types!inner(code,start_time,end_time,sort_order)")
+        .select("duty_date,duty_type,note,duty_types!inner(code,start_time,end_time,sort_order)")
         .eq("staff_id", me.id)
         .gte("duty_date", today)
         .order("duty_date")
@@ -249,7 +298,7 @@ if (session) {
         const time = !start ? "ยังไม่ได้กำหนดเวลา"
           : end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
         return `<div class="my-duty-row"><b>${escapeHtml(date)} · ${escapeHtml(row.duty_type)}</b>
-          <div class="my-duty-meta">${escapeHtml(time)}</div></div>`;
+          <div class="my-duty-meta">${escapeHtml(time)}${row.note ? ` · ${escapeHtml(row.note)}` : ""}</div></div>`;
       // ⚠️ ห้ามเขียนว่า "ยังไม่มีตารางเวรในระบบ" — หน้านี้พิสูจน์ไม่ได้ว่าเป็นเพราะยังไม่ได้สร้าง
       // หรือสร้างแล้วแต่ไม่มีชื่อเรา (RLS ให้ครูอ่าน duty_roster เฉพาะแถวตัวเอง และอ่าน
       // duty_month_sync ไม่ได้เลย) จึงต้องพูดเท่าที่รู้จริงแล้วชี้ทางไปถามฝ่ายบุคคล
@@ -591,6 +640,7 @@ if (session) {
     }
 
     el("month").addEventListener("change", renderMonth);
+    await renderMyCoverage();
     await renderMyDuties();
     await renderMyFieldDuties();
     await renderPermitCard();
