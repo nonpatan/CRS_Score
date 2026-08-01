@@ -277,7 +277,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor } from "../supabase-client.js?v=20260801-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -289,9 +289,17 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 // role ใช้ตัดสินว่าใครเช็คชื่อ/เห็นวิชาย่อยได้ (admin = ทุกวิชา, ครู = เฉพาะวิชาที่ตัวเองเป็นเจ้าของ)
 const myProfile = await getProfile(session.user.id);
 const isAdminUser = myProfile && myProfile.role === "admin";
+let coveredSubjectIds = new Set();
 
-// เจ้าของหรือ admin เท่านั้นที่เช็คชื่อ/บันทึกชดเชยวิชานั้นได้ (ให้ตรงกับ RLS can_edit_subject ที่ DB)
+// เจ้าของ/admin หรือคนที่ถูกจัดให้สอนแทนในวันที่เลือก จึงเช็คชื่อวิชานั้นได้
+// ต้องเป็น synchronous เพราะ loadMemberOptions() ใช้ผ่าน Array.filter(canEdit)
 function canEdit(subj) {
+  return !!subj && (isAdminUser || subj.owner_id === session.user.id || coveredSubjectIds.has(subj.id));
+}
+
+// ชั่วโมงชดเชยยังเป็นสิทธิ์ของเจ้าของวิชา/admin เท่านั้น ไม่รวมคนที่มาสอนแทน
+// ต้องเป็น synchronous เช่นเดียวกับ canEdit() เพื่อใช้กรองวิชาในโหมดบูรณาการได้
+function canEditMakeup(subj) {
   return !!subj && (isAdminUser || subj.owner_id === session.user.id);
 }
 
@@ -389,9 +397,19 @@ elDate.value = todayStr();
 
 // เปลี่ยนวันที่ = รายชื่อ/ครั้งที่ที่โหลดไว้เป็นของวันเดิม ใช้ไม่ได้แล้ว → ซ่อนรายชื่อให้กดโหลดใหม่
 // (ไม่แตะ currentSubjectId/pickedSubject — วิชาที่เลือกยังเหมือนเดิม แค่ต้องโหลดรายชื่อของวันใหม่)
-elDate.addEventListener("change", () => {
+elDate.addEventListener("change", async () => {
   hideStudents();
   elMakeupCard.style.display = "none";
+  btnLoad.disabled = true;
+  const dateStr = elDate.value;
+  coveredSubjectIds = new Set();
+  try {
+    const coverage = await getMyCoverageFor(dateStr);
+    if (elDate.value === dateStr) coveredSubjectIds = coverage.subjectIds;
+  } catch (error) {
+    showToast(error.message, false);
+  }
+  if (elDate.value === dateStr) elSubject.dispatchEvent(new Event("change"));
 });
 
 // ---------- โหลดวิชาทั้งหมด ----------
@@ -479,9 +497,9 @@ elSubject.addEventListener("change", async () => {
     currentSubjectId = pickedSubject.id;
     currentSubject = pickedSubject;
 
-    // ข้อ 1: เฉพาะเจ้าของ/admin เช็คได้ — คนอื่นเห็นได้แต่กดไม่ได้
+    // ข้อ 1: เจ้าของ/admin/คนแทนของวันที่เลือกเช็คได้ — คนอื่นเห็นได้แต่กดไม่ได้
     if (!canEdit(pickedSubject)) {
-      showAccessNote("คุณไม่ใช่เจ้าของวิชานี้ — เช็คชื่อ/บันทึกชั่วโมงชดเชยได้เฉพาะครูเจ้าของวิชาหรือผู้ดูแลระบบ");
+      showAccessNote("คุณไม่มีสิทธิ์เช็คชื่อวิชานี้ในวันที่เลือก — เฉพาะครูเจ้าของวิชา ผู้ดูแลระบบ หรือคนที่ถูกจัดให้สอนแทนในวันนั้นเท่านั้น · ถ้าคุณถูกจัดให้สอนแทน ต้องเลือกวันที่ที่ถูกจัดให้แทนก่อน");
       btnLoad.disabled = true;
       return;
     }
@@ -515,7 +533,7 @@ async function loadMemberOptions(integratedId) {
   // ข้อ 3a: โชว์เฉพาะวิชาย่อยที่ครูคนนี้เป็นเจ้าของ (admin เห็นทุกตัว)
   memberSubjects = allMembers.filter(m => canEdit(m));
   if (memberSubjects.length === 0) {
-    elMemberList.innerHTML = "<div class='hint'>คุณไม่ได้เป็นเจ้าของวิชาย่อยใดในวิชาบูรณาการนี้ — เช็คชื่อได้เฉพาะวิชาย่อยที่ตัวเองเป็นเจ้าของ</div>";
+    elMemberList.innerHTML = "<div class='hint'>คุณไม่ได้เป็นเจ้าของหรือถูกจัดให้สอนแทนวิชาย่อยใดในวันที่เลือก — ถ้าคุณถูกจัดให้สอนแทน ต้องเลือกวันที่ที่ถูกจัดให้แทนก่อน</div>";
     return;
   }
 
@@ -597,7 +615,7 @@ function getTickedMembers() {
       showToast("กรอกจำนวนคาบของ \"" + m.name + "\" ให้ถูกต้องก่อน (ต้องมากกว่า 0)", false);
       return null;
     }
-    result.push({ id: m.id, name: m.name, periods: periods });
+    result.push({ id: m.id, name: m.name, owner_id: m.owner_id, periods: periods });
   }
   return result;
 }
@@ -1188,16 +1206,21 @@ let makeupRecords = [];
 // - อย่างอื่น (ยังไม่เลือก/เป็นตัวบูรณาการเอง) → ซ่อน
 async function refreshMakeup() {
   if (blockMode && blockMembers.length > 0) {
+    const makeupMembers = blockMembers.filter(canEditMakeup);
+    if (makeupMembers.length === 0) {
+      elMakeupCard.style.display = "none";
+      return;
+    }
     elMakeupCard.style.display = "block";
     elMakeupMemberField.style.display = "block";
     elMakeupMember.innerHTML = "";
-    for (const m of blockMembers) {
+    for (const m of makeupMembers) {
       const o = document.createElement("option");
       o.value = m.id; o.textContent = m.name;
       elMakeupMember.appendChild(o);
     }
-    await loadMakeupFor(blockMembers[0].id);
-  } else if (currentSubjectId && currentSubject && currentSubject.subject_type !== "บูรณาการ") {
+    await loadMakeupFor(makeupMembers[0].id);
+  } else if (currentSubjectId && currentSubject && currentSubject.subject_type !== "บูรณาการ" && canEditMakeup(currentSubject)) {
     elMakeupCard.style.display = "block";
     elMakeupMemberField.style.display = "none";
     await loadMakeupFor(currentSubjectId);
@@ -1265,6 +1288,11 @@ async function getRawMissedInfo(subjectId, studentId) {
 
 document.getElementById("btn-add-makeup").addEventListener("click", async () => {
   if (!makeupSubjectId) { showToast("เลือกวิชาย่อยที่จะบันทึกชดเชยก่อน", false); return; }
+  const makeupSubject = allSubjects.find(s => s.id === makeupSubjectId);
+  if (!canEditMakeup(makeupSubject)) {
+    showToast("การบันทึกชั่วโมงชดเชยเป็นสิทธิ์ของครูเจ้าของวิชาเท่านั้น", false);
+    return;
+  }
   const studentId = elMakeupStudent.value;
   const periods = Number(document.getElementById("inp-makeup-periods").value);
   const reason = document.getElementById("inp-makeup-reason").value.trim();
@@ -1317,6 +1345,12 @@ async function populateGradeOptions() {
 
 // เริ่มทำงาน
 await populateGradeOptions();
+try {
+  const coverage = await getMyCoverageFor(elDate.value);
+  coveredSubjectIds = coverage.subjectIds;
+} catch (error) {
+  showToast(error.message, false);
+}
 loadSubjects();
 }
 </script>

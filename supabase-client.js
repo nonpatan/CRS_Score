@@ -2061,3 +2061,254 @@ export async function getStaffPositions(includeInactive = false) {
   if (error) throw new Error("โหลดรายการตำแหน่งไม่สำเร็จ");
   return data || [];
 }
+
+// ============================================================
+// จัดคนแทนประจำวัน (coverage_assignments)
+// เหตุผลและมติทั้งหมด: personnel/PLAN.md หัวข้อ "⭐ จัดคนแทนประจำวัน"
+// ตรรกะ "วันนั้นใครไม่มา และแต่ละคนมีของค้างอะไรบ้าง" อยู่ที่นี่ที่เดียว
+// (หน้า coverage.html เอาไปแสดงอย่างเดียว ไม่คิดเอง — กันแก้ที่หนึ่งลืมอีกที่)
+// ============================================================
+
+export const COVERAGE_KINDS = ["วิชา", "ครูประจำชั้น", "เวร"];
+
+// คีย์ประจำตัวของ "ของค้าง 1 ชิ้น" — ใช้จับคู่รายการบนจอกับแถวที่บันทึกไว้แล้ว
+// ต้องมี absent_staff_id อยู่ในคีย์ของเวร เพราะเวรระบุด้วย (คนที่ไม่มา + วัน + งาน)
+// ส่วนวิชา/ครูประจำชั้นระบุด้วยตัวมันเองได้ (วิชาเดียวกันมีเจ้าของคนเดียว)
+export function coverageItemKey(kind, ref, absentStaffId) {
+  if (kind === "เวร") return "เวร:" + absentStaffId + ":" + ref;
+  return kind + ":" + ref;
+}
+export function coverageRowKey(row) {
+  if (row.kind === "เวร") return coverageItemKey("เวร", row.duty_type, row.absent_staff_id);
+  if (row.kind === "วิชา") return coverageItemKey("วิชา", row.subject_id);
+  return coverageItemKey("ครูประจำชั้น", row.homeroom_id);
+}
+
+// ---------- สิทธิ์เช็คชื่อของคนแทนในวันที่เลือก ----------
+// ต้องกรอง substitute_staff_id เสมอ: ฝ่ายบุคคลอ่าน coverage_assignments ได้ทุกแถว
+// ถ้าพึ่ง RLS อย่างเดียว หน้าจอของฝ่ายบุคคลจะปลดล็อกวิชา/ห้องของคนอื่นทั้งหมดผิด ๆ
+export async function getMyCoverageFor(dateStr) {
+  const empty = { subjectIds: new Set(), roomKeys: new Set() };
+  const { data: userData, error: userError } = await sb.auth.getUser();
+  if (userError) throw new Error("ตรวจบัญชีผู้ใช้ไม่สำเร็จ: " + userError.message);
+  const userId = userData.user?.id;
+  if (!userId) return empty;
+
+  const { data: ownStaff, error: staffError } = await sb.from("staff")
+    .select("id").eq("user_id", userId).maybeSingle();
+  if (staffError) throw new Error("โหลดข้อมูลบุคลากรของคุณไม่สำเร็จ: " + staffError.message);
+  if (!ownStaff) return empty;
+
+  const { data: rows, error: coverageError } = await sb.from("coverage_assignments")
+    .select("kind,subject_id,homeroom_teachers(year,grade_level,classroom)")
+    .eq("substitute_staff_id", ownStaff.id)
+    .eq("cover_date", dateStr);
+  if (coverageError) throw new Error("โหลดสิทธิ์คนแทนไม่สำเร็จ: " + coverageError.message);
+
+  const subjectIds = new Set();
+  const roomKeys = new Set();
+  for (const row of rows || []) {
+    if (row.kind === "วิชา" && row.subject_id) subjectIds.add(row.subject_id);
+    if (row.kind !== "ครูประจำชั้น") continue;
+    const homeroom = Array.isArray(row.homeroom_teachers)
+      ? row.homeroom_teachers[0]
+      : row.homeroom_teachers;
+    if (homeroom?.grade_level && homeroom?.classroom) {
+      roomKeys.add(homeroom.grade_level + "\u0000" + homeroom.classroom);
+    }
+  }
+  return { subjectIds, roomKeys };
+}
+
+// ---------- โหลดทุกอย่างที่หน้าจัดคนแทนต้องใช้ของวันหนึ่ง ----------
+// extraAbsentIds = คนที่ฝ่ายบุคคลเพิ่งกดเพิ่มแบบ "เหตุสุดวิสัย" แต่ยังไม่ได้เลือกคนแทน
+// → ยังไม่มีแถวใน DB ให้จับได้ ถ้าไม่ส่งเข้ามา เขาจะโผล่บนจอแบบไม่มีของค้างให้เลือกเลย
+export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
+  const [staffRes, years, leaveRes, fieldRes, dutyRes, dutyTypes, assignRes] = await Promise.all([
+    sb.from("staff").select("id,full_name,is_active,user_id,exempt").order("full_name"),
+    getAcademicYears(),
+    // ใบลา/งานนอกสถานที่ที่ "คร่อม" วันนี้ — ต้องเทียบหัวท้าย ไม่ใช่ eq (รายการหลายวันจะหาย)
+    sb.from("staff_leaves").select("*").lte("start_date", dateStr).gte("end_date", dateStr),
+    sb.from("staff_field_duties").select("*").lte("start_date", dateStr).gte("end_date", dateStr),
+    sb.from("duty_roster").select("*").eq("duty_date", dateStr),
+    getDutyTypes(true),   // รวมงานที่ปิดใช้แล้ว ไม่งั้นเวรเก่าที่จัดไว้จะแสดงชื่องานไม่ออก
+    sb.from("coverage_assignments").select("*").eq("cover_date", dateStr)
+  ]);
+
+  const failed = [
+    [staffRes, "โหลดทะเบียนบุคลากร"],
+    [leaveRes, "โหลดข้อมูลลา"],
+    [fieldRes, "โหลดข้อมูลออกปฏิบัติหน้าที่"],
+    [dutyRes, "โหลดตารางเวร"],
+    [assignRes, "โหลดรายการจัดคนแทน"]
+  ].find(([res]) => res.error);
+  if (failed) throw new Error(`${failed[1]}ไม่สำเร็จ: ${failed[0].error.message}`);
+
+  const staff = staffRes.data || [];
+  const staffById = new Map(staff.map(s => [s.id, s]));
+  const leaves = leaveRes.data || [];
+  const fieldDuties = fieldRes.data || [];
+  const duties = dutyRes.data || [];
+  const assignments = assignRes.data || [];
+  const year = academicYearOf(dateStr, years);
+
+  // ---------- ใครไม่มา ----------
+  // 3 ทาง: ใบลา · ออกปฏิบัติหน้าที่ · เหตุสุดวิสัย (ตัวหลังไม่มีใบอะไรรองรับ
+  // รู้ได้ทางเดียวคือมีแถวที่ฝ่ายบุคคลบันทึกไว้แล้ว — ผู้ใช้เคาะว่าไม่ต้องมีใบลาก่อน)
+  const absentMap = new Map();
+  const addAbsent = (staffId, source, extra) => {
+    const person = staffById.get(staffId);
+    if (!person) return;                       // แถวค้างของคนที่ถูกลบไปแล้ว — ข้าม
+    if (!absentMap.has(staffId)) {
+      absentMap.set(staffId, { staff: person, source, leave: null, fieldDuty: null, items: [] });
+    }
+    Object.assign(absentMap.get(staffId), extra || {});
+  };
+  for (const row of leaves) addAbsent(row.staff_id, "ลา", { leave: row });
+  for (const row of fieldDuties) addAbsent(row.staff_id, "ออกปฏิบัติหน้าที่", { fieldDuty: row });
+  for (const row of assignments) {
+    if (row.source === "เหตุสุดวิสัย") addAbsent(row.absent_staff_id, "เหตุสุดวิสัย", null);
+  }
+  for (const staffId of extraAbsentIds) addAbsent(staffId, "เหตุสุดวิสัย", null);
+  const absentIds = [...absentMap.keys()];
+  const absentUserIds = absentIds.map(id => staffById.get(id)?.user_id).filter(Boolean);
+
+  // ---------- ของค้างของแต่ละคน ----------
+  // 🪤 ไม่มีตารางสอนรายคาบในระบบ → เดาไม่ได้ว่าวันนั้นครูมีคาบไหนบ้าง
+  //    จึงแสดง "ทุกวิชาที่เขาเป็นเจ้าของในปีนี้" แล้วให้ฝ่ายบุคคลเลือกเอง
+  let subjects = [], homerooms = [];
+  if (absentUserIds.length) {
+    let query = sb.from("subjects")
+      .select("id,name,code,year,term,grade_level,owner_id")
+      .in("owner_id", absentUserIds);
+    // ปีการศึกษาว่าง = ยังไม่ได้ตั้ง academic_years → ไม่กรอง ดีกว่าคืนค่าว่างแบบเงียบ ๆ
+    if (year) query = query.eq("year", year);
+    const res = await query;
+    if (res.error) throw new Error("โหลดวิชาที่สอนไม่สำเร็จ: " + res.error.message);
+    subjects = res.data || [];
+  }
+  if (absentIds.length && year) {
+    const res = await sb.from("homeroom_teachers")
+      .select("id,year,grade_level,classroom,staff_id")
+      .eq("year", year).in("staff_id", absentIds);
+    if (res.error) throw new Error("โหลดครูประจำชั้นไม่สำเร็จ: " + res.error.message);
+    homerooms = res.data || [];
+  }
+
+  const typeByCode = new Map(dutyTypes.map(t => [t.code, t]));
+  const subjectLabel = s => [s.code, s.name].filter(Boolean).join(" · ") || "(ไม่มีชื่อวิชา)";
+
+  for (const s of subjects) {
+    const person = staff.find(p => p.user_id === s.owner_id);
+    const entry = person && absentMap.get(person.id);
+    if (!entry) continue;
+    entry.items.push({
+      kind: "วิชา", key: coverageItemKey("วิชา", s.id), refId: s.id,
+      label: subjectLabel(s),
+      sub: [s.grade_level, s.term && ("ภาคเรียนที่ " + s.term)].filter(Boolean).join(" · ")
+    });
+  }
+  for (const h of homerooms) {
+    const entry = absentMap.get(h.staff_id);
+    if (!entry) continue;
+    entry.items.push({
+      kind: "ครูประจำชั้น", key: coverageItemKey("ครูประจำชั้น", h.id), refId: h.id,
+      label: h.grade_level + "/" + h.classroom, sub: "ปีการศึกษา " + h.year,
+      room: { year: h.year, grade_level: h.grade_level, classroom: h.classroom }
+    });
+  }
+  for (const d of duties) {
+    const entry = absentMap.get(d.staff_id);
+    if (!entry) continue;
+    const type = typeByCode.get(d.duty_type);
+    const start = String(type?.start_time || "").slice(0, 5);
+    entry.items.push({
+      kind: "เวร", key: coverageItemKey("เวร", d.duty_type, d.staff_id), refId: d.duty_type,
+      label: d.duty_type, sub: start ? start + " น." : "ยังไม่ได้กำหนดเวลา"
+    });
+  }
+
+  // แถวที่บันทึกไว้แล้วแต่ของต้นทางหายไป (ลบวิชา/ถอดเวรทีหลัง) ต้องยังเห็นบนจอ
+  // ไม่งั้นจะมีแถวใน DB ที่ไม่มีใครแก้หรือลบได้เลยผ่านหน้าเว็บ
+  for (const row of assignments) {
+    const entry = absentMap.get(row.absent_staff_id);
+    if (!entry) continue;
+    const key = coverageRowKey(row);
+    if (entry.items.some(i => i.key === key)) continue;
+    entry.items.push({
+      kind: row.kind, key, refId: row.subject_id || row.homeroom_id || row.duty_type,
+      label: "(รายการเดิมที่ต้นทางถูกลบไปแล้ว)", sub: "ลบรายการนี้ได้ถ้าไม่ใช้แล้ว", orphan: true
+    });
+  }
+
+  const ORDER = { "วิชา": 0, "ครูประจำชั้น": 1, "เวร": 2 };
+  const absentees = [...absentMap.values()].sort((a, b) =>
+    a.staff.full_name.localeCompare(b.staff.full_name, "th"));
+  for (const entry of absentees) {
+    entry.items.sort((a, b) => (ORDER[a.kind] - ORDER[b.kind]) ||
+      a.label.localeCompare(b.label, "th"));
+  }
+
+  const byKey = new Map(assignments.map(row => [coverageRowKey(row), row]));
+  // dutyRoster ของทั้งวัน (ไม่ใช่เฉพาะคนที่ไม่มา) — หน้าเว็บต้องรู้ว่าคนแทนมีเวรงานนั้น
+  // อยู่ก่อนแล้วหรือเปล่า ไม่งั้นตอนยกเลิกการจัดคนแทนจะเผลอถอดเวรของเขาเองทิ้ง
+  return { date: dateStr, year, staff, staffById, dutyTypes, dutyRoster: duties,
+           absentees, assignments, byKey };
+}
+
+// แถวเวรที่เกิดจากการจัดคนแทนจะติดโน้ตนำหน้าด้วยคำนี้เสมอ — ใช้เป็นเครื่องหมายว่า
+// "แถวนี้ระบบเพิ่มให้" จึงถอดคืนได้เมื่อยกเลิก · แถวที่ครูมีเวรอยู่แล้วจะไม่มีโน้ตนี้
+// และต้องไม่ถูกแตะเด็ดขาด (ถอดทิ้ง = เวรจริงของเขาหายไปเงียบ ๆ)
+export const COVERAGE_DUTY_NOTE = "มาแทน";
+export function isCoverageDutyRow(row) {
+  return String(row?.note || "").startsWith(COVERAGE_DUTY_NOTE);
+}
+
+// ---------- บันทึก/ลบรายการจัดคนแทน ----------
+// ประกอบแถวจาก item + คนแทน ที่นี่ที่เดียว เพื่อให้ check constraint ฝั่ง DB
+// (kind ไหนต้องมีคอลัมน์ไหน) กับฝั่งเว็บพูดตรงกันเสมอ
+export function buildCoverageRow({ date, item, absentee, substituteStaffId, worksheetNote, createdBy }) {
+  const row = {
+    cover_date: date,
+    kind: item.kind,
+    subject_id: null, homeroom_id: null, duty_type: null,
+    absent_staff_id: absentee.staff.id,
+    substitute_staff_id: substituteStaffId,
+    source: absentee.source,
+    leave_id: absentee.source === "ลา" ? (absentee.leave?.id || null) : null,
+    field_duty_id: absentee.source === "ออกปฏิบัติหน้าที่" ? (absentee.fieldDuty?.id || null) : null,
+    worksheet_note: item.kind === "วิชา" ? (worksheetNote || null) : null,
+    created_by: createdBy || null
+  };
+  if (item.kind === "วิชา") row.subject_id = item.refId;
+  else if (item.kind === "ครูประจำชั้น") row.homeroom_id = item.refId;
+  else row.duty_type = item.refId;
+  return row;
+}
+
+export async function createCoverageAssignment(row) {
+  const { data, error } = await sb.from("coverage_assignments").insert(row).select().single();
+  if (error) throw new Error(error.code === "23505"
+    ? "รายการนี้มีคนแทนอยู่แล้ว ลองรีเฟรชหน้าจอ"
+    : "บันทึกคนแทนไม่สำเร็จ: " + error.message);
+  return data;
+}
+export async function updateCoverageAssignment(id, fields) {
+  const { data, error } = await sb.from("coverage_assignments")
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq("id", id).select().single();
+  if (error) throw new Error("แก้ไขคนแทนไม่สำเร็จ: " + error.message);
+  return data;
+}
+export async function deleteCoverageAssignment(id) {
+  const { error } = await sb.from("coverage_assignments").delete().eq("id", id);
+  if (error) throw new Error("ลบรายการคนแทนไม่สำเร็จ: " + error.message);
+}
+
+// รายงาน "ใครถูกขอให้มาแทนบ่อย" — คำถามที่ผู้ใช้ระบุเองว่าต้องตอบได้
+export async function getCoverageByRange(from, to) {
+  const { data, error } = await sb.from("coverage_assignments")
+    .select("*").gte("cover_date", from).lte("cover_date", to).order("cover_date");
+  if (error) throw new Error("โหลดประวัติการจัดคนแทนไม่สำเร็จ: " + error.message);
+  return data || [];
+}

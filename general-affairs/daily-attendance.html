@@ -156,8 +156,9 @@
 import {
   sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
-  summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260730-1";
+  summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
+  getMyCoverageFor
+} from "../supabase-client.js?v=20260801-2";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -232,11 +233,12 @@ async function loadYearContext(dateStr) {
   el("room-select").innerHTML = '<option value="">กำลังโหลดห้อง…</option>';
   el("room-select").disabled = true;
 
-  const [placementRes, activeStudents, homeroomRes, ownStaffRes] = await Promise.all([
+  const [placementRes, activeStudents, homeroomRes, ownStaffRes, myCoverage] = await Promise.all([
     getStudentPlacements(currentYear),
     getActiveStudents(),
     sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
-    sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle()
+    sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
+    getMyCoverageFor(dateStr)
   ]);
   if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
   if (homeroomRes.error) throw new Error("โหลดข้อมูลครูประจำชั้นไม่สำเร็จ: " + homeroomRes.error.message);
@@ -258,7 +260,9 @@ async function loadYearContext(dateStr) {
       .filter(row => ownStaffId && row.staff_id === ownStaffId)
       .map(roomKey)
   );
-  availableRooms = canManage ? allRooms : allRooms.filter(room => assignedKeys.has(roomKey(room)));
+  availableRooms = canManage
+    ? allRooms
+    : allRooms.filter(room => assignedKeys.has(roomKey(room)) || myCoverage.roomKeys.has(roomKey(room)));
 
   if (!canManage && !ownStaffId) {
     el("room-select").innerHTML = '<option value="">— ไม่มีห้องที่รับผิดชอบ —</option>';

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จัดคนแทนประจำวัน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+          --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
+          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; --blue-soft:#e8f0fb;
+          --violet:#5b3f8a; --violet-soft:#f0eaf9; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:560px; margin:0 auto; }
+  header h1 { font-size:20px; font-weight:600; margin:4px 0; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
+  header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
+                border-radius:99px; border:1px solid var(--line);
+                box-shadow:0 4px 12px rgba(0,0,0,.05); margin:0 0 24px; align-items:center; }
+  header .nav a { color:var(--muted); text-decoration:none; font-weight:500;
+                  padding:8px 16px; border-radius:99px; font-size:14px; }
+  header .nav a.active { background:var(--teal); color:var(--white); }
+  header .nav #btn-signout { margin-left:auto; color:var(--danger); background:#fff0f0; }
+
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px; }
+  label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
+  input[type="text"], input[type="date"], select {
+    width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+    border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  .field { margin-bottom:14px; } .field:last-child { margin-bottom:0; }
+  .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
+  .row2 { display:flex; gap:12px; align-items:flex-end; } .row2 > * { flex:1; }
+  button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
+           border:none; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); }
+  button.ghost { background:var(--white); border:1px solid var(--line); color:var(--ink); }
+  button.small { font-size:13px; padding:6px 10px; }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  button:disabled { opacity:.5; cursor:default; }
+  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+                   text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
+  .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  .banner.info { background:var(--teal-soft); color:var(--teal); }
+  .banner.danger { background:var(--danger-soft); color:var(--danger); }
+  .banner:last-child { margin-bottom:0; }
+
+  .person-head { display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; margin-bottom:2px; }
+  .person-name { font-weight:600; font-size:17px; }
+  .person-why { color:var(--muted); font-size:13.5px; margin-bottom:12px; }
+  .chip { font-size:12px; font-weight:600; padding:2px 9px; border-radius:99px;
+          background:var(--teal-soft); color:var(--teal); white-space:nowrap; }
+  .chip.leave { background:var(--blue-soft); color:var(--blue); }
+  .chip.offsite { background:var(--violet-soft); color:var(--violet); }
+  .chip.urgent { background:var(--amber-soft); color:var(--amber); }
+  .chip.kind { background:#eef1f1; color:var(--muted); }
+  .chip.done { background:var(--teal-soft); color:var(--teal); }
+  .chip.nologin { background:var(--danger-soft); color:var(--danger); }
+
+  .item { padding:11px 0; border-top:1px solid var(--line); }
+  .item-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .item-label { font-weight:600; }
+  .item-sub { color:var(--muted); font-size:13.5px; }
+  .item-body { margin-top:8px; }
+  .item.covered { background:#f7fcfa; margin:0 -8px; padding:11px 8px; border-radius:8px; }
+  .item-foot { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
+           border-radius:10px; background:#1f2a2e; color:#fff; font-weight:600; opacity:0;
+           pointer-events:none; transition:opacity .18s; z-index:60; }
+  #toast.show { opacity:1; } #toast.err { background:var(--danger); }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>จัดคนแทนประจำวัน</h1>
+    <p>ครูไม่มา — จัดคนไปแทนทั้งวิชาที่สอน งานครูประจำชั้น และเวร</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="leave.html">บันทึกการลา</a>
+      <a href="coverage.html">จัดคนแทนประจำวัน</a>
+      <a href="duty.html">ตารางเวร</a>
+      <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260801-2"></script>
+  </header>
+
+  <div id="gate" class="card" style="display:none"></div>
+
+  <div id="content" style="display:none">
+    <div class="card">
+      <div class="row2">
+        <div class="field">
+          <label for="f-date">วันที่ต้องหาคนแทน</label>
+          <input id="f-date" type="date">
+        </div>
+        <div class="field" style="flex:0 0 auto">
+          <button id="btn-reload" class="ghost">โหลดใหม่</button>
+        </div>
+      </div>
+      <div id="day-note" class="field-note">—</div>
+      <div class="banner info" style="margin-top:12px">
+        <b>สิทธิ์เช็คชื่อของคนแทนผูกกับวันที่ที่จัดไว้</b><br>
+        คนแทนที่มีบัญชีล็อกอินจะเช็คชื่อวิชาหรือห้องนั้นได้เฉพาะวันที่ถูกจัดให้แทน
+        และต้องเลือกวันที่ให้ตรงในหน้าเช็คชื่อ ไม่เช่นนั้นจะกดไม่ได้<br>
+        สิทธิ์นี้ไม่รวมการแก้คะแนนหรือการลบผลเช็คชื่อ ซึ่งยังเป็นสิทธิ์ของครูเจ้าของวิชาเหมือนเดิม
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">คนที่ไม่มาในวันนี้</div>
+      <div id="list"><div class="muted-empty">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">คนที่ไม่มาแบบเหตุสุดวิสัย</div>
+      <p class="field-note" style="margin:0 0 10px">
+        ใช้กับคนที่ไม่มาแบบไม่มีใบลาและไม่มีบันทึกออกปฏิบัติหน้าที่ เช่น รถเสียกลางทาง —
+        เพิ่มที่นี่ได้เลยโดยไม่ต้องรอใบลา แล้วค่อยคีย์ใบลาย้อนหลังทีหลังถ้ามี
+      </p>
+      <div class="row2">
+        <div class="field">
+          <label for="f-urgent">เลือกบุคลากร</label>
+          <select id="f-urgent"><option value="">— เลือกคน —</option></select>
+        </div>
+        <div class="field" style="flex:0 0 auto">
+          <button id="btn-urgent" class="primary">เพิ่มเข้ารายการ</button>
+        </div>
+      </div>
+      <div class="field-note" id="urgent-note">
+        คนที่เพิ่มจะโผล่ในรายการด้านบนทันที แต่จะยังไม่ถูกบันทึกลงฐานข้อมูล
+        จนกว่าจะเลือกคนแทนอย่างน้อย 1 รายการ
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module">
+import {
+  requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, personnelAccessDeniedHtml,
+  loadCoverageDay, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
+  deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
+  COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260801-2";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
+  const toastEl = el("toast");
+  let toastTimer;
+  const toast = (message, error = false) => {
+    toastEl.textContent = message; toastEl.classList.toggle("err", error);
+    toastEl.classList.add("show"); clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3500);
+  };
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+
+  const canManage = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canManage);
+  if (!canManage) {
+    el("gate").style.display = "";
+    el("gate").innerHTML = personnelAccessDeniedHtml();
+  } else {
+    el("content").style.display = "";
+
+    let day = null;          // ผลจาก loadCoverageDay()
+    let busy = false;
+    // คนที่ฝ่ายบุคคลเพิ่มเองแบบเหตุสุดวิสัยแต่ยังไม่ได้เลือกคนแทน — ยังไม่มีแถวใน DB
+    // จึงต้องจำไว้ฝั่งหน้าจอ ไม่งั้นกดเพิ่มแล้วชื่อหายทันทีที่โหลดใหม่
+    let pendingUrgent = new Set();
+
+    const SOURCE_CHIP = {
+      "ลา": "leave", "ออกปฏิบัติหน้าที่": "offsite", "เหตุสุดวิสัย": "urgent"
+    };
+    const PORTION_LABEL = { full:"เต็มวัน", morning:"ครึ่งวันเช้า", afternoon:"ครึ่งวันบ่าย" };
+
+    // ---------- คำอธิบายว่าทำไมคนนี้ไม่มา ----------
+    const whyText = entry => {
+      if (entry.source === "ลา" && entry.leave) {
+        return [entry.leave.leave_type, PORTION_LABEL[entry.leave.day_portion] || "",
+                entry.leave.reason].filter(Boolean).join(" · ");
+      }
+      if (entry.source === "ออกปฏิบัติหน้าที่" && entry.fieldDuty) {
+        return [entry.fieldDuty.kind, entry.fieldDuty.title,
+                entry.fieldDuty.organizer].filter(Boolean).join(" · ");
+      }
+      return "ไม่มีใบลาหรือบันทึกออกปฏิบัติหน้าที่ — ฝ่ายบุคคลบันทึกเอง";
+    };
+
+    // ---------- ตัวเลือกคนแทน ----------
+    // ⚠ "ใครเป็นคนแทนก็ได้" เป็นมติของผู้ใช้ — ห้ามกรองเหลือเฉพาะเจ้าของวิชา
+    //   กรองแค่ 2 อย่าง: ต้องยังทำงานอยู่ และต้องไม่ใช่คนที่ไม่มาเอง
+    const substituteOptions = (absentStaffId, selectedId) => {
+      const rows = day.staff.filter(s =>
+        s.id !== absentStaffId && (s.is_active || s.id === selectedId));
+      return ["<option value=''>— ยังไม่มีคนแทน —</option>"].concat(rows.map(s =>
+        "<option value='" + esc(s.id) + "'" + (s.id === selectedId ? " selected" : "") + ">" +
+        esc(s.full_name) + (s.is_active ? "" : " (ออกแล้ว)") + "</option>")).join("");
+    };
+
+    // ---------- วาดหน้าจอ ----------
+    const render = () => {
+      const box = el("list");
+      const people = day.absentees;
+      if (!people.length) {
+        box.innerHTML = "<div class='muted-empty'>วันนี้ไม่มีใครลาหรือออกปฏิบัติหน้าที่<br>" +
+          "ถ้ามีคนไม่มาแบบกะทันหัน เพิ่มได้ที่ช่อง “เหตุสุดวิสัย” ด้านล่าง</div>";
+        return;
+      }
+
+      box.innerHTML = people.map(entry => {
+        const chip = SOURCE_CHIP[entry.source] || "kind";
+        const head =
+          "<div class='person-head'><span class='person-name'>" + esc(entry.staff.full_name) +
+          "</span><span class='chip " + chip + "'>" + esc(entry.source) + "</span></div>" +
+          "<div class='person-why'>" + esc(whyText(entry)) + "</div>";
+
+        if (!entry.items.length) {
+          return "<div class='item' style='border-top:0'>" + head +
+            "<div class='field-note'>ไม่พบวิชา งานครูประจำชั้น หรือเวรของคนนี้ในวันนี้ " +
+            "— ไม่มีอะไรต้องหาคนแทน</div></div>";
+        }
+
+        const items = entry.items.map(item => {
+          const saved = day.byKey.get(item.key) || null;
+          const sub = saved ? day.staffById.get(saved.substitute_staff_id) : null;
+          const noLogin = sub && !sub.user_id;
+          return "<div class='item" + (saved ? " covered" : "") + "'>" +
+            "<div class='item-head'><span class='chip kind'>" + esc(item.kind) + "</span>" +
+            "<span class='item-label'>" + esc(item.label) + "</span>" +
+            (item.sub ? "<span class='item-sub'>" + esc(item.sub) + "</span>" : "") +
+            "</div>" +
+            "<div class='item-body'>" +
+              "<select data-key='" + esc(item.key) + "' data-staff='" + esc(entry.staff.id) + "'>" +
+                substituteOptions(entry.staff.id, saved?.substitute_staff_id || "") +
+              "</select>" +
+              (item.kind === "วิชา" && saved
+                ? "<input type='text' class='worksheet' data-id='" + esc(saved.id) + "' " +
+                  "placeholder='ใบงานที่ครูฝากไว้ (ไม่บังคับ)' value='" +
+                  esc(saved.worksheet_note || "") + "' style='margin-top:8px'>"
+                : "") +
+            "</div>" +
+            (saved
+              ? "<div class='item-foot'>" +
+                  (noLogin
+                    ? "<span class='chip nologin'>ไม่มีบัญชีล็อกอิน — กดในระบบไม่ได้</span>"
+                    : "<span class='chip done'>บันทึกแล้ว</span>") +
+                  (item.kind === "เวร"
+                    ? "<span class='item-sub'>เพิ่มชื่อเข้าตารางเวรวันนี้ให้แล้ว</span>" : "") +
+                "</div>"
+              : "");
+        }).join("");
+
+        return "<div class='item' style='border-top:0'>" + head + items + "</div>";
+      }).join("<hr style='border:0;border-top:1px solid var(--line);margin:14px 0'>");
+
+      box.querySelectorAll("select[data-key]").forEach(sel =>
+        sel.addEventListener("change", () => onPick(sel)));
+      box.querySelectorAll("input.worksheet").forEach(input =>
+        input.addEventListener("change", () => onWorksheet(input)));
+    };
+
+    const findItem = key => {
+      for (const entry of day.absentees) {
+        const item = entry.items.find(i => i.key === key);
+        if (item) return { entry, item };
+      }
+      return null;
+    };
+
+    // ---------- เลือก/เปลี่ยน/ยกเลิกคนแทน ----------
+    async function onPick(sel) {
+      if (busy) return;
+      const found = findItem(sel.dataset.key);
+      if (!found) return;
+      const { entry, item } = found;
+      const saved = day.byKey.get(item.key) || null;
+      const newId = sel.value || null;
+      if (saved && saved.substitute_staff_id === newId) return;
+
+      busy = true;
+      sel.disabled = true;
+      try {
+        // เวร: ถอดชื่อคนแทนเดิมออกจากตารางเวรก่อนเสมอ (ทั้งกรณีเปลี่ยนคนและกรณียกเลิก)
+        // แต่ถอดเฉพาะแถวที่ระบบเพิ่มให้เท่านั้น — ดู isCoverageDutyRow()
+        if (saved && item.kind === "เวร") await unassignDutyRow(saved);
+
+        if (!newId) {
+          if (saved) {
+            await deleteCoverageAssignment(saved.id);
+            toast("ยกเลิกคนแทนของ " + item.label + " แล้ว");
+          }
+        } else {
+          if (item.kind === "เวร") await assignDutyRow(entry, item, newId);
+          if (saved) {
+            await updateCoverageAssignment(saved.id, { substitute_staff_id: newId });
+          } else {
+            await createCoverageAssignment(buildCoverageRow({
+              date: day.date, item, absentee: entry,
+              substituteStaffId: newId, createdBy: session.user.id
+            }));
+          }
+          // ⚠ ไม่ลบออกจาก pendingUrgent — ถ้าลบ พอฝ่ายบุคคลยกเลิกรายการสุดท้ายของคนนี้
+          //   ชื่อเขาจะหายจากจอทันทีทั้งที่ยังไม่มาทำงาน (ล้างทีเดียวตอนเปลี่ยนวันที่)
+          const who = day.staffById.get(newId);
+          toast("ให้ " + (who?.full_name || "คนแทน") + " แทน " + item.label + " แล้ว");
+        }
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+        sel.disabled = false;
+        await reload();
+      } finally {
+        busy = false;
+      }
+    }
+
+    // เวร: จัดคนแทน = เพิ่มแถวคนแทนใน duty_roster ด้วย (แถวของคนเดิมยังอยู่ตามเดิม
+    // เพื่อให้สูตร dutyMissed ยังนับได้ว่าเขามีเวรแล้วไม่มา — ห้ามลบแถวคนเดิม)
+    async function assignDutyRow(entry, item, substituteId) {
+      const already = (day.dutyRoster || []).some(r =>
+        r.duty_type === item.refId && r.staff_id === substituteId);
+      if (already) return;   // เขามีเวรงานนี้อยู่แล้ว ไม่ต้องเพิ่มและห้ามถอดคืนทีหลัง
+      await saveDutyRosterEntry(day.date, item.refId, substituteId, session.user.id,
+        COVERAGE_DUTY_NOTE + " " + entry.staff.full_name);
+    }
+    async function unassignDutyRow(saved) {
+      const row = (day.dutyRoster || []).find(r =>
+        r.duty_type === saved.duty_type && r.staff_id === saved.substitute_staff_id);
+      if (row && isCoverageDutyRow(row)) {
+        await removeDutyRosterEntry(day.date, saved.duty_type, saved.substitute_staff_id);
+      }
+    }
+
+    async function onWorksheet(input) {
+      const value = input.value.trim();
+      try {
+        await updateCoverageAssignment(input.dataset.id, { worksheet_note: value || null });
+        toast("บันทึกใบงานที่ฝากไว้แล้ว");
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+      }
+    }
+
+    // ---------- เพิ่มคนที่ไม่มาแบบเหตุสุดวิสัย ----------
+    el("btn-urgent").addEventListener("click", () => {
+      const staffId = el("f-urgent").value;
+      if (!staffId) { toast("เลือกบุคลากรก่อน", true); return; }
+      if (day.absentees.some(e => e.staff.id === staffId)) {
+        toast("คนนี้อยู่ในรายการอยู่แล้ว", true); return;
+      }
+      pendingUrgent.add(staffId);
+      el("f-urgent").value = "";
+      reload();
+    });
+
+    // ---------- โหลดข้อมูลของวันที่เลือก ----------
+    async function reload() {
+      const date = el("f-date").value;
+      if (!date) return;
+      try {
+        // ส่งคนที่เพิ่งกดเพิ่มแบบเหตุสุดวิสัยเข้าไปด้วย เพื่อให้ได้ของค้าง 3 อย่างของเขามาครบ
+        // เหมือนคนที่มีใบลา — ไม่งั้นจะเห็นชื่อแต่ไม่มีอะไรให้จัดคนแทน
+        day = await loadCoverageDay(date, { extraAbsentIds: [...pendingUrgent] });
+      } catch (e) {
+        el("list").innerHTML = "<div class='muted-empty'>โหลดข้อมูลไม่สำเร็จ</div>";
+        toast(e.message || String(e), true);
+        return;
+      }
+
+      const covered = day.assignments.length;
+      el("day-note").textContent = day.year
+        ? "ปีการศึกษา " + day.year + " · คนที่ไม่มา " + day.absentees.length +
+          " คน · จัดคนแทนแล้ว " + covered + " รายการ"
+        : "⚠ ยังไม่ได้ตั้งปีการศึกษาในหน้าตั้งค่างานบุคคล — จะยังหาวิชาและครูประจำชั้นไม่เจอ";
+
+      const picker = el("f-urgent");
+      picker.innerHTML = "<option value=''>— เลือกคน —</option>" + day.staff
+        .filter(s => s.is_active && !day.absentees.some(e => e.staff.id === s.id))
+        .map(s => "<option value='" + esc(s.id) + "'>" + esc(s.full_name) + "</option>").join("");
+
+      render();
+    }
+
+    el("f-date").addEventListener("change", () => { pendingUrgent.clear(); reload(); });
+    el("btn-reload").addEventListener("click", () => reload());
+
+    el("f-date").value = toDateStr(bangkokNow());
+    await reload();
+  }
+}
+</script>
+</body>
+</html>
