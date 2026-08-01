@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ส่งมอบงานครูที่ออก — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --teal:#075e5a; --teal-2:#0b8d86; --teal-soft:#e5f5f3; --ink:#183638; --muted:#657778; --line:#dce7e6; --bg:#f4f8f8; --white:#fff; --amber:#8a5a00; --amber-soft:#fff4df; --danger:#c52e35; --danger-soft:#fff0f1; --ok:#0b7a4b; --ok-soft:#e6f6ee; --shadow:0 14px 36px rgba(16,69,69,.09),0 2px 7px rgba(16,69,69,.04); }
+  * { box-sizing:border-box; } html { -webkit-text-size-adjust:100%; }
+  body { min-width:320px; min-height:100svh; margin:0; color:var(--ink); background:var(--bg); font:16px/1.5 "Sarabun",sans-serif; }
+  .topbar { display:flex; align-items:center; min-height:68px; padding:10px 16px; border-bottom:1px solid var(--line); background:rgba(255,255,255,.94); }
+  .back-link { display:inline-flex; align-items:center; gap:8px; min-height:44px; color:var(--teal); font-weight:700; text-decoration:none; }
+  .back-link:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline:3px solid rgba(11,141,134,.25); outline-offset:2px; }
+  main { max-width:960px; margin:0 auto; padding:26px 16px 60px; }
+  h1 { margin:0; font-size:clamp(25px,6vw,32px); line-height:1.25; letter-spacing:-.02em; }
+  h2 { margin:0 0 12px; font-size:19px; }
+  .intro { margin:4px 0 18px; color:var(--muted); }
+  .card { padding:19px; margin-bottom:16px; border:1px solid var(--line); border-radius:19px; background:var(--white); box-shadow:var(--shadow); }
+  .note { padding:13px 15px; border-radius:14px; background:var(--amber-soft); color:var(--amber); font-size:14.5px; }
+  .note.danger { background:var(--danger-soft); color:var(--danger); }
+  .note b { color:inherit; }
+  label.field { display:block; margin-bottom:6px; font-weight:600; }
+  select, input { min-height:46px; padding:9px 13px; border:1px solid var(--line); border-radius:12px; font:inherit; color:inherit; background:var(--white); }
+  select.wide { width:100%; }
+  button { min-height:46px; padding:10px 18px; border:0; border-radius:12px; font:inherit; font-weight:700; cursor:pointer; }
+  button.primary { background:var(--teal); color:#fff; }
+  button.danger { background:var(--danger); color:#fff; }
+  button.ghost { border:1px solid var(--line); background:var(--white); color:var(--ink); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .group { margin-bottom:18px; }
+  .group-head { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; margin-bottom:9px; }
+  .group-name { font-weight:700; font-size:17px; }
+  .group-count { color:var(--muted); font-size:14.5px; }
+  .item { display:grid; gap:9px; padding:13px 14px; margin-bottom:9px; border:1px solid var(--line); border-radius:14px; background:#fbfdfd; }
+  @media (min-width:760px) { .item { grid-template-columns:1fr 300px; align-items:center; } }
+  .item.done { border-color:rgba(11,122,75,.35); background:var(--ok-soft); }
+  .item.failed { border-color:rgba(197,46,53,.35); background:var(--danger-soft); }
+  .item-label { font-weight:600; }
+  .item-sub { color:var(--muted); font-size:14px; }
+  .item-result { font-size:14px; font-weight:600; }
+  .item-result.ok { color:var(--ok); }
+  .item-result.err { color:var(--danger); }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:6px; }
+  .empty { padding:18px; color:var(--muted); text-align:center; }
+  .history { font-size:14.5px; }
+  .history li { margin-bottom:6px; }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); padding:11px 18px; border-radius:12px; background:var(--ink); color:#fff; font-weight:600; box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity .18s; z-index:50; }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+</style>
+</head>
+<body>
+
+<div class="topbar"><a class="back-link" href="dashboard.html">← กลับหน้าภาพรวม</a></div>
+
+<main>
+  <h1>ส่งมอบงานครูที่ออก</h1>
+  <p class="intro">โอนงานที่ครูคนหนึ่งถือไว้ให้ครูคนอื่น แล้วปิดการล็อกอินเมื่อส่งมอบครบ</p>
+
+  <div id="gate" class="card" style="display:none">
+    <div class="note" id="gate-msg">กำลังตรวจสอบสิทธิ์…</div>
+  </div>
+
+  <div id="main-area" style="display:none">
+    <div class="card">
+      <label class="field" for="staff">เลือกครูที่ออก</label>
+      <select id="staff" class="wide"><option value="">— เลือกบุคลากร —</option></select>
+      <p class="intro" style="margin:9px 0 0">
+        คนที่ Jibble ระบุว่าออกแล้วจะอยู่บนสุด — แต่เลือกใครก็ได้
+        เพราะสถานะจาก Jibble ไม่ครอบคลุมทุกกรณี
+      </p>
+    </div>
+
+    <div id="assets" style="display:none">
+      <div class="card">
+        <h2>งานที่ยังค้างอยู่</h2>
+        <div id="asset-groups"></div>
+        <div class="actions">
+          <button id="btn-transfer" class="primary" disabled>โอนรายการที่เลือก</button>
+          <span class="group-count" id="transfer-hint">เลือกผู้รับอย่างน้อย 1 รายการก่อน</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>การล็อกอิน</h2>
+        <div class="note danger" id="login-note">
+          <b>ปิดการล็อกอินเมื่อส่งมอบงานครบแล้วเท่านั้น</b><br>
+          ครูที่ยังถือวิชาอยู่แล้วถูกปิดล็อกอิน จะไม่มีใครแก้คะแนนวิชานั้นได้นอกจากผู้ดูแลระบบ
+        </div>
+        <div class="actions">
+          <button id="btn-disable" class="danger">ปิดการล็อกอินของครูคนนี้</button>
+          <button id="btn-enable" class="ghost">เปิดคืน</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>ประวัติการโอน</h2>
+        <div id="history"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script type="module">
+  import { sb, requireAuth, getProfile, setUserLoginEnabled } from "./supabase-client.js?v=20260801-1";
+
+  const el = (id) => document.getElementById(id);
+  const elGate = el("gate"), elGateMsg = el("gate-msg"), elMain = el("main-area");
+  const elStaff = el("staff"), elAssets = el("assets"), elGroups = el("asset-groups");
+  const elBtnTransfer = el("btn-transfer"), elHint = el("transfer-hint");
+  const elHistory = el("history"), elToast = el("toast");
+
+  let toastTimer = null;
+  function toast(msg, isError) {
+    elToast.textContent = msg;
+    elToast.classList.toggle("err", !!isError);
+    elToast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => elToast.classList.remove("show"), 3200);
+  }
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c =>
+      ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+  }
+  const todayISO = () => new Date().toLocaleDateString("sv-SE"); // sv-SE = YYYY-MM-DD ตามเวลาเครื่อง
+
+  let allStaff = [];          // ทะเบียนบุคลากรทั้งหมด
+  let currentStaff = null;    // ครูที่กำลังส่งมอบ
+  let items = [];             // รายการงานที่ค้าง (แบนราบ ไม่แยกกลุ่ม เพื่อวนบันทึกทีเดียว)
+
+  // ---------- นิยามของ 5 จุดที่ต้องโอน ----------
+  // recipientBy: 'user' = คอลัมน์เก็บ auth user id (ผู้รับต้องมีบัญชีล็อกอิน)
+  //              'staff' = คอลัมน์เก็บ staff id (ผู้รับเป็นใครก็ได้ในทะเบียน)
+  const KINDS = {
+    subject:    { label: "วิชาที่สอน",          logKind: "วิชา",           recipientBy: "user"  },
+    competency: { label: "กิจกรรม/กิจวัตรสมรรถนะ", logKind: "กิจกรรมสมรรถนะ", recipientBy: "user"  },
+    homeroom:   { label: "ครูประจำชั้น",         logKind: "ครูประจำชั้น",    recipientBy: "staff" },
+    project:    { label: "โครงการ/กิจกรรม",      logKind: "โครงการ",        recipientBy: "staff" },
+    duty:       { label: "เวรรับนักเรียน (เฉพาะวันที่ยังไม่ถึง)", logKind: "เวร", recipientBy: "staff" }
+  };
+
+  // ---------- โหลดทะเบียนบุคลากร ----------
+  async function loadStaff() {
+    const { data, error } = await sb
+      .from("staff").select("id,full_name,is_active,user_id").order("full_name");
+    if (error) { toast("โหลดทะเบียนบุคลากรไม่สำเร็จ: " + error.message, true); return; }
+    allStaff = data || [];
+
+    // คนที่ Jibble บอกว่าออกแล้วขึ้นก่อน — เป็นแค่ตัวช่วยเรียง ไม่ใช่ตัวกรอง
+    // (ถ้าลบคนออกจาก Jibble ทิ้งเลย is_active จะค้างเป็น true ตลอดไป จึงเลือกด้วยมือได้เสมอ)
+    const sorted = [...allStaff].sort((a, b) => {
+      if (a.is_active !== b.is_active) return a.is_active ? 1 : -1;
+      return a.full_name.localeCompare(b.full_name, "th");
+    });
+    for (const s of sorted) {
+      const o = document.createElement("option");
+      o.value = s.id;
+      o.textContent = s.full_name + (s.is_active ? "" : " — ออกแล้ว");
+      elStaff.appendChild(o);
+    }
+  }
+
+  // ---------- รวบรวมงานที่ค้างทั้ง 5 จุด ----------
+  async function loadAssets(staff) {
+    const uid = staff.user_id;
+    // วิชาและกิจกรรมผูกกับ "บัญชีล็อกอิน" ไม่ใช่แถวทะเบียน — ไม่มีบัญชี = ไม่มีทางถืออยู่
+    const subjectsQ = uid
+      ? sb.from("subjects").select("id,name,code,year,grade_level").eq("owner_id", uid)
+      : Promise.resolve({ data: [] });
+    const compQ = uid
+      ? sb.from("competency_assessments").select("id,name,year,source_type").eq("owner_id", uid)
+      : Promise.resolve({ data: [] });
+
+    const [subjects, comps, homerooms, projects, duties] = await Promise.all([
+      subjectsQ,
+      compQ,
+      sb.from("homeroom_teachers").select("id,year,grade_level,classroom").eq("staff_id", staff.id),
+      sb.from("academic_projects").select("id,name,year,start_date").eq("responsible_staff_id", staff.id),
+      // เวรของอดีตไม่ย้าย — การย้ายเท่ากับแก้ประวัติว่าใครมาเข้าเวรจริง
+      sb.from("duty_roster").select("duty_date,staff_id,note")
+        .eq("staff_id", staff.id).gte("duty_date", todayISO()).order("duty_date")
+    ]);
+
+    for (const r of [subjects, comps, homerooms, projects, duties]) {
+      if (r && r.error) { toast("โหลดงานที่ค้างไม่สำเร็จ: " + r.error.message, true); return []; }
+    }
+
+    const out = [];
+    for (const s of subjects.data || []) {
+      out.push({ kind: "subject", id: s.id,
+        label: [s.code, s.name].filter(Boolean).join(" · "),
+        sub: [s.grade_level, s.year && ("ปี " + s.year)].filter(Boolean).join(" · ") });
+    }
+    for (const c of comps.data || []) {
+      out.push({ kind: "competency", id: c.id, label: c.name,
+        sub: [c.source_type, c.year && ("ปี " + c.year)].filter(Boolean).join(" · ") });
+    }
+    for (const h of homerooms.data || []) {
+      out.push({ kind: "homeroom", id: h.id,
+        label: h.grade_level + "/" + h.classroom, sub: "ปีการศึกษา " + h.year });
+    }
+    for (const p of projects.data || []) {
+      out.push({ kind: "project", id: p.id, label: p.name,
+        sub: [p.start_date, p.year && ("ปี " + p.year)].filter(Boolean).join(" · ") });
+    }
+    for (const d of duties.data || []) {
+      // duty_roster ใช้ PK ผสม จึงประกอบ id เองให้ log อ้างอิงกลับได้
+      out.push({ kind: "duty", id: d.duty_date + "|" + d.staff_id,
+        dutyDate: d.duty_date, label: "เวรวันที่ " + d.duty_date, sub: d.note || "" });
+    }
+    return out;
+  }
+
+  // ---------- แสดงผล ----------
+  function recipientOptions(recipientBy) {
+    // ผู้รับต้องยังทำงานอยู่ และต้องไม่ใช่คนที่กำลังส่งมอบ
+    return allStaff.filter(s =>
+      s.is_active && s.id !== currentStaff.id && (recipientBy === "staff" || s.user_id));
+  }
+
+  function render() {
+    elGroups.innerHTML = "";
+    if (!items.length) {
+      elGroups.innerHTML = "<div class='empty'>ไม่มีงานค้างที่ต้องส่งมอบแล้ว</div>";
+      updateTransferButton();
+      return;
+    }
+
+    for (const [kind, meta] of Object.entries(KINDS)) {
+      const rows = items.filter(i => i.kind === kind && !i.done);
+      if (!rows.length) continue;
+
+      const group = document.createElement("div");
+      group.className = "group";
+      group.innerHTML = "<div class='group-head'><span class='group-name'>" + esc(meta.label) +
+        "</span><span class='group-count'>" + rows.length + " รายการ</span></div>";
+
+      for (const item of rows) {
+        const box = document.createElement("div");
+        box.className = "item";
+        const opts = recipientOptions(meta.recipientBy);
+        // ⚠ ต้องคืนค่าที่เลือกไว้ทุกครั้งที่ render ใหม่ — หลังกดโอนแล้วมีบางรายการล้มเหลว
+        // หน้าจะ render ซ้ำ ถ้าไม่ใส่ selected กลับไป ช่องจะเด้งเป็น "ไม่โอน" ทั้งที่ item.toStaffId
+        // ยังมีค่าอยู่ → ปุ่มบอกว่า "จะโอน 1 รายการ" แต่จอโชว์ว่าไม่ได้เลือกใคร (ไม่ตรงกัน)
+        const optionHtml = ["<option value=''>— ไม่โอน (ข้ามไว้ก่อน) —</option>"]
+          .concat(opts.map(s => "<option value='" + esc(s.id) + "'" +
+            (s.id === item.toStaffId ? " selected" : "") + ">" + esc(s.full_name) + "</option>"))
+          .join("");
+        box.innerHTML =
+          "<div><div class='item-label'>" + esc(item.label) + "</div>" +
+          (item.sub ? "<div class='item-sub'>" + esc(item.sub) + "</div>" : "") +
+          (item.result ? "<div class='item-result " + (item.ok ? "ok" : "err") + "'>" +
+             esc(item.result) + "</div>" : "") +
+          "</div>" +
+          "<select class='wide' data-item='" + esc(item.kind + ":" + item.id) + "'>" + optionHtml + "</select>";
+        if (item.result && !item.ok) box.classList.add("failed");
+        group.appendChild(box);
+      }
+      elGroups.appendChild(group);
+    }
+
+    elGroups.querySelectorAll("select[data-item]").forEach(sel => {
+      sel.addEventListener("change", () => {
+        const it = items.find(i => (i.kind + ":" + i.id) === sel.dataset.item);
+        if (it) it.toStaffId = sel.value || null;
+        updateTransferButton();
+      });
+    });
+    updateTransferButton();
+  }
+
+  function updateTransferButton() {
+    const picked = items.filter(i => !i.done && i.toStaffId).length;
+    elBtnTransfer.disabled = picked === 0;
+    elHint.textContent = picked === 0
+      ? "เลือกผู้รับอย่างน้อย 1 รายการก่อน"
+      : "จะโอน " + picked + " รายการ";
+  }
+
+  // ---------- โอนจริง ----------
+  // ⚠ เขียนหลายตารางจาก JS = ไม่ atomic โดยธรรมชาติ → ทำทีละรายการ บันทึก log ทีละรายการ
+  //   และรายงานผลรายบรรทัด ให้กดซ้ำเฉพาะอันที่ค้างได้ (แนวเดียวกับ rollover.html)
+  async function transferOne(item, toStaff) {
+    const meta = KINDS[item.kind];
+    let error = null;
+
+    if (item.kind === "subject") {
+      ({ error } = await sb.from("subjects").update({ owner_id: toStaff.user_id }).eq("id", item.id));
+    } else if (item.kind === "competency") {
+      ({ error } = await sb.from("competency_assessments")
+        .update({ owner_id: toStaff.user_id }).eq("id", item.id));
+    } else if (item.kind === "homeroom") {
+      ({ error } = await sb.from("homeroom_teachers")
+        .update({ staff_id: toStaff.id }).eq("id", item.id));
+    } else if (item.kind === "project") {
+      // อัปเดตชื่อผู้รับผิดชอบคู่กันเสมอ ไม่งั้นหน้าโครงการจะโชว์ชื่อคนเดิมที่ออกไปแล้ว
+      ({ error } = await sb.from("academic_projects")
+        .update({ responsible_staff_id: toStaff.id, responsible_name: toStaff.full_name })
+        .eq("id", item.id));
+    } else if (item.kind === "duty") {
+      ({ error } = await sb.from("duty_roster").update({ staff_id: toStaff.id })
+        .eq("duty_date", item.dutyDate).eq("staff_id", currentStaff.id));
+    }
+
+    if (error) {
+      // 23505 = ชนคีย์ซ้ำ: ผู้รับมีเวรวันนั้นอยู่แล้ว หรือเป็นครูประจำชั้นห้องนั้นอยู่แล้ว
+      if (error.code === "23505") return { ok: false, msg: "ผู้รับมีรายการนี้อยู่แล้ว จึงข้ามให้" };
+      return { ok: false, msg: "ไม่สำเร็จ: " + error.message };
+    }
+
+    const { error: logError } = await sb.from("ownership_transfers").insert({
+      asset_kind: meta.logKind,
+      asset_id: String(item.id),
+      asset_label: item.label,
+      from_staff_id: currentStaff.id,
+      to_staff_id: toStaff.id
+    });
+    if (logError) return { ok: true, msg: "โอนแล้ว แต่บันทึกประวัติไม่สำเร็จ: " + logError.message };
+    return { ok: true, msg: "โอนให้ " + toStaff.full_name + " แล้ว" };
+  }
+
+  elBtnTransfer.addEventListener("click", async () => {
+    const targets = items.filter(i => !i.done && i.toStaffId);
+    if (!targets.length) return;
+    if (!confirm("โอน " + targets.length + " รายการจาก " + currentStaff.full_name + " ใช่ไหม")) return;
+
+    elBtnTransfer.disabled = true;
+    let okCount = 0;
+    for (const item of targets) {
+      const toStaff = allStaff.find(s => s.id === item.toStaffId);
+      if (!toStaff) { item.result = "ไม่พบผู้รับ"; item.ok = false; continue; }
+      const res = await transferOne(item, toStaff);
+      item.result = res.msg;
+      item.ok = res.ok;
+      if (res.ok) { item.done = true; okCount++; }
+    }
+    toast(okCount === targets.length
+      ? "โอนครบ " + okCount + " รายการแล้ว"
+      : "โอนสำเร็จ " + okCount + " จาก " + targets.length + " รายการ — ดูรายละเอียดในแต่ละแถว",
+      okCount !== targets.length);
+
+    items = items.filter(i => !i.done || !i.ok);
+    render();
+    await loadHistory();
+  });
+
+  // ---------- ปิด/เปิดล็อกอิน ----------
+  async function setLogin(enabled) {
+    if (!currentStaff) return;
+    if (!currentStaff.user_id) {
+      toast("ครูคนนี้ไม่มีบัญชีล็อกอินในระบบ จึงไม่ต้องปิด", true);
+      return;
+    }
+    const remaining = items.filter(i => !i.done).length;
+    if (!enabled && remaining > 0 &&
+        !confirm("ยังมีงานค้างอยู่ " + remaining + " รายการ ถ้าปิดล็อกอินตอนนี้จะไม่มีใครดูแลงานพวกนั้น\n\nยืนยันปิดการล็อกอินของ " + currentStaff.full_name + " หรือไม่")) return;
+    if (!enabled && remaining === 0 &&
+        !confirm("ปิดการล็อกอินของ " + currentStaff.full_name + " ใช่ไหม (กดเปิดคืนได้ภายหลัง)")) return;
+
+    try {
+      await setUserLoginEnabled(currentStaff.user_id, enabled);
+      toast(enabled
+        ? "เปิดการล็อกอินของ " + currentStaff.full_name + " แล้ว"
+        : "ปิดการล็อกอินของ " + currentStaff.full_name + " แล้ว");
+    } catch (e) {
+      toast(e.message || String(e), true);
+    }
+  }
+  el("btn-disable").addEventListener("click", () => setLogin(false));
+  el("btn-enable").addEventListener("click", () => setLogin(true));
+
+  // ---------- ประวัติการโอน ----------
+  async function loadHistory() {
+    const { data, error } = await sb.from("ownership_transfers")
+      .select("asset_kind,asset_label,to_staff_id,transferred_at")
+      .eq("from_staff_id", currentStaff.id)
+      .order("transferred_at", { ascending: false });
+    if (error) { elHistory.innerHTML = "<div class='empty'>โหลดประวัติไม่สำเร็จ</div>"; return; }
+    if (!data || !data.length) {
+      elHistory.innerHTML = "<div class='empty'>ยังไม่มีการโอนของครูคนนี้</div>";
+      return;
+    }
+    const nameOf = (id) => (allStaff.find(s => s.id === id) || {}).full_name || "(ไม่ทราบชื่อ)";
+    elHistory.innerHTML = "<ul class='history'>" + data.map(r =>
+      "<li><b>" + esc(r.asset_kind) + "</b> · " + esc(r.asset_label) +
+      " → " + esc(nameOf(r.to_staff_id)) +
+      " <span class='item-sub'>(" + esc(new Date(r.transferred_at).toLocaleString("th-TH")) + ")</span></li>"
+    ).join("") + "</ul>";
+  }
+
+  // ---------- เลือกครู ----------
+  elStaff.addEventListener("change", async () => {
+    currentStaff = allStaff.find(s => s.id === elStaff.value) || null;
+    if (!currentStaff) { elAssets.style.display = "none"; return; }
+
+    elGroups.innerHTML = "<div class='empty'>กำลังโหลด…</div>";
+    elAssets.style.display = "";
+    items = await loadAssets(currentStaff);
+    render();
+    await loadHistory();
+
+    const noAccount = !currentStaff.user_id;
+    el("btn-disable").disabled = noAccount;
+    el("btn-enable").disabled = noAccount;
+    el("login-note").innerHTML = noAccount
+      ? "<b>ครูคนนี้ไม่มีบัญชีล็อกอินผูกไว้</b><br>จึงไม่มีอะไรต้องปิด และไม่มีวิชา/กิจกรรมที่ผูกกับบัญชีของเขา"
+      : "<b>ปิดการล็อกอินเมื่อส่งมอบงานครบแล้วเท่านั้น</b><br>ครูที่ยังถือวิชาอยู่แล้วถูกปิดล็อกอิน จะไม่มีใครแก้คะแนนวิชานั้นได้นอกจากผู้ดูแลระบบ";
+  });
+
+  // ---------- เริ่มทำงาน ----------
+  (async () => {
+    const session = await requireAuth();
+    if (!session) return;
+    const profile = await getProfile(session.user.id);
+    if (!profile || profile.role !== "admin") {
+      elGate.style.display = "";
+      elGateMsg.innerHTML = "<b>หน้านี้สำหรับผู้ดูแลระบบ (admin) เท่านั้น</b><br>การโอนความเป็นเจ้าของงานข้ามฝ่าย ทำได้เฉพาะผู้ดูแลระบบ";
+      return;
+    }
+    await loadStaff();
+    elMain.style.display = "";
+  })();
+</script>
+</body>
+</html>

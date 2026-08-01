@@ -166,8 +166,8 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble, getLastSyncLog,
-         applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-         getStaffPositions } from "../supabase-client.js?v=20260728-1";
+         applyPersonnelMenuAccess, personnelAccessDeniedHtml, getProfile,
+         getStaffPositions } from "../supabase-client.js?v=20260801-1";
 
 const session = await requireAuth();
 if (session) {
@@ -189,6 +189,10 @@ if (session) {
 
   // สิทธิ์แก้ไขถามจากฐานข้อมูลด้วยฟังก์ชันตัวเดียวกับที่ RLS ใช้ → ตรงกับความจริงเสมอ
   const canEdit = await checkDepartment("บุคลากร");
+  // การส่งมอบงานโอนความเป็นเจ้าของข้ามฝ่าย (วิชา/สมรรถนะ/ประจำชั้น/โครงการ/เวร)
+  // จึงเป็นของ admin เท่านั้น — ฝ่ายบุคคลทำได้จริงแค่ 1 ใน 5 จุดตาม RLS
+  const myProfile = await getProfile(session.user.id);
+  const isAdminUser = !!myProfile && myProfile.role === "admin";
   applyPersonnelMenuAccess(canEdit);
   // ทะเบียนบุคลากรเป็นข้อมูลส่วนบุคคลของคนอื่น ครูทั่วไปจึงเข้าไม่ได้เลย ไม่ใช่แค่แก้ไม่ได้
   if (!canEdit) {
@@ -310,6 +314,10 @@ if (session) {
       const positionText = sortedPositionCodes(selectedCodes).join(" · ");
       const chips = [];
       if (!s.is_active) chips.push('<span class="chip off">ออกแล้ว</span>');
+      // ทางเข้าหน้าส่งมอบงาน — โผล่ตรงจุดที่คนเห็นก่อนใครว่ามีคนออก (admin เท่านั้น)
+      if (!s.is_active && isAdminUser) {
+        chips.push(`<a class="chip" href="../handover.html">ส่งมอบงาน →</a>`);
+      }
       if (s.exempt) chips.push('<span class="chip exempt">อนุโลม</span>');
       if (s.allowed_late_time) chips.push(`<span class="chip late">อนุโลมถาวร ${String(s.allowed_late_time).slice(0,5)}</span>`);
       if (!s.jibble_person_id) chips.push('<span class="chip nojibble">ไม่มีใน Jibble</span>');

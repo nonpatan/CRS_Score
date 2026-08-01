@@ -155,6 +155,31 @@ export async function syncJibble(scope, options = {}) {
   return data;
 }
 
+// ------------------------------------------------------------
+// ปิด/เปิดการล็อกอินของบัญชีครูที่ลาออก ผ่าน Edge Function "disable-user"
+// service_role key อยู่ฝั่ง server เท่านั้น — หน้าเว็บไม่เคยเห็น (repo เป็น public)
+//
+// การแบนเกิดที่ชั้น Auth ซึ่งอยู่ "ก่อน" RLS → ไม่ต้องแก้ policy ของตารางไหนเลย
+// enabled = true  → เปิดให้ล็อกอินได้ตามปกติ
+// enabled = false → ล็อกอินไม่ได้ทันที (กดคืนได้เสมอ ไม่ใช่การลบบัญชี)
+// ------------------------------------------------------------
+export async function setUserLoginEnabled(userId, enabled) {
+  const { data, error } = await sb.functions.invoke("disable-user", {
+    body: { userId, action: enabled ? "enable" : "disable" }
+  });
+  if (error) {
+    // ข้อความจริงของ error อยู่ในเนื้อ response ไม่ใช่ error.message ("non-2xx status")
+    let detail = error.message || String(error);
+    try {
+      const body = await error.context?.json();
+      if (body?.error) detail = body.error;
+    } catch { /* อ่านเนื้อไม่ได้ก็ใช้ข้อความเดิม */ }
+    throw new Error(detail);
+  }
+  if (data && data.ok === false) throw new Error(data.error || "ทำรายการไม่สำเร็จ");
+  return data;
+}
+
 // สถานะการซิงก์ล่าสุด — serverless พังเงียบได้ หน้าเว็บต้องแสดงให้เห็น
 export async function getLastSyncLog(scope = null) {
   let q = sb.from("jibble_sync_log").select("*").order("started_at", { ascending: false }).limit(1);
