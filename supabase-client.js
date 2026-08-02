@@ -1848,14 +1848,21 @@ export async function loadWorkContext(from, to) {
   const dutyTypes = dutyTypeRes.data || [];
   const dutyTypeByCode = new Map(dutyTypes.map(row => [row.code, row]));
   const attendanceDutyByKey = new Map();
+  const dutySubstituteOnlyByKey = new Map();
   for (const row of (dutyRes.data || [])) {
     const type = dutyTypeByCode.get(row.duty_type);
     if (!type?.affects_attendance || !type.start_time) continue;
-    attendanceDutyByKey.set(row.staff_id + "|" + row.duty_date, {
+    const key = row.staff_id + "|" + row.duty_date;
+    attendanceDutyByKey.set(key, {
       ...row,
       start_time: type.start_time
     });
+    dutySubstituteOnlyByKey.set(key,
+      (dutySubstituteOnlyByKey.get(key) ?? true) && isCoverageDutyRow(row));
   }
+  const dutySubstituteOnlyKeys = new Set(
+    [...dutySubstituteOnlyByKey].filter(([, substituteOnly]) => substituteOnly).map(([key]) => key)
+  );
 
   return {
     staff: staffRes.data || [],
@@ -1870,6 +1877,7 @@ export async function loadWorkContext(from, to) {
     dutyTypeByCode,
     attendanceDutyByKey,
     dutyByKey: new Set(attendanceDutyByKey.keys()),
+    dutySubstituteOnlyKeys,
     settings
   };
 }
@@ -1965,7 +1973,7 @@ export function summarizeStaff(staff, from, to, ctx) {
   const sum = {
     staff, workDays: 0, present: 0, late: 0, lateMinutes: 0, absent: 0,
     leaveDays: 0, leaveByType: {}, offsiteDays: 0, pendingDays: 0,
-    dutyDays: 0, dutyLate: 0, dutyMissed: 0,
+    dutyDays: 0, dutySubstituteDays: 0, dutyLate: 0, dutyMissed: 0,
     permitRequested: (ctx.latePermissions || []).filter(p =>
       p.staff_id === staff.id && from <= p.permit_date && p.permit_date <= to).length,
     permitUsed: 0, rows: []
@@ -1978,6 +1986,7 @@ export function summarizeStaff(staff, from, to, ctx) {
     // ไม่งั้น "วันเวร N" จะบวกวันที่ไม่มีใครต้องมารับนักเรียนจริง
     if (r.onDuty && r.status !== "holiday") {
       sum.dutyDays++;
+      if (ctx.dutySubstituteOnlyKeys?.has(staff.id + "|" + d)) sum.dutySubstituteDays++;
       if (r.status === "late") sum.dutyLate++;
       if (r.status === "leave" || r.status === "offsite" || r.status === "absent") sum.dutyMissed++;
     }
@@ -2008,6 +2017,27 @@ export function summarizeAll(from, to, ctx, { activeOnly = true } = {}) {
   return ctx.staff
     .filter(s => !activeOnly || s.is_active)
     .map(s => summarizeStaff(s, from, to, ctx));
+}
+
+// สรุปจำนวนงานที่บุคลากรถูกจัดให้ไปแทนในช่วงที่เลือก
+// coverage_assignments เก็บ 1 แถวต่อ (วัน x งาน) จึงนับเป็น "งาน" ไม่ใช่จำนวนคาบ
+export async function loadCoverageStats(from, to) {
+  const { data, error } = await sb.from("coverage_assignments")
+    .select("substitute_staff_id,kind,cover_date")
+    .gte("cover_date", from)
+    .lte("cover_date", to);
+  if (error) throw new Error("โหลดข้อมูลงานแทนไม่สำเร็จ: " + error.message);
+
+  const stats = new Map();
+  for (const row of data || []) {
+    if (!stats.has(row.substitute_staff_id)) {
+      stats.set(row.substitute_staff_id, { "วิชา": 0, "ครูประจำชั้น": 0, "เวร": 0, total: 0 });
+    }
+    const sum = stats.get(row.substitute_staff_id);
+    if (Object.prototype.hasOwnProperty.call(sum, row.kind)) sum[row.kind]++;
+    sum.total++;
+  }
+  return stats;
 }
 
 // ---------- ปีการศึกษา ----------

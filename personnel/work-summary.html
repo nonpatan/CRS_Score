@@ -109,12 +109,25 @@
         <label for="mode">รอบ</label>
         <select id="mode">
           <option value="month">รายเดือน</option>
+          <option value="range">สะสมตามช่วงเดือน</option>
           <option value="year">สะสมทั้งปีการศึกษา</option>
         </select>
       </div>
       <div class="field" id="month-field">
         <label for="month">เดือน</label>
         <input id="month" type="month">
+      </div>
+      <div class="field" id="range-field" style="display:none">
+        <div class="row2">
+          <div class="field">
+            <label for="range-from">จากเดือน</label>
+            <input id="range-from" type="month">
+          </div>
+          <div class="field">
+            <label for="range-to">ถึงเดือน</label>
+            <input id="range-to" type="month">
+          </div>
+        </div>
       </div>
       <div class="field" id="year-field" style="display:none">
         <label for="year">ปีการศึกษา</label>
@@ -138,7 +151,7 @@
         <div class="stat bad"><b id="s-absent">—</b><span>ขาด (วัน)</span></div>
         <div class="stat warn"><b id="s-leave">—</b><span>ลา (วัน)</span></div>
         <div class="stat"><b id="s-offsite">—</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
-        <div class="stat"><b id="s-duty">—</b><span>เวร (วัน)</span></div>
+        <div class="stat"><b id="s-duty">—</b><span id="s-duty-label">เวร (วัน)</span></div>
         <div class="stat warn"><b id="s-duty-late">—</b><span>สายเวร</span></div>
         <div class="stat bad"><b id="s-duty-missed">—</b><span>พลาดเวร</span></div>
       </div>
@@ -151,11 +164,12 @@
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>ชื่อ</th><th>วันทำงาน</th><th>มา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ออกนอกสถานที่</th><th>เวร</th><th>ขอเข้าสาย</th></tr></thead>
+          <thead><tr><th>ชื่อ</th><th>วันทำงาน</th><th>มา</th><th>สาย</th><th>ขาด</th><th>ลา</th><th>ออกนอกสถานที่</th><th>เวร</th><th>ไปแทน</th><th>ขอเข้าสาย</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
       <div class="field-note">แตะที่ชื่อเพื่อดูรายวันของคนนั้น</div>
+      <div class="field-note">“เวร” นับเป็นวัน และนับเฉพาะงานเวรที่ผูกเกณฑ์เข้างาน · “ไปแทน” นับเป็นงาน รวมงานเวรทุกชนิด — วิชาเดียวกันในวันเดียวกันนับ 1 ครั้ง สองคอลัมน์นี้จึงไม่เท่ากันเป็นปกติ</div>
     </div>
 
     <div id="detail-card" class="card" style="display:none">
@@ -172,9 +186,9 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-         loadWorkContext, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, getDutyTypes,
-         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260728-2";
+         loadWorkContext, loadCoverageStats, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
+         getAcademicYears, academicYearRange, academicYearOf, getDutyTypes,
+         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260802-3";
 
 const session = await requireAuth();
 if (session) {
@@ -203,7 +217,7 @@ if (session) {
     box.innerHTML = personnelAccessDeniedHtml();
     document.querySelector(".wrap").appendChild(box);
   } else {
-  let years = [], summaries = [], ctx = null;
+  let years = [], summaries = [], ctx = null, coverageStats = new Map();
   let attendanceDutyName = "งานที่ผูกเกณฑ์เข้างาน";
 
   [years, attendanceDutyName] = await Promise.all([
@@ -214,17 +228,25 @@ if (session) {
   el("report-description").textContent =
     `ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
   el("year").innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
-  el("month").value = toDateStr(bangkokNow()).slice(0, 7);
+  const today = toDateStr(bangkokNow());
+  const currentMonth = today.slice(0, 7);
+  const currentAcademicYear = academicYearOf(today, years);
+  const currentAcademicYearRow = years.find(y => y.year === currentAcademicYear);
+  el("month").value = currentMonth;
+  el("range-from").value = currentAcademicYearRow?.start_date.slice(0, 7) || currentMonth;
+  el("range-to").value = currentMonth;
 
   el("mode").addEventListener("change", () => {
-    const isYear = el("mode").value === "year";
-    el("month-field").style.display = isYear ? "none" : "";
-    el("year-field").style.display = isYear ? "" : "none";
+    const mode = el("mode").value;
+    el("month-field").style.display = mode === "month" ? "" : "none";
+    el("range-field").style.display = mode === "range" ? "" : "none";
+    el("year-field").style.display = mode === "year" ? "" : "none";
   });
 
   // ---------- หาช่วงวันที่ตามรอบที่เลือก ----------
   function currentRange() {
-    if (el("mode").value === "year") {
+    const mode = el("mode").value;
+    if (mode === "year") {
       const y = el("year").value;
       if (!y) return null;
       const r = academicYearRange(y, years);
@@ -232,6 +254,32 @@ if (session) {
       // ไม่ต้องคิดเลยวันนี้ (อนาคตยังไม่มีข้อมูล)
       const today = toDateStr(bangkokNow());
       return { from: r.start, to: r.end > today ? today : r.end, label: `ปีการศึกษา ${y}` };
+    }
+    if (mode === "range") {
+      const fromMonth = el("range-from").value;
+      const toMonth = el("range-to").value;
+      if (!fromMonth || !toMonth) return null;
+      if (fromMonth > toMonth) {
+        toast("เดือนเริ่มต้องไม่เกินเดือนสิ้นสุด", true);
+        return null;
+      }
+      const [yy, mm] = toMonth.split("-").map(Number);
+      const monthEnd = new Date(Date.UTC(yy, mm, 0)).toISOString().slice(0, 10);
+      const today = toDateStr(bangkokNow());
+      const firstDay = fromMonth + "-01";
+      const academicYearStartingInMonth = years.find(y =>
+        y.start_date.slice(0, 7) === fromMonth);
+      // เดือนเปิดปีการศึกษาเริ่มนับจากวันเปิดเทอมจริง ไม่สร้างวันขาดก่อนเปิดเทอม
+      const from = academicYearStartingInMonth?.start_date || firstDay;
+      const fromLabel = new Date(fromMonth + "-01T00:00:00Z")
+        .toLocaleDateString("th-TH", { month: "long", year: "numeric", timeZone: "UTC" });
+      const toLabel = new Date(toMonth + "-01T00:00:00Z")
+        .toLocaleDateString("th-TH", { month: "long", year: "numeric", timeZone: "UTC" });
+      return {
+        from,
+        to: monthEnd > today ? today : monthEnd,
+        label: fromMonth === toMonth ? fromLabel : `${fromLabel} – ${toLabel}`
+      };
     }
     const m = el("month").value;
     if (!m) return null;
@@ -283,13 +331,22 @@ if (session) {
   // ---------- แสดงรายงาน ----------
   async function loadReport(force) {
     const range = currentRange();
-    if (!range) { toast("กรุณาเลือกรอบรายงาน", true); return; }
+    if (!range) {
+      const reverseRange = el("mode").value === "range" &&
+        el("range-from").value && el("range-to").value &&
+        el("range-from").value > el("range-to").value;
+      if (!reverseRange) toast("กรุณาเลือกรอบรายงาน", true);
+      return;
+    }
     el("btn-load").disabled = true; el("btn-resync").disabled = true;
     el("status").textContent = "กำลังเตรียมข้อมูล…";
     try {
       await ensureSynced(range, force);
       el("status").textContent = "กำลังคำนวณ…";
-      ctx = await loadWorkContext(range.from, range.to);
+      [ctx, coverageStats] = await Promise.all([
+        loadWorkContext(range.from, range.to),
+        loadCoverageStats(range.from, range.to)
+      ]);
       summaries = summarizeAll(range.from, range.to, ctx);
       const attendanceType = ctx.dutyTypes.find(type => type.affects_attendance);
       attendanceDutyName = attendanceType?.code || "งานที่ผูกเกณฑ์เข้างาน";
@@ -305,7 +362,11 @@ if (session) {
       el("s-absent").textContent = summaries.reduce((a, s) => a + s.absent, 0);
       el("s-leave").textContent = summaries.reduce((a, s) => a + s.leaveDays, 0);
       el("s-offsite").textContent = summaries.reduce((a, s) => a + s.offsiteDays, 0);
-      el("s-duty").textContent = summaries.reduce((a, s) => a + s.dutyDays, 0);
+      const totalDutySubstitute = summaries.reduce((a, s) => a + s.dutySubstituteDays, 0);
+      el("s-duty").textContent = summaries.reduce(
+        (a, s) => a + s.dutyDays - s.dutySubstituteDays, 0);
+      el("s-duty-label").textContent = "เวร (วัน)" +
+        (totalDutySubstitute > 0 ? ` · +${totalDutySubstitute} แทน` : "");
       el("s-duty-late").textContent = summaries.reduce((a, s) => a + s.dutyLate, 0);
       el("s-duty-missed").textContent = summaries.reduce((a, s) => a + s.dutyMissed, 0);
 
@@ -325,32 +386,47 @@ if (session) {
 
   // เตือนวันที่คนมาน้อยผิดปกติ — อาจเป็นวันหยุดที่ลืมตั้งใน Jibble (ไม่ตัดสินเอง ให้คนตรวจ)
   function renderAlerts(range) {
-    const active = ctx.staff.filter(s => s.is_active && !s.exempt);
-    if (active.length === 0) { el("alerts").innerHTML = ""; return; }
-    const suspicious = [];
-    for (const d of eachDate(range.from, range.to)) {
-      let working = 0, came = 0;
-      for (const s of active) {
-        const r = summaries.find(x => x.staff.id === s.id)?.rows.find(x => x.date === d);
-        if (!r || r.status === "holiday" || r.status === "pending") continue;
-        working++;
-        if (r.status === "present" || r.status === "late" ||
-            r.status === "leave" || r.status === "offsite") came++;
+    const warnings = [];
+    if (el("mode").value === "range") {
+      const fromYear = academicYearOf(range.from, years);
+      const toYear = academicYearOf(range.to, years);
+      if (fromYear !== toYear) {
+        warnings.push(`<div class="banner warn">ช่วงที่เลือกคร่อม 2 ปีการศึกษา
+          (${esc(fromYear || "ไม่พบข้อมูลปีของวันเริ่ม")} และ
+          ${esc(toYear || "ไม่พบข้อมูลปีของวันสิ้นสุด")}) ตัวเลขจึงรวมข้ามปีการศึกษา</div>`);
       }
-      if (working > 0 && came / working < 0.5) suspicious.push({ d, came, working });
     }
-    el("alerts").innerHTML = suspicious.length
-      ? `<div class="banner warn"><b>ต้องตรวจสอบ ${suspicious.length} วัน</b> — มีคนมาน้อยผิดปกติ
+    const active = ctx.staff.filter(s => s.is_active && !s.exempt);
+    const suspicious = [];
+    if (active.length > 0) {
+      for (const d of eachDate(range.from, range.to)) {
+        let working = 0, came = 0;
+        for (const s of active) {
+          const r = summaries.find(x => x.staff.id === s.id)?.rows.find(x => x.date === d);
+          if (!r || r.status === "holiday" || r.status === "pending") continue;
+          working++;
+          if (r.status === "present" || r.status === "late" ||
+              r.status === "leave" || r.status === "offsite") came++;
+        }
+        if (working > 0 && came / working < 0.5) suspicious.push({ d, came, working });
+      }
+    }
+    if (suspicious.length) {
+      warnings.push(`<div class="banner warn"><b>ต้องตรวจสอบ ${suspicious.length} วัน</b> — มีคนมาน้อยผิดปกติ
          อาจเป็นวันหยุดที่ยังไม่ได้ตั้งในปฏิทิน Jibble<br>` +
         suspicious.slice(0, 8).map(x => `${x.d} (มา ${x.came} จาก ${x.working})`).join(" · ") +
-        (suspicious.length > 8 ? " …" : "") + "</div>"
-      : "";
+        (suspicious.length > 8 ? " …" : "") + "</div>");
+    }
+    el("alerts").innerHTML = warnings.join("");
   }
 
   function renderTable() {
     const q = el("q").value.trim().toLowerCase();
     const rows = summaries.filter(s => !q || s.staff.full_name.toLowerCase().includes(q));
-    el("tbody").innerHTML = rows.length ? rows.map(s => `
+    el("tbody").innerHTML = rows.length ? rows.map(s => {
+      const coverage = coverageStats.get(s.staff.id) ||
+        { "วิชา": 0, "ครูประจำชั้น": 0, "เวร": 0, total: 0 };
+      return `
       <tr data-staff="${s.staff.id}">
         <td>${s.staff.full_name}${s.staff.exempt ? ' <span class="field-note">(อนุโลม)</span>' : ""}</td>
         <td>${s.workDays}</td><td>${s.present}</td>
@@ -362,15 +438,20 @@ if (session) {
         <td>${s.leaveDays}</td>
         <td>${s.offsiteDays}</td>
         <td>
-          <span class="cell-main">${s.dutyDays} วัน</span>
+          <span class="cell-main">${s.dutyDays - s.dutySubstituteDays} วัน${s.dutySubstituteDays > 0 ? ` (+${s.dutySubstituteDays} แทน)` : ""}</span>
           <span class="cell-sub">สาย ${s.dutyLate} · พลาด ${s.dutyMissed}</span>
+        </td>
+        <td>
+          <span class="cell-main">${coverage.total} งาน</span>
+          ${coverage.total > 0 ? `<span class="cell-sub">วิชา ${coverage["วิชา"]} · ประจำชั้น ${coverage["ครูประจำชั้น"]} · เวร ${coverage["เวร"]}</span>` : ""}
         </td>
         <td>
           <span class="cell-main">ขอ ${s.permitRequested}</span>
           <span class="cell-sub">มาทันเวลาที่อนุญาต ${s.permitUsed}</span>
         </td>
-      </tr>`).join("")
-      : '<tr><td colspan="9" class="muted-empty">ไม่พบข้อมูล</td></tr>';
+      </tr>`;
+    }).join("")
+      : '<tr><td colspan="10" class="muted-empty">ไม่พบข้อมูล</td></tr>';
   }
   el("q").addEventListener("input", renderTable);
 
@@ -389,11 +470,13 @@ if (session) {
     if (!tr) return;
     const s = summaries.find(x => x.staff.id === tr.dataset.staff);
     if (!s) return;
+    const ownDutyDays = s.dutyDays - s.dutySubstituteDays;
+    const dutySubstituteSuffix = s.dutySubstituteDays > 0 ? ` (+${s.dutySubstituteDays} แทน)` : "";
 
     el("detail-title").textContent = "รายละเอียด — " + s.staff.full_name;
     el("detail-permit").innerHTML =
       `<div class="banner info"><b>ขออนุญาตเข้าสาย:</b> ขอ ${s.permitRequested} ครั้ง · มาทันเวลาที่อนุญาต ${s.permitUsed} ครั้ง</div>
-       <div class="banner warn"><b>${esc(attendanceDutyName)}:</b> ${s.dutyDays} วัน · สายเวร ${s.dutyLate} · พลาดเวร ${s.dutyMissed}</div>`;
+       <div class="banner warn"><b>${esc(attendanceDutyName)}:</b> ${ownDutyDays} วัน${dutySubstituteSuffix} · สายเวร ${s.dutyLate} · พลาดเวร ${s.dutyMissed}</div>`;
     const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
     el("detail-stats").innerHTML = `
       <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
@@ -401,7 +484,7 @@ if (session) {
       <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
       <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
       <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
-      <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
+      <div class="stat"><b>${ownDutyDays}</b><span>วันเวร${s.dutySubstituteDays > 0 ? ` · +${s.dutySubstituteDays} แทน` : ""}</span></div>
       <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
       <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
 
