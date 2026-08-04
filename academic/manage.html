@@ -307,6 +307,10 @@
       <select id="sel-add-student"></select>
       <button class="ghost" id="btn-add-student">+ เพิ่มทีละคน</button>
     </div>
+    <label id="lbl-all-stages" style="display:none; align-items:center; gap:6px; margin-top:8px; font-size:13px; cursor:pointer">
+      <input type="checkbox" id="chk-all-stages" style="width:auto; margin:0">
+      แสดงนักเรียนทุกช่วงชั้น (ปกติแสดงเฉพาะช่วงชั้นเดียวกับวิชานี้)
+    </label>
   </div>
 
   <!-- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) -->
@@ -386,6 +390,8 @@ const elEnrollCard   = document.getElementById("enroll-card");
 const elEnrollList   = document.getElementById("enroll-list");
 const elSelBulkClassroom = document.getElementById("sel-bulk-classroom");
 const elSelAddStudent = document.getElementById("sel-add-student");
+const elChkAllStages  = document.getElementById("chk-all-stages");
+const elLblAllStages  = document.getElementById("lbl-all-stages");
 const elMembersCard  = document.getElementById("members-card");
 const elEmptyHint    = document.getElementById("empty-hint");
 const elToast        = document.getElementById("toast");
@@ -1209,6 +1215,8 @@ let allStudentsForEnroll = [];
 let currentEnrollments = [];
 
 async function loadEnrollments() {
+  // เปลี่ยนวิชา = เริ่มจากกรองตามช่วงชั้นของวิชาใหม่เสมอ ไม่ค้างค่าติ๊กจากวิชาก่อนหน้า
+  elChkAllStages.checked = false;
   // ดึงเฉพาะนักเรียนที่ยัง active (ยังไม่จบ) มาเป็น "รายชื่อให้เพิ่มเข้าวิชา" — เด็กจบแล้วไม่ต้องเสนอให้ลงทะเบียนใหม่
   // (รายชื่อที่ลงทะเบียนอยู่แล้วแสดงจาก currentEnrollments ต่างหาก เด็กจบที่เคยลงไว้ยังเห็นได้)
   const { data: students, error: stuErr } = await sb.from("students").select("*").eq("graduated", false).eq("left_school", false).order("grade_level").order("classroom").order("student_no");
@@ -1265,13 +1273,66 @@ function renderEnrollments() {
     elEnrollList.appendChild(row);
   }
 
-  // dropdown เพิ่มทีละคน — ทุกคนที่ยังไม่ได้ลงทะเบียน ไม่จำกัดชั้น/ห้อง (เผื่อนักเรียนซ้ำชั้น)
-  const candidates = allStudentsForEnroll.filter(s => !enrolledIds.has(s.id));
-  const label = s => s.name + "  (รหัสประจำตัว " + s.student_no + (s.classroom ? " · " + (s.grade_level || "") + "/" + s.classroom : "") + ")";
-  fillSelect(elSelAddStudent, candidates, label, "— เลือกนักเรียน —");
+  // dropdown เพิ่มทีละคน — ตั้งต้นแสดงเฉพาะช่วงชั้นเดียวกับวิชานี้ แล้วแยกกลุ่มตามห้อง
+  // เดิมแสดงทั้งโรงเรียนในรายการเดียว หาไม่เจอเมื่อนักเรียนเยอะ (ผู้ใช้แจ้ง 2026-08-04)
+  // ⚠️ ยังต้องข้ามช่วงชั้นได้ผ่าน checkbox — เดิมจงใจไม่จำกัดชั้น เผื่อเด็กซ้ำชั้น/ติด มส.
+  // ที่ต้องเรียนร่วมห้องอื่น (เช่น ม.1 เรียนซ่อมวิชา ป.6 ซึ่งอยู่คนละช่วงชั้น)
+  const subjectStage = competencyStageForGrade(currentSubject.grade_level);
+  const showAllStages = elChkAllStages.checked || !subjectStage;
+  const candidates = allStudentsForEnroll.filter(s =>
+    !enrolledIds.has(s.id) &&
+    (showAllStages || competencyStageForGrade(s.grade_level) === subjectStage)
+  );
+  fillStudentSelectGrouped(elSelAddStudent, candidates, "— เลือกนักเรียน —");
   document.getElementById("btn-add-student").style.display = canEdit ? "inline-block" : "none";
   elSelAddStudent.style.display = canEdit ? "block" : "none";
+  // ซ่อน checkbox เมื่อวิชายังไม่ได้ตั้งชั้นปี (ไม่รู้ช่วงชั้น เลยแสดงทุกคนอยู่แล้ว)
+  elLblAllStages.style.display = (canEdit && subjectStage) ? "flex" : "none";
 }
+
+// ดรอปดาวน์เลือกนักเรียนแบบแยกกลุ่มตามชั้น/ห้อง — แยกจาก fillSelect() เพราะดรอปดาวน์อื่น
+// อีกหลายตัวใช้ fillSelect อยู่ ไม่ควรไปเปลี่ยนพฤติกรรมร่วม
+function fillStudentSelectGrouped(el, students, placeholder) {
+  el.innerHTML = "";
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholder;
+  el.appendChild(opt0);
+
+  // จัดกลุ่มตามห้อง แล้วเรียงกลุ่มตาม GRADE_ORDER ก่อน ค่อยเรียงชื่อห้อง
+  // (ห้ามเรียงด้วยตัวอักษรล้วน ไม่งั้น ป.10 จะมาก่อน ป.2 ถ้าโรงเรียนเพิ่มห้องเลขสองหลัก)
+  const groups = new Map(); // key -> { grade, classroom, students: [] }
+  for (const s of students) {
+    const key = (s.grade_level || "") + "/" + (s.classroom || "");
+    if (!groups.has(key)) groups.set(key, { grade: s.grade_level || "", classroom: s.classroom || "", students: [] });
+    groups.get(key).students.push(s);
+  }
+  const sorted = [...groups.values()].sort((a, b) => {
+    const ga = GRADE_ORDER.indexOf(a.grade), gb = GRADE_ORDER.indexOf(b.grade);
+    // ชั้นที่ไม่รู้จัก (รวมคนที่ยังไม่กำหนดชั้น/ห้อง) ไปท้ายสุดเสมอ
+    if (ga !== gb) return (ga === -1 ? 99 : ga) - (gb === -1 ? 99 : gb);
+    return String(a.classroom).localeCompare(String(b.classroom), "th", { numeric: true });
+  });
+
+  for (const g of sorted) {
+    const og = document.createElement("optgroup");
+    const name = g.grade && g.classroom ? g.grade + "/" + g.classroom : (g.grade || "ยังไม่กำหนดห้อง");
+    og.label = name + " (" + g.students.length + " คน)";
+    for (const s of g.students) {
+      const o = document.createElement("option");
+      o.value = s.id;
+      // ไม่ต้องซ้ำชั้น/ห้องในตัวเลือก เพราะอยู่ที่ป้ายกลุ่มแล้ว
+      o.textContent = s.name + "  (รหัสประจำตัว " + s.student_no + ")";
+      og.appendChild(o);
+    }
+    el.appendChild(og);
+  }
+}
+
+// ติ๊ก/ปลดติ๊ก "ทุกช่วงชั้น" = วาดดรอปดาวน์ใหม่เท่านั้น ไม่ต้องโหลดข้อมูลซ้ำ
+elChkAllStages.addEventListener("change", () => {
+  if (currentSubject) renderEnrollments();
+});
 
 document.getElementById("btn-bulk-add-classroom").addEventListener("click", async () => {
   const classroom = elSelBulkClassroom.value;

@@ -84,6 +84,8 @@
     margin: 0 6px 6px 0;
   }
   .chip.active { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); font-weight: 600; }
+  /* ปุ่มลบครั้งที่เช็ค — แยกสีให้เห็นชัดว่าเป็นงานที่ย้อนกลับไม่ได้ */
+  .chip-danger { color: var(--danger, #a32d2d); border-color: var(--danger, #a32d2d); background: var(--danger-soft, #fff0f0); }
   select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .field { margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
@@ -219,7 +221,7 @@
     </div>
     <div class="field" id="field-periods">
       <label for="inp-periods">จำนวนคาบที่ครั้งนี้ครอบคลุม</label>
-      <input type="number" id="inp-periods" min="1" step="1" placeholder="ต้องกรอก เช่น 2">
+      <input type="number" id="inp-periods" min="0.5" step="0.5" placeholder="ต้องกรอก เช่น 2 หรือ 1.5">
     </div>
     <div class="field">
       <label for="inp-date">วันที่เช็คชื่อ</label>
@@ -277,7 +279,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor } from "../supabase-client.js?v=20260801-2";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor } from "../supabase-client.js?v=20260804-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -303,8 +305,39 @@ function canEditMakeup(subj) {
   return !!subj && (isAdminUser || subj.owner_id === session.user.id);
 }
 
+// สิทธิ์ลบครั้งที่เช็คชื่อ = เจ้าของวิชา/admin เท่านั้น ให้ตรงกับ policy attendance_sessions_delete
+// ที่ใช้ can_edit_subject() เดี่ยว ๆ (schema.sql:549) — migration คนสอนแทน (2026-08-01)
+// จงใจไม่ขยายสิทธิ์ delete ให้คนแทน (schema.sql:3231) คนแทนจึงเช็ค/แก้ได้ แต่ลบไม่ได้
+function canDeleteSession(subj) {
+  return !!subj && (isAdminUser || subj.owner_id === session.user.id);
+}
+
 // สถานะเช็คชื่อที่เลือกได้ทั้งหมด (ต้องตรงกับ check constraint ใน schema.sql)
 const STATUS_OPTIONS = ["มา", "ขาด", "ลาป่วย", "ลากิจ", "มาสาย"];
+
+// ---------- ตัวช่วยเรื่องจำนวนคาบ/วันที่ (ประกาศไว้บนสุดก่อนทุกฟังก์ชันที่เรียกใช้) ----------
+
+// จำนวนคาบต้องมากกว่า 0 และเป็นจำนวนเต็มหรือครึ่งคาบเท่านั้น (0.5, 1, 1.5, 2, ...)
+// step="0.5" ของ input[type=number] ไม่ได้บล็อกการพิมพ์ ค่าอย่าง 0.3 ยังหลุดเข้า DB ได้
+const PERIODS_HINT = "กรอกจำนวนคาบให้ถูกต้องก่อน (มากกว่า 0 และเป็นครึ่งคาบ เช่น 0.5, 1, 2.5)";
+function isValidPeriods(v) {
+  return !isNaN(v) && v > 0 && (v * 2) % 1 === 0;
+}
+
+// แสดงจำนวนคาบให้อ่านง่าย — periods_covered เป็น numeric(4,1) ตั้งแต่ 2026-08-04
+// ถ้า client ได้ค่ามาเป็น "2.0" ต้องโชว์ "2 คาบ" ไม่ใช่ "2.0 คาบ" · ครึ่งคาบยังเห็นเป็น 2.5 ตามเดิม
+function fmtPeriods(v) {
+  const n = Number(v);
+  return isNaN(n) ? String(v) : String(n);
+}
+
+// วันที่แบบไทยไว้ใช้ในกล่องยืนยัน — ช่องวันที่โชว์ "4 ส.ค. 2569" (พ.ศ.) อยู่แล้ว
+// ถ้ากล่องยืนยันขึ้น 2026-08-04 (ค.ศ.) ครูจะสะดุดว่าใช่วันเดียวกันหรือเปล่า
+function fmtDateTH(iso) {
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m || !d) return String(iso);
+  return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+}
 
 // อ้างอิง element ที่ใช้บ่อย
 const elFilterYear   = document.getElementById("filter-year");
@@ -581,7 +614,7 @@ async function loadMemberOptions(integratedId) {
     num.type = "number";
     num.className = "member-periods";
     num.dataset.id = m.id;
-    num.min = "1"; num.step = "1";
+    num.min = "0.5"; num.step = "0.5";
     num.value = "";
     num.placeholder = "คาบ";
     num.disabled = !hasStudents;
@@ -611,8 +644,8 @@ function getTickedMembers() {
     if (!m) continue;
     const num = elMemberList.querySelector(".member-periods[data-id='" + m.id + "']");
     const periods = Number(num && num.value);
-    if (isNaN(periods) || periods <= 0) {
-      showToast("กรอกจำนวนคาบของ \"" + m.name + "\" ให้ถูกต้องก่อน (ต้องมากกว่า 0)", false);
+    if (!isValidPeriods(periods)) {
+      showToast("วิชา \"" + m.name + "\": " + PERIODS_HINT, false);
       return null;
     }
     result.push({ id: m.id, name: m.name, owner_id: m.owner_id, periods: periods });
@@ -781,7 +814,7 @@ elClassroom.addEventListener("change", () => {
 // ---------- โหมดวิชาเดียว: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน) ----------
 async function loadPlainSubjectDay() {
   const periods = readCurrentPeriods();
-  if (isNaN(periods) || periods <= 0) { showToast("กรอกจำนวนคาบที่ครั้งนี้ครอบคลุมก่อน (ต้องมากกว่า 0)", false); return; }
+  if (!isValidPeriods(periods)) { showToast(PERIODS_HINT, false); return; }
 
   students = await getRosterForSubject(currentSubjectId);
   await computeMissedMap([currentSubjectId]); // ข้อ 4: คาบขาดสะสมของวิชานี้
@@ -871,7 +904,7 @@ function renderBlockRoundChips() {
     b.className = "chip" + (blockEditRound === i ? " active" : "");
     const parts = blockMembers
       .filter(m => round.bySubject.has(m.id))
-      .map(m => m.name + " " + round.bySubject.get(m.id).periods_covered + " คาบ");
+      .map(m => m.name + " " + fmtPeriods(round.bySubject.get(m.id).periods_covered) + " คาบ");
     b.textContent = "ครั้งที่ " + (i + 1) + " · " + parts.join(" · ");
     b.addEventListener("click", () => selectBlockRound(i));
     elDaySessions.appendChild(b);
@@ -882,6 +915,76 @@ function renderBlockRoundChips() {
   add.textContent = "+ เพิ่มครั้งใหม่";
   add.addEventListener("click", () => startNewBlockRound());
   elDaySessions.appendChild(add);
+
+  // ปุ่มลบครั้งนี้ — โหมดบล็อก 1 ครั้ง = session หลายแถว (วิชาย่อยละแถว) ลบเฉพาะวิชาที่มีสิทธิ์
+  if (blockEditRound !== null && blockRounds[blockEditRound]) {
+    const round = blockRounds[blockEditRound];
+    const inRound = blockMembers.filter(m => round.bySubject.has(m.id));
+    if (inRound.some(m => canDeleteSession(m))) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "chip chip-danger";
+      del.textContent = "🗑 ลบครั้งที่ " + (blockEditRound + 1);
+      del.addEventListener("click", () => deleteBlockRound(blockEditRound));
+      elDaySessions.appendChild(del);
+    } else if (inRound.length > 0) {
+      const note = document.createElement("div");
+      note.className = "hint";
+      note.style.cssText = "font-size:13px; margin-top:4px";
+      note.textContent = "ลบครั้งที่เช็คได้เฉพาะครูเจ้าของวิชาหรือฝ่ายวิชาการ";
+      elDaySessions.appendChild(note);
+    }
+  }
+}
+
+// ลบครั้งที่เช็คชื่อ (โหมดบล็อก) — ลบ session ของทุกวิชาย่อยในครั้งนั้นที่ผู้ใช้มีสิทธิ์ลบ
+// วิชาที่ไม่มีสิทธิ์ต้องบอกในกล่องยืนยันให้เห็น ห้ามลบครึ่ง ๆ กลาง ๆ แบบเงียบ
+async function deleteBlockRound(r) {
+  const round = blockRounds[r];
+  if (!round) return;
+  const inRound = blockMembers.filter(m => round.bySubject.has(m.id));
+  const targets = inRound.filter(m => canDeleteSession(m));
+  const blocked = inRound.filter(m => !canDeleteSession(m));
+  if (targets.length === 0) { showToast("ไม่มีวิชาที่คุณมีสิทธิ์ลบในครั้งนี้", false); return; }
+
+  const lines = [];
+  for (const m of targets) {
+    const sess = round.bySubject.get(m.id);
+    const { count, error: cErr } = await sb
+      .from("attendance_records")
+      .select("student_id", { count: "exact", head: true })
+      .eq("session_id", sess.id);
+    if (cErr) { showToast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: " + cErr.message, false); return; }
+    lines.push("· " + m.name + " (" + fmtPeriods(sess.periods_covered) + " คาบ · นักเรียน " + (count || 0) + " คน)");
+  }
+
+  let msg = "ลบการเช็คชื่อครั้งที่ " + (r + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n\n" +
+    "วิชาที่จะถูกลบ:\n" + lines.join("\n") +
+    "\n\nผลเช็คชื่อของนักเรียนในครั้งนี้จะถูกลบทั้งหมด และกู้คืนไม่ได้";
+  if (blocked.length > 0) {
+    msg += "\n\n⚠️ วิชาต่อไปนี้จะไม่ถูกลบ เพราะคุณไม่ใช่เจ้าของวิชา:\n" +
+      blocked.map(m => "· " + m.name).join("\n");
+  }
+  if (!confirm(msg)) return;
+
+  let deleted = 0;
+  let failed = false;
+  for (const m of targets) {
+    const sess = round.bySubject.get(m.id);
+    const suffix = deleted > 0 ? " (ลบไปแล้ว " + deleted + " วิชา)" : "";
+    const { data, error } = await sb.from("attendance_sessions").delete().eq("id", sess.id).select("id");
+    if (error) { showToast("ลบของ \"" + m.name + "\" ไม่สำเร็จ: " + error.message + suffix, false); failed = true; break; }
+    if (!data || data.length === 0) { showToast("ลบของ \"" + m.name + "\" ไม่สำเร็จ — ไม่มีสิทธิ์" + suffix, false); failed = true; break; }
+    deleted++;
+  }
+  if (!failed) showToast("ลบครั้งที่ " + (r + 1) + " แล้ว " + deleted + " วิชา", true);
+
+  // คำนวณคาบขาดสะสมก่อนวาดรายชื่อเสมอ ไม่งั้นตัวเลขบนจอจะเป็นของก่อนลบ
+  await computeMissedMap(blockMembers.map(m => m.id));
+  const ok = await loadBlockDaySessions();
+  if (!ok) return;
+  if (blockRounds.length === 0) startNewBlockRound();
+  else selectBlockRound(Math.min(r, blockRounds.length - 1));
 }
 
 // เปิดครั้งเดิมมาแก้ — เซ็ตคาบรายวิชา + สถานะเด็ก (ช่องเดียวต่อคน แก้ทีเดียวทุกวิชา)
@@ -893,7 +996,7 @@ function selectBlockRound(r) {
     const sess = round.bySubject.get(m.id);
     if (!sess) continue;
     const num = elMemberList.querySelector(".member-periods[data-id='" + m.id + "']");
-    if (num) num.value = sess.periods_covered;
+    if (num) num.value = fmtPeriods(sess.periods_covered);
     // วิชาแรกที่มี record ของเด็กคนนั้นในครั้งนี้ = สถานะที่โชว์ (บันทึกทับให้ตรงกันทุกวิชาตอนเซฟ)
     for (const rec of (sess.attendance_records || [])) {
       if (!(rec.student_id in scoreMap)) scoreMap[rec.student_id] = rec.status;
@@ -955,7 +1058,7 @@ function renderDaySessionChips() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "chip" + (currentSession && currentSession.id === s.id ? " active" : "");
-    b.textContent = "ครั้งที่ " + (i + 1) + " · " + s.periods_covered + " คาบ";
+    b.textContent = "ครั้งที่ " + (i + 1) + " · " + fmtPeriods(s.periods_covered) + " คาบ";
     b.addEventListener("click", () => selectDaySession(s));
     elDaySessions.appendChild(b);
   });
@@ -965,12 +1068,66 @@ function renderDaySessionChips() {
   add.textContent = "+ เพิ่มครั้งใหม่";
   add.addEventListener("click", () => { startNewSession(); });
   elDaySessions.appendChild(add);
+
+  // ปุ่มลบ — ปุ่มเดียวต่อท้ายแถว โผล่เฉพาะตอนกำลังเปิดครั้งเดิมอยู่
+  // (จงใจไม่ใส่ไอคอนลบในทุกชิป เพราะชิปเป็นปุ่มอยู่แล้ว จะกลายเป็นปุ่มซ้อนปุ่ม
+  //  และบนมือถือกดพลาดง่ายมากสำหรับงานที่ย้อนกลับไม่ได้)
+  if (currentSession) {
+    const idx = daySessions.findIndex(s => s.id === currentSession.id);
+    if (canDeleteSession(currentSubject)) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "chip chip-danger";
+      del.textContent = "🗑 ลบครั้งที่ " + (idx + 1);
+      del.addEventListener("click", () => deleteCurrentSession(idx));
+      elDaySessions.appendChild(del);
+    } else if (coveredSubjectIds.has(currentSubjectId)) {
+      const note = document.createElement("div");
+      note.className = "hint";
+      note.style.cssText = "font-size:13px; margin-top:4px";
+      note.textContent = "คนสอนแทนลบครั้งที่เช็คไม่ได้ — แจ้งครูเจ้าของวิชาหรือฝ่ายวิชาการ";
+      elDaySessions.appendChild(note);
+    }
+  }
+}
+
+// ลบครั้งที่เช็คชื่อ (โหมดวิชาเดียว) — attendance_records ผูกแบบ on delete cascade
+// ผลของนักเรียนทั้งครั้งจึงหายตามไปด้วย ต้องบอกให้ครบก่อนยืนยัน
+async function deleteCurrentSession(idx) {
+  const s = currentSession;
+  if (!s) return;
+
+  const { count, error: cErr } = await sb
+    .from("attendance_records")
+    .select("student_id", { count: "exact", head: true })
+    .eq("session_id", s.id);
+  if (cErr) { showToast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: " + cErr.message, false); return; }
+
+  const msg = "ลบการเช็คชื่อครั้งที่ " + (idx + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n" +
+    "วิชา " + (currentSubject ? currentSubject.name : "") + " (" + fmtPeriods(s.periods_covered) + " คาบ)\n\n" +
+    "ผลเช็คชื่อของนักเรียน " + (count || 0) + " คนในครั้งนี้จะถูกลบทั้งหมด และกู้คืนไม่ได้";
+  if (!confirm(msg)) return;
+
+  // ⚠️ ต้อง .select() ท้าย .delete() เสมอ — ถ้า RLS บล็อก PostgREST ตอบสำเร็จโดยไม่มี error
+  // และไม่มีแถวกลับมา ถ้าเช็คแค่ error ครูจะเห็น "ลบแล้ว" ทั้งที่ข้อมูลยังอยู่ครบ
+  const { data, error } = await sb.from("attendance_sessions").delete().eq("id", s.id).select("id");
+  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
+  if (!data || data.length === 0) { showToast("ลบไม่สำเร็จ — ไม่มีสิทธิ์ลบครั้งนี้", false); return; }
+
+  showToast("ลบครั้งที่ " + (idx + 1) + " แล้ว", true);
+  currentSession = null;
+  // คำนวณคาบขาดสะสมก่อนวาดรายชื่อเสมอ ไม่งั้นตัวเลขบนจอจะเป็นของก่อนลบ
+  await computeMissedMap([currentSubjectId]);
+  const ok = await refreshDaySessions();
+  if (!ok) return;
+  if (daySessions.length > 0) await selectDaySession(daySessions[0]);
+  else startNewSession();
 }
 
 // เปิดครั้งเดิมมาแก้
 async function selectDaySession(s) {
   currentSession = s;
-  writeCurrentPeriods(s.periods_covered);
+  writeCurrentPeriods(fmtPeriods(s.periods_covered));
   const { data: records, error } = await sb
     .from("attendance_records")
     .select("student_id, status")
@@ -1057,7 +1214,7 @@ btnSave.addEventListener("click", async () => {
 // โหมดวิชาเดียว: สร้าง/แก้ไขครั้งที่เช็คชื่อ แล้ว upsert สถานะทุกคน
 async function saveSingleSubject() {
   const periods = readCurrentPeriods();
-  if (isNaN(periods) || periods <= 0) { showToast("กรอกจำนวนคาบที่ครั้งนี้ครอบคลุมก่อน (ต้องมากกว่า 0)", false); return; }
+  if (!isValidPeriods(periods)) { showToast(PERIODS_HINT, false); return; }
 
   let sessionId;
   if (currentSession) {
@@ -1106,7 +1263,7 @@ async function saveBlock() {
   for (const m of blockMembers) {
     const num = elMemberList.querySelector(".member-periods[data-id='" + m.id + "']");
     const p = Number(num && num.value);
-    if (isNaN(p) || p <= 0) { showToast("กรอกจำนวนคาบของ \"" + m.name + "\" ให้ถูกต้องก่อน (ต้องมากกว่า 0)", false); return; }
+    if (!isValidPeriods(p)) { showToast("วิชา \"" + m.name + "\": " + PERIODS_HINT, false); return; }
     periodsBySubject.set(m.id, p);
   }
 

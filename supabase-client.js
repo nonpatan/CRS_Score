@@ -507,8 +507,12 @@ export function computeMissedPeriods(studentId, sessionsArr) {
   for (const sess of sessionsArr) {
     const rec = (sess.attendance_records || []).find(r => r.student_id === studentId);
     if (!rec) continue; // ยังไม่มีบันทึกของคนนี้ในครั้งนี้ ข้ามไป ไม่นับ
-    if (rec.status === "ขาด") missed += sess.periods_covered;
-    else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") missed += sess.periods_covered * 0.5;
+    // ครอบ Number() เสมอ — periods_covered เป็น numeric(4,1) ตั้งแต่ 2026-08-04 (รองรับครึ่งคาบ)
+    // ถ้า client ได้ค่ามาเป็นสตริงเมื่อไหร่ การบวกดิบจะกลายเป็นต่อสตริง ("2" + "2.5" = "22.5")
+    // แล้วคาบขาดจะพุ่งมั่วจนกระทบ มส. ของเด็กจริง
+    const p = Number(sess.periods_covered) || 0;
+    if (rec.status === "ขาด") missed += p;
+    else if (rec.status === "ลาป่วย" || rec.status === "ลากิจ") missed += p * 0.5;
     // 'มา'/'มาสาย' ไม่นับ (ไม่ขาด)
   }
   return missed;
