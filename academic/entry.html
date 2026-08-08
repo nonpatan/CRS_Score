@@ -20,6 +20,7 @@
     --bg: #f7f8f7;
     --white: #ffffff;
     --danger: #a32d2d;
+    --danger-soft: #fceaea;
   }
   * { box-sizing: border-box; }
   body {
@@ -57,7 +58,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
-  select, input[type="number"] {
+  select, input[type="number"], input[type="text"] {
     width: 100%;
     font-family: inherit;
     font-size: 16px;
@@ -125,6 +126,23 @@
     font-size: 14px;
     line-height: 1.5;
   }
+  .collection-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; align-items:center; }
+  .collection-row button { min-height:44px; font:inherit; border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
+  .ghost { background:var(--teal-soft); color:var(--teal); }
+  .danger { background:var(--danger-soft); color:var(--danger); }
+  .overlay { position:fixed; inset:0; background:rgba(31,42,46,.42); display:none; align-items:center; justify-content:center; padding:16px; z-index:10000; }
+  .overlay.show { display:flex; }
+  .modal { width:min(100%,440px); background:var(--white); border-radius:12px; padding:18px; box-shadow:0 18px 48px rgba(31,42,46,.24); }
+  .modal h3 { margin:0 0 8px; font-size:19px; }
+  .modal .meta { color:var(--muted); font-size:14px; white-space:pre-line; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .modal-actions button { min-height:44px; min-width:96px; font:inherit; border:0; border-radius:8px; padding:9px 14px; cursor:pointer; }
+  .modal-actions .primary { background:var(--teal); color:var(--white); }
+  .modal-actions .primary:disabled { opacity:.5; cursor:default; }
+  @media (max-width:520px) {
+    .collection-row { grid-template-columns:1fr 1fr; }
+    .collection-row select { grid-column:1 / -1; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
 </head>
@@ -147,7 +165,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -216,7 +234,11 @@
     </div>
     <div class="field">
       <label for="sel-collection">ครั้งที่</label>
-      <select id="sel-collection"><option value="">—</option></select>
+      <div class="collection-row">
+        <select id="sel-collection"><option value="">—</option></select>
+        <button type="button" class="ghost" id="btn-add-collection" style="display:none">+ เพิ่มครั้ง</button>
+        <button type="button" class="danger" id="btn-delete-collection" style="display:none">ลบครั้งนี้</button>
+      </div>
     </div>
   </div>
 
@@ -251,13 +273,15 @@
     <button class="save" id="btn-add-remark">+ ติด ร.</button>
   </div>
 
+  <div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" style="display:none;margin-top:12px"><label id="confirm-type-label" for="confirm-type-input">พิมพ์ข้อความให้ตรงกันเพื่อยืนยัน</label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="modal-actions"><button class="ghost" id="confirm-cancel">ยกเลิก</button><button class="primary" id="confirm-ok">ยืนยัน</button></div></div></div>
+
   <!-- toast อยู่นอกการ์ดอื่นทั้งหมด เห็นได้เสมอไม่ว่าการ์ดไหนจะซ่อนอยู่ -->
   <div class="toast" id="toast"></div>
   </main>
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-8";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -291,6 +315,8 @@ const elUnitLabel  = document.getElementById("lbl-unit");
 const elUnit       = document.getElementById("sel-unit");
 const elIndicator  = document.getElementById("sel-indicator");
 const elCollection = document.getElementById("sel-collection");
+const btnAddCollection = document.getElementById("btn-add-collection");
+const btnDeleteCollection = document.getElementById("btn-delete-collection");
 const elStudentsCard = document.getElementById("students-card");
 const elStudentList  = document.getElementById("student-list");
 const elCollHead   = document.getElementById("collection-head");
@@ -306,6 +332,7 @@ let students = [];              // รายชื่อนักเรียน
 let allSubjects = [];           // วิชาทั้งหมด (กรองด้วยปี/ชั้น/ภาคเรียนก่อนเติมลง dropdown)
 let memberIdSet = new Set();    // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown หลัก)
 let memberSubjects = [];        // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
+let currentCollections = [];
 
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
@@ -408,6 +435,56 @@ function showToast(msg, ok) {
   elToast.textContent = msg;
   elToast.className = "toast " + (ok ? "ok" : "err");
   setTimeout(() => { elToast.className = "toast"; }, 2500);
+}
+
+function askNumber({ title, message, label, value = "", okLabel = "สร้าง" }) {
+  return askConfirm({ title, message, okLabel, numberInput: { label, value } })
+    .then(result => result === false ? null : result);
+}
+
+// กล่องยืนยันของหน้าเว็บ — ห้ามเปลี่ยนกลับไปใช้ confirm()/prompt() เพราะ webview บางตัวบล็อกเงียบ ๆ
+function askConfirm({ title, message, requireText = null, okLabel = "ลบ", numberInput = null }) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById("confirm-overlay");
+    const input = document.getElementById("confirm-type-input");
+    const ok = document.getElementById("confirm-ok");
+    const cancel = document.getElementById("confirm-cancel");
+    document.getElementById("confirm-title").textContent = title;
+    document.getElementById("confirm-message").textContent = message;
+    document.getElementById("confirm-type-field").style.display = (requireText || numberInput) ? "block" : "none";
+    document.getElementById("confirm-type-label").textContent = numberInput
+      ? numberInput.label
+      : "พิมพ์ “" + requireText + "” เพื่อยืนยัน";
+    input.type = numberInput ? "number" : "text";
+    if (numberInput) { input.min = "1"; input.step = "1"; }
+    else { input.removeAttribute("min"); input.removeAttribute("step"); }
+    input.value = numberInput ? String(numberInput.value ?? "") : "";
+    ok.textContent = okLabel;
+    const sync = () => {
+      if (numberInput) {
+        const number = Number(input.value);
+        ok.disabled = !(input.value !== "" && Number.isInteger(number) && number > 0);
+      } else {
+        ok.disabled = requireText ? input.value.trim() !== requireText : false;
+      }
+    };
+    const close = result => {
+      overlay.classList.remove("show");
+      ok.onclick = null; cancel.onclick = null; input.oninput = null; overlay.onclick = null;
+      document.removeEventListener("keydown", onKey);
+      ok.disabled = false;
+      resolve(result);
+    };
+    const onKey = event => { if (event.key === "Escape") close(false); };
+    ok.onclick = () => close(numberInput ? Number(input.value) : true);
+    cancel.onclick = () => close(false);
+    overlay.onclick = event => { if (event.target === overlay) close(false); };
+    input.oninput = sync;
+    document.addEventListener("keydown", onKey);
+    sync();
+    overlay.classList.add("show");
+    setTimeout(() => (requireText || numberInput ? input : ok).focus(), 0);
+  });
 }
 
 function showAccessNote(message) {
@@ -618,6 +695,11 @@ elUnit.addEventListener("change", async () => {
 
 elIndicator.addEventListener("change", async () => {
   resetBelow("collection");
+  if (!elIndicator.value) return;
+  await loadCollections();
+});
+
+async function loadCollections(selectId = "") {
   const id = elIndicator.value;
   if (!id) return;
   const { data, error } = await sb
@@ -626,19 +708,95 @@ elIndicator.addEventListener("change", async () => {
     .eq("indicator_id", id)
     .order("seq");
   if (error) { showToast("โหลดครั้งที่ไม่สำเร็จ", false); return; }
-  fillSelect(elCollection, data, c => "ครั้งที่ " + c.seq + "  (เต็ม " + c.max_score + ")", "— เลือกครั้งที่ —");
-});
+  currentCollections = data || [];
+  fillSelect(elCollection, currentCollections, c => "ครั้งที่ " + c.seq + "  (เต็ม " + c.max_score + ")", "— เลือกครั้งที่ —");
+  if (selectId && currentCollections.some(collection => collection.id === selectId)) {
+    elCollection.value = selectId;
+    elCollection.dispatchEvent(new Event("change"));
+  }
+  refreshCollectionActions();
+}
 
 elCollection.addEventListener("change", async () => {
   const id = elCollection.value;
-  if (!id) { hideStudents(); return; }
+  if (!id) { hideStudents(); refreshCollectionActions(); return; }
   if (!currentSubject || !canEdit(currentSubject)) { hideStudents(); return; }
 
-  const { data: coll } = await sb.from("collections").select("*").eq("id", id).single();
-  currentCollection = coll;
+  currentCollection = currentCollections.find(collection => collection.id === id) || null;
+  if (!currentCollection) { hideStudents(); refreshCollectionActions(); return; }
 
   renderStudents();
+  refreshCollectionActions();
 });
+
+function refreshCollectionActions() {
+  const editable = currentSubject && canEdit(currentSubject);
+  btnAddCollection.style.display = editable && elIndicator.value ? "block" : "none";
+  btnDeleteCollection.style.display = editable && currentCollection ? "block" : "none";
+}
+
+btnAddCollection.addEventListener("click", async () => {
+  if (!currentSubject || !canEdit(currentSubject) || !elIndicator.value) return;
+  const seq = currentCollections.reduce((max, collection) => Math.max(max, Number(collection.seq) || 0), 0) + 1;
+  const maxScore = await askNumber({
+    title: "เพิ่มครั้งที่ " + seq,
+    message: "กำหนดคะแนนเต็มของครั้งนี้",
+    label: "คะแนนเต็ม (จำนวนเต็มมากกว่า 0)",
+    value: 10
+  });
+  if (maxScore === null) { showToast("ยกเลิกการเพิ่มครั้ง", true); return; }
+  const { data, error } = await sb.from("collections")
+    .insert({ indicator_id: elIndicator.value, seq, max_score: maxScore })
+    .select().single();
+  if (error) { showToast("สร้างครั้งที่ไม่สำเร็จ: " + error.message, false); return; }
+  await loadCollections(data.id);
+  showToast("สร้างครั้งที่ " + seq + " แล้ว", true);
+});
+
+btnDeleteCollection.addEventListener("click", async () => {
+  if (!currentCollection || !currentSubject || !canEdit(currentSubject)) return;
+  const target = currentCollection;
+  const label = "ครั้งที่ " + target.seq;
+  const { count, error: countError } = await sb.from("scores")
+    .select("student_id", { count: "exact", head: true })
+    .eq("collection_id", target.id);
+  if (countError) { showToast("ตรวจสอบคะแนนก่อนลบไม่สำเร็จ: " + countError.message, false); return; }
+  const agreed = await askConfirm({
+    title: "ลบ" + label,
+    message: count > 0
+      ? label + " มีคะแนนของนักเรียน " + count + " คน คะแนนทั้งหมดจะหายและกู้คืนไม่ได้"
+      : label + " ยังไม่มีคะแนนนักเรียน",
+    requireText: count > 0 ? label : null,
+    okLabel: "ลบ" + label
+  });
+  if (!agreed) { showToast("ยกเลิกการลบ", true); return; }
+  const { data: deleted, error } = await sb.from("collections")
+    .delete().eq("id", target.id).select("id");
+  if (error) { showToast("ลบครั้งที่ไม่สำเร็จ: " + error.message, false); return; }
+  if (!deleted || deleted.length === 0) { showToast("ลบไม่สำเร็จ — บัญชีนี้ไม่มีสิทธิ์ลบครั้งที่นี้", false); return; }
+  currentCollections = currentCollections.filter(collection => collection.id !== target.id);
+  hideStudents();
+  const resequenced = await resequenceCollections();
+  if (!resequenced) return;
+  await loadCollections();
+  showToast("ลบ" + label + " และเรียงเลขครั้งใหม่แล้ว", true);
+});
+
+async function resequenceCollections() {
+  const rows = currentCollections.slice().sort((a, b) => Number(a.seq) - Number(b.seq));
+  for (let index = 0; index < rows.length; index++) {
+    const want = index + 1;
+    if (Number(rows[index].seq) === want) continue;
+    const { data, error } = await sb.from("collections")
+      .update({ seq: want }).eq("id", rows[index].id).select("id");
+    if (error || !data || data.length === 0) {
+      showToast("เรียงเลขครั้งใหม่ไม่สำเร็จ" + (error ? ": " + error.message : ""), false);
+      return false;
+    }
+    rows[index].seq = want;
+  }
+  return true;
+}
 
 function renderStudents() {
   elCollHead.innerHTML =
@@ -670,9 +828,9 @@ async function loadScoresAndRender() {
     const info = document.createElement("div");
     info.className = "student-info";
     info.innerHTML =
-      "<div class='name'>" + stu.name + "</div>" +
-      "<div class='meta'>รหัสประจำตัว " + stu.student_no +
-      (stu.classroom ? " · " + stu.classroom : "") + "</div>";
+      "<div class='name'>" + escapeHtml(stu.name) + "</div>" +
+      "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
+      (stu.classroom ? " · " + escapeHtml(stu.classroom) : "") + "</div>";
 
     const input = document.createElement("input");
     input.type = "number";
@@ -728,7 +886,9 @@ function resetBelow(level) {
     const el = { unit: elUnit, indicator: elIndicator, collection: elCollection }[order[i]];
     el.innerHTML = "<option value=''>—</option>";
   }
+  if (from <= order.indexOf("collection")) currentCollections = [];
   hideStudents();
+  refreshCollectionActions();
 }
 
 function hideStudents() {
@@ -820,7 +980,11 @@ document.getElementById("btn-add-remark").addEventListener("click", async () => 
 });
 
 async function removeRemark(r) {
-  if (!confirm("ยืนยันถอด ร. ของ \"" + r.student.name + "\" ?")) return;
+  if (!await window.crsAskConfirm({
+    title: "ถอดผลการเรียน ร.",
+    message: "นักเรียน \"" + r.student.name + "\"",
+    okLabel: "ถอด ร."
+  })) return;
   const { error } = await sb.from("remarks").delete().eq("id", r.id);
   if (error) { showToast("ถอดไม่สำเร็จ: " + error.message, false); return; }
   showToast("ถอด ร. แล้ว", true);

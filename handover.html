@@ -106,8 +106,9 @@
 
 <div id="toast"></div>
 
+<script src="app-shell.js?v=20260808-3"></script>
 <script type="module">
-  import { sb, requireAuth, getProfile, setUserLoginEnabled } from "./supabase-client.js?v=20260808-1";
+  import { sb, requireAuth, getProfile, setUserLoginEnabled } from "./supabase-client.js?v=20260808-8";
 
   const el = (id) => document.getElementById(id);
   const elGate = el("gate"), elGateMsg = el("gate-msg"), elMain = el("main-area");
@@ -327,7 +328,12 @@
   elBtnTransfer.addEventListener("click", async () => {
     const targets = items.filter(i => !i.done && i.toStaffId);
     if (!targets.length) return;
-    if (!confirm("โอน " + targets.length + " รายการจาก " + currentStaff.full_name + " ใช่ไหม")) return;
+    if (!await window.crsAskConfirm({
+      title: "ยืนยันการโอนงาน",
+      message: "โอน " + targets.length + " รายการจาก " + currentStaff.full_name,
+      okLabel: "โอนงาน",
+      danger: false
+    })) return;
 
     elBtnTransfer.disabled = true;
     let okCount = 0;
@@ -358,9 +364,17 @@
     }
     const remaining = items.filter(i => !i.done).length;
     if (!enabled && remaining > 0 &&
-        !confirm("ยังมีงานค้างอยู่ " + remaining + " รายการ ถ้าปิดล็อกอินตอนนี้จะไม่มีใครดูแลงานพวกนั้น\n\nยืนยันปิดการล็อกอินของ " + currentStaff.full_name + " หรือไม่")) return;
+        !await window.crsAskConfirm({
+          title: "ปิดการล็อกอินทั้งที่ยังมีงานค้าง",
+          message: "ยังมีงานค้างอยู่ " + remaining + " รายการ ถ้าปิดล็อกอินตอนนี้จะไม่มีใครดูแลงานพวกนั้น\n\nปิดการล็อกอินของ " + currentStaff.full_name + " หรือไม่",
+          okLabel: "ปิดการล็อกอิน"
+        })) return;
     if (!enabled && remaining === 0 &&
-        !confirm("ปิดการล็อกอินของ " + currentStaff.full_name + " ใช่ไหม (กดเปิดคืนได้ภายหลัง)")) return;
+        !await window.crsAskConfirm({
+          title: "ปิดการล็อกอิน",
+          message: "ปิดการล็อกอินของ " + currentStaff.full_name + " ใช่ไหม (กดเปิดคืนได้ภายหลัง)",
+          okLabel: "ปิดการล็อกอิน"
+        })) return;
 
     try {
       await setUserLoginEnabled(currentStaff.user_id, enabled);

@@ -114,7 +114,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -258,7 +258,7 @@
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getAcademicYears, getLeaveTypes, getLeaveQuotas,
-         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260808-1";
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260808-8";
 
 const session = await requireAuth();
 if (session) {
@@ -594,7 +594,11 @@ if (session) {
 
     if (event.target.closest("[data-delete-position]")) {
       if (!isAdmin) return;
-      if (!confirm(`ลบตำแหน่ง “${original}” ใช่หรือไม่`)) return;
+      if (!await window.crsAskConfirm({
+        title: "ลบตำแหน่ง",
+        message: `ตำแหน่ง “${original}”`,
+        okLabel: "ลบตำแหน่ง"
+      })) return;
       const { error } = await sb.from("staff_positions").delete().eq("code", original);
       if (error) {
         const countRes = await sb.from("staff_position_map")
@@ -732,7 +736,12 @@ if (session) {
         type.affects_attendance && type.code !== original);
       if (affectsAttendance && otherAttendance) {
         if (!isAdmin) return toast("แก้ธงเกณฑ์เข้างานได้เฉพาะผู้ดูแลระบบ", true);
-        if (!confirm(`ย้ายธงเกณฑ์เข้างานจาก “${otherAttendance.code}” มาที่ “${code}” ใช่หรือไม่`)) return;
+        if (!await window.crsAskConfirm({
+          title: "ย้ายเกณฑ์เข้างาน",
+          message: `ย้ายธงเกณฑ์เข้างานจาก “${otherAttendance.code}” มาที่ “${code}”`,
+          okLabel: "ย้ายเกณฑ์",
+          danger: false
+        })) return;
         const clearRes = await sb.from("duty_types")
           .update({ affects_attendance: false }).eq("code", otherAttendance.code);
         if (clearRes.error) return toast("ย้ายธงเกณฑ์เข้างานไม่สำเร็จ กรุณาลองใหม่", true);
@@ -763,7 +772,11 @@ if (session) {
       if (current?.affects_attendance) {
         return toast("ต้องย้ายธงเกณฑ์เข้างานไปงานอื่นก่อน", true);
       }
-      if (!confirm(`ลบงานเวร “${original}” ใช่หรือไม่`)) return;
+      if (!await window.crsAskConfirm({
+        title: "ลบงานเวร",
+        message: `งานเวร “${original}”`,
+        okLabel: "ลบงานเวร"
+      })) return;
       const { error } = await sb.from("duty_types").delete().eq("code", original);
       if (error) {
         const [rosterCount, patternCount] = await Promise.all([

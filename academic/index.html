@@ -190,7 +190,7 @@
       <a href="retention.html">เรียนซ้ำชั้น</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
   </header>
 
   <main class="academic-content">
@@ -206,7 +206,7 @@
       <div class="card">
         <h2>ต้องช่วยด่วน <span class="note" id="threshold-note"></span></h2>
         <!-- วงกลมแสดงเฉพาะสิ่งที่แบ่งกันได้จริงและรวมเป็น 100% คือนักเรียนทั้งหมด
-             แยกเป็น ปกติ/เฝ้าระวัง/วิกฤต — ตัวเลขอีก 3 ตัวด้านล่างเป็นคนละมิติกัน
+             แยกเป็น ปกติ/เฝ้าระวัง/เข้าข่าย มส./เรียนซ้ำ — ตัวเลขอีก 3 ตัวด้านล่างเป็นคนละมิติกัน
              (แยกตามระดับชั้น และเรื่อง ร. ที่ไม่เกี่ยวกับการขาดเรียน) จึงไม่เอามารวมในวงเดียวกัน -->
         <div class="donut-wrap">
           <div class="donut-figure">
@@ -269,7 +269,7 @@ import {
   getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
   getSetting, setSetting,
   loadAcademicOverviewData, buildAcademicOverview
-} from "../supabase-client.js?v=20260808-1";
+} from "../supabase-client.js?v=20260808-8";
 
 const session = await requireAuth();
 if (!session) {
@@ -397,14 +397,14 @@ async function setupAdminSetting() {
 }
 
 // ---------- วงกลมสัดส่วนการเฝ้าระวัง ----------
-// แสดงเฉพาะกลุ่มที่ "ไม่ทับกัน" และรวมกันได้ 100% พอดี (ปกติ + เฝ้าระวัง + วิกฤต = นักเรียนทั้งหมด)
-// วิกฤตเป็นส่วนย่อยของคนที่ติดธงอยู่แล้ว จึงต้องหักออกจาก "เฝ้าระวัง" ไม่งั้นนับซ้ำ
-const WATCH_COLORS = { normal: "#12946f", watch: "#c47f00", critical: "#9e2a35" };
+// แสดงเฉพาะกลุ่มที่ไม่ทับกัน: ปกติ + เฝ้าระวัง + เข้าข่าย มส. + เรียนซ้ำ = นักเรียนทั้งหมด
+const WATCH_COLORS = { normal: "#12946f", watch: "#c47f00", critical: "#9e2a35", retake: "#671823" };
 
 function renderDonut(overview) {
   const total = overview.studentCount;
-  const critical = overview.flaggedRows.filter(r => r.critical).length;
-  const watch = overview.flaggedRows.length - critical;
+  const retake = overview.flaggedRows.filter(r => r.retake).length;
+  const critical = overview.flaggedRows.filter(r => r.critical && !r.retake).length;
+  const watch = overview.flaggedRows.length - critical - retake;
   const normal = Math.max(0, total - overview.flaggedRows.length);
 
   document.getElementById("donut-hero").textContent = overview.flaggedRows.length;
@@ -412,7 +412,8 @@ function renderDonut(overview) {
   const segments = [
     { key: "normal",   label: "ยังไม่ถึงเกณฑ์เฝ้าระวัง", value: normal },
     { key: "watch",    label: "เฝ้าระวัง",              value: watch },
-    { key: "critical", label: "วิกฤต",                  value: critical }
+    { key: "critical", label: "เข้าข่าย มส. (>20%)",     value: critical },
+    { key: "retake",   label: "เรียนซ้ำรายวิชา (>40%)", value: retake }
   ];
 
   const svg = document.getElementById("donut");
@@ -459,13 +460,15 @@ function renderGrades(overview) {
   }
   elGrades.innerHTML = overview.grades.map(group => {
     const flagged = group.flagged.length;
+    const criticalOnly = group.criticalCount - group.retakeCount;
     const pillClass = group.criticalCount > 0 ? "bad" : (flagged > 0 ? "warn" : "ok");
     const label = group.isPrimary ? "ขาดบ่อย" : "เสี่ยง มส.";
     const pill = "<span class='pill " + pillClass + "'>" + label + " " + flagged + " คน</span>";
     const meta = [
       "นักเรียน " + group.studentCount + " คน",
       "เกณฑ์ " + group.warnPercent + "%",
-      group.criticalCount > 0 ? "วิกฤต " + group.criticalCount + " คน" : null,
+      group.retakeCount > 0 ? "เรียนซ้ำรายวิชา " + group.retakeCount + " คน" : null,
+      criticalOnly > 0 ? "เข้าข่าย มส. " + criticalOnly + " คน" : null,
       group.remarkCount > 0 ? "ร. " + group.remarkCount + " รายการ" : null
     ].filter(Boolean).join(" · ");
 
@@ -474,13 +477,16 @@ function renderGrades(overview) {
       : group.flagged.map(row => {
           const worst = row.subjects[0];
           const more = row.subjects.length > 1 ? " และอีก " + (row.subjects.length - 1) + " วิชา" : "";
+          const shownPercent = worst.retake ? worst.rawPercent : worst.percent;
+          const shownMissed = worst.retake ? worst.rawMissed : worst.netMissed;
+          const riskLabel = worst.retake ? "เรียนซ้ำรายวิชา" : worst.critical ? "เข้าข่าย มส." : "เสี่ยง";
           return "<div class='student-line'>" +
             "<div><div class='who'>" + esc(row.student.name) + "</div>" +
             "<div class='where'>" + esc(row.classroom || row.grade || "") +
             (row.student.student_no ? " · เลขที่ " + esc(row.student.student_no) : "") + "</div>" +
             "<div class='subject-note'>" + subjLabel(worst.subject) + more + "</div></div>" +
-            "<div class='val" + (row.critical ? " critical" : "") + "'>" + fmtPct(row.maxPercent) + "%<br>" +
-            "<span style='font-weight:500'>ขาด " + worst.netMissed + " คาบ</span></div>" +
+            "<div class='val" + (row.critical ? " critical" : "") + "'>" + esc(riskLabel) + "<br>" +
+            "<span style='font-weight:500'>" + fmtPct(shownPercent) + "% · ขาด" + (worst.retake ? "ดิบ " : "สุทธิ ") + shownMissed + " คาบ</span></div>" +
             "</div>";
         }).join("");
 
@@ -635,7 +641,8 @@ async function render() {
   renderDonut(overview);
   document.getElementById("threshold-note").textContent =
     "มัธยม ≥" + overview.thresholds.secondaryWarn + "% · ประถม ≥" + overview.thresholds.primaryWarn +
-    "% · วิกฤต >" + overview.thresholds.criticalPercent + "%";
+    "% · เข้าข่าย มส. >" + overview.thresholds.makeupPercent +
+    "% · เรียนซ้ำรายวิชา >" + overview.thresholds.retakePercent + "%";
 
   elScope.innerHTML = "ปีการศึกษา " + esc(overview.year) + " · วิชา " + overview.subjectCount +
     " รายการ · นักเรียน " + overview.studentCount + " คน" +

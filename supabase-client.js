@@ -295,12 +295,13 @@ export function distinctYears(subjects) {
 export const GRADE_ORDER = ["ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
 
 // ช่วงชั้นของนักเรียน ใช้เลือกองค์ประกอบสมรรถนะหลักมาตรฐาน
-// โรงเรียนปัจจุบันเปิดถึง ม.3 แต่รองรับชั้นสูงกว่านี้ไว้เผื่อใช้ข้อมูลในอนาคต
+// รองรับถึง ม.6 แต่ช่วงชั้น 4 จะยังไม่มีองค์ประกอบจนกว่าจะได้เอกสาร สพฐ. ตัวจริง
 export function competencyStageForGrade(grade) {
   const i = GRADE_ORDER.indexOf(grade);
   if (i >= 0 && i <= 2) return "ช่วงชั้น 1";
   if (i >= 3 && i <= 5) return "ช่วงชั้น 2";
-  if (i >= 6) return "ช่วงชั้น 3";
+  if (i >= 6 && i <= 8) return "ช่วงชั้น 3";
+  if (i >= 9) return "ช่วงชั้น 4";
   return "";
 }
 
@@ -438,7 +439,11 @@ export function computeCombinedCompetencyResult(weight, sources, levels) {
     return { complete: false, reason: "ข้อมูลยังไม่ครบ — ไม่สามารถสรุปคะแนนได้" };
   }
   const score = required.reduce((sum, item) => sum + item.source.percent * item.weight / 100, 0);
-  const level = (levels || []).find(l => score >= Number(l.min_score) && score <= Number(l.max_score));
+  // จับคู่ด้วยขอบล่างอย่างเดียว เรียงจากระดับสูงสุด แล้วเอาช่วงแรกที่คะแนนถึง
+  // กันคะแนนทศนิยมตกร่องระหว่างช่วงจำนวนเต็ม; max_score เก็บไว้แสดงช่วงให้ครูอ่านเท่านั้น
+  const orderedLevels = (levels || []).slice()
+    .sort((a, b) => Number(b.min_score) - Number(a.min_score));
+  const level = orderedLevels.find(item => score >= Number(item.min_score));
   return {
     complete: true,
     score,
@@ -534,6 +539,13 @@ export async function getRosterForSubject(subjectId) {
 // อยู่ที่เดียวกันเพื่อกัน "แก้ที่หนึ่งแล้วลืมอีกที่" ตามที่เคยพลาดมาก่อน (ดู CLAUDE.md)
 // ============================================================
 
+// ---------- เกณฑ์ มส. — ประกาศที่เดียวเท่านั้น ห้ามพิมพ์ตัวเลขซ้ำที่อื่นอีก ----------
+// เคยพิมพ์ซ้ำหลายจุดแล้วเกณฑ์เพี้ยนจนเด็กที่ต้องเรียนซ้ำหายจากหน้าเฝ้าระวัง (แก้ 2026-08)
+export const MS_RETAKE_RATIO = 0.40;          // ขาดดิบเกินนี้ = เรียนซ้ำรายวิชา ชดเชยช่วยไม่ได้
+export const MS_MAKEUP_RATIO = 0.20;          // ขาดสุทธิเกินนี้ = ต้องเรียนเพิ่มให้ครบเวลา
+export const MS_WARN_PERCENT_SECONDARY = 10;  // มัธยม: ขาดสุทธิถึงเท่านี้ = ขึ้นหน้าเฝ้าระวัง
+export const MS_WARN_PERCENT_PRIMARY = 5;     // ประถม: เตือนเร็วกว่าเพราะคาบทั้งปีมากกว่า
+
 // เกณฑ์แปลงเปอร์เซ็นต์คะแนนเป็นเกรด (มาตรฐาน 8 ระดับ ตามที่ยืนยันแล้วใน CLAUDE.md)
 export function percentToGrade(p) {
   if (p >= 80) return 4;
@@ -570,8 +582,9 @@ export function computeMissedPeriods(studentId, sessionsArr) {
 // คำนวณสถานะเฝ้าระวัง มส. จากวิชาพื้นฐาน 1 ตัว หรือหลายตัวที่ประกอบเป็นวิชาบูรณาการ
 // ใช้ร่วมกันทั้ง dashboard.html, warning.html และ summary.html เพื่อให้เกณฑ์ไม่แยกกันหลายหน้า
 // subjectDataList ใช้รูปเดียวกับผลจาก loadSubjectData(): [{ subject, sessions, makeupHours }, ...]
-// เกณฑ์ที่ยืนยันแล้ว: ขาดสุทธิหลังหักชั่วโมงชดเชย >= 10% = เสี่ยง, > 20% = วิกฤต
-export function computeAttendanceRisk(studentId, subjectDataList) {
+// เกณฑ์เตือนรับจากผู้เรียกเพราะประถม/มัธยมเตือนคนละจุด แต่เกณฑ์ มส. ใช้ค่ากลางชุดเดียวกันเสมอ
+export function computeAttendanceRisk(studentId, subjectDataList, options = {}) {
+  const warnPercent = Number(options.warnPercent ?? MS_WARN_PERCENT_SECONDARY);
   const dataList = Array.isArray(subjectDataList) ? subjectDataList : [];
   let totalBase = 0;
   let rawMissed = 0;
@@ -587,39 +600,57 @@ export function computeAttendanceRisk(studentId, subjectDataList) {
   }
 
   const netMissed = Math.max(0, rawMissed - makeupTotal);
-  const percent = totalBase > 0 ? (netMissed / totalBase) * 100 : 0;
+  const has = totalBase > 0;
+  const percent = has ? (netMissed / totalBase) * 100 : 0;
+  const rawPercent = has ? (rawMissed / totalBase) * 100 : 0;
+  // เรียนซ้ำต้องดูยอดขาดดิบให้ตรงกับ computeSubjectResult — ชดเชยไม่ลดระดับนี้
+  const retake = has && rawMissed > totalBase * MS_RETAKE_RATIO;
+  const critical = has && (retake || netMissed > totalBase * MS_MAKEUP_RATIO);
   return {
     totalBase,
     rawMissed,
     makeupTotal,
     netMissed,
     percent,
-    risky: totalBase > 0 && percent >= 10,
-    critical: totalBase > 0 && percent > 20
+    rawPercent,
+    retake,
+    critical,
+    risky: has && (critical || percent >= warnPercent),
+    level: !has ? null : retake ? "retake" : critical ? "critical"
+      : (percent >= warnPercent ? "warn" : null)
   };
 }
 
 // โหลดข้อมูลเต็มของวิชา 1 ตัว (โครงสร้างคะแนน + ร. + เช็คชื่อ + ชั่วโมงชดเชย) — ใช้ได้ทั้งวิชาพื้นฐานเดี่ยว
 // และวิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ
 export async function loadSubjectData(subjectId) {
-  const { data: subj } = await sb.from("subjects").select("*").eq("id", subjectId).single();
-  const { data: unitData } = await sb
-    .from("units")
-    .select("*, indicators(*, collections(*, scores(student_id, raw_score)))")
-    .eq("subject_id", subjectId)
-    .order("seq");
-  const { data: remarks } = await sb.from("remarks").select("*").eq("subject_id", subjectId);
-  const { data: sessionData } = await sb
-    .from("attendance_sessions")
-    .select("*, attendance_records(*)")
-    .eq("subject_id", subjectId);
-  const { data: makeupData } = await sb.from("makeup_hours").select("*").eq("subject_id", subjectId);
+  const [subjectResult, unitResult, remarkResult, sessionResult, makeupResult] = await Promise.all([
+    sb.from("subjects").select("*").eq("id", subjectId).single(),
+    sb.from("units")
+      .select("*, indicators(*, collections(*, scores(student_id, raw_score)))")
+      .eq("subject_id", subjectId)
+      .order("seq"),
+    sb.from("remarks").select("*").eq("subject_id", subjectId),
+    sb.from("attendance_sessions")
+      .select("*, attendance_records(*)")
+      .eq("subject_id", subjectId),
+    sb.from("makeup_hours").select("*").eq("subject_id", subjectId)
+  ]);
+  const namedResults = [
+    ["รายวิชา", subjectResult],
+    ["โครงสร้างคะแนน", unitResult],
+    ["สถานะ ร.", remarkResult],
+    ["การเข้าเรียน", sessionResult],
+    ["ชั่วโมงชดเชย", makeupResult]
+  ];
+  const failed = namedResults.find(([, result]) => result.error);
+  if (failed) throw new Error("โหลด" + failed[0] + "ไม่สำเร็จ: " + failed[1].error.message);
   return {
-    subject: subj,
-    units: unitData || [],
-    remarksData: remarks || [],
-    sessions: sessionData || [],
-    makeupHours: makeupData || []
+    subject: subjectResult.data,
+    units: unitResult.data || [],
+    remarksData: remarkResult.data || [],
+    sessions: sessionResult.data || [],
+    makeupHours: makeupResult.data || []
   };
 }
 
@@ -633,36 +664,64 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   const subjectUnits = [];
   const competencyUnits = [];
   let subjectRaw = 0, subjectCap = 0;
+  // partial คิดจากเฉพาะครั้งที่กรอกแล้ว ใช้แค่แสดงระหว่างเทอม ไม่ใช่เกรดทางการ
+  let subjectPartialRaw = 0, subjectPartialCap = 0;
+  let expectedCount = 0, scoredCount = 0;
 
   for (const unit of unitsTree) {
     let unitRaw = 0, unitCap = 0;
+    let unitPartialRaw = 0, unitPartialCap = 0;
+    let unitExpected = 0, unitScored = 0;
     for (const ind of (unit.indicators || [])) {
-      let indRaw = 0, indCap = 0;
+      let indRaw = 0, indCap = 0, indPartialCap = 0;
       for (const coll of (ind.collections || [])) {
-        indCap += coll.max_score;
+        const collectionMax = Number(coll.max_score) || 0;
+        indCap += collectionMax;
+        unitExpected++;
         const row = (coll.scores || []).find(s => s.student_id === studentId);
-        if (row) indRaw += Number(row.raw_score);
+        if (row) {
+          indRaw += Number(row.raw_score);
+          indPartialCap += collectionMax;
+          unitScored++;
+        }
       }
       const indScaled = indCap > 0 ? (indRaw / indCap) * ind.max_score : 0;
       unitRaw += indScaled;
       unitCap += ind.max_score;
+      if (indPartialCap > 0) {
+        unitPartialRaw += (indRaw / indPartialCap) * ind.max_score;
+        unitPartialCap += ind.max_score;
+      }
     }
     const unitScaled = unitCap > 0 ? (unitRaw / unitCap) * unit.max_score : 0;
+    const unitPartialScaled = unitPartialCap > 0 ? (unitPartialRaw / unitPartialCap) * unit.max_score : 0;
     if (unit.kind === "วิชา") {
       subjectUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score });
       subjectRaw += unitScaled;
       subjectCap += unit.max_score;
+      if (unitPartialCap > 0) {
+        subjectPartialRaw += unitPartialScaled;
+        subjectPartialCap += unit.max_score;
+      }
+      expectedCount += unitExpected;
+      scoredCount += unitScored;
     } else {
       competencyUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score });
     }
   }
 
   const subjectScaled = subjectCap > 0 ? (subjectRaw / subjectCap) * subj.max_score : 0;
+  const scoring = {
+    expectedCount,
+    scoredCount,
+    complete: expectedCount > 0 && scoredCount === expectedCount,
+    partialPercent: subjectPartialCap > 0 ? (subjectPartialRaw / subjectPartialCap) * 100 : null
+  };
 
   // 1) เช็ค ร. ก่อน
   const remark = remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
   if (remark) {
-    return { subjectUnits, competencyUnits, subjectScaled, result: { type: "ร.", reason: remark.reason } };
+    return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "ร.", reason: remark.reason } };
   }
 
   // ชั่วโมงชดเชย (ทำงาน/เรียนเสริม ฯลฯ) ของนักเรียนคนนี้ในวิชานี้ — บวกเข้า attended ตรงๆ
@@ -682,17 +741,17 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   //   ขาดสะสม > 40% ของคาบเต็มตามรอบวิชา               → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
   if (!skipMs && subj.total_periods && sessionsArr.length > 0) {
     const rawMissed = computeMissedPeriods(studentId, sessionsArr);
-    const maxMissedRetake = subj.total_periods * 0.40;
-    const maxMissedMakeup = subj.total_periods * 0.20;
+    const maxMissedRetake = subj.total_periods * MS_RETAKE_RATIO;
+    const maxMissedMakeup = subj.total_periods * MS_MAKEUP_RATIO;
 
     if (rawMissed > maxMissedRetake) {
       // ขาดเกินเพดานเรียนซ้ำแล้ว — ชดเชยช่วยไม่ได้แล้ว ต้องเรียนซ้ำรายวิชา (ไม่หัก makeupTotal เข้าไปเลย)
-      return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake } };
+      return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake } };
     }
     if (rawMissed > maxMissedMakeup) {
       const netMissed = Math.max(0, rawMissed - makeupTotal);
       if (netMissed > maxMissedMakeup) {
-        return { subjectUnits, competencyUnits, subjectScaled, result: { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal } };
+        return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal } };
       }
       // ชดเชยจนขาดสุทธิไม่เกินเพดานแล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
     }
@@ -701,7 +760,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   // 3) แปลงเป็นเกรด
   const percentScore = subj.max_score > 0 ? (subjectScaled / subj.max_score) * 100 : 0;
   const grade = percentToGrade(percentScore);
-  return { subjectUnits, competencyUnits, subjectScaled, result: { type: "grade", grade, percentScore, makeupTotal } };
+  return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "grade", grade, percentScore, makeupTotal } };
 }
 
 // ---------- คำนวณผลรวมวิชาบูรณาการของนักเรียน 1 คน ----------
@@ -716,21 +775,37 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 // รับ memberDataList = [{ subject, units, remarksData, sessions, makeupHours }, ...] จาก loadSubjectData
 export function computeIntegratedResult(studentId, memberDataList) {
   const memberResults = [];
+  const noPeriodSubjects = [];
   let hasR = false;
   let weightedSum = 0, weightSum = 0;
+  let expectedCount = 0, scoredCount = 0;
+  let partialWeightedSum = 0, partialWeightSum = 0;
   let totalBase = 0, rawMissed = 0, makeupTotal = 0, anySessions = false;
 
   for (const md of memberDataList) {
     // skipMs = true: วิชาย่อยไม่ตัดสิน มส. รายตัว (คิดรวมข้างล่างแทน) — ผลรายวิชาจึงมีแค่ ร./เกรด
     const r = computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions, md.makeupHours, true);
-    const weight = md.subject.total_periods || 0;
+    const weight = Number(md.subject.total_periods) || 0;
     const missed = computeMissedPeriods(studentId, md.sessions || []);
     // เก็บสมรรถนะหลักของวิชาย่อยนี้ไว้ด้วย (ถ้ามี) — แสดงแยกตามวิชาที่กรอกไว้จริง ไม่ถัวเฉลี่ยรวม
     // เพราะสมรรถนะหลักมักกรอกแค่บางวิชา ถัวเฉลี่ยรวมกับวิชาที่ไม่มีข้อมูลจะทำให้คะแนนต่ำลงผิดๆ
     // missedPeriods เก็บไว้โชว์รายวิชา ให้ครูเห็นว่าเด็กขาดหนักที่วิชาย่อยไหน
-    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed });
+    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed, scoring: r.scoring });
+    expectedCount += r.scoring.expectedCount;
+    scoredCount += r.scoring.scoredCount;
+    if (r.scoring.partialPercent !== null && weight > 0) {
+      partialWeightedSum += r.scoring.partialPercent * weight;
+      partialWeightSum += weight;
+    }
     if (r.result.type === "ร.") hasR = true;
     else { weightedSum += r.result.percentScore * weight; weightSum += weight; }
+
+    // ถ้าไม่มีฐานเวลา ห้ามนับคาบขาดเข้ายอดรวมฝ่ายเดียว ไม่งั้นอัตราขาดจะพุ่งและติด มส. ผิด
+    // ยัง push memberResults และคิดคะแนนตามปกติ — ตัดออกเฉพาะส่วนเวลาเรียน/มส.
+    if (weight <= 0) {
+      noPeriodSubjects.push(md.subject.name);
+      continue;
+    }
 
     totalBase += weight;
     rawMissed += missed;
@@ -743,8 +818,8 @@ export function computeIntegratedResult(studentId, memberDataList) {
   // 1) เช็ค มส. รวมก่อน (มส. ชนะ ร.) — ต้องมีฐานเวลากับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้งถึงเช็คได้
   let overall = null;
   if (totalBase > 0 && anySessions) {
-    const maxMissedRetake = totalBase * 0.40;
-    const maxMissedMakeup = totalBase * 0.20;
+    const maxMissedRetake = totalBase * MS_RETAKE_RATIO;
+    const maxMissedMakeup = totalBase * MS_MAKEUP_RATIO;
     if (rawMissed > maxMissedRetake) {
       overall = { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake, totalBase };
     } else if (rawMissed > maxMissedMakeup) {
@@ -764,7 +839,13 @@ export function computeIntegratedResult(studentId, memberDataList) {
     overall = { type: "grade", grade: percentToGrade(percentScore), percentScore, weightSum, makeupTotal };
   }
 
-  return { memberResults, overall, totalBase, rawMissed, makeupTotal };
+  const scoring = {
+    expectedCount,
+    scoredCount,
+    complete: expectedCount > 0 && scoredCount === expectedCount,
+    partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null
+  };
+  return { memberResults, overall, scoring, totalBase, rawMissed, makeupTotal, noPeriodSubjects };
 }
 
 // ---------- รวมผลทุกวิชาของนักเรียนทุกคน ในชั้น + ปีการศึกษา (+ เทอม ถ้าส่งมา) ----------
@@ -837,7 +918,12 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
       for (const studentId of enrolledSet) {
         if (!out.has(studentId)) continue;
         const ir = computeIntegratedResult(studentId, memberDataList);
-        out.get(studentId).subjects.push({ subject: subj, result: ir.overall });
+        out.get(studentId).subjects.push({
+          subject: subj,
+          result: ir.overall,
+          scoring: ir.scoring,
+          noPeriodSubjects: ir.noPeriodSubjects
+        });
       }
     } else {
       const data = loadedData.get(subj.id);
@@ -845,7 +931,7 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
       for (const studentId of enrolledSet) {
         if (!out.has(studentId)) continue;
         const r = computeSubjectResult(studentId, data.subject, data.units, data.remarksData, data.sessions, data.makeupHours);
-        out.get(studentId).subjects.push({ subject: subj, result: r.result });
+        out.get(studentId).subjects.push({ subject: subj, result: r.result, scoring: r.scoring });
       }
     }
   }
@@ -855,20 +941,41 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
 
 // ---------- คิดเกรดเฉลี่ย (GPA) จากผลรายวิชาของนักเรียน 1 คน ----------
 // ถ่วงน้ำหนักด้วยหน่วยกิต (credits) — ไม่มีหน่วยกิต (ประถม) ถือเป็น 1 หน่วยเท่ากัน (ยืนยันแล้ว)
-// มีวิชาติด ร./มส. ที่ยังไม่แก้แม้แต่วิชาเดียว → pending=true ("ยังสรุปไม่ได้") ไม่คิด GPA (ยืนยันแล้ว)
-// รับ subjectResults = [{ subject, result }, ...]  คืน { gpa: number|null, pending, total }
+// pending = ยังสรุปของจริงไม่ได้เพราะมี ร./มส. หรือกรอกคะแนนไม่ครบ
+// provisionalGpa คิดจากคะแนนเฉพาะที่กรอกแล้ว ใช้ดูระหว่างทางเท่านั้น ห้ามใช้ตัดสิน
 export function computeGpa(subjectResults) {
   const list = subjectResults || [];
   const total = list.length;
-  const pending = list.some(x => x.result.type === "มส." || x.result.type === "ร.");
-  if (pending || total === 0) return { gpa: null, pending, total };
-  let weightedSum = 0, weightSum = 0;
+  const hasBlocked = list.some(x => x.result.type === "มส." || x.result.type === "ร.");
+  const hasIncomplete = list.some(x => x.scoring && !x.scoring.complete);
+  const pending = hasBlocked || hasIncomplete;
+  const reasons = [];
+  if (hasBlocked) reasons.push("มีวิชาติด ร./มส.");
+  if (hasIncomplete) reasons.push("ยังกรอกคะแนนไม่ครบ");
+
+  let weightedSum = 0, weightSum = 0, countedSubjects = 0;
   for (const x of list) {
+    if (x.result.type !== "grade") continue;
+    const partial = x.scoring && x.scoring.partialPercent;
+    // ⚠ วิชาที่ยังไม่มีคะแนนเลย (ไม่มีโครงสร้าง หรือมีแต่ยังไม่กรอกสักช่อง) ต้อง **ข้าม**
+    // ห้ามนับเป็นเกรด 0 — ไม่งั้นเลข "ชั่วคราว" จะสร้างบั๊กเดิมของข้อ 3 ขึ้นมาใหม่ในตัวมันเอง
+    // (เคสจริง: มีคะแนนวิชาเดียวได้ 100% อีก 4 วิชายังไม่มีโครงสร้าง → เคยขึ้น 1.33 ทั้งที่ควรเป็น 4.00)
+    if (x.scoring && !x.scoring.complete && (partial === null || partial === undefined)) continue;
+    const percent = partial !== null && partial !== undefined ? partial : x.result.percentScore;
     const w = x.subject.credits && x.subject.credits > 0 ? Number(x.subject.credits) : 1;
-    weightedSum += x.result.grade * w;
+    weightedSum += percentToGrade(percent) * w;
     weightSum += w;
+    countedSubjects++;
   }
-  return { gpa: weightSum > 0 ? weightedSum / weightSum : 0, pending: false, total };
+  const value = weightSum > 0 ? weightedSum / weightSum : 0;
+  return {
+    gpa: pending || total === 0 ? null : value,
+    pending,
+    pendingReason: reasons.join(" · "),
+    provisionalGpa: countedSubjects > 0 ? value : null,
+    countedSubjects,
+    total
+  };
 }
 
 // ============================================================
@@ -978,9 +1085,8 @@ export async function loadAcademicOverviewData(year) {
 
 // คำนวณล้วน — รับผลจาก loadAcademicOverviewData() แล้วสรุปเป็นข้อมูลพร้อมแสดงผล
 export function buildAcademicOverview(raw, options = {}) {
-  const primaryWarn  = Number(options.primaryWarnPercent ?? 5);
-  const secondaryWarn = Number(options.secondaryWarnPercent ?? 10);
-  const criticalPercent = Number(options.criticalPercent ?? 20);
+  const primaryWarn = Number(options.primaryWarnPercent ?? MS_WARN_PERCENT_PRIMARY);
+  const secondaryWarn = Number(options.secondaryWarnPercent ?? MS_WARN_PERCENT_SECONDARY);
 
   const data = raw || {};
   const subjects = data.subjects || [];
@@ -1055,26 +1161,31 @@ export function buildAcademicOverview(raw, options = {}) {
       if (subject.subject_type === "บูรณาการ") {
         const members = membersOf.get(subject.id) || [];
         enrolled = members.some(m => enrolledBySubject.get(m.id)?.has(studentId));
-        risk = computeAttendanceRisk(studentId, members.map(m => subjectDataFor(m, studentId)));
+        risk = computeAttendanceRisk(studentId, members.map(m => subjectDataFor(m, studentId)), { warnPercent });
       } else {
         enrolled = Boolean(enrolledBySubject.get(subject.id)?.has(studentId));
-        risk = computeAttendanceRisk(studentId, [subjectDataFor(subject, studentId)]);
+        risk = computeAttendanceRisk(studentId, [subjectDataFor(subject, studentId)], { warnPercent });
       }
       // totalBase = 0 คือวิชาที่ยังไม่ตั้งจำนวนคาบ — ตัดสินความเสี่ยงไม่ได้ ไปขึ้นที่ "ความพร้อมข้อมูล" แทน
       if (!enrolled || risk.totalBase <= 0) continue;
-      if (risk.percent >= warnPercent) {
+      if (risk.risky) {
         risky.push({
           subject,
           percent: risk.percent,
+          rawPercent: risk.rawPercent,
+          rawMissed: risk.rawMissed,
           netMissed: risk.netMissed,
           totalBase: risk.totalBase,
-          critical: risk.percent > criticalPercent
+          retake: risk.retake,
+          critical: risk.critical,
+          level: risk.level
         });
       }
     }
 
     if (risky.length === 0) continue;
-    risky.sort((a, b) => b.percent - a.percent);
+    const riskRank = item => item.retake ? 2 : item.critical ? 1 : 0;
+    risky.sort((a, b) => riskRank(b) - riskRank(a) || b.percent - a.percent);
     rows.push({
       student: entry.student,
       grade: entry.grade,
@@ -1082,12 +1193,14 @@ export function buildAcademicOverview(raw, options = {}) {
       isPrimary: isPrimaryGrade(entry.grade),
       warnPercent,
       subjects: risky,
-      maxPercent: risky[0].percent,
-      maxMissed: risky[0].netMissed,
+      maxPercent: risky[0].retake ? risky[0].rawPercent : risky[0].percent,
+      maxMissed: risky[0].retake ? risky[0].rawMissed : risky[0].netMissed,
+      retake: risky.some(r => r.retake),
       critical: risky.some(r => r.critical)
     });
   }
-  rows.sort((a, b) => b.maxPercent - a.maxPercent || b.maxMissed - a.maxMissed);
+  const rowRiskRank = row => row.retake ? 2 : row.critical ? 1 : 0;
+  rows.sort((a, b) => rowRiskRank(b) - rowRiskRank(a) || b.maxPercent - a.maxPercent || b.maxMissed - a.maxMissed);
 
   // ---------- ติด ร. ที่ยังค้างอยู่ (มีแถวใน remarks = ยังไม่ถูกถอด) ----------
   const gradeOfStudent = new Map(roster.map(r => [r.student.id, r.grade]));
@@ -1140,7 +1253,7 @@ export function buildAcademicOverview(raw, options = {}) {
         grade,
         isPrimary: isPrimaryGrade(grade),
         warnPercent: isPrimaryGrade(grade) ? primaryWarn : secondaryWarn,
-        studentCount: 0, flagged: [], criticalCount: 0, remarkCount: 0
+        studentCount: 0, flagged: [], retakeCount: 0, criticalCount: 0, remarkCount: 0
       });
     }
     gradeMap.get(grade).studentCount += 1;
@@ -1149,6 +1262,7 @@ export function buildAcademicOverview(raw, options = {}) {
     const group = gradeMap.get(row.grade || "(ไม่ระบุชั้น)");
     if (!group) continue;
     group.flagged.push(row);
+    if (row.retake) group.retakeCount += 1;
     if (row.critical) group.criticalCount += 1;
   }
   for (const remark of incompleteRemarks) {
@@ -1172,7 +1286,12 @@ export function buildAcademicOverview(raw, options = {}) {
     remarks: incompleteRemarks,
     readiness,
     coverage,
-    thresholds: { primaryWarn, secondaryWarn, criticalPercent }
+    thresholds: {
+      primaryWarn,
+      secondaryWarn,
+      makeupPercent: MS_MAKEUP_RATIO * 100,
+      retakePercent: MS_RETAKE_RATIO * 100
+    }
   };
 }
 

@@ -166,7 +166,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -366,7 +366,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-1";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-8";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -874,7 +874,11 @@ elDelSubject.addEventListener("click", async () => {
     }
   }
 
-  if (!confirm(confirmMsg)) return;
+  if (!await window.crsAskConfirm({
+    title: "ลบวิชา",
+    message: confirmMsg,
+    okLabel: "ลบวิชา"
+  })) return;
   const { error } = await sb.from("subjects").delete().eq("id", currentSubject.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบวิชาแล้ว", true);
@@ -1189,19 +1193,31 @@ async function saveNode() {
 async function deleteUnit(unit) {
   const n = countScoresInUnit(unit);
   if (n > 0) { showToast("ลบไม่ได้ หน่วยนี้มีคะแนนกรอกไว้แล้ว " + n + " ช่อง", false); return; }
-  if (!confirm("ยืนยันลบ \"" + unit.name + "\" ? หน่วยย่อยและครั้งที่ข้างในจะถูกลบด้วย")) return;
+  if (!await window.crsAskConfirm({
+    title: "ลบหน่วยการเรียนรู้",
+    message: "ลบ \"" + unit.name + "\" ? หน่วยย่อยและครั้งที่ข้างในจะถูกลบด้วย",
+    okLabel: "ลบหน่วย"
+  })) return;
   await doDelete("units", unit.id);
 }
 async function deleteIndicator(ind) {
   const n = countScoresInIndicator(ind);
   if (n > 0) { showToast("ลบไม่ได้ หน่วยย่อยนี้มีคะแนนกรอกไว้แล้ว " + n + " ช่อง", false); return; }
-  if (!confirm("ยืนยันลบ \"" + ind.name + "\" ? ครั้งที่ข้างในจะถูกลบด้วย")) return;
+  if (!await window.crsAskConfirm({
+    title: "ลบหน่วยย่อย",
+    message: "ลบ \"" + ind.name + "\" ? ครั้งที่ข้างในจะถูกลบด้วย",
+    okLabel: "ลบหน่วยย่อย"
+  })) return;
   await doDelete("indicators", ind.id);
 }
 async function deleteCollection(coll) {
   const n = countScoresInCollection(coll);
   if (n > 0) { showToast("ลบไม่ได้ ครั้งที่นี้มีคะแนนกรอกไว้แล้ว " + n + " ช่อง", false); return; }
-  if (!confirm("ยืนยันลบ ครั้งที่ " + coll.seq + " ?")) return;
+  if (!await window.crsAskConfirm({
+    title: "ลบครั้งที่ " + coll.seq,
+    message: "ครั้งนี้ยังไม่มีคะแนนที่กรอกไว้",
+    okLabel: "ลบครั้งนี้"
+  })) return;
   await doDelete("collections", coll.id);
 }
 async function doDelete(table, id) {
@@ -1360,7 +1376,11 @@ document.getElementById("btn-add-student").addEventListener("click", async () =>
 });
 
 async function removeEnrollment(e) {
-  if (!confirm("เอา \"" + e.student.name + "\" ออกจากวิชานี้?")) return;
+  if (!await window.crsAskConfirm({
+    title: "เอานักเรียนออกจากวิชา",
+    message: "นักเรียน \"" + e.student.name + "\"",
+    okLabel: "เอาออก"
+  })) return;
   const { error } = await sb.from("enrollments").delete().eq("id", e.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("เอาออกแล้ว", true);
@@ -1428,7 +1448,11 @@ document.getElementById("btn-add-member").addEventListener("click", async () => 
 });
 
 async function removeMember(m) {
-  if (!confirm("ยืนยันเอา \"" + m.member.name + "\" ออกจากวิชาบูรณาการนี้? (ไม่ลบคะแนนของวิชานั้น)")) return;
+  if (!await window.crsAskConfirm({
+    title: "เอาวิชาออกจากวิชาบูรณาการ",
+    message: "วิชา \"" + m.member.name + "\" · คะแนนเดิมของวิชานั้นจะไม่ถูกลบ",
+    okLabel: "เอาวิชาออก"
+  })) return;
   const { error } = await sb.from("integration_members").delete().eq("id", m.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("เอาออกแล้ว", true);

@@ -189,7 +189,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -306,7 +306,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-1";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-8";
 
 const session = await requireAuth();
 if (!session) {
@@ -604,8 +604,16 @@ async function deleteStudent(stu) {
   // ไม่มีคะแนน/เช็คชื่อ/ร./ชดเชย/สมรรถนะ เลย → ลบได้เลยแบบเดิม (ยืนยันสั้น ๆ)
   if (gradeCount === 0) {
     const enrollN = links.enroll.length;
-    if (enrollN > 0 && !confirm("นักเรียนคนนี้ลงทะเบียนอยู่ " + enrollN + " วิชา จะลบพร้อมเลิกลงทะเบียนทั้งหมดหรือไม่?")) return;
-    if (enrollN === 0 && !confirm("ยืนยันลบ \"" + stu.name + "\" ?")) return;
+    if (enrollN > 0 && !await window.crsAskConfirm({
+      title: "ลบนักเรียนและการลงทะเบียน",
+      message: "นักเรียน \"" + stu.name + "\" ลงทะเบียนอยู่ " + enrollN + " วิชา ระบบจะเลิกลงทะเบียนทั้งหมดพร้อมลบนักเรียน",
+      okLabel: "ลบนักเรียน"
+    })) return;
+    if (enrollN === 0 && !await window.crsAskConfirm({
+      title: "ลบนักเรียน",
+      message: "ยืนยันลบ \"" + stu.name + "\" ?",
+      okLabel: "ลบนักเรียน"
+    })) return;
     const { error } = await sb.from("students").delete().eq("id", stu.id);
     if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
     showToast("ลบแล้ว", true);

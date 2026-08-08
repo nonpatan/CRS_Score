@@ -105,7 +105,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -155,7 +155,7 @@ import {
   loadWorkContext, computeDayStatus, getDutyTypes, getDutyPattern,
   saveDutyPattern, removeDutyPattern, saveDutyRosterEntry, removeDutyRosterEntry,
   generateDutyRosterFromPattern, bangkokNow, toDateStr, eachDate, isoWeekday
-} from "../supabase-client.js?v=20260808-1";
+} from "../supabase-client.js?v=20260808-8";
 
 const session = await requireAuth();
 if (session) {
@@ -217,9 +217,14 @@ if (session) {
       }
       return warnings;
     }
-    function confirmWarnings(staff, type, date = null) {
+    async function confirmWarnings(staff, type, date = null) {
       const warnings = warningsFor(staff, type, date);
-      return !warnings.length || confirm("คำเตือนก่อนจัดเวร\n\n• " + warnings.join("\n• ") + "\n\nยืนยันทำต่อหรือไม่?");
+      return !warnings.length || await window.crsAskConfirm({
+        title: "คำเตือนก่อนจัดเวร",
+        message: "• " + warnings.join("\n• "),
+        okLabel: "ทำต่อ",
+        danger: false
+      });
     }
 
     function renderPattern() {
@@ -346,7 +351,12 @@ if (session) {
       swapState = null; el("swap-card").hidden = true; loadData();
     });
     el("btn-generate").addEventListener("click", async () => {
-      if (monthSync && !confirm("เดือนนี้เคยสร้างแล้ว ระบบจะข้ามทุกช่อง (วัน + งาน) ที่มีคนอยู่ และสร้างเฉพาะช่องว่าง ยืนยันทำต่อหรือไม่?")) return;
+      if (monthSync && !await window.crsAskConfirm({
+        title: "เดือนนี้เคยสร้างตารางแล้ว",
+        message: "ระบบจะข้ามทุกช่อง (วัน + งาน) ที่มีคนอยู่ และสร้างเฉพาะช่องว่าง",
+        okLabel: "สร้างเฉพาะช่องว่าง",
+        danger: false
+      })) return;
       const button = el("btn-generate"); button.disabled = true;
       try {
         const result = await generateDutyRosterFromPattern(range.from, range.to, session.user.id);
@@ -361,7 +371,7 @@ if (session) {
       if (!select?.value) return;
       const type = typeByCode.get(select.dataset.dutyType);
       const staff = staffById.get(select.value);
-      if (!confirmWarnings(staff, type)) { select.value = ""; return; }
+      if (!await confirmWarnings(staff, type)) { select.value = ""; return; }
       select.disabled = true;
       try {
         await saveDutyPattern(staff.id, select.dataset.weekday, type.code);
@@ -387,7 +397,12 @@ if (session) {
       if (!additions.length) return toast("ไม่มีรายชื่อใหม่ให้คัดลอก");
       const targetType = typeByCode.get(copy.dataset.toType);
       const warnings = additions.flatMap(row => warningsFor(staffById.get(row.staff_id), targetType));
-      if (warnings.length && !confirm("คำเตือนก่อนคัดลอก\n\n• " + [...new Set(warnings)].join("\n• ") + "\n\nยืนยันทำต่อหรือไม่?")) return;
+      if (warnings.length && !await window.crsAskConfirm({
+        title: "คำเตือนก่อนคัดลอก",
+        message: "• " + [...new Set(warnings)].join("\n• "),
+        okLabel: "คัดลอกต่อ",
+        danger: false
+      })) return;
       copy.disabled = true;
       try {
         for (const row of additions) {
@@ -404,7 +419,7 @@ if (session) {
         const select = el("days").querySelector(`[data-day-select="${CSS.escape(add.dataset.addDate + "|" + type.code)}"]`);
         const staff = staffById.get(select?.value);
         if (!staff) return toast("กรุณาเลือกบุคลากร", true);
-        if (!confirmWarnings(staff, type, add.dataset.addDate)) return;
+        if (!await confirmWarnings(staff, type, add.dataset.addDate)) return;
         add.disabled = true;
         try {
           await saveDutyRosterEntry(add.dataset.addDate, type.code, staff.id, session.user.id);
@@ -415,7 +430,11 @@ if (session) {
       const remove = event.target.closest("[data-remove-date]");
       if (remove) {
         const staff = staffById.get(remove.dataset.staff);
-        if (!confirm(`ถอด ${staff?.full_name || "บุคลากร"} ออกจาก “${remove.dataset.dutyType}” วันที่ ${remove.dataset.removeDate} ใช่หรือไม่?`)) return;
+        if (!await window.crsAskConfirm({
+          title: "ถอดเวร",
+          message: `ถอด ${staff?.full_name || "บุคลากร"} ออกจาก “${remove.dataset.dutyType}” วันที่ ${remove.dataset.removeDate}`,
+          okLabel: "ถอดเวร"
+        })) return;
         remove.disabled = true;
         try {
           await removeDutyRosterEntry(remove.dataset.removeDate, remove.dataset.dutyType, remove.dataset.staff);

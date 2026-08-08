@@ -168,7 +168,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -280,7 +280,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor } from "../supabase-client.js?v=20260808-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor } from "../supabase-client.js?v=20260808-8";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -966,7 +966,7 @@ async function deleteBlockRound(r) {
     msg += "\n\n⚠️ วิชาต่อไปนี้จะไม่ถูกลบ เพราะคุณไม่ใช่เจ้าของวิชา:\n" +
       blocked.map(m => "· " + m.name).join("\n");
   }
-  if (!confirm(msg)) return;
+  if (!await window.crsAskConfirm({ title: "ลบวิชาที่เลือก", message: msg, okLabel: "ลบวิชา" })) return;
 
   let deleted = 0;
   let failed = false;
@@ -1107,7 +1107,7 @@ async function deleteCurrentSession(idx) {
   const msg = "ลบการเช็คชื่อครั้งที่ " + (idx + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n" +
     "วิชา " + (currentSubject ? currentSubject.name : "") + " (" + fmtPeriods(s.periods_covered) + " คาบ)\n\n" +
     "ผลเช็คชื่อของนักเรียน " + (count || 0) + " คนในครั้งนี้จะถูกลบทั้งหมด และกู้คืนไม่ได้";
-  if (!confirm(msg)) return;
+  if (!await window.crsAskConfirm({ title: "ลบการเช็คชื่อ", message: msg, okLabel: "ลบครั้งนี้" })) return;
 
   // ⚠️ ต้อง .select() ท้าย .delete() เสมอ — ถ้า RLS บล็อก PostgREST ตอบสำเร็จโดยไม่มี error
   // และไม่มีแถวกลับมา ถ้าเช็คแค่ error ครูจะเห็น "ลบแล้ว" ทั้งที่ข้อมูลยังอยู่ครบ
@@ -1476,7 +1476,11 @@ document.getElementById("btn-add-makeup").addEventListener("click", async () => 
 });
 
 async function removeMakeup(m) {
-  if (!confirm("ยืนยันลบชั่วโมงชดเชยของ \"" + m.student.name + "\" (" + m.periods + " คาบ) ?")) return;
+  if (!await window.crsAskConfirm({
+    title: "ลบชั่วโมงชดเชย",
+    message: "นักเรียน \"" + m.student.name + "\" · " + m.periods + " คาบ",
+    okLabel: "ลบชั่วโมง"
+  })) return;
   const { error } = await sb.from("makeup_hours").delete().eq("id", m.id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบแล้ว", true);

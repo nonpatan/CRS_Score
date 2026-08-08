@@ -149,7 +149,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -186,7 +186,7 @@ import {
   sb, requireAuth, signOut,
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting
-} from "../supabase-client.js?v=20260808-1";
+} from "../supabase-client.js?v=20260808-8";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -289,15 +289,19 @@ async function loadReport() {
     const stu = entry.student;
     const subjList = entry.subjects;
     const total = subjList.length;
-    const failCount = subjList.filter(x =>
-      x.result.type === "มส." || x.result.type === "ร." || (x.result.type === "grade" && x.result.grade === 0)
-    ).length;
+    const failCount = subjList.filter(x => {
+      // ร./มส. ตัดสินจากสถานะ/เวลาเรียน ยังต้องนับแม้คะแนนไม่ครบ
+      if (x.result.type === "มส." || x.result.type === "ร.") return true;
+      if (x.scoring && !x.scoring.complete) return false;
+      return x.result.type === "grade" && x.result.grade === 0;
+    }).length;
+    const incompleteCount = subjList.filter(x => x.scoring && !x.scoring.complete).length;
     const cond2 = total > 0 && failCount > total / 2;
 
-    const { gpa, pending } = computeGpa(subjList);
+    const { gpa, pending, pendingReason, provisionalGpa, countedSubjects } = computeGpa(subjList);
     const cond1 = gpa !== null && gpa < 1.0;
 
-    rows.push({ stu, subjList, total, failCount, cond2, gpa, cond1, pending, flagged: cond1 || cond2 });
+    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, flagged: cond1 || cond2 });
   }
 
   rows.sort((a, b) => {
@@ -328,11 +332,16 @@ function renderReport(rows, grade, year) {
 }
 
 function renderStudentRow(row) {
-  const { stu, subjList, total, failCount, cond2, gpa, cond1, pending, flagged } = row;
+  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, flagged } = row;
+  const noPeriodSubjects = [...new Set(subjList.flatMap(item => item.noPeriodSubjects || []))];
 
-  const subjRows = subjList.map(x =>
-    "<div class='score-row'><span>" + escapeHtml(x.subject.name) + "</span><span class='val'>" + subjBadge(x.result) + "</span></div>"
-  ).join("");
+  const subjRows = subjList.map(x => {
+    const display = x.result.type === "grade" && x.scoring && !x.scoring.complete
+      ? "<span class='badge mid'>" + (x.scoring.expectedCount === 0 ? "ยังไม่มีโครงสร้างคะแนน" : "ยังไม่ครบ · " + x.scoring.scoredCount + "/" + x.scoring.expectedCount + " ครั้ง") + "</span>" +
+        (x.scoring.partialPercent !== null ? " <span class='hint'>(ชั่วคราว " + x.scoring.partialPercent.toFixed(0) + "%)</span>" : "")
+      : subjBadge(x.result);
+    return "<div class='score-row'><span>" + escapeHtml(x.subject.name) + "</span><span class='val'>" + display + "</span></div>";
+  }).join("");
 
   let verdictHtml;
   if (flagged) {
@@ -345,8 +354,9 @@ function renderStudentRow(row) {
   } else if (pending) {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge mid'>ยังสรุปไม่ได้</span></div>" +
-      "<div class='result-note'>มีวิชาติด ร./มส. ที่ยังไม่แก้ไข — เกรดเฉลี่ยทั้งปียังคิดไม่ได้จนกว่าจะแก้ไขให้ครบ " +
-      "(ติด 0/ร./มส. " + failCount + " จาก " + total + " วิชา ตอนนี้)</div>";
+      "<div class='result-note'>" + escapeHtml(pendingReason) + " — ผลทางการยังคิดไม่ได้ " +
+      "(ติด 0/ร./มส. " + failCount + " จาก " + total + " วิชาตอนนี้)</div>" +
+      (provisionalGpa !== null ? "<div class='result-note'>เกรดเฉลี่ยชั่วคราว " + provisionalGpa.toFixed(2) + " จาก " + countedSubjects + " วิชาที่มีคะแนนแล้ว — ยังไม่ใช่ของจริง</div>" : "");
   } else {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge good'>ไม่เข้าเกณฑ์</span></div>" +
@@ -364,6 +374,12 @@ function renderStudentRow(row) {
         "<div class='section-title'>รายวิชา (" + total + " วิชา)</div>" +
         (subjRows || "<div class='hint'>ไม่มีวิชา</div>") +
       "</div>" +
+      (noPeriodSubjects.length
+        ? "<div class='warn-note'>⚠️ ยังไม่ได้กรอกจำนวนคาบของ: " + escapeHtml(noPeriodSubjects.join(", ")) + " — ผลเวลาเรียน/มส. ยังไม่ครบ</div>"
+        : "") +
+      (incompleteCount > 0
+        ? "<div class='warn-note'>⚠️ ยังกรอกคะแนนไม่ครบ " + incompleteCount + " วิชา — ผลนี้ยังไม่ควรใช้ตัดสิน</div>"
+        : "") +
       "<div class='section'>" + verdictHtml + "</div>" +
     "</div>"
   );

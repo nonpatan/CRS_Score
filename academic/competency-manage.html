@@ -109,7 +109,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-1"></script>
+    <script src="../app-shell.js?v=20260808-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -197,7 +197,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, getStudentPlacements, competencyStageForGrade } from "../supabase-client.js?v=20260808-1";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, getStudentPlacements, competencyStageForGrade } from "../supabase-client.js?v=20260808-8";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -408,7 +408,7 @@ function renderStudents(){if(!current)return;const grade=$("filter-grade").value
 $("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,term=$("f-term").value;if(!name||!year||!term){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const ownerId=isAdmin?($("f-owner").value||session.user.id):session.user.id;const {data,error}=await sb.from("competency_assessments").insert({name,year,term,source_type:$("f-type").value,owner_id:ownerId}).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year)){assessmentYears.push(year);refreshAssessmentYearFilter();}$("f-name").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
 $("sel-competency").onchange=renderElements;
 $("btn-add-target").onclick=async()=>{if(!canEdit())return;const chosen=[...$("element-options").querySelectorAll("[data-element]:checked")];if(!chosen.length){toast("เลือกองค์ประกอบก่อน",false);return;}const start=targets.length+1;const rows=chosen.map((c,i)=>({assessment_id:current.id,competency_id:$("sel-competency").value,element_id:c.dataset.element,max_score:Number($("element-options").querySelector("[data-score='"+c.dataset.element+"']").value),seq:start+i}));if(rows.some(r=>!r.max_score||r.max_score<=0)){toast("คะแนนเต็มต้องมากกว่า 0",false);return;}const {error}=await sb.from("competency_assessment_targets").insert(rows);if(error){toast("บันทึกไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มองค์ประกอบแล้ว");};
-async function removeTarget(t){if(!confirm("ลบองค์ประกอบนี้? คะแนนที่เคยกรอกขององค์ประกอบนี้จะหายด้วย"))return;const {error}=await sb.from("competency_assessment_targets").delete().eq("id",t.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("ลบแล้ว");}
+async function removeTarget(t){if(!await window.crsAskConfirm({title:"ลบองค์ประกอบ",message:"คะแนนที่เคยกรอกขององค์ประกอบนี้จะถูกลบด้วย",okLabel:"ลบองค์ประกอบ"}))return;const {error}=await sb.from("competency_assessment_targets").delete().eq("id",t.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("ลบแล้ว");}
 let editingTarget=null;
 function openTargetModal(target){editingTarget=target;$("target-modal-label").textContent=(target.competency&&target.competency.name||"สมรรถนะหลัก")+" · "+(target.element&&target.element.name||"องค์ประกอบ");$("target-modal-max").value=target.max_score;$("target-overlay").classList.add("show");setTimeout(()=>$("target-modal-max").focus(),0);}
 function closeTargetModal(){$("target-overlay").classList.remove("show");editingTarget=null;}
@@ -481,10 +481,13 @@ async function removeAssessment(assessment){
   let impact;
   try { impact=await getAssessmentImpact(assessment); } catch(error) { toast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: "+error.message,false); return; }
   const detail="องค์ประกอบ "+impact.targets+" รายการ · ผู้เข้าร่วม "+impact.members+" คน · ครั้งประเมิน "+impact.sessions+" ครั้ง · snapshot "+impact.snapshots+" คน · คะแนน "+impact.scores+" ช่อง";
-  if(impact.sessions||impact.scores){
-    const typed=prompt("การลบ “"+assessment.name+"” จะลบข้อมูลทั้งหมดนี้ถาวร:\n"+detail+"\n\nพิมพ์ชื่อรายการให้ตรงกันเพื่อยืนยัน","");
-    if(typed!==assessment.name){toast("ยกเลิกการลบรายการ");return;}
-  } else if(!confirm("ลบ “"+assessment.name+"”?\n"+detail)) return;
+  const confirmed=await window.crsAskConfirm({
+    title:"ลบรายการประเมิน",
+    message:"การลบ “"+assessment.name+"” จะลบข้อมูลทั้งหมดนี้ถาวร:\n"+detail,
+    requireText:(impact.sessions||impact.scores)?assessment.name:null,
+    okLabel:"ลบรายการ"
+  });
+  if(!confirmed){toast("ยกเลิกการลบรายการ");return;}
   const {error}=await sb.from("competency_assessments").delete().eq("id",assessment.id);
   if(error){toast("ลบรายการไม่สำเร็จ: "+error.message,false);return;}
   assessments=assessments.filter(item=>item.id!==assessment.id);
@@ -495,7 +498,7 @@ $("filter-grade").onchange=renderStudents;$("filter-room").onchange=renderStuden
 async function addMembers(ids){if(!ids.length){toast("เลือกรายชื่อนักเรียนก่อน",false);return;}const {error}=await sb.from("competency_assessment_members").insert(ids.map(student_id=>({assessment_id:current.id,student_id})));if(error){toast("เพิ่มไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มผู้เข้าร่วมแล้ว");}
 $("btn-add-selected").onclick=()=>addMembers([...$("student-picker").querySelectorAll("input:checked:not(:disabled)")].map(i=>i.value));
 $("btn-add-room").onclick=()=>addMembers([...$("student-picker").querySelectorAll("input:not(:disabled)")].map(i=>i.value));
-async function removeMember(m){if(!confirm("เอา "+m.student.name+" ออกจากรายการนี้?"))return;const {error}=await sb.from("competency_assessment_members").delete().eq("id",m.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เอาออกแล้ว");}
+async function removeMember(m){if(!await window.crsAskConfirm({title:"เอาผู้เรียนออกจากรายการ",message:"นักเรียน "+m.student.name,okLabel:"เอาออก"}))return;const {error}=await sb.from("competency_assessment_members").delete().eq("id",m.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เอาออกแล้ว");}
 init();
 }
 </script>

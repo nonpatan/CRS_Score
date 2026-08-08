@@ -2,6 +2,112 @@
    รองรับหลายฝ่าย: ดูว่าหน้าปัจจุบันอยู่ในโฟลเดอร์ไหน แล้วเลือกชุดเมนูของฝ่ายนั้น
    (โฟลเดอร์ที่ไม่รู้จักจะถือเป็นฝ่ายวิชาการ เพื่อคงพฤติกรรมเดิมของหน้าเก่าทุกหน้า) */
 (function () {
+  // กล่องยืนยันกลางของทุกฝ่าย — ใช้แทน confirm()/prompt() ซึ่ง webview บางตัวบล็อกเงียบ ๆ
+  // requireText มีค่าเมื่อการกระทำเสี่ยงสูงและต้องพิมพ์ข้อความให้ตรงก่อนยืนยัน
+  window.crsAskConfirm = function ({
+    title = "ยืนยันการทำรายการ",
+    message = "",
+    requireText = null,
+    okLabel = "ยืนยัน",
+    danger = true
+  } = {}) {
+    return new Promise(resolve => {
+      if (!document.getElementById("crs-confirm-style")) {
+        const style = document.createElement("style");
+        style.id = "crs-confirm-style";
+        style.textContent = `
+          .crs-confirm-overlay{position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(15,23,42,.58)}
+          .crs-confirm-overlay.show{display:flex}
+          .crs-confirm-dialog{width:min(100%,460px);max-height:calc(100vh - 40px);overflow:auto;border-radius:16px;background:var(--white,#fff);box-shadow:0 24px 70px rgba(15,23,42,.3);padding:22px}
+          .crs-confirm-dialog h3{margin:0;color:var(--ink,#1f2a2e);font-size:1.15rem;line-height:1.4}
+          .crs-confirm-message{margin:10px 0 0;color:var(--muted,#5f6b70);font-size:.95rem;line-height:1.65;white-space:pre-line}
+          .crs-confirm-field{margin-top:16px}
+          .crs-confirm-field[hidden]{display:none}
+          .crs-confirm-field label{display:block;margin-bottom:6px;color:var(--ink,#1f2a2e);font-weight:600;font-size:.92rem}
+          .crs-confirm-field input{box-sizing:border-box;width:100%;min-height:44px;border:1px solid var(--line,#dfe4e3);border-radius:10px;background:var(--white,#fff);color:var(--ink,#1f2a2e);font:inherit;font-size:16px;padding:9px 11px}
+          .crs-confirm-field input:focus{outline:3px solid rgba(15,110,86,.18);border-color:var(--teal,#0f6e56)}
+          .crs-confirm-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+          .crs-confirm-actions button{min-height:44px;border:0;border-radius:10px;font:inherit;font-weight:700;padding:9px 16px;cursor:pointer}
+          .crs-confirm-cancel{background:var(--teal-soft,#e1f5ee);color:var(--ink,#1f2a2e)}
+          .crs-confirm-ok{background:var(--teal,#0f6e56);color:#fff}
+          .crs-confirm-ok.crs-confirm-danger{background:var(--danger,#a32d2d);color:#fff}
+          .crs-confirm-actions button:disabled{cursor:not-allowed;opacity:.45}
+          @media(max-width:520px){.crs-confirm-overlay{align-items:flex-end;padding:12px}.crs-confirm-dialog{width:100%;max-height:calc(100vh - 24px);border-radius:16px;padding:18px}.crs-confirm-actions{display:grid;grid-template-columns:1fr 1fr}.crs-confirm-actions button{width:100%}}
+        `;
+        document.head.appendChild(style);
+      }
+
+      let overlay = document.getElementById("crs-confirm-overlay");
+      if (!overlay) {
+        overlay = document.createElement("div");
+        overlay.id = "crs-confirm-overlay";
+        overlay.className = "crs-confirm-overlay";
+        overlay.setAttribute("role", "presentation");
+        overlay.innerHTML = `
+          <div class="crs-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="crs-confirm-title" aria-describedby="crs-confirm-message">
+            <h3 id="crs-confirm-title"></h3>
+            <div class="crs-confirm-message" id="crs-confirm-message"></div>
+            <div class="crs-confirm-field" id="crs-confirm-field" hidden>
+              <label for="crs-confirm-input" id="crs-confirm-label"></label>
+              <input id="crs-confirm-input" type="text" autocomplete="off">
+            </div>
+            <div class="crs-confirm-actions">
+              <button type="button" class="crs-confirm-cancel" id="crs-confirm-cancel">ยกเลิก</button>
+              <button type="button" class="crs-confirm-ok" id="crs-confirm-ok"></button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+      }
+
+      const titleEl = document.getElementById("crs-confirm-title");
+      const messageEl = document.getElementById("crs-confirm-message");
+      const field = document.getElementById("crs-confirm-field");
+      const label = document.getElementById("crs-confirm-label");
+      const input = document.getElementById("crs-confirm-input");
+      const cancel = document.getElementById("crs-confirm-cancel");
+      const ok = document.getElementById("crs-confirm-ok");
+      const required = requireText == null ? null : String(requireText);
+      const previousFocus = document.activeElement;
+
+      titleEl.textContent = title;
+      messageEl.textContent = message;
+      field.hidden = required == null;
+      label.textContent = required == null ? "" : `พิมพ์ “${required}” เพื่อยืนยัน`;
+      input.value = "";
+      ok.textContent = okLabel;
+      // ⚠ ห้ามใช้ชื่อคลาส "danger" ตรง ๆ — app-shell.css มีกฎ `button.danger,.danger{...!important}`
+      // ที่จะทับปุ่มนี้ให้กลายเป็นพื้นอ่อน ทำให้ปุ่มยืนยันการลบไม่เด่นกว่าปุ่มยกเลิก
+      ok.classList.toggle("crs-confirm-danger", Boolean(danger));
+      ok.disabled = required != null;
+
+      const syncButton = () => { ok.disabled = required != null && input.value !== required; };
+      const finish = result => {
+        overlay.classList.remove("show");
+        overlay.removeEventListener("click", onOutsideClick);
+        document.removeEventListener("keydown", onKeyDown);
+        input.removeEventListener("input", syncButton);
+        cancel.onclick = null;
+        ok.onclick = null;
+        if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
+        resolve(result);
+      };
+      const onOutsideClick = event => { if (event.target === overlay) finish(false); };
+      const onKeyDown = event => {
+        if (event.key === "Escape") finish(false);
+        if (event.key === "Enter" && !ok.disabled) finish(true);
+      };
+
+      cancel.onclick = () => finish(false);
+      ok.onclick = () => finish(true);
+      input.addEventListener("input", syncButton);
+      overlay.addEventListener("click", onOutsideClick);
+      document.addEventListener("keydown", onKeyDown);
+      overlay.classList.add("show");
+      setTimeout(() => (required == null ? cancel : input).focus(), 0);
+    });
+  };
+
   const nav = document.querySelector("header .nav");
   if (!nav) return;
   const header = nav.closest("header");
