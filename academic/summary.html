@@ -1494,6 +1494,28 @@ async function loadCompetencyStudentResult(student) {
   const assessments = assessmentResult.data || [];
   const assessmentById = new Map(assessments.map(a => [a.id, a]));
   let activityItems = [], routineItems = [];
+  // กิจกรรม/กิจวัตรที่ "กำหนดองค์ประกอบของด้านนี้ไว้แล้ว" — ใช้บอกชื่อตอนที่ยังไม่มีครั้งประเมินเลย
+  // (ไล่จากครั้งประเมินอย่างเดียวไม่พอ ถ้าครูยังไม่กดสร้างครั้งที่ 1 จะไม่มีอะไรให้ตั้งชื่อ)
+  const plannedByCompetency = new Map();
+  if (assessments.length) {
+    const assessmentIds = assessments.map(a => a.id);
+    const [plannedResult, myMemberResult] = await Promise.all([
+      sb.from("competency_assessment_targets").select("assessment_id,competency_id").in("assessment_id", assessmentIds),
+      sb.from("competency_assessment_members").select("assessment_id").eq("student_id", student.id).in("assessment_id", assessmentIds)
+    ]);
+    // ⚠ ต้องกรองด้วยรายชื่อผู้เข้าร่วมก่อน ไม่งั้นจะไปบอกให้ตามกิจกรรมของชั้นอื่น
+    // (เด็ก ม.3 ไม่ได้อยู่ใน "เวทคณิต ม.2" การขึ้นชื่อนั้นคือส่งฝ่ายวิชาการไปผิดทาง)
+    const myAssessmentIds = new Set((myMemberResult.data || []).map(r => r.assessment_id));
+    for (const row of (plannedResult.data || [])) {
+      const assessment = assessmentById.get(row.assessment_id);
+      if (!assessment) continue;
+      const key = row.competency_id + "|" + assessment.source_type;
+      if (!plannedByCompetency.has(key)) plannedByCompetency.set(key, { mine: new Set(), any: false });
+      const bucket = plannedByCompetency.get(key);
+      bucket.any = true;
+      if (myAssessmentIds.has(row.assessment_id)) bucket.mine.add(assessment.name || "ไม่ระบุชื่อรายการ");
+    }
+  }
   if (assessments.length) {
     const snapshotResult = await sb.from("competency_assessment_session_students").select("session_id").eq("student_id", student.id);
     if (snapshotResult.error) {
@@ -1554,7 +1576,7 @@ async function loadCompetencyStudentResult(student) {
     const weight = sourceWeights.find(w => w.competency_id === competency.id);
     return { competency, sources, weight, combined: computeCombinedCompetencyResult(weight, sources, interpretationLevels) };
   });
-  renderCompetencyResult(student, results, year, grade, term, subjectNameById);
+  renderCompetencyResult(student, results, year, grade, term, subjectNameById, plannedByCompetency);
 }
 
 // รายชื่อที่ยังกรอกไม่ครบ — เกณฑ์ความครบเข้มโดยตั้งใจ แต่ถ้าไม่บอกว่าค้างที่ไหน
@@ -1572,17 +1594,34 @@ function pendingText(source, nameOf) {
   return "<div class='pending-list'>ค้าง: " + escapeHtml(shown + more) + "</div>";
 }
 
-function sourceDisplay(label, source, weight, nameOf) {
+// ชื่อกิจกรรม/กิจวัตรที่กำหนดองค์ประกอบของด้านนี้ไว้แล้ว (ยังไม่ต้องมีครั้งประเมิน)
+function plannedNames(plannedByCompetency, competencyId, sourceType) {
+  const bucket = plannedByCompetency && plannedByCompetency.get(competencyId + "|" + sourceType);
+  return bucket ? { mine: [...bucket.mine], any: bucket.any } : { mine: [], any: false };
+}
+
+function sourceDisplay(label, source, weight, nameOf, planned = null) {
   const numericWeight = Number(weight);
   const weightText = Number.isFinite(numericWeight) ? " · น้ำหนัก " + numericWeight.toFixed(0) + "%" : "";
   if (numericWeight === 0) return "<div class='source-row'><span>" + label + weightText + "</span><span class='hint'>ไม่ใช้ในการคำนวณ</span></div>";
   if (source.complete) return "<div class='source-row'><span>" + label + weightText + "</span><strong>" + source.percent.toFixed(1) + "</strong></div>";
   const progress = source.expectedCount > 0 ? "กรอกแล้ว " + source.scoredCount + "/" + source.expectedCount : "ยังไม่มีรายการประเมิน";
-  return "<div class='source-row'><span>" + label + weightText + "</span><span class='missing'>" + progress + "</span></div>" +
-    pendingText(source, nameOf);
+  let detail = pendingText(source, nameOf);
+  // ยังไม่มีครั้งประเมินเลย แต่มีกิจกรรมที่กำหนดองค์ประกอบด้านนี้ไว้แล้ว → บอกชื่อไปเลยว่าต้องไปตามที่ไหน
+  if (!detail && source.expectedCount === 0 && planned) {
+    if (planned.mine.length) {
+      const shown = planned.mine.slice(0, 3).join(", ");
+      const more = planned.mine.length > 3 ? " และอีก " + (planned.mine.length - 3) + " รายการ" : "";
+      detail = "<div class='pending-list'>ยังไม่ได้สร้างครั้งประเมิน: " + escapeHtml(shown + more) + "</div>";
+    } else if (planned.any) {
+      // มีรายการที่วัดด้านนี้อยู่ แต่ไม่มีรายการไหนที่นักเรียนคนนี้เป็นผู้เข้าร่วม
+      detail = "<div class='pending-list'>นักเรียนยังไม่อยู่ในรายการใดที่วัดด้านนี้</div>";
+    }
+  }
+  return "<div class='source-row'><span>" + label + weightText + "</span><span class='missing'>" + progress + "</span></div>" + detail;
 }
 
-function renderCompetencyResult(student, rows, year, grade, term, subjectNameById) {
+function renderCompetencyResult(student, rows, year, grade, term, subjectNameById, plannedByCompetency) {
   const subjectName = item => escapeHtml(subjectNameById && subjectNameById.get(item.subjectId) || "วิชาที่ไม่ทราบชื่อ");
   const assessmentName = item => escapeHtml(item.label || "รายการที่ไม่ทราบชื่อ");
   let html = "<div class='card student-card'><div class='student-head'><span class='name'>" + escapeHtml(student.name) +
@@ -1603,8 +1642,10 @@ function renderCompetencyResult(student, rows, year, grade, term, subjectNameByI
       "<div class='competency-head'><span class='name'>" + escapeHtml(row.competency.name) + "</span><span class='competency-score'>" + combinedText + (row.combined.complete ? " / 100" : "") + "</span></div>"+
       "<div class='source-detail'>"+
         sourceDisplay("รายวิชา", row.sources.subject, w.subject_weight, subjectName) +
-        sourceDisplay("กิจกรรม", row.sources.activity, w.activity_weight, assessmentName) +
-        sourceDisplay("กิจวัตรประจำวัน", row.sources.routine, w.routine_weight, assessmentName) +
+        sourceDisplay("กิจกรรม", row.sources.activity, w.activity_weight, assessmentName,
+          plannedNames(plannedByCompetency, row.competency.id, "กิจกรรม")) +
+        sourceDisplay("กิจวัตรประจำวัน", row.sources.routine, w.routine_weight, assessmentName,
+          plannedNames(plannedByCompetency, row.competency.id, "กิจวัตรประจำวัน")) +
       "</div><div class='competency-result'>" + resultHtml + "</div></div>";
   }
   elCompResult.innerHTML = html;
