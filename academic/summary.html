@@ -148,6 +148,7 @@
   .source-detail { padding:12px 16px; }
   .source-row { display:grid; grid-template-columns:1fr auto; gap:10px; padding:5px 0; font-size:14px; }
   .source-row .missing { color:var(--danger); }
+  .pending-list { color:var(--muted); font-size:13px; padding:0 0 6px 12px; border-left:2px solid var(--line); margin:0 0 4px; }
   .competency-result { padding:12px 16px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:10px; }
   .incomplete { color:var(--danger); font-size:13px; }
   .attendance-summary { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin:10px 0; }
@@ -363,7 +364,7 @@ import {
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
   computeCombinedCompetencyResult, computeAttendanceRisk, GRADE_ORDER, getSetting
-} from "../supabase-client.js";
+} from "../supabase-client.js?v=20260808-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1445,7 +1446,7 @@ async function loadCompetencyStudentResult(student) {
   const term = grade.startsWith("ม.") ? elCompTerm.value : "";
 
   // ---------- แหล่งที่ 1: คะแนนสมรรถนะจากรายวิชาที่นักเรียนลงทะเบียน ----------
-  let subjectQuery = sb.from("subjects").select("id").eq("year", year).eq("grade_level", grade);
+  let subjectQuery = sb.from("subjects").select("id,name").eq("year", year).eq("grade_level", grade);
   if (term) subjectQuery = subjectQuery.eq("term", term);
   const [subjectRows,enrollmentRows] = await Promise.all([
     subjectQuery,
@@ -1456,6 +1457,8 @@ async function loadCompetencyStudentResult(student) {
     return;
   }
   const enrolledIds = new Set((enrollmentRows.data || []).map(r => r.subject_id));
+  // ชื่อวิชาไว้บอกครูว่าค้างที่ไหน (ข้อ 4) — ก่อนหน้านี้ query ดึงมาแต่ id เลยไม่มีชื่อจะแสดง
+  const subjectNameById = new Map((subjectRows.data || []).map(s => [s.id, s.name]));
   const subjectIds = (subjectRows.data || []).map(s => s.id).filter(id => enrolledIds.has(id));
   let competencyUnits = [], subjectScoreRows = [];
   if (subjectIds.length) {
@@ -1480,7 +1483,7 @@ async function loadCompetencyStudentResult(student) {
   }
 
   // ---------- แหล่งที่ 2–3: กิจกรรมและกิจวัตรที่มี snapshot นักเรียนในครั้งประเมิน ----------
-  let assessmentQuery = sb.from("competency_assessments").select("id,source_type,term").eq("year", year);
+  let assessmentQuery = sb.from("competency_assessments").select("id,name,source_type,term").eq("year", year);
   // มัธยมใช้เฉพาะรายการของภาคเรียนที่เลือก; ประถมไม่กรอง term จึงรวมทั้งสองภาคเรียนเป็นรายปี
   if (term) assessmentQuery = assessmentQuery.eq("term", term);
   const assessmentResult = await assessmentQuery;
@@ -1529,6 +1532,7 @@ async function loadCompetencyStudentResult(student) {
           //  จะ fallback มาใช้ค่าน้ำหนักของ target เหมือนเดิม ข้อมูลเก่าจึงไม่ขยับ)
           const item = {
             competency_id: target.competency_id,
+            assessment_name: assessment.name,
             element_id: target.element_id,
             element_weight: Number(target.max_score),
             max_score: Number(assessmentSession.max_score ?? target.max_score),
@@ -1550,19 +1554,37 @@ async function loadCompetencyStudentResult(student) {
     const weight = sourceWeights.find(w => w.competency_id === competency.id);
     return { competency, sources, weight, combined: computeCombinedCompetencyResult(weight, sources, interpretationLevels) };
   });
-  renderCompetencyResult(student, results, year, grade, term);
+  renderCompetencyResult(student, results, year, grade, term, subjectNameById);
 }
 
-function sourceDisplay(label, source, weight) {
+// รายชื่อที่ยังกรอกไม่ครบ — เกณฑ์ความครบเข้มโดยตั้งใจ แต่ถ้าไม่บอกว่าค้างที่ไหน
+// ฝ่ายวิชาการจะตามครูไม่ถูก ทั้งโรงเรียนค้างโดยหาต้นตอไม่เจอ (brief ข้อ 4)
+function pendingText(source, nameOf) {
+  const rows = (source.pending || []).map(item => {
+    const name = nameOf(item);
+    if (item.structureIncomplete) return name + " (โครงสร้างยังไม่ครบ)";
+    if (!item.expected) return name + " (ยังไม่มีช่องคะแนน)";
+    return name + " (" + item.scored + "/" + item.expected + ")";
+  });
+  if (!rows.length) return "";
+  const shown = rows.slice(0, 3).join(", ");
+  const more = rows.length > 3 ? " และอีก " + (rows.length - 3) + " รายการ" : "";
+  return "<div class='pending-list'>ค้าง: " + escapeHtml(shown + more) + "</div>";
+}
+
+function sourceDisplay(label, source, weight, nameOf) {
   const numericWeight = Number(weight);
   const weightText = Number.isFinite(numericWeight) ? " · น้ำหนัก " + numericWeight.toFixed(0) + "%" : "";
   if (numericWeight === 0) return "<div class='source-row'><span>" + label + weightText + "</span><span class='hint'>ไม่ใช้ในการคำนวณ</span></div>";
   if (source.complete) return "<div class='source-row'><span>" + label + weightText + "</span><strong>" + source.percent.toFixed(1) + "</strong></div>";
   const progress = source.expectedCount > 0 ? "กรอกแล้ว " + source.scoredCount + "/" + source.expectedCount : "ยังไม่มีรายการประเมิน";
-  return "<div class='source-row'><span>" + label + weightText + "</span><span class='missing'>" + progress + "</span></div>";
+  return "<div class='source-row'><span>" + label + weightText + "</span><span class='missing'>" + progress + "</span></div>" +
+    pendingText(source, nameOf);
 }
 
-function renderCompetencyResult(student, rows, year, grade, term) {
+function renderCompetencyResult(student, rows, year, grade, term, subjectNameById) {
+  const subjectName = item => escapeHtml(subjectNameById && subjectNameById.get(item.subjectId) || "วิชาที่ไม่ทราบชื่อ");
+  const assessmentName = item => escapeHtml(item.label || "รายการที่ไม่ทราบชื่อ");
   let html = "<div class='card student-card'><div class='student-head'><span class='name'>" + escapeHtml(student.name) +
     "</span><span class='meta'>ปี " + escapeHtml(year) + " · " + escapeHtml(grade) + " · ห้อง " + escapeHtml(student.classroom) +
     (term ? " · ภาคเรียน " + escapeHtml(term) : " · ทั้งปี") + "</span></div></div>";
@@ -1580,9 +1602,9 @@ function renderCompetencyResult(student, rows, year, grade, term) {
     html += "<div class='card competency-card'>"+
       "<div class='competency-head'><span class='name'>" + escapeHtml(row.competency.name) + "</span><span class='competency-score'>" + combinedText + (row.combined.complete ? " / 100" : "") + "</span></div>"+
       "<div class='source-detail'>"+
-        sourceDisplay("รายวิชา", row.sources.subject, w.subject_weight) +
-        sourceDisplay("กิจกรรม", row.sources.activity, w.activity_weight) +
-        sourceDisplay("กิจวัตรประจำวัน", row.sources.routine, w.routine_weight) +
+        sourceDisplay("รายวิชา", row.sources.subject, w.subject_weight, subjectName) +
+        sourceDisplay("กิจกรรม", row.sources.activity, w.activity_weight, assessmentName) +
+        sourceDisplay("กิจวัตรประจำวัน", row.sources.routine, w.routine_weight, assessmentName) +
       "</div><div class='competency-result'>" + resultHtml + "</div></div>";
   }
   elCompResult.innerHTML = html;

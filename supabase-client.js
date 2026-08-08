@@ -317,20 +317,30 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
   const scoreByCollection = new Map((scoreRows || []).map(s => [s.collection_id, Number(s.raw_score)]));
   let expectedCount = 0, scoredCount = 0, scaledSum = 0, maxSum = 0;
   let structureComplete = units.length > 0;
+  // เก็บว่าค้างที่วิชาไหนบ้าง — เกณฑ์ความครบเข้มโดยตั้งใจ (ผู้ใช้เลือกทางเลือก A)
+  // แต่ถ้าไม่บอกว่าค้างที่ไหน ฝ่ายวิชาการจะตามครูไม่ถูก ทั้งโรงเรียนค้างโดยหาต้นตอไม่เจอ
+  const bySubject = new Map();
+  const subjectStat = subjectId => {
+    if (!bySubject.has(subjectId)) bySubject.set(subjectId, { subjectId, expected: 0, scored: 0, structureIncomplete: false });
+    return bySubject.get(subjectId);
+  };
 
   for (const unit of units) {
+    const stat = subjectStat(unit.subject_id);
     const indicators = unit.indicators || [];
-    if (!indicators.length) structureComplete = false;
+    if (!indicators.length) { structureComplete = false; stat.structureIncomplete = true; }
     let unitRaw = 0, unitCap = 0;
     for (const indicator of indicators) {
       const collections = indicator.collections || [];
-      if (!collections.length) structureComplete = false;
+      if (!collections.length) { structureComplete = false; stat.structureIncomplete = true; }
       let indicatorRaw = 0, indicatorCap = 0;
       for (const collection of collections) {
         expectedCount++;
+        stat.expected++;
         indicatorCap += Number(collection.max_score) || 0;
         if (scoreByCollection.has(collection.id)) {
           scoredCount++;
+          stat.scored++;
           indicatorRaw += scoreByCollection.get(collection.id);
         }
       }
@@ -351,7 +361,9 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
     complete,
     percent: complete ? (scaledSum / maxSum) * 100 : null,
     expectedCount,
-    scoredCount
+    scoredCount,
+    // เฉพาะวิชาที่ยังไม่ครบ — ผู้เรียกเอา subjectId ไปแปลงเป็นชื่อวิชาเอง
+    pending: [...bySubject.values()].filter(s => s.structureIncomplete || s.scored < s.expected || s.expected === 0)
   };
 }
 
@@ -388,12 +400,23 @@ export function computeAssessmentCompetencySource(competencyId, expectedItems) {
     weightSum += weight;
   }
 
+  // ค้างที่กิจกรรม/กิจวัตรรายการไหน — จัดกลุ่มตามชื่อรายการเพื่อให้ครูตามได้ถูกตัว
+  const byAssessment = new Map();
+  for (const item of items) {
+    const label = item.assessment_name || "ไม่ระบุชื่อรายการ";
+    if (!byAssessment.has(label)) byAssessment.set(label, { label, expected: 0, scored: 0 });
+    const stat = byAssessment.get(label);
+    stat.expected++;
+    if (item.raw_score !== null && item.raw_score !== undefined) stat.scored++;
+  }
+
   const complete = items.length > 0 && scored.length === items.length && weightSum > 0;
   return {
     complete,
     percent: complete ? (weightedSum / weightSum) * 100 : null,
     expectedCount: items.length,   // ยังนับเป็น "ครั้ง" เหมือนเดิม — หน้าจอใช้โชว์ "กรอกแล้ว n/m"
-    scoredCount: scored.length
+    scoredCount: scored.length,
+    pending: [...byAssessment.values()].filter(stat => stat.scored < stat.expected)
   };
 }
 
