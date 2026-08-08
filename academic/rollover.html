@@ -230,7 +230,7 @@ import {
   sb, requireAuth, signOut, getProfile,
   getActiveYear, setActiveYear, distinctYears,
   getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20260808-8";
+} from "../supabase-client.js?v=20260808-12";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -650,6 +650,37 @@ async function autoEnroll(newSubjectId, newGradeLevel, rooms) {
   return targets.length;
 }
 
+// ---------- คัดลอกอัตราส่วนคะแนนไปปีใหม่ (ทำก่อนแตะนักเรียน/ก๊อปวิชา) ----------
+async function copyGradeWeightsToYear(sourceYear, newYear, addLog) {
+  addLog("• กำลังคัดลอกอัตราส่วนคะแนนจากปี " + sourceYear + " ไปปี " + newYear + "...");
+  const { data, error } = await sb.from("grade_weights")
+    .select("level,collect_weight,exam_weight")
+    .eq("year", sourceYear);
+  if (error) throw new Error("อ่านอัตราส่วนคะแนนปีต้นทางไม่สำเร็จ: " + error.message);
+
+  const byLevel = new Map([
+    ["ประถม", { collect_weight: 80, exam_weight: 20 }],
+    ["มัธยม", { collect_weight: 70, exam_weight: 30 }]
+  ]);
+  for (const row of (data || [])) {
+    if (byLevel.has(row.level)) {
+      byLevel.set(row.level, {
+        collect_weight: Number(row.collect_weight),
+        exam_weight: Number(row.exam_weight)
+      });
+    }
+  }
+  const rows = [...byLevel].map(([level, weights]) => ({ year: newYear, level, ...weights }));
+  const { error: copyError } = await sb.from("grade_weights").upsert(rows, {
+    onConflict: "year,level",
+    ignoreDuplicates: true
+  });
+  if (copyError) throw new Error("คัดลอกอัตราส่วนคะแนนไปปีใหม่ไม่สำเร็จ: " + copyError.message);
+  addLog((data || []).length === 0
+    ? "  ✓ ปีต้นทางยังไม่มีค่า ใช้ค่าเริ่มต้นประถม 80:20 · มัธยม 70:30 แล้ว"
+    : "  ✓ คัดลอกอัตราส่วนคะแนนแล้ว (ค่าที่ตั้งไว้ล่วงหน้าในปีใหม่จะไม่ถูกทับ)");
+}
+
 // ---------- ตรวจสอบ + ลงมือขึ้นปีใหม่ ----------
 btnRun.addEventListener("click", async () => {
   elRunLog.textContent = "";
@@ -701,6 +732,9 @@ btnRun.addEventListener("click", async () => {
   function addLog(line) { log.push(line); elRunLog.textContent = log.join("\n"); }
 
   try {
+    // ต้องสำเร็จก่อนเริ่มเปลี่ยนชั้น/ก๊อปวิชา ไม่งั้นปีใหม่จะมีวิชาแต่คำนวณเกรดไม่ได้
+    await copyGradeWeightsToYear(src, newYear, addLog);
+
     // 1) ยืนยันว่าปีต้นทางมีประวัติชั้น/ห้องครบก่อน
     // ห้ามเดาจาก students ปัจจุบัน เพราะถ้าเลือกปีเก่า ค่านั้นอาจถูกเลื่อนชั้นทับไปแล้ว
     addLog("• กำลังตรวจประวัติชั้น/ห้องของปีต้นทาง...");

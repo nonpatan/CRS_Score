@@ -18,6 +18,8 @@
     --white: #ffffff;
     --danger: #a32d2d;
     --danger-soft: #fceaea;
+    --amber: #93690f;
+    --amber-soft: #faf1dd;
   }
   * { box-sizing: border-box; }
   body {
@@ -126,6 +128,25 @@
   .member-row .title { flex: 1; font-size: 14px; }
   .member-row .weight { color: var(--muted); font-size: 13px; }
   .member-row .weight.zero { color: var(--danger); }
+
+  .weight-grid { display:grid; grid-template-columns:minmax(72px,1fr) repeat(2,minmax(0,1fr)); gap:8px 10px; align-items:center; }
+  .weight-grid .grid-head { color:var(--muted); font-size:13px; font-weight:600; text-align:center; }
+  .weight-grid .level-name { font-weight:600; }
+  .weight-grid input { min-width:0; text-align:center; }
+  .weight-readonly { background:var(--danger-soft); color:var(--danger); padding:8px 12px; border-radius:8px; margin-bottom:14px; font-size:13px; }
+  .weight-missing { background:var(--amber-soft); color:var(--amber); padding:10px 12px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+  .weight-missing button { width:100%; min-height:44px; margin-top:10px; }
+  #btn-save-weights { min-height:44px; }
+  .exam-status { padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
+  .exam-status.closed { border-color:var(--amber); background:var(--amber-soft); }
+  .exam-status .status-title { font-weight:600; }
+  .exam-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px; }
+  .exam-actions button { min-height:44px; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+
+  @media (max-width: 520px) {
+    .exam-actions { align-items:stretch; flex-direction:column; }
+    .exam-actions button { width:100%; }
+  }
 
   /* กล่อง popup สำหรับเพิ่ม/แก้ node */
   .overlay {
@@ -281,6 +302,19 @@
     <button class="danger" id="btn-del-subject" style="width:100%; margin-top:8px; display:none">ลบวิชานี้</button>
   </div>
 
+  <!-- ปิด/เปิดคะแนนสอบ (เฉพาะวิชาพื้นฐานที่เลือกอยู่) -->
+  <div class="card" id="exam-control-card" style="display:none">
+    <div class="section-title">ปิด/เปิดคะแนนสอบ</div>
+    <div class="exam-status" id="manage-exam-status">
+      <div class="status-title" id="manage-exam-status-title"></div>
+      <div class="field-note" id="manage-exam-status-note"></div>
+      <div class="exam-actions">
+        <span class="hint" id="manage-exam-missing-count"></span>
+        <button type="button" class="ghost" id="btn-manage-toggle-exam" style="display:none"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
   <div class="card" id="structure-card" style="display:none">
     <div class="section-title">คะแนนวิชา</div>
@@ -331,6 +365,36 @@
 
   <div class="card hint" id="empty-hint">เลือกวิชาเพื่อจัดการโครงสร้าง หรือกด "สร้างวิชาใหม่"</div>
 
+  <div class="card" id="grade-weights-card">
+    <div class="section-title" id="weights-title">อัตราส่วนคะแนนเก็บ : คะแนนสอบ</div>
+    <div class="field">
+      <label for="weight-year">ปีการศึกษาของอัตราส่วน</label>
+      <select id="weight-year"><option value="">— กำลังโหลด —</option></select>
+    </div>
+    <div class="weight-readonly" id="weights-readonly" style="display:none">
+      คุณไม่มีสิทธิ์แก้ค่านี้ — ดูได้อย่างเดียว เฉพาะ admin หรือฝ่ายวิชาการเท่านั้นที่แก้ได้
+    </div>
+    <div class="weight-missing" id="weights-missing" style="display:none">
+      <div id="weights-missing-text"></div>
+      <button type="button" class="ghost" id="btn-init-weights" style="display:none">ตั้งค่าเริ่มต้น (ประถม 80:20 · มัธยม 70:30)</button>
+    </div>
+    <div class="weight-grid" id="weight-editor">
+      <div></div>
+      <div class="grid-head">คะแนนเก็บ</div>
+      <div class="grid-head">คะแนนสอบ</div>
+      <label class="level-name" for="weight-primary-collect">ประถม</label>
+      <input type="number" id="weight-primary-collect" min="0" max="100" step="0.01" aria-label="คะแนนเก็บระดับประถม" disabled>
+      <input type="number" id="weight-primary-exam" min="0" max="100" step="0.01" aria-label="คะแนนสอบระดับประถม" disabled>
+      <label class="level-name" for="weight-secondary-collect">มัธยม</label>
+      <input type="number" id="weight-secondary-collect" min="0" max="100" step="0.01" aria-label="คะแนนเก็บระดับมัธยม" disabled>
+      <input type="number" id="weight-secondary-exam" min="0" max="100" step="0.01" aria-label="คะแนนสอบระดับมัธยม" disabled>
+    </div>
+    <div class="field-note" style="margin-top:10px">
+      ตัวเลขคะแนนสอบเป็นทั้งน้ำหนักและคะแนนเต็มของข้อสอบ การเปลี่ยนค่านี้หลังเริ่มกรอกคะแนนสอบจะทำให้คะแนนเดิมเปลี่ยนความหมายและอาจทำให้เกรดเปลี่ยนทันที
+    </div>
+    <button class="primary" id="btn-save-weights" disabled>บันทึกอัตราส่วน</button>
+  </div>
+
   <div class="toast" id="toast"></div>
   </main>
 </div>
@@ -366,7 +430,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-8";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, getAcademicYears, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-12";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -377,6 +441,7 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 
 const myProfile = await getProfile(session.user.id);
 const isAdminUser = !!myProfile && myProfile.role === "admin";
+const canEditWeights = isAdminUser || await checkDepartment("วิชาการ");
 const myUserId = session.user.id;
 
 // อ้างอิง element ที่ใช้บ่อย
@@ -404,6 +469,30 @@ const elSelAddMember = document.getElementById("sel-add-member");
 const mCoreField     = document.getElementById("modal-core-field");
 const mCoreLabel     = document.getElementById("m-core-label");
 const mCoreSelect    = document.getElementById("m-core-select");
+const elExamControlCard = document.getElementById("exam-control-card");
+const elManageExamStatus = document.getElementById("manage-exam-status");
+const elManageExamStatusTitle = document.getElementById("manage-exam-status-title");
+const elManageExamStatusNote = document.getElementById("manage-exam-status-note");
+const elManageExamMissingCount = document.getElementById("manage-exam-missing-count");
+const btnManageToggleExam = document.getElementById("btn-manage-toggle-exam");
+const elWeightsReadonly = document.getElementById("weights-readonly");
+const elWeightsTitle = document.getElementById("weights-title");
+const elWeightYear = document.getElementById("weight-year");
+const elWeightEditor = document.getElementById("weight-editor");
+const elWeightsMissing = document.getElementById("weights-missing");
+const elWeightsMissingText = document.getElementById("weights-missing-text");
+const btnInitWeights = document.getElementById("btn-init-weights");
+const btnSaveWeights = document.getElementById("btn-save-weights");
+const weightInputs = {
+  "ประถม": {
+    collect: document.getElementById("weight-primary-collect"),
+    exam: document.getElementById("weight-primary-exam")
+  },
+  "มัธยม": {
+    collect: document.getElementById("weight-secondary-collect"),
+    exam: document.getElementById("weight-secondary-exam")
+  }
+};
 
 // ฟิลด์ในฟอร์มวิชา
 const fType = document.getElementById("f-type");
@@ -461,6 +550,109 @@ function canEditCurrentSubject() {
   return currentSubject.owner_id === myUserId;
 }
 
+function canEditExamStatus() {
+  return Boolean(currentSubject) &&
+    (isAdminUser || canEditWeights || currentSubject.owner_id === myUserId);
+}
+
+async function loadSubjectStudentIds(tableName, subjectId) {
+  const ids = [];
+  const pageSize = 1000;
+  for (let page = 0; ; page++) {
+    const { data, error } = await sb.from(tableName)
+      .select("student_id")
+      .eq("subject_id", subjectId)
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+    if (error) throw new Error(error.message);
+    for (const row of (data || [])) ids.push(row.student_id);
+    if (!data || data.length < pageSize) break;
+  }
+  return ids;
+}
+
+async function loadExamControl() {
+  if (!currentSubject || currentSubject.subject_type !== "พื้นฐาน") {
+    elExamControlCard.style.display = "none";
+    return;
+  }
+  elExamControlCard.style.display = "block";
+  elManageExamStatusTitle.textContent = "กำลังโหลดสถานะคะแนนสอบ...";
+  elManageExamStatusNote.textContent = "";
+  elManageExamMissingCount.textContent = "";
+  btnManageToggleExam.style.display = "none";
+  try {
+    const subjectId = currentSubject.id;
+    const [enrolledIds, scoredIds] = await Promise.all([
+      loadSubjectStudentIds("enrollments", subjectId),
+      loadSubjectStudentIds("exam_scores", subjectId)
+    ]);
+    // ถ้าผู้ใช้เปลี่ยนวิชาระหว่าง query ให้ทิ้งผลเก่า ไม่เขียนทับการ์ดของวิชาใหม่
+    if (!currentSubject || currentSubject.id !== subjectId) return;
+    const scoredSet = new Set(scoredIds);
+    const missingCount = enrolledIds.filter(studentId => !scoredSet.has(studentId)).length;
+    const closed = Boolean(currentSubject.exam_closed_at);
+    elManageExamStatus.classList.toggle("closed", closed);
+    elManageExamStatusTitle.textContent = closed ? "ปิดคะแนนสอบแล้ว" : "ยังไม่ปิดคะแนนสอบ";
+    elManageExamStatusNote.textContent = closed
+      ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) +
+        " · นักเรียนที่ยังไม่มีคะแนนสอบจะติด ร. จากการคำนวณ"
+      : "ก่อนปิด นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้นว่ายังไม่ครบและยังไม่ตัดสินผลทางการ";
+    elManageExamMissingCount.textContent = missingCount > 0
+      ? "ยังไม่มีคะแนนสอบ " + missingCount + " คน"
+      : "มีคะแนนสอบครบ " + enrolledIds.length + " คน";
+    btnManageToggleExam.textContent = closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ";
+    btnManageToggleExam.className = closed ? "ghost" : "danger";
+    btnManageToggleExam.style.display = canEditExamStatus() ? "inline-block" : "none";
+  } catch (error) {
+    elManageExamStatus.classList.remove("closed");
+    elManageExamStatusTitle.textContent = "โหลดสถานะคะแนนสอบไม่สำเร็จ";
+    elManageExamStatusNote.textContent = error.message;
+    elManageExamMissingCount.textContent = "";
+    btnManageToggleExam.style.display = "none";
+  }
+}
+
+btnManageToggleExam.addEventListener("click", async () => {
+  if (!currentSubject || currentSubject.subject_type !== "พื้นฐาน" || !canEditExamStatus()) return;
+  const subjectId = currentSubject.id;
+  let enrolledIds, scoredIds;
+  try {
+    [enrolledIds, scoredIds] = await Promise.all([
+      loadSubjectStudentIds("enrollments", subjectId),
+      loadSubjectStudentIds("exam_scores", subjectId)
+    ]);
+  } catch (error) {
+    showToast("นับนักเรียนที่ยังไม่มีคะแนนสอบไม่สำเร็จ: " + error.message, false);
+    return;
+  }
+  if (!currentSubject || currentSubject.id !== subjectId) return;
+  const scoredSet = new Set(scoredIds);
+  const missingCount = enrolledIds.filter(studentId => !scoredSet.has(studentId)).length;
+  const closed = Boolean(currentSubject.exam_closed_at);
+  const agreed = await window.crsAskConfirm({
+    title: closed ? "เปิดคะแนนสอบอีกครั้ง" : "ปิดคะแนนสอบวิชานี้",
+    message: closed
+      ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
+      : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที",
+    okLabel: closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ",
+    danger: !closed
+  });
+  if (!agreed) return;
+
+  btnManageToggleExam.disabled = true;
+  const { data, error } = await sb.rpc("set_subject_exam_closed", {
+    p_subject_id: subjectId,
+    p_closed: !closed
+  });
+  btnManageToggleExam.disabled = false;
+  if (error) { showToast((closed ? "เปิด" : "ปิด") + "คะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
+  currentSubject.exam_closed_at = closed ? null : data;
+  const sourceSubject = allSubjects.find(subject => subject.id === subjectId);
+  if (sourceSubject) sourceSubject.exam_closed_at = currentSubject.exam_closed_at;
+  await loadExamControl();
+  showToast(closed ? "เปิดแก้ไขคะแนนสอบอีกครั้งแล้ว" : "ปิดคะแนนสอบแล้ว", true);
+});
+
 // ช่องกรอกใน "ข้อมูลวิชา" — ปิด/เปิดพร้อมกันตามสิทธิ์แก้ข้อมูลวิชา (admin เท่านั้น)
 const SUBJECT_INFO_FIELDS = ["f-type","f-name","f-code","f-level","f-grade","f-max","f-credits","f-year","f-term","f-owner","f-periods"];
 function setSubjectInfoDisabled(disabled) {
@@ -495,8 +687,8 @@ function applyEditPermissionUI() {
   } else if (canEditStructure) {
     // เจ้าของวิชา (ครู): แก้โครงสร้าง/คะแนนได้ แต่ข้อมูลวิชาแก้ไม่ได้
     banner.textContent = "ข้อมูลวิชา (ชื่อ/รหัส/คาบ/เจ้าของ) แก้ได้เฉพาะ admin — คุณเป็นเจ้าของวิชานี้ จึงแก้โครงสร้างและคะแนนด้านล่างได้";
-    banner.style.background = "#faf1dd";
-    banner.style.color = "#93690f";
+    banner.style.background = "var(--amber-soft)";
+    banner.style.color = "var(--amber)";
     banner.style.display = "block";
   } else {
     banner.textContent = "คุณไม่ใช่เจ้าของวิชานี้ — ดูได้อย่างเดียว (ให้ admin ตั้งเป็นเจ้าของก่อน)";
@@ -573,6 +765,7 @@ function updateTypeDependentUI() {
   const isIntegrated = fType.value === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
   if (currentSubject) {
+    elExamControlCard.style.display = isIntegrated ? "none" : "block";
     elStructure.style.display = isIntegrated ? "none" : "block";
     elEnrollCard.style.display = isIntegrated ? "none" : "block";
     elMembersCard.style.display = isIntegrated ? "block" : "none";
@@ -600,12 +793,248 @@ let units = [];               // ต้นไม้โครงสร้าง�
 let modalContext = null;      // เก็บว่ากำลังเพิ่ม/แก้ node ประเภทอะไร ของใคร
 let allSubjects = [];         // วิชาทั้งหมด (ใช้เลือกวิชาพื้นฐานมาเป็นสมาชิกวิชาบูรณาการ)
 let members = [];             // แถว integration_members ของวิชาบูรณาการที่กำลังดูอยู่
+let savedGradeWeights = new Map();
+let academicYears = [];
+const DEFAULT_GRADE_WEIGHTS = [
+  { level: "ประถม", collect_weight: 80, exam_weight: 20 },
+  { level: "มัธยม", collect_weight: 70, exam_weight: 30 }
+];
 
 function showToast(msg, ok) {
   elToast.textContent = msg;
   elToast.className = "toast " + (ok ? "ok" : "err");
   setTimeout(() => { elToast.className = "toast"; }, 3000);
 }
+
+function fillWeightYearOptions() {
+  const previous = elWeightYear.value;
+  const years = [...new Set([
+    ...distinctYears(allSubjects),
+    ...academicYears.map(row => row.year).filter(Boolean)
+  ])].sort((a, b) => b.localeCompare(a, "th", { numeric: true }));
+  elWeightYear.innerHTML = "";
+  if (years.length === 0) {
+    elWeightYear.innerHTML = "<option value=''>— ยังไม่มีปีการศึกษา —</option>";
+    return;
+  }
+  for (const year of years) {
+    const option = document.createElement("option");
+    option.value = year;
+    option.textContent = "ปีการศึกษา " + year;
+    elWeightYear.appendChild(option);
+  }
+  const preferred = previous || getActiveYear();
+  elWeightYear.value = years.includes(preferred) ? preferred : years[0];
+}
+
+function setWeightInputsDisabled(disabled) {
+  for (const fields of Object.values(weightInputs)) {
+    fields.collect.disabled = disabled;
+    fields.exam.disabled = disabled;
+  }
+}
+
+async function loadWeightSettings() {
+  const year = elWeightYear.value;
+  elWeightsTitle.textContent = "อัตราส่วนคะแนนเก็บ : คะแนนสอบ" +
+    (year ? " · ปีการศึกษา " + year : "");
+  savedGradeWeights = new Map();
+  if (!year) {
+    setWeightInputsDisabled(true);
+    elWeightEditor.style.display = "none";
+    elWeightsMissing.style.display = "block";
+    elWeightsMissingText.textContent = "ยังไม่มีปีการศึกษาให้ตั้งอัตราส่วน";
+    btnInitWeights.style.display = "none";
+    btnSaveWeights.style.display = "none";
+    elWeightsReadonly.style.display = "none";
+    return;
+  }
+  try {
+    const rows = await loadGradeWeights();
+    const yearRows = rows.filter(row => row.year === year);
+    savedGradeWeights = new Map(yearRows.map(row => [row.level, row]));
+    const missingLevels = DEFAULT_GRADE_WEIGHTS
+      .map(row => row.level)
+      .filter(level => !savedGradeWeights.has(level));
+    if (missingLevels.length > 0) {
+      setWeightInputsDisabled(true);
+      elWeightEditor.style.display = "none";
+      elWeightsMissing.style.display = "block";
+      elWeightsMissingText.textContent = yearRows.length === 0
+        ? "ยังไม่ได้ตั้งอัตราส่วนของปีการศึกษา " + year + (canEditWeights ? "" : " · ให้ติดต่อฝ่ายวิชาการ")
+        : "อัตราส่วนของปีการศึกษา " + year + " ยังไม่ครบระดับ" + missingLevels.join(" และ ") +
+          (canEditWeights ? "" : " · ให้ติดต่อฝ่ายวิชาการ");
+      btnInitWeights.style.display = canEditWeights ? "block" : "none";
+      btnInitWeights.disabled = !canEditWeights;
+      btnSaveWeights.style.display = "none";
+      elWeightsReadonly.style.display = "none";
+      return;
+    }
+    for (const level of ["ประถม", "มัธยม"]) {
+      const row = savedGradeWeights.get(level);
+      weightInputs[level].collect.value = row.collect_weight;
+      weightInputs[level].exam.value = row.exam_weight;
+    }
+    elWeightEditor.style.display = "grid";
+    elWeightsMissing.style.display = "none";
+    btnInitWeights.style.display = "none";
+    setWeightInputsDisabled(!canEditWeights);
+    elWeightsReadonly.textContent = "คุณไม่มีสิทธิ์แก้ค่านี้ — ดูได้อย่างเดียว เฉพาะ admin หรือฝ่ายวิชาการเท่านั้นที่แก้ได้";
+    elWeightsReadonly.style.display = canEditWeights ? "none" : "block";
+    btnSaveWeights.style.display = canEditWeights ? "block" : "none";
+    btnSaveWeights.disabled = !canEditWeights;
+  } catch (error) {
+    setWeightInputsDisabled(true);
+    elWeightEditor.style.display = "none";
+    elWeightsMissing.style.display = "none";
+    btnInitWeights.style.display = "none";
+    btnSaveWeights.style.display = "none";
+    elWeightsReadonly.textContent = "โหลดอัตราส่วนไม่ได้: " + error.message;
+    elWeightsReadonly.style.display = "block";
+    showToast("โหลดอัตราส่วนคะแนนไม่สำเร็จ: " + error.message, false);
+  }
+}
+
+function readWeightRows() {
+  const year = elWeightYear.value;
+  if (!year) throw new Error("กรุณาเลือกปีการศึกษาของอัตราส่วนก่อน");
+  return ["ประถม", "มัธยม"].map(level => {
+    if (weightInputs[level].collect.value === "" || weightInputs[level].exam.value === "") {
+      throw new Error("กรุณากรอกอัตราส่วนระดับ" + level + " ให้ครบทั้งสองช่อง");
+    }
+    const collectWeight = Number(weightInputs[level].collect.value);
+    const examWeight = Number(weightInputs[level].exam.value);
+    if (!Number.isFinite(collectWeight) || !Number.isFinite(examWeight) ||
+        collectWeight < 0 || collectWeight > 100 || examWeight < 0 || examWeight > 100) {
+      throw new Error("อัตราส่วนระดับ" + level + " ต้องอยู่ระหว่าง 0 ถึง 100");
+    }
+    if (Math.abs(collectWeight + examWeight - 100) >= 0.000001) {
+      throw new Error("คะแนนเก็บกับคะแนนสอบระดับ" + level + " ต้องรวมกันเท่ากับ 100");
+    }
+    return { year, level, collect_weight: collectWeight, exam_weight: examWeight };
+  });
+}
+
+async function countExamSubjects(level, year) {
+  const subjectIds = [];
+  const subjectPageSize = 1000;
+  for (let page = 0; ; page++) {
+    const { data, error } = await sb.from("subjects")
+      .select("id")
+      .eq("level", level)
+      .eq("year", year)
+      .range(page * subjectPageSize, (page + 1) * subjectPageSize - 1);
+    if (error) throw new Error("โหลดวิชาระดับ" + level + " ปีการศึกษา " + year + " ไม่สำเร็จ: " + error.message);
+    for (const subject of (data || [])) subjectIds.push(subject.id);
+    if (!data || data.length < subjectPageSize) break;
+  }
+  if (subjectIds.length === 0) return 0;
+  const scoredSubjectIds = new Set();
+  const idChunkSize = 100;
+  const pageSize = 1000;
+  for (let chunkStart = 0; chunkStart < subjectIds.length; chunkStart += idChunkSize) {
+    const chunk = subjectIds.slice(chunkStart, chunkStart + idChunkSize);
+    for (let page = 0; ; page++) {
+      const { data, error } = await sb.from("exam_scores")
+        .select("subject_id")
+        .in("subject_id", chunk)
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+      if (error) throw new Error("นับวิชาที่มีคะแนนสอบระดับ" + level + " ปีการศึกษา " + year + " ไม่สำเร็จ: " + error.message);
+      for (const row of (data || [])) scoredSubjectIds.add(row.subject_id);
+      if (!data || data.length < pageSize) break;
+    }
+  }
+  return scoredSubjectIds.size;
+}
+
+btnInitWeights.addEventListener("click", async () => {
+  if (!canEditWeights) return;
+  const year = elWeightYear.value;
+  if (!year) { showToast("กรุณาเลือกปีการศึกษาก่อน", false); return; }
+  const missingRows = DEFAULT_GRADE_WEIGHTS
+    .filter(row => !savedGradeWeights.has(row.level))
+    .map(row => ({ year, ...row }));
+  if (missingRows.length === 0) { await loadWeightSettings(); return; }
+  btnInitWeights.disabled = true;
+  const { data, error } = await sb.from("grade_weights").insert(missingRows).select("year,level");
+  btnInitWeights.disabled = false;
+  if (error) { showToast("ตั้งค่าเริ่มต้นไม่สำเร็จ: " + error.message, false); return; }
+  if ((data || []).length !== missingRows.length) {
+    showToast("ตั้งค่าเริ่มต้นได้ไม่ครบ กรุณาตรวจสิทธิ์ฝ่ายวิชาการ", false);
+    return;
+  }
+  await loadWeightSettings();
+  showToast("ตั้งค่าเริ่มต้นของปีการศึกษา " + year + " แล้ว", true);
+});
+
+elWeightYear.addEventListener("change", loadWeightSettings);
+
+btnSaveWeights.addEventListener("click", async () => {
+  if (!canEditWeights) return;
+  let rows;
+  try {
+    rows = readWeightRows();
+  } catch (error) {
+    showToast(error.message, false);
+    return;
+  }
+  const changedRows = rows.filter(row => {
+    const saved = savedGradeWeights.get(row.level);
+    return !saved || Number(saved.collect_weight) !== row.collect_weight || Number(saved.exam_weight) !== row.exam_weight;
+  });
+  if (changedRows.length === 0) { showToast("อัตราส่วนยังไม่มีการเปลี่ยนแปลง", false); return; }
+
+  btnSaveWeights.disabled = true;
+  try {
+    const selectedYear = elWeightYear.value;
+    const affectedCounts = await Promise.all(changedRows.map(row => countExamSubjects(row.level, selectedYear)));
+    const impactLines = changedRows.map((row, index) => {
+      const savedExam = Number(savedGradeWeights.get(row.level)?.exam_weight);
+      const count = affectedCounts[index];
+      return "ระดับ" + row.level + " ปีการศึกษา " + selectedYear + ": มี " + count + " วิชาที่กรอกคะแนนสอบแล้ว · เปลี่ยนคะแนนเต็มจาก " +
+        savedExam + " เป็น " + row.exam_weight;
+    });
+    const hasExistingScores = affectedCounts.some(count => count > 0);
+    const agreed = await window.crsAskConfirm({
+      title: hasExistingScores ? "อัตราส่วนใหม่นี้กระทบคะแนนเดิม" : "ยืนยันเปลี่ยนอัตราส่วนคะแนน",
+      message: impactLines.join("\n") + (hasExistingScores
+        ? "\n\nคะแนนที่กรอกไว้แล้วทั้งหมดจะเปลี่ยนความหมาย และเกรดของนักเรียนอาจเปลี่ยนตามทันที"
+        : "\n\nยังไม่มีคะแนนสอบเดิมในระดับที่เปลี่ยน"),
+      okLabel: "บันทึกอัตราส่วน",
+      danger: hasExistingScores
+    });
+    if (!agreed) return;
+
+    const results = await Promise.all(changedRows.map(async row => {
+      const payload = {
+        collect_weight: row.collect_weight,
+        exam_weight: row.exam_weight,
+        updated_at: new Date().toISOString()
+      };
+      const updated = await sb.from("grade_weights")
+        .update(payload)
+        .eq("year", row.year)
+        .eq("level", row.level)
+        .select("year,level");
+      if (updated.error || (updated.data || []).length > 0) return updated;
+      return sb.from("grade_weights")
+        .insert({ year: row.year, level: row.level, ...payload })
+        .select("year,level");
+    }));
+    for (let index = 0; index < results.length; index++) {
+      if (results[index].error) throw new Error(results[index].error.message);
+      if ((results[index].data || []).length !== 1) {
+        throw new Error("บันทึกระดับ" + changedRows[index].level + " ไม่สำเร็จ กรุณาตรวจสิทธิ์ฝ่ายวิชาการ");
+      }
+    }
+    await loadWeightSettings();
+    showToast("บันทึกอัตราส่วนคะแนนแล้ว", true);
+  } catch (error) {
+    showToast("บันทึกอัตราส่วนไม่สำเร็จ: " + error.message, false);
+  } finally {
+    btnSaveWeights.disabled = false;
+  }
+});
 
 function fillSelect(el, items, getLabel, placeholder) {
   el.innerHTML = "";
@@ -651,6 +1080,7 @@ async function loadSubjects(selectId) {
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
   allSubjects = data || [];
   fillYearOptions();
+  fillWeightYearOptions();
   if (selectId) {
     // เพิ่ง สร้าง/แก้ไข วิชานี้มา — ตั้งตัวกรองให้ตรงกับวิชานี้ จะได้ไม่หายไปจากลิสต์
     const target = allSubjects.find(s => s.id === selectId);
@@ -699,6 +1129,7 @@ elSubject.addEventListener("change", async () => {
     await loadStructure();
     elStructure.style.display = "block";
   }
+  await loadExamControl();
 });
 
 // ---------- กดสร้างวิชาใหม่ ----------
@@ -718,6 +1149,7 @@ document.getElementById("btn-new-subject").addEventListener("click", () => {
   elStructure.style.display = "none";   // ต้องบันทึกวิชาก่อนถึงจะเพิ่มหน่วย/นักเรียน/วิชาย่อยได้
   elEnrollCard.style.display = "none";
   elMembersCard.style.display = "none";
+  elExamControlCard.style.display = "none";
   elEmptyHint.style.display = "none";
   applyEditPermissionUI();
   fName.focus();
@@ -798,6 +1230,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     currentSubject = { ...currentSubject, ...payload };
     updateTypeDependentUI();
     applyEditPermissionUI();
+    await loadExamControl();
   } else {
     const { data, error } = await sb.from("subjects").insert(payload).select().single();
     if (error) { showToast("สร้างวิชาไม่สำเร็จ: " + error.message, false); return; }
@@ -808,6 +1241,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
     updateTypeDependentUI();
     applyEditPermissionUI();
+    await loadExamControl();
     if (!isIntegrated) {
       await loadStructure();
       elStructure.style.display = "block";
@@ -1462,6 +1896,7 @@ async function removeMember(m) {
 function hideAll() {
   currentSubject = null;
   elSubjectForm.style.display = "none";
+  elExamControlCard.style.display = "none";
   elStructure.style.display = "none";
   elEnrollCard.style.display = "none";
   elMembersCard.style.display = "none";
@@ -1472,7 +1907,9 @@ function hideAll() {
 await loadHighestGrade();
 populateFilterGradeOptions();
 updateGradeOptions();
-loadSubjects();
+academicYears = await getAcademicYears();
+await loadSubjects();
+await loadWeightSettings();
 }
 </script>
 </body>

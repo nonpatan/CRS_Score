@@ -119,6 +119,7 @@
   .badge.good  { background: var(--teal-soft);  color: var(--teal); }
   .badge.mid   { background: var(--amber-soft); color: var(--amber); }
   .badge.bad   { background: var(--danger-soft); color: var(--danger); }
+  .score-over-cap { color:var(--danger); font-weight:600; }
   .result-note { color: var(--muted); font-size: 13px; margin-top: 6px; }
 
   .warn-note {
@@ -362,13 +363,13 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, getRosterForSubject,
-  loadSubjectData, computeSubjectResult, computeIntegratedResult,
+  loadGradeWeights, loadSubjectData, computeSubjectResult, computeIntegratedResult,
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
   computeCombinedCompetencyResult, computeAttendanceRisk, isPrimaryGrade,
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting
-} from "../supabase-client.js?v=20260808-8";
+} from "../supabase-client.js?v=20260808-12";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -421,6 +422,8 @@ let students = [];            // นักเรียนทั้งหมด
 let remarksData = [];         // ใช้กับวิชาพื้นฐาน: แถว ร. ทั้งหมดของวิชานี้
 let sessions = [];            // ใช้กับวิชาพื้นฐาน: ครั้งที่เช็คชื่อทั้งหมด พร้อม attendance_records
 let makeupHours = [];         // ใช้กับวิชาพื้นฐาน: ชั่วโมงชดเชยทั้งหมดของวิชานี้
+let examScores = [];           // ใช้กับวิชาพื้นฐาน: คะแนนสอบรายคน (ไม่มีแถว = ยังไม่กรอก)
+let currentGradeWeight = null; // อัตราส่วนคะแนนเก็บ:สอบของระดับวิชาที่กำลังดู
 let integrationMembers = [];  // ใช้กับวิชาบูรณาการ: แถว integration_members พร้อมข้อมูลวิชาพื้นฐานสมาชิก
 let memberDataList = [];      // ใช้กับวิชาบูรณาการ: ข้อมูลเต็มของวิชาพื้นฐานสมาชิกแต่ละตัว (units/remarks/sessions)
 let allSubjects = [];         // วิชาทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
@@ -623,6 +626,13 @@ elSubject.addEventListener("change", async () => {
   const { data: subj, error: subjError } = await sb.from("subjects").select("*").eq("id", id).single();
   if (subjError || !subj) { showEmpty("โหลดรายวิชาไม่สำเร็จ: " + (subjError ? subjError.message : "ไม่พบรายวิชา")); return; }
   currentSubject = subj;
+  let sharedGradeWeights;
+  try {
+    sharedGradeWeights = await loadGradeWeights();
+  } catch (error) {
+    showEmpty(error.message);
+    return;
+  }
 
   if (subj.subject_type === "บูรณาการ") {
     // วิชาบูรณาการ: โหลดรายชื่อวิชาพื้นฐานสมาชิก แล้วโหลดข้อมูลเต็มของแต่ละวิชา
@@ -633,7 +643,7 @@ elSubject.addEventListener("change", async () => {
     if (memErr) { showEmpty("โหลดวิชาย่อยไม่สำเร็จ: " + memErr.message); return; }
     integrationMembers = memberRows || [];
     try {
-      memberDataList = await Promise.all(integrationMembers.map(m => loadSubjectData(m.member_subject_id)));
+      memberDataList = await Promise.all(integrationMembers.map(m => loadSubjectData(m.member_subject_id, sharedGradeWeights)));
     } catch (error) {
       showEmpty(error.message);
       return;
@@ -648,7 +658,7 @@ elSubject.addEventListener("change", async () => {
     // วิชาพื้นฐาน: โหลดโครงสร้างคะแนน + ร. + เช็คชื่อของตัวเอง + รายชื่อที่ลงทะเบียน
     let data;
     try {
-      data = await loadSubjectData(id);
+      data = await loadSubjectData(id, sharedGradeWeights);
     } catch (error) {
       showEmpty(error.message);
       return;
@@ -658,6 +668,8 @@ elSubject.addEventListener("change", async () => {
     remarksData = data.remarksData;
     sessions = data.sessions;
     makeupHours = data.makeupHours;
+    examScores = data.examScores;
+    currentGradeWeight = data.gradeWeight;
     students = await getRosterForSubject(currentSubject.id);
   }
 
@@ -689,7 +701,10 @@ function showEmpty(msg) {
 // ย้ายไปอยู่ supabase-client.js แล้ว (ใช้ร่วมกับ retention.html) — ที่นี่เหลือแค่ wrapper
 // ผูกกับ state กลางของหน้านี้ (currentSubject/units/remarksData/sessions/makeupHours/memberDataList)
 function computeStudent(studentId) {
-  return computeSubjectResult(studentId, currentSubject, units, remarksData, sessions, makeupHours);
+  return computeSubjectResult(studentId, currentSubject, units, remarksData, sessions, makeupHours, {
+    examScores,
+    gradeWeight: currentGradeWeight
+  });
 }
 
 function computeIntegratedStudent(studentId) {
@@ -746,8 +761,9 @@ function resultBadgeLabel(res, scoring) {
   if (res.type === "ร.") return "ร.";
   if (res.type === "มส.") return "มส.";
   if (scoring && !scoring.complete) {
-    if (scoring.expectedCount === 0) return "ยังไม่มีโครงสร้างคะแนน";
-    return "ยังไม่ครบ · กรอกแล้ว " + scoring.scoredCount + "/" + scoring.expectedCount + " ครั้ง" +
+    if (scoring.examOverCap) return "คะแนนสอบเกินเพดาน · ต้องแก้";
+    if (!scoring.hasCollectStructure) return "ยังไม่มีโครงสร้างคะแนน";
+    return "ยังไม่ครบ · กรอกแล้ว " + scoring.scoredCount + "/" + scoring.expectedCount + " ช่อง" +
       (scoring.partialPercent !== null ? " (ชั่วคราว " + scoring.partialPercent.toFixed(0) + "%)" : "");
   }
   return "เกรด " + res.grade + " (" + res.percentScore.toFixed(0) + "%)";
@@ -795,9 +811,12 @@ function renderIntegratedCard(stu, ir) {
       "<div class='result-line'><span>ผลการเรียน (บูรณาการ)</span><span class='badge bad'>ร.</span></div>" +
       "<div class='result-note'>มีวิชาย่อยอย่างน้อย 1 วิชาติด ร.</div>";
   } else if (!ir.scoring.complete) {
+    const overCap = ir.scoring.examOverCap;
     overallHtml =
-      "<div class='result-line'><span>ผลการเรียน (บูรณาการ)</span><span class='badge mid'>ยังไม่ครบ</span></div>" +
-      "<div class='result-note'>" + (ir.scoring.expectedCount === 0 ? "ยังไม่มีโครงสร้างคะแนน" : "กรอกแล้ว " + ir.scoring.scoredCount + "/" + ir.scoring.expectedCount + " ครั้ง") +
+      "<div class='result-line'><span>ผลการเรียน (บูรณาการ)</span><span class='badge " + (overCap ? "bad" : "mid") + "'>" +
+      (overCap ? "คะแนนสอบเกินเพดาน · ต้องแก้" : "ยังไม่ครบ") + "</span></div>" +
+      "<div class='result-note'>" + (overCap ? "มีวิชาย่อยอย่างน้อย 1 วิชาที่คะแนนสอบเกินเพดาน" :
+        (!ir.scoring.hasCollectStructure ? "ยังไม่มีโครงสร้างคะแนน" : "กรอกแล้ว " + ir.scoring.scoredCount + "/" + ir.scoring.expectedCount + " ช่อง")) +
       (ir.scoring.partialPercent !== null ? " · คะแนนชั่วคราว " + ir.scoring.partialPercent.toFixed(1) + "%" : "") +
       " — ยังไม่ใช่ผลทางการ</div>";
   } else {
@@ -855,9 +874,12 @@ function renderStudentCard(stu, r) {
           (r.result.makeupTotal > 0 ? " — ชดเชยไปแล้ว " + r.result.makeupTotal + " คาบ (ขาดสุทธิเหลือ " + r.result.netMissed + " คาบ) ยังไม่พอ" : "")) +
       "</div>";
   } else if (!r.scoring.complete) {
+    const overCap = r.scoring.examOverCap;
     resultHtml =
-      "<div class='result-line'><span>ผลการเรียน</span><span class='badge mid'>ยังไม่ครบ</span></div>" +
-      "<div class='result-note'>" + (r.scoring.expectedCount === 0 ? "ยังไม่มีโครงสร้างคะแนน" : "กรอกแล้ว " + r.scoring.scoredCount + "/" + r.scoring.expectedCount + " ครั้ง") +
+      "<div class='result-line'><span>ผลการเรียน</span><span class='badge " + (overCap ? "bad" : "mid") + "'>" +
+      (overCap ? "คะแนนสอบเกินเพดาน · ต้องแก้" : "ยังไม่ครบ") + "</span></div>" +
+      "<div class='result-note'>" + (overCap ? "คะแนนสอบที่บันทึกไว้สูงกว่าคะแนนเต็มปัจจุบัน" :
+        (!r.scoring.hasCollectStructure ? "ยังไม่มีโครงสร้างคะแนน" : "กรอกแล้ว " + r.scoring.scoredCount + "/" + r.scoring.expectedCount + " ช่อง")) +
       (r.scoring.partialPercent !== null ? " · คะแนนชั่วคราว " + r.scoring.partialPercent.toFixed(1) + "%" : "") +
       " — ยังไม่ใช่ผลทางการ</div>";
   } else {
@@ -873,8 +895,15 @@ function renderStudentCard(stu, r) {
     "<div class='section'>" +
       "<div class='section-title'>คะแนนวิชา</div>" +
       (subjectRows || "<div class='hint'>ยังไม่มีหน่วยคะแนนวิชา</div>") +
-      "<div class='score-row total'><span>รวมวิชา</span><span class='val'>" +
+      "<div class='score-row total'><span>คะแนนเก็บก่อนคิดสัดส่วน</span><span class='val'>" +
         r.subjectScaled.toFixed(1) + " / " + currentSubject.max_score + "</span></div>" +
+      "<div class='score-row'><span>คะแนนเก็บหลังคิดสัดส่วน</span><span class='val'>" +
+        r.collectPart.toFixed(1) + " / " + Number(currentGradeWeight.collect_weight).toFixed(0) + "</span></div>" +
+      "<div class='score-row'><span>คะแนนสอบปลายภาค/ปลายปี</span><span class='val" +
+        (r.scoring.examOverCap ? " score-over-cap" : "") + "'>" +
+        (r.scoring.examOverCap
+          ? r.examPart.toFixed(1) + " / " + Number(currentGradeWeight.exam_weight).toFixed(0) + " · เกินเพดาน"
+          : (r.scoring.examScored ? r.examPart.toFixed(1) : "ยังไม่ได้กรอก") + " / " + Number(currentGradeWeight.exam_weight).toFixed(0)) + "</span></div>" +
     "</div>";
   const competencyScoreSection = subjectStructureMissing ? "" :
     "<div class='section'>" +
@@ -1815,8 +1844,10 @@ function gpaSubjBadge(item) {
   if (result.type === "ร.") return "<span class='badge bad'>ร.</span>";
   if (result.type === "มส.") return "<span class='badge bad'>มส.</span>";
   if (item.scoring && !item.scoring.complete) {
-    const label = item.scoring.expectedCount === 0 ? "ยังไม่มีโครงสร้างคะแนน" : "ยังไม่ครบ · " + item.scoring.scoredCount + "/" + item.scoring.expectedCount + " ครั้ง";
-    return "<span class='badge mid'>" + label + "</span>" +
+    const overCap = item.scoring.examOverCap;
+    const label = overCap ? "คะแนนสอบเกินเพดาน · ต้องแก้" :
+      (!item.scoring.hasCollectStructure ? "ยังไม่มีโครงสร้างคะแนน" : "ยังไม่ครบ · " + item.scoring.scoredCount + "/" + item.scoring.expectedCount + " ช่อง");
+    return "<span class='badge " + (overCap ? "bad" : "mid") + "'>" + label + "</span>" +
       (item.scoring.partialPercent !== null ? " <span class='hint'>(ชั่วคราว " + item.scoring.partialPercent.toFixed(0) + "%)</span>" : "");
   }
   const g = result.grade;

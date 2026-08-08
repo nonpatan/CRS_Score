@@ -218,9 +218,9 @@
 <script type="module">
   import {
     sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
-    getActiveStudents, loadSubjectData, computeAttendanceRisk, isPrimaryGrade,
+    getActiveStudents, loadGradeWeights, loadSubjectData, computeAttendanceRisk, isPrimaryGrade,
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY
-  } from "../supabase-client.js?v=20260808-8";
+  } from "../supabase-client.js?v=20260808-12";
 
   let allActiveStudents = [];
   const elYear = document.getElementById("filter-year");
@@ -353,6 +353,7 @@
       });
 
       const loadedSubjects = [];
+      const sharedGradeWeights = await loadGradeWeights();
       // โหลดข้อมูลเฉพาะวิชาที่มีเด็กในห้องนี้ลงทะเบียน (หรือเป็นวิชาบูรณาการที่มีวิชาย่อย)
       for (const subj of subjects) {
         const hasEnrolls = enrollMap[subj.id] && enrollMap[subj.id].size > 0;
@@ -364,12 +365,12 @@
         }
 
         if (shouldLoad) {
-          const fullData = await loadSubjectData(subj.id);
+          const fullData = await loadSubjectData(subj.id, sharedGradeWeights);
           // สำหรับวิชาบูรณาการ โหลดข้อมูลวิชาย่อยด้วย
           let membersData = [];
           if (subj.subject_type === 'บูรณาการ') {
             for (const m of members) {
-              const mData = await loadSubjectData(m.member.id);
+              const mData = await loadSubjectData(m.member.id, sharedGradeWeights);
               membersData.push({ subj: m.member, data: mData });
             }
           }

@@ -130,6 +130,14 @@
   .collection-row button { min-height:44px; font:inherit; border:0; border-radius:8px; padding:8px 12px; cursor:pointer; }
   .ghost { background:var(--teal-soft); color:var(--teal); }
   .danger { background:var(--danger-soft); color:var(--danger); }
+  .exam-status { margin-bottom:14px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
+  .exam-status.closed { border-color:var(--amber); background:var(--amber-soft); }
+  .exam-status .status-title { font-weight:600; }
+  .exam-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px; }
+  .exam-actions button { min-height:44px; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  .student-row.exam-over-cap { background:var(--danger-soft); border-radius:8px; padding-left:8px; padding-right:8px; }
+  .student-row.exam-over-cap input { border-color:var(--danger); color:var(--danger); font-weight:600; }
+  .exam-over-cap-note { color:var(--danger); font-size:13px; font-weight:600; margin-top:4px; }
   .overlay { position:fixed; inset:0; background:rgba(31,42,46,.42); display:none; align-items:center; justify-content:center; padding:16px; z-index:10000; }
   .overlay.show { display:flex; }
   .modal { width:min(100%,440px); background:var(--white); border-radius:12px; padding:18px; box-shadow:0 18px 48px rgba(31,42,46,.24); }
@@ -142,6 +150,8 @@
   @media (max-width:520px) {
     .collection-row { grid-template-columns:1fr 1fr; }
     .collection-row select { grid-column:1 / -1; }
+    .exam-actions { align-items:stretch; flex-direction:column; }
+    .exam-actions button { width:100%; }
   }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
@@ -222,17 +232,18 @@
       <select id="sel-kind">
         <option value="วิชา">คะแนนวิชา</option>
         <option value="สมรรถนะหลัก">สมรรถนะหลัก 6 ด้าน</option>
+        <option value="สอบ">คะแนนสอบปลายภาค/ปลายปี</option>
       </select>
     </div>
-    <div class="field">
+    <div class="field" id="unit-pick">
       <label for="sel-unit" id="lbl-unit">หน่วยใหญ่</label>
       <select id="sel-unit"><option value="">— เลือกวิชาก่อน —</option></select>
     </div>
-    <div class="field">
+    <div class="field" id="indicator-pick">
       <label for="sel-indicator">หน่วยย่อย</label>
       <select id="sel-indicator"><option value="">—</option></select>
     </div>
-    <div class="field">
+    <div class="field" id="collection-pick">
       <label for="sel-collection">ครั้งที่</label>
       <div class="collection-row">
         <select id="sel-collection"><option value="">—</option></select>
@@ -245,6 +256,14 @@
   <!-- รายชื่อนักเรียนให้กรอกคะแนน -->
   <div class="card" id="students-card" style="display:none">
     <div id="collection-head" class="field"></div>
+    <div class="exam-status" id="exam-status" style="display:none">
+      <div class="status-title" id="exam-status-title"></div>
+      <div class="full-note" id="exam-status-note"></div>
+      <div class="exam-actions">
+        <span class="hint" id="exam-missing-count"></span>
+        <button type="button" class="ghost" id="btn-toggle-exam"></button>
+      </div>
+    </div>
     <div id="student-list"></div>
     <button class="save" id="btn-save">บันทึกคะแนน</button>
   </div>
@@ -281,7 +300,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-8";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-12";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -311,6 +330,9 @@ const elClassroom   = document.getElementById("filter-classroom");
 const elMemberPick   = document.getElementById("member-pick");
 const elMemberSelect = document.getElementById("sel-member");
 const elKind       = document.getElementById("sel-kind");
+const elUnitPick   = document.getElementById("unit-pick");
+const elIndicatorPick = document.getElementById("indicator-pick");
+const elCollectionPick = document.getElementById("collection-pick");
 const elUnitLabel  = document.getElementById("lbl-unit");
 const elUnit       = document.getElementById("sel-unit");
 const elIndicator  = document.getElementById("sel-indicator");
@@ -324,6 +346,11 @@ const elEmptyHint  = document.getElementById("empty-hint");
 const elToast      = document.getElementById("toast");
 const btnSave      = document.getElementById("btn-save");
 const elAccessNote = document.getElementById("access-note");
+const elExamStatus = document.getElementById("exam-status");
+const elExamStatusTitle = document.getElementById("exam-status-title");
+const elExamStatusNote = document.getElementById("exam-status-note");
+const elExamMissingCount = document.getElementById("exam-missing-count");
+const btnToggleExam = document.getElementById("btn-toggle-exam");
 
 // เก็บ state ที่กำลังทำงานอยู่
 let currentSubject = null;
@@ -333,6 +360,13 @@ let allSubjects = [];           // วิชาทั้งหมด (กรอ�
 let memberIdSet = new Set();    // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown หลัก)
 let memberSubjects = [];        // วิชาย่อยของวิชาบูรณาการที่เลือกอยู่
 let currentCollections = [];
+let gradeWeights = [];          // 2 แถวต่อปี (ประถม/มัธยม) โหลดครั้งเดียวต่อหน้า
+let currentGradeWeight = null;
+let currentExamScores = [];
+
+function isExamMode() {
+  return elKind.value === "สอบ";
+}
 
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
@@ -576,7 +610,8 @@ function updateClassroomDropdown(roster) {
 elClassroom.addEventListener("change", () => {
   if (currentSubject) {
     if (elStudentsCard.style.display !== "none") {
-      renderStudents();
+      if (isExamMode()) renderExamStudents();
+      else renderStudents();
     }
     if (elRemarkCard.style.display !== "none") {
       loadRemarkSection();
@@ -609,6 +644,7 @@ elSubject.addEventListener("change", async () => {
   await loadUnits();
   if (currentSubject) {
     students = await getRosterForSubject(currentSubject.id);
+    if (isExamMode()) await loadExamMode();
   }
   await loadRemarkSection();
 });
@@ -651,16 +687,28 @@ elMemberSelect.addEventListener("change", async () => {
   await loadUnits();
   if (currentSubject) {
     students = await getRosterForSubject(currentSubject.id);
+    if (isExamMode()) await loadExamMode();
   }
   await loadRemarkSection();
 });
 
-elKind.addEventListener("change", () => {
+elKind.addEventListener("change", async () => {
   resetBelow("indicator");
-  loadUnits();
+  await loadUnits();
+  if (currentSubject && isExamMode()) await loadExamMode();
 });
 
 async function loadUnits() {
+  const examMode = isExamMode();
+  elEmptyHint.textContent = examMode ? "เลือกวิชาเพื่อกรอกคะแนนสอบ" : "เลือกครั้งที่เพื่อเริ่มกรอกคะแนน";
+  elUnitPick.style.display = examMode ? "none" : "block";
+  elIndicatorPick.style.display = examMode ? "none" : "block";
+  elCollectionPick.style.display = examMode ? "none" : "block";
+  if (examMode) {
+    refreshCollectionActions();
+    return;
+  }
+
   const isCoreCompetency = elKind.value === "สมรรถนะหลัก";
   elUnitLabel.textContent = isCoreCompetency ? "ด้านสมรรถนะหลัก" : "หน่วยใหญ่";
 
@@ -798,7 +846,99 @@ async function resequenceCollections() {
   return true;
 }
 
+async function loadExamMode() {
+  if (!currentSubject || !canEdit(currentSubject)) { hideStudents(); return; }
+  currentGradeWeight = gradeWeights.find(
+    row => row.year === currentSubject.year && row.level === currentSubject.level
+  ) || null;
+  if (!currentGradeWeight) {
+    hideStudents();
+    showToast(
+      "ยังไม่ได้ตั้งอัตราส่วนคะแนนของปีการศึกษา " + (currentSubject.year || "(ไม่ระบุ)") +
+      " ระดับ" + (currentSubject.level || "(ไม่ระบุ)") +
+      " — ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “จัดการโครงสร้าง” ก่อน",
+      false
+    );
+    return;
+  }
+  const { data, error } = await sb.from("exam_scores")
+    .select("id, subject_id, student_id, raw_score, updated_at")
+    .eq("subject_id", currentSubject.id);
+  if (error) { hideStudents(); showToast("โหลดคะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
+  currentExamScores = data || [];
+  renderExamStudents();
+}
+
+function renderExamStudents() {
+  if (!currentSubject || !currentGradeWeight) { hideStudents(); return; }
+  const examWeight = Number(currentGradeWeight.exam_weight);
+  const scoreMap = new Map(currentExamScores.map(row => [row.student_id, row.raw_score]));
+  const overCapIds = new Set(students
+    .filter(student => scoreMap.has(student.id) && Number(scoreMap.get(student.id)) > examWeight + 0.000001)
+    .map(student => student.id));
+  elCollHead.innerHTML =
+    "<label>คะแนนสอบปลายภาค/ปลายปี · เต็ม " + examWeight + " คะแนน</label>" +
+    "<div class='full-note'>ตัวเลขนี้มาจากอัตราส่วนของปีการศึกษา " + escapeHtml(currentSubject.year) +
+    " ระดับ" + escapeHtml(currentSubject.level) + " และเป็นคะแนนเต็มของข้อสอบโดยตรง</div>" +
+    (overCapIds.size > 0
+      ? "<div class='exam-over-cap-note'>มีคะแนนสอบเกินเพดาน " + overCapIds.size + " คน · ต้องแก้ก่อนสรุปผล</div>"
+      : "");
+
+  let visibleStudents = students;
+  if (elClassroom.value) visibleStudents = students.filter(student => student.classroom === elClassroom.value);
+
+  elStudentList.innerHTML = "";
+  for (const stu of visibleStudents) {
+    const row = document.createElement("div");
+    row.className = "student-row" + (overCapIds.has(stu.id) ? " exam-over-cap" : "");
+    const info = document.createElement("div");
+    info.className = "student-info";
+    info.innerHTML =
+      "<div class='name'>" + escapeHtml(stu.name) + "</div>" +
+      "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
+      (stu.classroom ? " · " + escapeHtml(stu.classroom) : "") + "</div>";
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = String(examWeight);
+    input.step = "0.01";
+    input.dataset.studentId = stu.id;
+    if (scoreMap.has(stu.id)) input.value = scoreMap.get(stu.id);
+    row.appendChild(info);
+    row.appendChild(input);
+    elStudentList.appendChild(row);
+  }
+  if (visibleStudents.length === 0) {
+    elStudentList.innerHTML = "<div class='hint'>ไม่มีนักเรียนในห้องที่เลือก</div>";
+  }
+
+  btnSave.textContent = "บันทึกคะแนนสอบ";
+  renderExamStatus();
+  elStudentsCard.style.display = "block";
+  elEmptyHint.style.display = "none";
+}
+
+function renderExamStatus() {
+  const scoredIds = new Set(currentExamScores.map(row => row.student_id));
+  const missingCount = students.filter(student => !scoredIds.has(student.id)).length;
+  const closed = Boolean(currentSubject && currentSubject.exam_closed_at);
+  elExamStatus.style.display = canEdit(currentSubject) ? "block" : "none";
+  elExamStatus.classList.toggle("closed", closed);
+  elExamStatusTitle.textContent = closed ? "ปิดคะแนนสอบแล้ว" : "ยังไม่ปิดคะแนนสอบ";
+  elExamStatusNote.textContent = closed
+    ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) +
+      " · นักเรียนที่ยังไม่มีคะแนนสอบจะติด ร. จากการคำนวณ"
+    : "ก่อนปิด นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้นว่ายังไม่ครบและยังไม่ตัดสินผลทางการ";
+  elExamMissingCount.textContent = missingCount > 0
+    ? "ยังไม่มีคะแนนสอบ " + missingCount + " คน"
+    : "มีคะแนนสอบครบ " + students.length + " คน";
+  btnToggleExam.textContent = closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ";
+  btnToggleExam.className = closed ? "ghost" : "danger";
+}
+
 function renderStudents() {
+  elExamStatus.style.display = "none";
+  btnSave.textContent = "บันทึกคะแนน";
   elCollHead.innerHTML =
     "<label>กำลังกรอก: ครั้งที่ " + currentCollection.seq +
     "  ·  คะแนนเต็ม " + currentCollection.max_score + "</label>" +
@@ -850,6 +990,10 @@ async function loadScoresAndRender() {
 }
 
 btnSave.addEventListener("click", async () => {
+  if (isExamMode()) {
+    await saveExamScores();
+    return;
+  }
   const inputs = elStudentList.querySelectorAll("input[type=number]");
   const rows = [];
   const cap = currentCollection.max_score;
@@ -879,6 +1023,91 @@ btnSave.addEventListener("click", async () => {
   else showToast("บันทึกแล้ว " + rows.length + " คน", true);
 });
 
+async function saveExamScores() {
+  if (!currentSubject || !currentGradeWeight || !canEdit(currentSubject)) return;
+  const inputs = elStudentList.querySelectorAll("input[type=number]");
+  const examWeight = Number(currentGradeWeight.exam_weight);
+  const existingIds = new Set(currentExamScores.map(row => row.student_id));
+  const rows = [];
+  const removeStudentIds = [];
+
+  for (const input of inputs) {
+    if (input.value === "") {
+      if (existingIds.has(input.dataset.studentId)) removeStudentIds.push(input.dataset.studentId);
+      continue;
+    }
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value < 0) { showToast("มีคะแนนสอบไม่ถูกต้อง", false); return; }
+    if (value > examWeight) { showToast("มีคะแนนสอบเกิน " + examWeight + " คะแนน", false); return; }
+    rows.push({
+      subject_id: currentSubject.id,
+      student_id: input.dataset.studentId,
+      raw_score: value,
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  if (rows.length === 0 && removeStudentIds.length === 0) {
+    showToast("ยังไม่ได้กรอกหรือแก้คะแนนสอบ", false);
+    return;
+  }
+
+  btnSave.disabled = true;
+  try {
+    const [saveResult, deleteResult] = await Promise.all([
+      rows.length
+        ? sb.from("exam_scores").upsert(rows, { onConflict: "subject_id,student_id" }).select("id")
+        : Promise.resolve({ data: [], error: null }),
+      removeStudentIds.length
+        ? sb.from("exam_scores").delete()
+          .eq("subject_id", currentSubject.id)
+          .in("student_id", removeStudentIds)
+          .select("id")
+        : Promise.resolve({ data: [], error: null })
+    ]);
+    if (saveResult.error) throw new Error(saveResult.error.message);
+    if (deleteResult.error) throw new Error(deleteResult.error.message);
+    if ((saveResult.data || []).length !== rows.length) throw new Error("บันทึกได้ไม่ครบทุกคน กรุณาตรวจสิทธิ์วิชา");
+    if ((deleteResult.data || []).length !== removeStudentIds.length) throw new Error("ล้างคะแนนได้ไม่ครบทุกคน กรุณาตรวจสิทธิ์วิชา");
+    showToast("บันทึกคะแนนสอบ " + rows.length + " คน" +
+      (removeStudentIds.length ? " · ล้างช่องว่าง " + removeStudentIds.length + " คน" : ""), true);
+    await loadExamMode();
+  } catch (error) {
+    showToast("บันทึกคะแนนสอบไม่สำเร็จ: " + error.message, false);
+  } finally {
+    btnSave.disabled = false;
+  }
+}
+
+btnToggleExam.addEventListener("click", async () => {
+  if (!currentSubject || !canEdit(currentSubject) || !isExamMode()) return;
+  const closed = Boolean(currentSubject.exam_closed_at);
+  const scoredIds = new Set(currentExamScores.map(row => row.student_id));
+  const missingCount = students.filter(student => !scoredIds.has(student.id)).length;
+  const agreed = await window.crsAskConfirm({
+    title: closed ? "เปิดคะแนนสอบอีกครั้ง" : "ปิดคะแนนสอบวิชานี้",
+    message: closed
+      ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
+      : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที",
+    okLabel: closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ",
+    danger: !closed
+  });
+  if (!agreed) return;
+
+  btnToggleExam.disabled = true;
+  const { data, error } = await sb.rpc("set_subject_exam_closed", {
+    p_subject_id: currentSubject.id,
+    p_closed: !closed
+  });
+  btnToggleExam.disabled = false;
+  if (error) { showToast((closed ? "เปิด" : "ปิด") + "คะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
+  currentSubject.exam_closed_at = closed ? null : data;
+  const sourceSubject = allSubjects.find(subject => subject.id === currentSubject.id);
+  if (sourceSubject) sourceSubject.exam_closed_at = currentSubject.exam_closed_at;
+  renderExamStatus();
+  showToast(closed ? "เปิดแก้ไขคะแนนสอบอีกครั้งแล้ว" : "ปิดคะแนนสอบแล้ว", true);
+});
+
 function resetBelow(level) {
   const order = ["unit", "indicator", "collection"];
   const from = order.indexOf(level);
@@ -893,6 +1122,7 @@ function resetBelow(level) {
 
 function hideStudents() {
   elStudentsCard.style.display = "none";
+  elExamStatus.style.display = "none";
   elEmptyHint.style.display = "block";
   currentCollection = null;
 }
@@ -1011,7 +1241,13 @@ async function populateGradeOptions() {
 
 // เริ่มทำงาน
 await populateGradeOptions();
-loadSubjects();
+try {
+  gradeWeights = await loadGradeWeights();
+} catch (error) {
+  gradeWeights = [];
+  showToast(error.message + " — คะแนนเก็บเดิมยังกรอกได้ แต่โหมดคะแนนสอบยังใช้ไม่ได้", false);
+}
+await loadSubjects();
 }
 </script>
 </body>

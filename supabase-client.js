@@ -623,8 +623,32 @@ export function computeAttendanceRisk(studentId, subjectDataList, options = {}) 
 
 // โหลดข้อมูลเต็มของวิชา 1 ตัว (โครงสร้างคะแนน + ร. + เช็คชื่อ + ชั่วโมงชดเชย) — ใช้ได้ทั้งวิชาพื้นฐานเดี่ยว
 // และวิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ
-export async function loadSubjectData(subjectId) {
-  const [subjectResult, unitResult, remarkResult, sessionResult, makeupResult] = await Promise.all([
+export async function loadGradeWeights() {
+  const { data, error } = await sb.from("grade_weights")
+    .select("year, level, collect_weight, exam_weight, updated_at")
+    .order("year")
+    .order("level");
+  if (error) throw new Error("โหลดอัตราส่วนคะแนนไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+function gradeWeightFor(subj, gradeWeights) {
+  const weight = (gradeWeights || []).find(row => row.year === subj.year && row.level === subj.level);
+  if (!weight) throw new Error(
+    "ยังไม่ได้ตั้งอัตราส่วนคะแนนของปีการศึกษา " + (subj.year || "(ไม่ระบุ)") +
+    " ระดับ" + (subj.level || "(ไม่ระบุ)") + " — ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “จัดการโครงสร้าง” ก่อน"
+  );
+  return weight;
+}
+
+export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
+  const weightsPromise = sharedGradeWeights
+    ? Promise.resolve({ data: sharedGradeWeights, error: null })
+    : sb.from("grade_weights")
+      .select("year, level, collect_weight, exam_weight, updated_at")
+      .order("year")
+      .order("level");
+  const [subjectResult, unitResult, remarkResult, sessionResult, makeupResult, examResult, weightsResult] = await Promise.all([
     sb.from("subjects").select("*").eq("id", subjectId).single(),
     sb.from("units")
       .select("*, indicators(*, collections(*, scores(student_id, raw_score)))")
@@ -634,23 +658,30 @@ export async function loadSubjectData(subjectId) {
     sb.from("attendance_sessions")
       .select("*, attendance_records(*)")
       .eq("subject_id", subjectId),
-    sb.from("makeup_hours").select("*").eq("subject_id", subjectId)
+    sb.from("makeup_hours").select("*").eq("subject_id", subjectId),
+    sb.from("exam_scores").select("id, subject_id, student_id, raw_score, updated_at").eq("subject_id", subjectId),
+    weightsPromise
   ]);
   const namedResults = [
     ["รายวิชา", subjectResult],
     ["โครงสร้างคะแนน", unitResult],
     ["สถานะ ร.", remarkResult],
     ["การเข้าเรียน", sessionResult],
-    ["ชั่วโมงชดเชย", makeupResult]
+    ["ชั่วโมงชดเชย", makeupResult],
+    ["คะแนนสอบ", examResult],
+    ["อัตราส่วนคะแนน", weightsResult]
   ];
   const failed = namedResults.find(([, result]) => result.error);
   if (failed) throw new Error("โหลด" + failed[0] + "ไม่สำเร็จ: " + failed[1].error.message);
+  const gradeWeights = weightsResult.data || [];
   return {
     subject: subjectResult.data,
     units: unitResult.data || [],
     remarksData: remarkResult.data || [],
     sessions: sessionResult.data || [],
-    makeupHours: makeupResult.data || []
+    makeupHours: makeupResult.data || [],
+    examScores: examResult.data || [],
+    gradeWeight: gradeWeightFor(subjectResult.data, gradeWeights)
   };
 }
 
@@ -660,7 +691,23 @@ export async function loadSubjectData(subjectId) {
 // แต่ละตัวที่เป็นสมาชิกของวิชาบูรณาการ
 // skipMs = true เมื่อวิชานี้เป็นสมาชิกของวิชาบูรณาการ — มส. ของวิชาย่อยไม่ตัดสินรายตัว
 // แต่ไปคิด "แบบรวม" ที่ระดับวิชาบูรณาการแทน (ยืนยันกับผู้ใช้แล้ว 2026-07 ดู computeIntegratedResult)
-export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, sessionsArr, makeupArr, skipMs) {
+export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, sessionsArr, makeupArr, options = {}) {
+  const { skipMs = false, examScores = [], gradeWeight = null } = options || {};
+  if (!gradeWeight || gradeWeight.level !== subj.level || gradeWeight.year !== subj.year) {
+    throw new Error(
+      "ยังไม่ได้ตั้งอัตราส่วนคะแนนของปีการศึกษา " + (subj.year || "(ไม่ระบุ)") +
+      " ระดับ" + (subj.level || "(ไม่ระบุ)") + " — ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “จัดการโครงสร้าง” ก่อน"
+    );
+  }
+  const collectWeight = Number(gradeWeight.collect_weight);
+  const examWeight = Number(gradeWeight.exam_weight);
+  if (!Number.isFinite(collectWeight) || !Number.isFinite(examWeight) || Math.abs(collectWeight + examWeight - 100) > 0.000001) {
+    throw new Error("อัตราส่วนคะแนนของระดับ “" + subj.level + "” ไม่ถูกต้อง");
+  }
+  const examRow = (examScores || []).find(row => row.student_id === studentId) || null;
+  const examPart = examRow ? Number(examRow.raw_score) : 0;
+  const examOverCap = Boolean(examRow) && examPart > examWeight + 0.000001;
+  const examUsable = Boolean(examRow) && !examOverCap;
   const subjectUnits = [];
   const competencyUnits = [];
   let subjectRaw = 0, subjectCap = 0;
@@ -711,17 +758,48 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   }
 
   const subjectScaled = subjectCap > 0 ? (subjectRaw / subjectCap) * subj.max_score : 0;
+  const collectPercent = subj.max_score > 0 ? (subjectScaled / subj.max_score) * 100 : 0;
+  const collectPart = collectPercent * collectWeight / 100;
+  const collectExpectedCount = expectedCount;
+  const hasCollectStructure = collectExpectedCount > 0;
+  expectedCount += 1;
+  if (examUsable) scoredCount += 1;
+  const collectPartialPercent = subjectPartialCap > 0
+    ? (subjectPartialRaw / subjectPartialCap) * 100
+    : null;
+  let partialEarned = 0, partialCap = 0;
+  if (collectPartialPercent !== null) {
+    partialEarned += collectPartialPercent * collectWeight / 100;
+    partialCap += collectWeight;
+  }
+  if (examUsable) {
+    partialEarned += examPart;
+    partialCap += examWeight;
+  }
   const scoring = {
     expectedCount,
     scoredCount,
-    complete: expectedCount > 0 && scoredCount === expectedCount,
-    partialPercent: subjectPartialCap > 0 ? (subjectPartialRaw / subjectPartialCap) * 100 : null
+    collectExpectedCount,
+    hasCollectStructure,
+    examScored: examUsable,
+    examOverCap,
+    complete: hasCollectStructure && scoredCount === expectedCount,
+    partialPercent: partialCap > 0 ? (partialEarned / partialCap) * 100 : null
   };
 
   // 1) เช็ค ร. ก่อน
   const remark = remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
   if (remark) {
-    return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "ร.", reason: remark.reason } };
+    return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "ร.", reason: remark.reason } };
+  }
+
+  // ร. ที่ระบบคำนวณจากการไม่มีคะแนนสอบ — เกิดหลังครูปิดคะแนนสอบเท่านั้น
+  // ไม่เขียนลง remarks เพื่อให้หายเองเมื่อเปิดคะแนนหรือกรอกคะแนนย้อนหลัง
+  if (subj.exam_closed_at && !examRow) {
+    return {
+      subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring,
+      result: { type: "ร.", reason: "ไม่มีคะแนนสอบปลายภาค/ปลายปี" }
+    };
   }
 
   // ชั่วโมงชดเชย (ทำงาน/เรียนเสริม ฯลฯ) ของนักเรียนคนนี้ในวิชานี้ — บวกเข้า attended ตรงๆ
@@ -746,21 +824,21 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 
     if (rawMissed > maxMissedRetake) {
       // ขาดเกินเพดานเรียนซ้ำแล้ว — ชดเชยช่วยไม่ได้แล้ว ต้องเรียนซ้ำรายวิชา (ไม่หัก makeupTotal เข้าไปเลย)
-      return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake } };
+      return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "มส.", subtype: "retake", missedPeriods: rawMissed, maxMissed: maxMissedRetake } };
     }
     if (rawMissed > maxMissedMakeup) {
       const netMissed = Math.max(0, rawMissed - makeupTotal);
       if (netMissed > maxMissedMakeup) {
-        return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal } };
+        return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal } };
       }
       // ชดเชยจนขาดสุทธิไม่เกินเพดานแล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
     }
   }
 
   // 3) แปลงเป็นเกรด
-  const percentScore = subj.max_score > 0 ? (subjectScaled / subj.max_score) * 100 : 0;
+  const percentScore = collectPart + examPart;
   const grade = percentToGrade(percentScore);
-  return { subjectUnits, competencyUnits, subjectScaled, scoring, result: { type: "grade", grade, percentScore, makeupTotal } };
+  return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "grade", grade, percentScore, makeupTotal } };
 }
 
 // ---------- คำนวณผลรวมวิชาบูรณาการของนักเรียน 1 คน ----------
@@ -779,12 +857,18 @@ export function computeIntegratedResult(studentId, memberDataList) {
   let hasR = false;
   let weightedSum = 0, weightSum = 0;
   let expectedCount = 0, scoredCount = 0;
+  let hasCollectStructure = memberDataList.length > 0;
+  let examOverCap = false;
   let partialWeightedSum = 0, partialWeightSum = 0;
   let totalBase = 0, rawMissed = 0, makeupTotal = 0, anySessions = false;
 
   for (const md of memberDataList) {
     // skipMs = true: วิชาย่อยไม่ตัดสิน มส. รายตัว (คิดรวมข้างล่างแทน) — ผลรายวิชาจึงมีแค่ ร./เกรด
-    const r = computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions, md.makeupHours, true);
+    const r = computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions, md.makeupHours, {
+      skipMs: true,
+      examScores: md.examScores,
+      gradeWeight: md.gradeWeight
+    });
     const weight = Number(md.subject.total_periods) || 0;
     const missed = computeMissedPeriods(studentId, md.sessions || []);
     // เก็บสมรรถนะหลักของวิชาย่อยนี้ไว้ด้วย (ถ้ามี) — แสดงแยกตามวิชาที่กรอกไว้จริง ไม่ถัวเฉลี่ยรวม
@@ -793,6 +877,8 @@ export function computeIntegratedResult(studentId, memberDataList) {
     memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed, scoring: r.scoring });
     expectedCount += r.scoring.expectedCount;
     scoredCount += r.scoring.scoredCount;
+    if (!r.scoring.hasCollectStructure) hasCollectStructure = false;
+    if (r.scoring.examOverCap) examOverCap = true;
     if (r.scoring.partialPercent !== null && weight > 0) {
       partialWeightedSum += r.scoring.partialPercent * weight;
       partialWeightSum += weight;
@@ -842,7 +928,9 @@ export function computeIntegratedResult(studentId, memberDataList) {
   const scoring = {
     expectedCount,
     scoredCount,
-    complete: expectedCount > 0 && scoredCount === expectedCount,
+    hasCollectStructure,
+    examOverCap,
+    complete: hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount,
     partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null
   };
   return { memberResults, overall, scoring, totalBase, rawMissed, makeupTotal, noPeriodSubjects };
@@ -882,8 +970,9 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
   for (const s of countableSubjects) if (s.subject_type === "พื้นฐาน") plainIdsToLoad.add(s.id);
   for (const id of memberSubjectIds) plainIdsToLoad.add(id);
 
+  const gradeWeights = await loadGradeWeights();
   const loadedData = new Map();
-  await Promise.all([...plainIdsToLoad].map(async id => { loadedData.set(id, await loadSubjectData(id)); }));
+  await Promise.all([...plainIdsToLoad].map(async id => { loadedData.set(id, await loadSubjectData(id, gradeWeights)); }));
 
   const groupMembers = new Map(); // integrated_subject_id -> [member_subject_id, ...]
   for (const link of memberLinks) {
@@ -930,7 +1019,10 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
       const enrolledSet = enrolledBySubject.get(subj.id) || new Set();
       for (const studentId of enrolledSet) {
         if (!out.has(studentId)) continue;
-        const r = computeSubjectResult(studentId, data.subject, data.units, data.remarksData, data.sessions, data.makeupHours);
+        const r = computeSubjectResult(studentId, data.subject, data.units, data.remarksData, data.sessions, data.makeupHours, {
+          examScores: data.examScores,
+          gradeWeight: data.gradeWeight
+        });
         out.get(studentId).subjects.push({ subject: subj, result: r.result, scoring: r.scoring });
       }
     }

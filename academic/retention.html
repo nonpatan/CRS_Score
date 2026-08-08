@@ -186,7 +186,7 @@ import {
   sb, requireAuth, signOut,
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting
-} from "../supabase-client.js?v=20260808-8";
+} from "../supabase-client.js?v=20260808-12";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -336,8 +336,10 @@ function renderStudentRow(row) {
   const noPeriodSubjects = [...new Set(subjList.flatMap(item => item.noPeriodSubjects || []))];
 
   const subjRows = subjList.map(x => {
+    const overCap = x.scoring && x.scoring.examOverCap;
     const display = x.result.type === "grade" && x.scoring && !x.scoring.complete
-      ? "<span class='badge mid'>" + (x.scoring.expectedCount === 0 ? "ยังไม่มีโครงสร้างคะแนน" : "ยังไม่ครบ · " + x.scoring.scoredCount + "/" + x.scoring.expectedCount + " ครั้ง") + "</span>" +
+      ? "<span class='badge " + (overCap ? "bad" : "mid") + "'>" + (overCap ? "คะแนนสอบเกินเพดาน · ต้องแก้" :
+        (!x.scoring.hasCollectStructure ? "ยังไม่มีโครงสร้างคะแนน" : "ยังไม่ครบ · " + x.scoring.scoredCount + "/" + x.scoring.expectedCount + " ช่อง")) + "</span>" +
         (x.scoring.partialPercent !== null ? " <span class='hint'>(ชั่วคราว " + x.scoring.partialPercent.toFixed(0) + "%)</span>" : "")
       : subjBadge(x.result);
     return "<div class='score-row'><span>" + escapeHtml(x.subject.name) + "</span><span class='val'>" + display + "</span></div>";
