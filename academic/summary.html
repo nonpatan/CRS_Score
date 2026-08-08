@@ -1499,7 +1499,7 @@ async function loadCompetencyStudentResult(student) {
     }
     const snapshotSessionIds = (snapshotResult.data || []).map(r => r.session_id);
     if (snapshotSessionIds.length) {
-      const sessionResult = await sb.from("competency_assessment_sessions").select("id,assessment_id,target_id")
+      const sessionResult = await sb.from("competency_assessment_sessions").select("id,assessment_id,target_id,max_score")
         .in("id", snapshotSessionIds).in("assessment_id", assessments.map(a => a.id));
       if (sessionResult.error) {
         elCompResult.innerHTML = "<div class='card incomplete'>โหลดครั้งประเมินไม่สำเร็จ: " + escapeHtml(sessionResult.error.message) + "</div>";
@@ -1509,7 +1509,7 @@ async function loadCompetencyStudentResult(student) {
       if (sessionsForStudent.length) {
         const targetIds = [...new Set(sessionsForStudent.map(s => s.target_id))];
         const [targetResult,scoreResult] = await Promise.all([
-          sb.from("competency_assessment_targets").select("id,assessment_id,competency_id,max_score").in("id", targetIds),
+          sb.from("competency_assessment_targets").select("id,assessment_id,competency_id,element_id,max_score").in("id", targetIds),
           sb.from("competency_assessment_scores").select("session_id,target_id,raw_score")
             .eq("student_id", student.id).in("session_id", sessionsForStudent.map(s => s.id))
         ]);
@@ -1524,9 +1524,14 @@ async function loadCompetencyStudentResult(student) {
           const assessment = assessmentById.get(assessmentSession.assessment_id);
           if (!target || !assessment) continue;
           const key = assessmentSession.id + ":" + target.id;
+          // element_id = คีย์จัดกลุ่มก่อนถ่วงน้ำหนัก · element_weight = น้ำหนักขององค์ประกอบ
+          // (คนละตัวกับ max_score ซึ่งเป็นคะแนนเต็มของ "ครั้งนั้น" — ครั้งที่ไม่ได้ตั้งเต็มเอง
+          //  จะ fallback มาใช้ค่าน้ำหนักของ target เหมือนเดิม ข้อมูลเก่าจึงไม่ขยับ)
           const item = {
             competency_id: target.competency_id,
-            max_score: Number(target.max_score),
+            element_id: target.element_id,
+            element_weight: Number(target.max_score),
+            max_score: Number(assessmentSession.max_score ?? target.max_score),
             raw_score: scoreBySession.has(key) ? scoreBySession.get(key) : null
           };
           if (assessment.source_type === "กิจกรรม") activityItems.push(item);

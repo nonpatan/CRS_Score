@@ -104,7 +104,7 @@
   <!-- กล่องยืนยันของหน้าเว็บเอง ไม่ใช้ confirm()/prompt() ของเบราว์เซอร์
        — webview บางตัว (แผงพรีวิว, แอปมือถือบางแบบ) คืน false เงียบ ๆ หรือโยน error
        ทำให้ปุ่มลบดูเหมือนกดไม่ติดโดยไม่มีสัญญาณอะไรเลย -->
-  <div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" style="display:none;margin-top:12px"><label for="confirm-type-input">พิมพ์ชื่อรายการให้ตรงกันเพื่อยืนยัน</label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="modal-actions"><button class="ghost" id="confirm-cancel">ยกเลิก</button><button class="primary" id="confirm-ok">ลบ</button></div></div></div>
+  <div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" style="display:none;margin-top:12px"><label id="confirm-type-label" for="confirm-type-input">พิมพ์ชื่อรายการให้ตรงกันเพื่อยืนยัน</label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="modal-actions"><button class="ghost" id="confirm-cancel">ยกเลิก</button><button class="primary" id="confirm-ok">ลบ</button></div></div></div>
   <div id="toast" class="toast"></div>
   </main>
 </div>
@@ -139,6 +139,13 @@ function toast(msg, ok=true) {
 }
 function canEdit() {
   return current && (isAdmin || current.owner_id === session.user.id);
+}
+// คะแนนเต็มของ "ครั้งนั้น" — ครั้งที่ไม่ได้ตั้งเองใช้น้ำหนักของ target แทน (พฤติกรรมเดิม)
+// ⚠️ ทุกจุดที่แสดง/ตรวจคะแนนเต็มต้องผ่านตัวนี้ ห้ามอ่าน target.max_score ตรง ๆ อีก
+//    ลืมจุดใดจุดหนึ่ง = ครูกรอกเกินเพดานของครั้งนั้นได้เงียบ ๆ
+function sessionMax(sess, target) {
+  const own = sess && sess.max_score;
+  return Number(own === null || own === undefined ? (target && target.max_score) : own);
 }
 function fill(sel, rows, label, placeholder) {
   sel.innerHTML = "<option value=''>" + placeholder + "</option>";
@@ -320,7 +327,7 @@ function renderTargets() {
       item.innerHTML =
         "<div class='target-head'><div class='target-name'>" +
         esc(target.element && target.element.name) +
-        "</div><div class='meta'>เต็ม " + esc(target.max_score) + "</div></div>";
+        "</div><div class='meta'>น้ำหนัก " + esc(target.max_score) + "</div></div>";
       const list = document.createElement("div");
       list.className = "session-list";
       const attempts = sessions
@@ -332,7 +339,10 @@ function renderTargets() {
         chip.className = "session-chip";
         const button = document.createElement("button");
         button.className = "ghost" + (isCurrent ? " selected" : "");
-        button.textContent = "ครั้งที่ " + attempt.attempt_no;
+        // โชว์คะแนนเต็มบนชิปเฉพาะครั้งที่ตั้งเองไว้ต่างจากน้ำหนัก — ครั้งปกติจะได้ไม่รก
+        button.textContent = "ครั้งที่ " + attempt.attempt_no +
+          (attempt.max_score !== null && attempt.max_score !== undefined
+            ? " · เต็ม " + attempt.max_score : "");
         button.setAttribute("aria-pressed", isCurrent ? "true" : "false");
         button.onclick = () => loadSession(attempt.id);
         chip.appendChild(button);
@@ -382,8 +392,17 @@ async function createSession(target) {
   const attemptNo = sessions
     .filter(s => s.target_id === target.id)
     .reduce((max, s) => Math.max(max, Number(s.attempt_no) || 0), 0) + 1;
+  // ถามคะแนนเต็มของครั้งนี้ — ค่าเริ่มต้นคือน้ำหนักขององค์ประกอบ กดสร้างเลยก็ได้พฤติกรรมเดิม
+  const maxScore = await askNumber({
+    title: (target.element && target.element.name || "องค์ประกอบ") + " ครั้งที่ " + attemptNo,
+    message: "คะแนนเต็มของครั้งนี้ (น้ำหนักขององค์ประกอบคือ " + target.max_score + ")",
+    label: "คะแนนเต็มของครั้งนี้",
+    value: target.max_score
+  });
+  if (maxScore === null) { toast("ยกเลิกการสร้างครั้งประเมิน"); return; }
   const { data:newSession, error } = await sb.from("competency_assessment_sessions")
-    .insert({ assessment_id:current.id, target_id:target.id, attempt_no:attemptNo })
+    .insert({ assessment_id:current.id, target_id:target.id, attempt_no:attemptNo,
+              max_score: Number(maxScore) === Number(target.max_score) ? null : maxScore })
     .select().single();
   if (error) {
     toast("สร้างครั้งประเมินไม่สำเร็จ: " + error.message, false);
@@ -406,15 +425,30 @@ async function createSession(target) {
 //    webview ของแผงพรีวิวคืน confirm() = false ทันทีโดยไม่แสดงกล่อง และ prompt() โยน error
 //    ผลคือปุ่มลบ "กดแล้วไม่มีอะไรเกิดขึ้น" โดยไม่มีสัญญาณให้ครูรู้เลยว่าทำไม
 // requireText มีค่า = ต้องพิมพ์ข้อความนั้นให้ตรงก่อนจึงกดยืนยันได้ (ใช้ตอนลบข้อมูลที่มีคะแนนแล้ว)
-function askConfirm({ title, message, requireText = null, okLabel = "ลบ" }) {
+// askNumber(): กล่องกรอกตัวเลขที่ใช้ overlay เดียวกัน คืน Promise<number|null> (null = ยกเลิก)
+// ใช้ตอนสร้างครั้งประเมินใหม่เพื่อถามคะแนนเต็มของครั้งนั้น
+function askNumber({ title, message, label, value = "", okLabel = "สร้าง" }) {
+  return askConfirm({ title, message, okLabel, numberInput: { label, value } })
+    .then(result => (result === false ? null : result));
+}
+
+function askConfirm({ title, message, requireText = null, okLabel = "ลบ", numberInput = null }) {
   return new Promise(resolve => {
     const overlay = $("confirm-overlay"), input = $("confirm-type-input"), ok = $("confirm-ok");
     $("confirm-title").textContent = title;
     $("confirm-message").textContent = message;
-    $("confirm-type-field").style.display = requireText ? "block" : "none";
+    $("confirm-type-field").style.display = (requireText || numberInput) ? "block" : "none";
+    $("confirm-type-label").textContent = numberInput
+      ? numberInput.label
+      : "พิมพ์ชื่อรายการให้ตรงกันเพื่อยืนยัน";
+    input.type = numberInput ? "number" : "text";
+    if (numberInput) { input.min = "0.01"; input.step = "0.01"; } else { input.removeAttribute("min"); input.removeAttribute("step"); }
     ok.textContent = okLabel;
-    input.value = "";
-    const sync = () => { ok.disabled = requireText ? input.value.trim() !== requireText : false; };
+    input.value = numberInput ? String(numberInput.value ?? "") : "";
+    const sync = () => {
+      if (numberInput) { const n = Number(input.value); ok.disabled = !(input.value !== "" && Number.isFinite(n) && n > 0); return; }
+      ok.disabled = requireText ? input.value.trim() !== requireText : false;
+    };
     const close = result => {
       overlay.classList.remove("show");
       ok.onclick = null; $("confirm-cancel").onclick = null;
@@ -423,7 +457,7 @@ function askConfirm({ title, message, requireText = null, okLabel = "ลบ" }) 
       resolve(result);
     };
     const onKey = e => { if (e.key === "Escape") close(false); };
-    ok.onclick = () => close(true);
+    ok.onclick = () => close(numberInput ? Number(input.value) : true);
     $("confirm-cancel").onclick = () => close(false);
     overlay.onclick = e => { if (e.target === overlay) close(false); };  // คลิกนอกกล่อง = ยกเลิก
     input.oninput = sync;
@@ -510,7 +544,7 @@ async function loadSession(id) {
   }
   scoreMap = new Map((sc.data || []).map(x => [x.student_id, x.raw_score]));
   $("score-heading").textContent = (currentTarget.competency && currentTarget.competency.name || "สมรรถนะหลัก") + " · ครั้งที่ " + currentSession.attempt_no;
-  $("score-subheading").textContent = (currentTarget.element && currentTarget.element.name || "องค์ประกอบ") + " · " + (currentTarget.element && currentTarget.element.stage || "") + " · เต็ม " + currentTarget.max_score;
+  $("score-subheading").textContent = (currentTarget.element && currentTarget.element.name || "องค์ประกอบ") + " · " + (currentTarget.element && currentTarget.element.stage || "") + " · เต็ม " + sessionMax(currentSession, currentTarget);
   $("scores-card").style.display = "block";
   $("readonly").style.display = canEdit() ? "none" : "block";
   renderTargets();
@@ -551,10 +585,10 @@ function renderScores() {
   }
 }
 let editingScore=null;
-function openScoreModal(student,target,value){editingScore={student,target};$("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+target.max_score+")";$("score-modal-value").value=value;$("score-modal-value").max=target.max_score;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}
+function openScoreModal(student,target,value){editingScore={student,target};$("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");const cap=sessionMax(currentSession,target);$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+cap+")";$("score-modal-value").value=value;$("score-modal-value").max=cap;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}
 function closeScoreModal(){$("score-overlay").classList.remove("show");editingScore=null;}
 $("score-modal-cancel").onclick=closeScoreModal;$("score-overlay").addEventListener("click",event=>{if(event.target===$("score-overlay"))closeScoreModal();});
-$("score-modal-save").onclick=async()=>{if(!editingScore||!currentSession)return;const input=$("score-modal-value"),raw=Number(input.value),target=editingScore.target;if(input.value===""||!Number.isFinite(raw)||raw<0||raw>Number(target.max_score)){toast("คะแนนต้องอยู่ระหว่าง 0 ถึง "+target.max_score,false);input.focus();return;}const button=$("score-modal-save");button.disabled=true;const {error}=await sb.from("competency_assessment_scores").upsert({session_id:currentSession.id,target_id:target.id,student_id:editingScore.student.id,raw_score:raw,updated_at:new Date().toISOString()},{onConflict:"session_id,target_id,student_id"});button.disabled=false;if(error){toast("บันทึกคะแนนไม่สำเร็จ: "+error.message,false);return;}closeScoreModal();await loadSession(currentSession.id);toast("บันทึกคะแนนแล้ว");}
+$("score-modal-save").onclick=async()=>{if(!editingScore||!currentSession)return;const input=$("score-modal-value"),raw=Number(input.value),target=editingScore.target,cap=sessionMax(currentSession,target);if(input.value===""||!Number.isFinite(raw)||raw<0||raw>cap){toast("คะแนนต้องอยู่ระหว่าง 0 ถึง "+cap,false);input.focus();return;}const button=$("score-modal-save");button.disabled=true;const {error}=await sb.from("competency_assessment_scores").upsert({session_id:currentSession.id,target_id:target.id,student_id:editingScore.student.id,raw_score:raw,updated_at:new Date().toISOString()},{onConflict:"session_id,target_id,student_id"});button.disabled=false;if(error){toast("บันทึกคะแนนไม่สำเร็จ: "+error.message,false);return;}closeScoreModal();await loadSession(currentSession.id);toast("บันทึกคะแนนแล้ว");}
 $("f-year").onchange=()=>{setActiveYear($("f-year").value);renderAssessments();$("sel-assessment").value="";selectAssessment()};
 $("f-term").onchange=()=>{renderAssessments();$("sel-assessment").value="";selectAssessment()};
 $("f-type").onchange=()=>{renderAssessments();if(!$("sel-assessment").value)selectAssessment();};

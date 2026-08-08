@@ -357,16 +357,42 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
 
 // สรุปคะแนนจากกิจกรรมหรือกิจวัตร 1 ด้าน รายการหนึ่งแทนหนึ่งครั้งประเมินที่นักเรียนอยู่ใน snapshot
 // raw_score=null แปลว่ายังไม่ได้กรอก (ต่างจาก 0 ซึ่งเป็นคะแนนจริงและถือว่ากรอกแล้ว)
+//
+// ⚠️ ต้อง normalize ที่ชั้น "องค์ประกอบ" ก่อนถ่วงน้ำหนัก — ห้ามบวกคะแนนดิบรวมทั้งด้านแล้วหาร
+// (สูตรเดิมทำแบบนั้นจนถึง 2026-08) เพราะ**จำนวนครั้งที่ประเมินจะรั่วไปเป็นน้ำหนัก**:
+//   องค์ประกอบ A เต็ม 10 ประเมิน 5 ครั้งได้เต็ม · B เต็ม 10 ประเมินครั้งเดียวได้ 0
+//   → สูตรเดิม 50/60 = 83.3 ("เหนือความคาดหวัง") · ที่ถูกคือ 50.0 ("เริ่มต้น") ต่างกัน 2 ระดับ
+// จัดกลุ่มด้วย element_id ไม่ใช่ target_id — target มี 1 แถวต่อ (กิจกรรม × องค์ประกอบ) แต่หน้าสรุป
+// รวมทุกกิจกรรมในปีเข้าด้วยกัน ถ้าใช้ target_id องค์ประกอบที่ถูกเลือกไว้ใน 3 กิจกรรมจะได้น้ำหนัก
+// 10+10+10 = 30 ทั้งที่ครูตั้งไว้ 10 (ผู้ใช้เคาะ 2026-08-07: ครูตั้ง 10 ต้องได้ 10 เสมอ)
 export function computeAssessmentCompetencySource(competencyId, expectedItems) {
   const items = (expectedItems || []).filter(i => i.competency_id === competencyId);
   const scored = items.filter(i => i.raw_score !== null && i.raw_score !== undefined);
-  const maxSum = items.reduce((sum, i) => sum + (Number(i.max_score) || 0), 0);
-  const rawSum = scored.reduce((sum, i) => sum + Number(i.raw_score), 0);
-  const complete = items.length > 0 && scored.length === items.length && maxSum > 0;
+
+  const groups = new Map();
+  for (const item of items) {
+    const key = item.element_id ?? item.competency_id;  // ไม่มี element_id = ข้อมูลรุ่นเก่า ถอยไปพฤติกรรมเดิม
+    if (!groups.has(key)) groups.set(key, { raw: 0, cap: 0, weights: [] });
+    const group = groups.get(key);
+    group.cap += Number(item.max_score) || 0;
+    if (item.raw_score !== null && item.raw_score !== undefined) group.raw += Number(item.raw_score);
+    // เก็บน้ำหนักที่แต่ละกิจกรรมตั้งไว้ แล้วเฉลี่ยตอนท้าย — ห้ามบวกสะสม ไม่งั้นบั๊กเดิมกลับมา
+    group.weights.push(Number(item.element_weight ?? item.max_score) || 0);
+  }
+
+  let weightedSum = 0, weightSum = 0;
+  for (const group of groups.values()) {
+    const weight = group.weights.reduce((sum, w) => sum + w, 0) / group.weights.length;
+    if (group.cap <= 0 || weight <= 0) continue;
+    weightedSum += (group.raw / group.cap) * weight;
+    weightSum += weight;
+  }
+
+  const complete = items.length > 0 && scored.length === items.length && weightSum > 0;
   return {
     complete,
-    percent: complete ? (rawSum / maxSum) * 100 : null,
-    expectedCount: items.length,
+    percent: complete ? (weightedSum / weightSum) * 100 : null,
+    expectedCount: items.length,   // ยังนับเป็น "ครั้ง" เหมือนเดิม — หน้าจอใช้โชว์ "กรอกแล้ว n/m"
     scoredCount: scored.length
   };
 }
