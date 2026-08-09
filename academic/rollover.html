@@ -235,9 +235,16 @@
       <div id="subject-list"></div>
     </div>
 
+    <!-- ยกกิจกรรม -->
+    <div class="card">
+      <div class="step-title"><span class="num">4</span>ยกกิจกรรมไปปีใหม่</div>
+      <div id="activity-summary" class="hint">เลือกปีต้นทางก่อน แล้วกิจกรรมจะขึ้นให้เลือก</div>
+      <div id="activity-list"></div>
+    </div>
+
     <!-- ลงมือ -->
     <div class="card">
-      <div class="step-title"><span class="num">4</span>เริ่มขึ้นปีใหม่</div>
+      <div class="step-title"><span class="num">5</span>เริ่มขึ้นปีใหม่</div>
       <div id="run-warn"></div>
       <button class="primary danger" id="btn-run">ตรวจสอบและเริ่มขึ้นปีใหม่</button>
       <div id="run-log"></div>
@@ -263,7 +270,7 @@ import {
   sb, requireAuth, signOut, getProfile,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20260809-2";
+} from "../supabase-client.js?v=20260809-3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -288,6 +295,8 @@ let allSubjects = [];       // วิชาทั้งหมด (ใช้ห�
 let allActiveStudents = []; // นักเรียน active ปัจจุบัน ใช้ตรวจว่าใครยังเรียนต่ออยู่
 let activeStudents = [];    // นักเรียน active พร้อมชั้น/ห้องของ "ปีต้นทางที่เลือก"
 let sourceSubjects = [];    // วิชาของปีต้นทางที่เลือก
+let allActivities = [];     // กิจกรรมพัฒนาผู้เรียนทุกปี (ไม่รวมกิจวัตรประจำวัน)
+let sourceActivities = [];  // กิจกรรมของปีต้นทางที่เลือก
 let selectableYears = [];   // ปีที่ลงทะเบียน + ปีที่ยังมีอยู่จริงในวิชา
 
 const elHighest = document.getElementById("sel-highest");
@@ -298,6 +307,8 @@ const elPromoteSummary = document.getElementById("promote-summary");
 const elPromoteList = document.getElementById("promote-list");
 const elSubjectSummary = document.getElementById("subject-summary");
 const elSubjectList = document.getElementById("subject-list");
+const elActivitySummary = document.getElementById("activity-summary");
+const elActivityList = document.getElementById("activity-list");
 const elRunWarn = document.getElementById("run-warn");
 const elRunLog = document.getElementById("run-log");
 const btnRun = document.getElementById("btn-run");
@@ -380,8 +391,16 @@ async function init() {
   if (saved) highestGrade = saved;
   elHighest.value = highestGrade;
 
-  const { data: subjData } = await sb.from("subjects").select("*").order("created_at");
-  allSubjects = subjData || [];
+  const [subjectResult,activityResult] = await Promise.all([
+    sb.from("subjects").select("*").order("created_at"),
+    sb.from("competency_assessments").select("*").eq("source_type","กิจกรรม").order("created_at")
+  ]);
+  if(subjectResult.error||activityResult.error){
+    showToast("โหลดวิชาหรือกิจกรรมไม่สำเร็จ: "+(subjectResult.error||activityResult.error).message,false);
+    return;
+  }
+  allSubjects = subjectResult.data || [];
+  allActivities = activityResult.data || [];
   try {
     await refreshSelectableYears();
   } catch (error) {
@@ -427,6 +446,7 @@ async function onSourceYearChange() {
       : "";
   }
   sourceSubjects = allSubjects.filter(s => s.year === src);
+  sourceActivities = allActivities.filter(activity => activity.year === src);
 
   // ใช้ชั้น/ห้องของปีต้นทางจริง ไม่อ่านค่าปัจจุบันจาก students ซึ่งอาจถูกเลื่อนชั้นทับแล้ว
   activeStudents = [];
@@ -446,6 +466,7 @@ async function onSourceYearChange() {
   }
   renderPromote();
   renderSubjects();
+  renderActivities();
 }
 
 // ---------- ปลายทางเมื่อ "เลื่อนตามแผน" ของนักเรียน 1 คน ----------
@@ -703,6 +724,48 @@ function updateSubjectSummary() {
   });
 }
 
+// ---------- วาดรายการกิจกรรมที่จะยก (ไม่รวมกิจวัตรประจำวัน) ----------
+function renderActivities(){
+  if(!elSourceYear.value){
+    elActivitySummary.textContent="เลือกปีต้นทางก่อน แล้วกิจกรรมจะขึ้นให้เลือก";
+    elActivityList.innerHTML="";
+    return;
+  }
+  if(!sourceActivities.length){
+    elActivitySummary.textContent="ปีต้นทางนี้ไม่มีกิจกรรมพัฒนาผู้เรียน";
+    elActivityList.innerHTML="";
+    return;
+  }
+  elActivitySummary.innerHTML=
+    "<div class='summary-box'>กิจกรรมปี "+escapeHtml(elSourceYear.value)+" ทั้งหมด "+sourceActivities.length+" กิจกรรม"+
+    " · เลือกยก <b id='activity-selected-count'>"+sourceActivities.length+"</b>"+
+    " · ไม่ยก <b id='activity-unselected-count'>0</b><br>"+
+    "<span class='hint'>ติ๊กออก = ไม่ยกกิจกรรมนี้ · ปีใหม่จะไม่ก๊อปสมาชิก คะแนน หรือผลผ่าน</span> "+
+    "<span class='link-toggle' id='toggle-all-activity'>เลือก/ไม่เลือกทั้งหมด</span></div>";
+  elActivityList.innerHTML=sourceActivities.map(activity=>{
+    const meta="ภาคเรียน "+(activity.term||"-")+(activity.in_transcript?" · ปพ.":"");
+    return "<label class='row'><input type='checkbox' class='activity-cb' data-id='"+activity.id+"' checked>"+
+      "<span class='info'><span class='name'>"+escapeHtml(activity.name)+"</span><span class='meta'> "+escapeHtml(meta)+"</span></span></label>";
+  }).join("");
+  elActivityList.querySelectorAll(".activity-cb").forEach(cb=>cb.addEventListener("change",updateActivitySummary));
+  document.getElementById("toggle-all-activity").addEventListener("click",()=>{
+    const cbs=elActivityList.querySelectorAll(".activity-cb");
+    const anyUnchecked=[...cbs].some(cb=>!cb.checked);
+    cbs.forEach(cb=>{cb.checked=anyUnchecked;});
+    updateActivitySummary();
+  });
+  updateActivitySummary();
+}
+
+function updateActivitySummary(){
+  const cbs=elActivityList.querySelectorAll(".activity-cb");
+  const selected=[...cbs].filter(cb=>cb.checked).length;
+  const selectedEl=document.getElementById("activity-selected-count");
+  const unselectedEl=document.getElementById("activity-unselected-count");
+  if(selectedEl)selectedEl.textContent=selected;
+  if(unselectedEl)unselectedEl.textContent=cbs.length-selected;
+}
+
 // ---------- ดึงชุด id ที่ติ๊กไว้ ----------
 function checkedIds(containerClass) {
   return [...document.querySelectorAll("." + containerClass + ":checked")].map(cb => cb.dataset.id);
@@ -743,6 +806,26 @@ async function cloneSubject(src, newYear) {
     }
   }
   return newSub.id;
+}
+
+// ---------- ก๊อปโครงสร้างกิจกรรม 1 ตัวไปปีใหม่ (ไม่ก๊อปสมาชิก/ครั้งประเมิน/คะแนน/ผลผ่าน) ----------
+async function cloneActivity(src,newYear){
+  const payload={
+    source_type:"กิจกรรม",name:src.name,year:newYear,term:src.term,
+    owner_id:src.owner_id,in_transcript:src.in_transcript===true
+  };
+  const {data:newActivity,error}=await sb.from("competency_assessments").insert(payload).select().single();
+  if(error)throw new Error("สร้างกิจกรรม "+src.name+" ไม่สำเร็จ: "+error.message);
+
+  const {data:targets,error:targetReadError}=await sb.from("competency_assessment_targets")
+    .select("competency_id,element_id,max_score,seq").eq("assessment_id",src.id).order("seq");
+  if(targetReadError)throw new Error("อ่านองค์ประกอบของ "+src.name+" ไม่สำเร็จ: "+targetReadError.message);
+  if((targets||[]).length){
+    const rows=targets.map(target=>({assessment_id:newActivity.id,...target}));
+    const {error:targetWriteError}=await sb.from("competency_assessment_targets").insert(rows);
+    if(targetWriteError)throw new Error("ก๊อปองค์ประกอบของ "+src.name+" ไม่สำเร็จ: "+targetWriteError.message);
+  }
+  return newActivity.id;
 }
 
 // ---------- ลงทะเบียนอัตโนมัติ: จับคู่เด็ก active ตามชั้น+ห้องที่วิชาต้นทางเคยมี ----------
@@ -789,6 +872,36 @@ async function copyGradeWeightsToYear(sourceYear, newYear, addLog) {
     : "  ✓ คัดลอกอัตราส่วนคะแนนแล้ว (ค่าที่ตั้งไว้ล่วงหน้าในปีใหม่จะไม่ถูกทับ)");
 }
 
+// ---------- คัดลอกน้ำหนัก 3 แหล่ง + เกณฑ์แปลผลสมรรถนะไปปีใหม่ ----------
+async function copyCompetencySettingsToYear(sourceYear,newYear,addLog){
+  addLog("• กำลังคัดลอกค่าตั้งสมรรถนะจากปี "+sourceYear+" ไปปี "+newYear+"...");
+  const [weightResult,levelResult,competencyResult]=await Promise.all([
+    sb.from("competency_source_weights").select("competency_id,subject_weight,activity_weight,routine_weight").eq("year",sourceYear),
+    sb.from("competency_interpretation_levels").select("code,label,min_score,max_score,seq").eq("year",sourceYear).order("seq"),
+    sb.from("core_competencies").select("id,name")
+  ]);
+  if(weightResult.error||levelResult.error||competencyResult.error){
+    throw new Error("อ่านค่าตั้งสมรรถนะปีต้นทางไม่สำเร็จ: "+(weightResult.error||levelResult.error||competencyResult.error).message);
+  }
+  const weights=weightResult.data||[],levels=levelResult.data||[],competencies=competencyResult.data||[];
+  const weightedIds=new Set(weights.map(row=>row.competency_id));
+  const missing=competencies.filter(row=>!weightedIds.has(row.id)).map(row=>row.name);
+  if(!weights.length||missing.length||levels.length!==4){
+    const detail=[!weights.length?"ไม่มีน้ำหนัก":"",missing.length?"ขาดน้ำหนัก: "+missing.join(", "):"",levels.length!==4?"เกณฑ์แปลผล "+levels.length+"/4 ระดับ":""].filter(Boolean).join(" · ");
+    throw new Error("ปี "+sourceYear+" ยังตั้งค่าสมรรถนะไม่ครบ — "+detail);
+  }
+  const weightRows=weights.map(row=>({year:newYear,...row}));
+  const levelRows=levels.map(row=>({year:newYear,...row}));
+  const [weightCopyResult,levelCopyResult]=await Promise.all([
+    sb.from("competency_source_weights").upsert(weightRows,{onConflict:"year,competency_id",ignoreDuplicates:true}),
+    sb.from("competency_interpretation_levels").upsert(levelRows,{onConflict:"year,code",ignoreDuplicates:true})
+  ]);
+  if(weightCopyResult.error||levelCopyResult.error){
+    throw new Error("คัดลอกค่าตั้งสมรรถนะไปปีใหม่ไม่สำเร็จ: "+(weightCopyResult.error||levelCopyResult.error).message);
+  }
+  addLog("  ✓ คัดลอกน้ำหนัก "+weights.length+" ด้าน · เกณฑ์แปลผล 4 ระดับแล้ว (ค่าที่ตั้งไว้ล่วงหน้าในปีใหม่จะไม่ถูกทับ)");
+}
+
 // ---------- ตรวจสอบ + ลงมือขึ้นปีใหม่ ----------
 btnRun.addEventListener("click", async () => {
   elRunLog.textContent = "";
@@ -816,6 +929,8 @@ btnRun.addEventListener("click", async () => {
 
   const subjectIds = checkedIds("subject-cb");
   const subjectsToClone = sourceSubjects.filter(s => subjectIds.indexOf(s.id) !== -1);
+  const activityIds = checkedIds("activity-cb");
+  const activitiesToClone = sourceActivities.filter(activity => activityIds.indexOf(activity.id) !== -1);
 
   let upN = 0, gradN = 0, holdN = 0, leftN = 0;
   for (const s of activeStudents) {
@@ -834,6 +949,8 @@ btnRun.addEventListener("click", async () => {
     "• คงชั้นเดิม (ซ้ำชั้น) " + holdN + " คน\n" +
     "• ย้ายออก/ไม่เรียนต่อ " + leftN + " คน\n" +
     "• ยกวิชา " + subjectsToClone.length + " วิชา ไปปี " + newYear + "\n" +
+    "• ยกกิจกรรม " + activitiesToClone.length + " กิจกรรม ไปปี " + newYear + "\n" +
+    "• ยกน้ำหนัก 3 แหล่งและเกณฑ์แปลผลสมรรถนะไปปีใหม่\n" +
     "• ลงทะเบียนนักเรียนให้วิชาปีใหม่อัตโนมัติ\n\n" +
     "ทำแล้วย้อนกลับอัตโนมัติไม่ได้ — ตรวจให้ดีก่อนกดยืนยัน",
     okLabel: "ขึ้นปีการศึกษา"
@@ -852,6 +969,8 @@ btnRun.addEventListener("click", async () => {
     }
     // ต้องสำเร็จก่อนเริ่มเปลี่ยนชั้น/ก๊อปวิชา ไม่งั้นปีใหม่จะมีวิชาแต่คำนวณเกรดไม่ได้
     await copyGradeWeightsToYear(src, newYear, addLog);
+    // ค่าตั้งสมรรถนะต้องสำเร็จก่อนแตะนักเรียน/วิชา และห้ามเดาค่าเมื่อปีต้นทางยังตั้งไม่ครบ
+    await copyCompetencySettingsToYear(src,newYear,addLog);
 
     // 1) ยืนยันว่าปีต้นทางมีประวัติชั้น/ห้องครบก่อน
     // ห้ามเดาจาก students ปัจจุบัน เพราะถ้าเลือกปีเก่า ค่านั้นอาจถูกเลื่อนชั้นทับไปแล้ว
@@ -965,10 +1084,38 @@ btnRun.addEventListener("click", async () => {
       }
     }
 
+    // 8) ยกกิจกรรมเป็นขั้นท้ายสุด — ถ้าปีใหม่มีกิจกรรมอยู่แล้วให้ข้ามเฉพาะขั้นนี้
+    // และถ้าขั้นนี้พลาด ห้ามย้อนวิชา/นักเรียนที่ทำเสร็จแล้ว
+    let activityCopyError=null;
+    try{
+      addLog("• กำลังยกกิจกรรมไปปี "+newYear+"...");
+      const {count,error:existingActivityError}=await sb.from("competency_assessments")
+        .select("id",{count:"exact",head:true}).eq("year",newYear).eq("source_type","กิจกรรม");
+      if(existingActivityError)throw new Error("ตรวจกิจกรรมปีใหม่ไม่สำเร็จ: "+existingActivityError.message);
+      if((count||0)>0){
+        addLog("  ⚠ ปี "+newYear+" มีกิจกรรมอยู่แล้ว "+count+" กิจกรรม — ข้ามการยกกิจกรรมเพื่อกันก๊อปซ้ำ");
+      }else{
+        for(const activity of activitiesToClone){
+          await cloneActivity(activity,newYear);
+          addLog("  ✓ "+activity.name+(activity.in_transcript?" (ปพ.)":""));
+        }
+        addLog("  ยกกิจกรรมรวม "+activitiesToClone.length+" กิจกรรม · ไม่ก๊อปสมาชิก/คะแนน/ผลผ่าน");
+      }
+    }catch(error){
+      activityCopyError=error;
+      addLog("  ❌ ยกกิจกรรมไม่สำเร็จ: "+error.message);
+      addLog("  ⚠ นักเรียนและวิชาปีใหม่ทำเสร็จแล้ว เหลือกิจกรรมที่ต้องตรวจและจัดการแยก");
+    }
+
     // ตั้งปีที่ทำงานอยู่เป็นปีใหม่ ให้ทุกหน้าใช้ปีใหม่ต่อได้เลย
     setActiveYear(newYear);
-    addLog("\n✅ เสร็จสิ้น! ขึ้นปีการศึกษา " + newYear + " เรียบร้อย");
-    showToast("ขึ้นปี " + newYear + " เรียบร้อย ตั้งปีที่ใช้งานเป็น " + newYear + " แล้ว", true);
+    if(activityCopyError){
+      addLog("\n⚠ ขึ้นปี "+newYear+" เสร็จเฉพาะนักเรียนและวิชา — กิจกรรมยังไม่ครบ");
+      showToast("ขึ้นปีและยกวิชาแล้ว แต่ยกกิจกรรมไม่ครบ — ตรวจรายละเอียดในบันทึก",false);
+    }else{
+      addLog("\n✅ เสร็จสิ้น! ขึ้นปีการศึกษา " + newYear + " เรียบร้อย");
+      showToast("ขึ้นปี " + newYear + " เรียบร้อย ตั้งปีที่ใช้งานเป็น " + newYear + " แล้ว", true);
+    }
   } catch (e) {
     addLog("\n❌ หยุดกลางคัน: " + e.message);
     showToast("เกิดข้อผิดพลาด: " + e.message, false);

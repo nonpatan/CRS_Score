@@ -68,6 +68,10 @@
   .danger { color:var(--danger); background:var(--danger-soft); }
   .icon-btn { background:transparent; border:0; cursor:pointer; font-size:17px; padding:4px 6px; color:var(--muted); border-radius:7px; box-shadow:none; } .icon-btn.edit:hover { background:var(--teal-soft); color:var(--teal); } .icon-btn.del:hover { background:var(--danger-soft); color:var(--danger); }
   .assessment-row,.member-row,.student-row { display:flex; gap:9px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:9px 10px; margin-bottom:7px; } .assessment-row { cursor:pointer; } .assessment-row.selected { border-color:var(--teal); background:var(--teal-soft); } .grow { flex:1; min-width:0; } .title { font-weight:600; } .meta { color:var(--muted); font-size:13px; margin-top:1px; }
+  .transcript-tag { display:inline-block; margin-left:5px; padding:1px 7px; border-radius:999px; background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; vertical-align:middle; }
+  .check-field label { display:flex; align-items:flex-start; gap:9px; cursor:pointer; }
+  .check-field input[type="checkbox"] { width:20px; height:20px; margin-top:2px; flex:none; }
+  .check-field .meta { margin-left:29px; }
   .assessment-group { margin-top:8px; }
   .assessment-group:first-child { margin-top:0; }
   .assessment-group-toggle {
@@ -131,6 +135,10 @@
     </div>
     <div class="field"><label for="f-term">ภาคเรียน</label><select id="f-term"><option value="">— เลือกภาคเรียน —</option><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select><div class="meta">สร้างชื่อกิจกรรมซ้ำกันได้เมื่ออยู่คนละภาคเรียน สำหรับนักเรียนประถม ระบบจะเก็บคะแนนทั้งสองภาคเรียนไว้รวมประมวลผลเมื่อสิ้นปีการศึกษา</div></div>
     <div class="field"><label for="f-name">ชื่อกิจกรรม / ชื่อแม่แบบกิจวัตร</label><input type="text" id="f-name" placeholder="เช่น โครงงานลดขยะ / ละหมาดหญิง"></div>
+    <div class="field check-field" id="field-in-transcript">
+      <label for="f-in-transcript"><input type="checkbox" id="f-in-transcript"><span>ออกในเอกสาร ปพ.</span></label>
+      <div class="meta">ติ๊กเฉพาะกิจกรรมพัฒนาผู้เรียนที่ต้องแสดงในระเบียนแสดงผลการเรียน</div>
+    </div>
     <div class="field" id="field-assessment-owner" style="display:none">
       <label for="f-owner">ครูผู้รับผิดชอบ</label>
       <select id="f-owner"></select>
@@ -188,6 +196,10 @@
       </div>
       <div class="field"><label for="assessment-edit-term">ภาคเรียน</label><select id="assessment-edit-term"><option value="">— เลือกภาคเรียน —</option><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select></div>
       <div class="field"><label for="assessment-edit-name">ชื่อกิจกรรม / ชื่อแม่แบบกิจวัตร</label><input id="assessment-edit-name" type="text"></div>
+      <div class="field check-field" id="field-assessment-edit-in-transcript">
+        <label for="assessment-edit-in-transcript"><input type="checkbox" id="assessment-edit-in-transcript"><span>ออกในเอกสาร ปพ.</span></label>
+        <div class="meta">ติ๊กเฉพาะกิจกรรมพัฒนาผู้เรียนที่ต้องแสดงในระเบียนแสดงผลการเรียน</div>
+      </div>
       <div class="field" id="field-assessment-edit-owner" style="display:none"><label for="assessment-edit-owner">ครูผู้รับผิดชอบ</label><select id="assessment-edit-owner"></select></div>
       <div class="modal-actions"><button class="ghost" id="assessment-edit-cancel">ยกเลิก</button><button class="primary" id="assessment-edit-save">บันทึก</button></div>
     </div>
@@ -197,7 +209,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages } from "../supabase-client.js?v=20260809-2";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages } from "../supabase-client.js?v=20260809-3";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -214,6 +226,11 @@ function esc(v) { return String(v || "").replace(/&/g,"&amp;").replace(/</g,"&lt
 function toast(msg, ok=true) { const el=$("toast"); el.textContent=msg; el.className="toast "+(ok?"ok":"err"); setTimeout(()=>{el.className="toast";},4500); }
 function canManageAssessment(assessment) { return !!(assessment && (isAdmin || assessment.owner_id === session.user.id)); }
 function canEdit() { return canManageAssessment(current); }
+function syncTranscriptField(typeId,fieldId,checkboxId){
+  const isActivity=$(typeId).value==="กิจกรรม";
+  $(fieldId).style.display=isActivity?"block":"none";
+  if(!isActivity)$(checkboxId).checked=false;
+}
 function ownerLabel(assessment) {
   if (assessment.owner_id === session.user.id) return "ผู้กำหนด: คุณ";
   const owner = profilesById.get(assessment.owner_id);
@@ -286,6 +303,9 @@ async function init() {
   resetMemberFilters();
   renderAssessments();
 }
+$("f-type").addEventListener("change",()=>syncTranscriptField("f-type","field-in-transcript","f-in-transcript"));
+$("assessment-edit-type").addEventListener("change",()=>syncTranscriptField("assessment-edit-type","field-assessment-edit-in-transcript","assessment-edit-in-transcript"));
+syncTranscriptField("f-type","field-in-transcript","f-in-transcript");
 // เติม dropdown เลือกครูผู้รับผิดชอบ (admin เท่านั้นที่เห็นช่องนี้)
 function fillOwnerSelect(sel){
   sel.innerHTML="";
@@ -338,7 +358,7 @@ function renderAssessments() {
     for(const a of groups.get(type)){
       const row=document.createElement("div");
       row.className="assessment-row"+(current&&current.id===a.id?" selected":"");
-      row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+"</div><div class='meta'>"+esc(a.source_type)+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ยังไม่ระบุภาคเรียน")+" · "+esc(ownerLabel(a))+"</div></div>";
+      row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+(a.in_transcript?"<span class='transcript-tag'>ปพ.</span>":"")+"</div><div class='meta'>"+esc(a.source_type)+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ยังไม่ระบุภาคเรียน")+" · "+esc(ownerLabel(a))+"</div></div>";
       row.addEventListener("click",()=>selectAssessment(a.id));
       if(canManageAssessment(a)){
         const actions=document.createElement("div"); actions.className="target-actions";
@@ -416,7 +436,7 @@ function renderElements(){const id=$("sel-competency").value;const rows=elements
 function targetStageSet(){return new Set(targets.map(t=>t.element&&t.element.stage).filter(Boolean));}
 function renderStudents(){if(!current)return;const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";const stages=targetStageSet();for(const s of rows){const stage=competencyStageForGrade(s.grade_level);const blocked=!stage||!stages.has(stage);const label=document.createElement("label");label.className="student-row"+(blocked?" blocked":"");label.innerHTML="<input type='checkbox' value='"+s.id+"'"+(blocked?" disabled":"")+"><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div>"+(blocked?"<div class='block-note'>ไม่มีองค์ประกอบรองรับ"+esc(stage||"ช่วงชั้นนี้")+" — เพิ่มองค์ประกอบก่อนจึงเพิ่มนักเรียนคนนี้ได้</div>":"")+"</div>";el.appendChild(label);}}
 
-$("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,term=$("f-term").value;if(!name||!year||!term){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const ownerId=isAdmin?($("f-owner").value||session.user.id):session.user.id;const {data,error}=await sb.from("competency_assessments").insert({name,year,term,source_type:$("f-type").value,owner_id:ownerId}).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year)){assessmentYears.push(year);refreshAssessmentYearFilter();}$("f-name").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
+$("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,term=$("f-term").value;const sourceType=$("f-type").value;if(!name||!year||!term){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const ownerId=isAdmin?($("f-owner").value||session.user.id):session.user.id;const {data,error}=await sb.from("competency_assessments").insert({name,year,term,source_type:sourceType,owner_id:ownerId,in_transcript:sourceType==="กิจกรรม"&&$("f-in-transcript").checked}).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year)){assessmentYears.push(year);refreshAssessmentYearFilter();}$("f-name").value="";$("f-in-transcript").checked=false;setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
 $("sel-competency").onchange=renderElements;
 $("btn-add-target").onclick=async()=>{if(!canEdit())return;const chosen=[...$("element-options").querySelectorAll("[data-element]:checked")];if(!chosen.length){toast("เลือกองค์ประกอบก่อน",false);return;}const start=targets.length+1;const rows=chosen.map((c,i)=>({assessment_id:current.id,competency_id:$("sel-competency").value,element_id:c.dataset.element,max_score:Number($("element-options").querySelector("[data-score='"+c.dataset.element+"']").value),seq:start+i}));if(rows.some(r=>!r.max_score||r.max_score<=0)){toast("คะแนนเต็มต้องมากกว่า 0",false);return;}const {error}=await sb.from("competency_assessment_targets").insert(rows);if(error){toast("บันทึกไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มองค์ประกอบแล้ว");};
 async function removeTarget(t){if(!await window.crsAskConfirm({title:"ลบองค์ประกอบ",message:"คะแนนที่เคยกรอกขององค์ประกอบนี้จะถูกลบด้วย",okLabel:"ลบองค์ประกอบ"}))return;const {error}=await sb.from("competency_assessment_targets").delete().eq("id",t.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("ลบแล้ว");}
@@ -431,6 +451,8 @@ async function openAssessmentModal(assessment){
   $("assessment-edit-name").value=assessment.name;
   fillSelectableYearSelect($("assessment-edit-year"),assessment.year);
   $("assessment-edit-type").value=assessment.source_type;
+  $("assessment-edit-in-transcript").checked=assessment.in_transcript===true;
+  syncTranscriptField("assessment-edit-type","field-assessment-edit-in-transcript","assessment-edit-in-transcript");
   $("assessment-edit-term").value=assessment.term||"";
   if(isAdmin)$("assessment-edit-owner").value=assessment.owner_id;
   $("assessment-edit-lock-note").style.display="none";
@@ -456,7 +478,9 @@ $("assessment-edit-save").onclick=async()=>{
   const year=$("assessment-edit-year").value;
   const term=$("assessment-edit-term").value;
   if(!name||(!editingAssessmentHasSessions&&(!year||!term))){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}
-  const updates=editingAssessmentHasSessions ? {name,updated_at:new Date().toISOString()} : {name,year,term,source_type:$("assessment-edit-type").value,updated_at:new Date().toISOString()};
+  const sourceType=$("assessment-edit-type").value;
+  const inTranscript=sourceType==="กิจกรรม"&&$("assessment-edit-in-transcript").checked;
+  const updates=editingAssessmentHasSessions ? {name,in_transcript:inTranscript,updated_at:new Date().toISOString()} : {name,year,term,source_type:sourceType,in_transcript:inTranscript,updated_at:new Date().toISOString()};
   if(isAdmin)updates.owner_id=$("assessment-edit-owner").value||editingAssessment.owner_id;
   const button=$("assessment-edit-save"); button.disabled=true;
   const {data,error}=await sb.from("competency_assessments").update(updates).eq("id",editingAssessment.id).select().single();

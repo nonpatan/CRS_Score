@@ -461,6 +461,24 @@ export function computeCombinedCompetencyResult(weight, sources, levels) {
   };
 }
 
+// โหลดค่าตั้งสมรรถนะของปีเดียว — ไม่มี fallback ข้ามปีโดยตั้งใจ
+// คืนค่าดิบให้หน้าเว็บตรวจความครบและบอกชื่อปี/ด้านที่ยังไม่ได้ตั้งเอง
+export async function loadCompetencySettings(year) {
+  const normalizedYear = String(year == null ? "" : year).trim();
+  if (!normalizedYear) throw new Error("กรุณาเลือกปีการศึกษาก่อนโหลดค่าตั้งสมรรถนะ");
+  const [weightResult, levelResult] = await Promise.all([
+    sb.from("competency_source_weights").select("*").eq("year", normalizedYear),
+    sb.from("competency_interpretation_levels").select("*").eq("year", normalizedYear).order("seq")
+  ]);
+  if (weightResult.error || levelResult.error) {
+    throw new Error(
+      "โหลดค่าตั้งสมรรถนะปีการศึกษา " + normalizedYear + " ไม่สำเร็จ: " +
+      (weightResult.error || levelResult.error).message
+    );
+  }
+  return { weights: weightResult.data || [], levels: levelResult.data || [] };
+}
+
 // อ่านค่าตั้งค่าส่วนกลาง 1 ตัว (เช่น highest_grade) — คืน null ถ้าไม่มี
 export async function getSetting(key) {
   const { data, error } = await sb.from("app_settings").select("value").eq("key", key).maybeSingle();

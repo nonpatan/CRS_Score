@@ -119,6 +119,7 @@
   .badge.good  { background: var(--teal-soft);  color: var(--teal); }
   .badge.mid   { background: var(--amber-soft); color: var(--amber); }
   .badge.bad   { background: var(--danger-soft); color: var(--danger); }
+  .transcript-tag { display:inline-block; margin-left:5px; padding:1px 7px; border-radius:999px; background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; vertical-align:middle; }
   .score-over-cap { color:var(--danger); font-weight:600; }
   .result-note { color: var(--muted); font-size: 13px; margin-top: 6px; }
 
@@ -367,9 +368,9 @@ import {
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
-  computeCombinedCompetencyResult, computeAttendanceRisk, isPrimaryGrade,
+  computeCombinedCompetencyResult, loadCompetencySettings, computeAttendanceRisk, isPrimaryGrade,
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting
-} from "../supabase-client.js?v=20260809-2";
+} from "../supabase-client.js?v=20260809-3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -429,7 +430,7 @@ let memberDataList = [];      // ใช้กับวิชาบูรณา�
 let allSubjects = [];         // วิชาทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
 let memberIdSet = new Set();  // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown)
 let compStudents = [], coreCompetencies = [], sourceWeights = [], interpretationLevels = [];
-let competencyConfigError = "", competencyPlacementError = "", selectedCompStudentId = "";
+let competencyConfigError = "", competencySettingsError = "", competencyPlacementError = "", selectedCompStudentId = "";
 let placementWarning = "";
 let subjectStructureMissing = false;
 let activitySummaryByStudent = new Map(), activitySummaryError = "";
@@ -699,7 +700,7 @@ async function loadActivitySummaries(year, studentIds) {
   if (!year || !studentIds.length) return;
 
   const activityResult = await sb.from("competency_assessments")
-    .select("id,name,year,term")
+    .select("id,name,year,term,in_transcript")
     .eq("year", year)
     .eq("source_type", "กิจกรรม")
     .order("created_at");
@@ -754,6 +755,7 @@ function renderActivitySummarySection(studentId) {
         : "<span class='badge bad'>ไม่ผ่าน</span>";
     const meta = row.activity.term ? "ภาคเรียน " + row.activity.term : "ทั้งปี";
     return "<div class='score-row'><span><b>" + escapeHtml(row.activity.name) + "</b>" +
+      (row.activity.in_transcript ? "<span class='transcript-tag'>ปพ.</span>" : "") +
       (meta ? "<br><span class='hint'>" + escapeHtml(meta) + "</span>" : "") +
       (result && !result.passed && result.note ? "<br><span class='result-note'>หมายเหตุ: " + escapeHtml(result.note) + "</span>" : "") +
       "</span><span>" + badge + "</span></div>";
@@ -1467,17 +1469,12 @@ elAttSubject.addEventListener("change", loadAttendanceSubjectContext);
 // ============================================================
 
 async function initCompetencyReport() {
-  const [assessmentYears,competencies,weights,levels] = await Promise.all([
+  const [assessmentYears,competencies] = await Promise.all([
     sb.from("competency_assessments").select("year"),
-    sb.from("core_competencies").select("*").order("seq"),
-    sb.from("competency_source_weights").select("*"),
-    sb.from("competency_interpretation_levels").select("*").order("seq")
+    sb.from("core_competencies").select("*").order("seq")
   ]);
   coreCompetencies = competencies.data || [];
-  sourceWeights = weights.data || [];
-  interpretationLevels = levels.data || [];
-  competencyConfigError = (competencies.error && competencies.error.message) ||
-    (weights.error && weights.error.message) || (levels.error && levels.error.message) || "";
+  competencyConfigError = (competencies.error && competencies.error.message) || "";
 
   const years = distinctYears(allSubjects.concat((assessmentYears.data || []).map(r => ({ year:r.year }))));
   elCompYear.innerHTML = "<option value=''>— เลือกปีการศึกษา —</option>";
@@ -1488,8 +1485,21 @@ async function initCompetencyReport() {
   }
   const savedYear = getActiveYear();
   if (years.includes(savedYear)) elCompYear.value = savedYear;
+  await loadCompetencySettingsForReport(elCompYear.value);
   await loadCompetencyPlacements();
   refreshCompetencyStudentFilters();
+}
+
+async function loadCompetencySettingsForReport(year) {
+  sourceWeights = []; interpretationLevels = []; competencySettingsError = "";
+  if (!year) return;
+  try {
+    const settings = await loadCompetencySettings(year);
+    sourceWeights = settings.weights;
+    interpretationLevels = settings.levels;
+  } catch (error) {
+    competencySettingsError = error.message;
+  }
 }
 
 async function loadCompetencyPlacements() {
@@ -1575,6 +1585,7 @@ function renderCompetencyStudentList() {
 
 elCompYear.addEventListener("change", async () => {
   setActiveYear(elCompYear.value);
+  await loadCompetencySettingsForReport(elCompYear.value);
   await loadCompetencyPlacements();
   refreshCompetencyStudentFilters();
 });
@@ -1583,13 +1594,19 @@ elCompTerm.addEventListener("change", renderCompetencyStudentList);
 elCompRoom.addEventListener("change", renderCompetencyStudentList);
 
 async function loadCompetencyStudentResult(student) {
-  if (competencyConfigError) {
-    elCompResult.innerHTML = "<div class='card incomplete'>ยังใช้รายงานสมรรถนะรวมไม่ได้: " + escapeHtml(competencyConfigError) +
+  const selectedYear=elCompYear.value;
+  if (competencyConfigError || competencySettingsError) {
+    elCompResult.innerHTML = "<div class='card incomplete'>ยังใช้รายงานสมรรถนะรวมของปีการศึกษา " + escapeHtml(selectedYear||"(ยังไม่เลือก)") + ": " + escapeHtml(competencyConfigError||competencySettingsError) +
       "<br>ต้องรัน migration น้ำหนักและเกณฑ์แปลผลท้าย schema.sql ก่อน</div>";
     return;
   }
-  if (sourceWeights.length !== coreCompetencies.length) {
-    elCompResult.innerHTML = "<div class='card incomplete'>ยังไม่ได้กำหนดน้ำหนักรายวิชา/กิจกรรม/กิจวัตรให้ครบทุกด้าน ที่หน้า “กำหนดสมรรถนะหลัก”</div>";
+  const missingWeightNames=coreCompetencies.filter(competency=>!sourceWeights.some(weight=>weight.competency_id===competency.id)).map(competency=>competency.name);
+  if (missingWeightNames.length) {
+    elCompResult.innerHTML = "<div class='card incomplete'>ปีการศึกษา " + escapeHtml(selectedYear) + " ยังไม่ได้กำหนดน้ำหนักครบ · ขาด: " + escapeHtml(missingWeightNames.join(", ")) + "<br>ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “กำหนดสมรรถนะหลัก”</div>";
+    return;
+  }
+  if (interpretationLevels.length !== 4) {
+    elCompResult.innerHTML = "<div class='card incomplete'>ปีการศึกษา " + escapeHtml(selectedYear) + " มีเกณฑ์แปลผล " + interpretationLevels.length + "/4 ระดับ — ให้ admin หรือฝ่ายวิชาการตั้งให้ครบก่อนคำนวณผล</div>";
     return;
   }
   elCompResult.innerHTML = "<div class='card hint'>กำลังคำนวณผลสมรรถนะ...</div>";
