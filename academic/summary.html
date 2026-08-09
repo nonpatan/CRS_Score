@@ -200,7 +200,7 @@
       <a href="entry.html">กรอกคะแนน</a>
       <a href="competency-manage.html">กำหนดกิจกรรม/กิจวัตร</a>
       <a href="competency-core.html">กำหนดสมรรถนะหลัก</a>
-      <a href="competency-entry.html">ลงคะแนนสมรรถนะ</a>
+      <a href="competency-entry.html">กรอกคะแนนกิจกรรม/กิจวัตร</a>
       <a href="attendance.html">เช็คชื่อ</a>
       <a href="summary.html">สรุปผลการเรียน</a>
       <a href="manage.html">จัดการโครงสร้าง</a>
@@ -210,7 +210,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260809-1"></script>
+    <script src="../app-shell.js?v=20260809-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -698,9 +698,10 @@ async function loadActivitySummaries(year, studentIds) {
   activitySummaryError = "";
   if (!year || !studentIds.length) return;
 
-  const activityResult = await sb.from("activities")
-    .select("id,name,year,term,grade_level")
+  const activityResult = await sb.from("competency_assessments")
+    .select("id,name,year,term")
     .eq("year", year)
+    .eq("source_type", "กิจกรรม")
     .order("created_at");
   if (activityResult.error) {
     activitySummaryError = activityResult.error.message;
@@ -711,10 +712,10 @@ async function loadActivitySummaries(year, studentIds) {
   if (!activityIds.length) return;
 
   const [enrollmentResult, resultResult] = await Promise.all([
-    sb.from("activity_enrollments").select("activity_id,student_id")
-      .in("activity_id", activityIds).in("student_id", studentIds),
-    sb.from("activity_results").select("activity_id,student_id,passed,note")
-      .in("activity_id", activityIds).in("student_id", studentIds)
+    sb.from("competency_assessment_members").select("assessment_id,student_id")
+      .in("assessment_id", activityIds).in("student_id", studentIds),
+    sb.from("activity_pass_results").select("assessment_id,student_id,passed,note")
+      .in("assessment_id", activityIds).in("student_id", studentIds)
   ]);
   if (enrollmentResult.error || resultResult.error) {
     activitySummaryError = (enrollmentResult.error || resultResult.error).message;
@@ -722,14 +723,14 @@ async function loadActivitySummaries(year, studentIds) {
   }
 
   const activityById = new Map(activities.map(activity => [activity.id, activity]));
-  const resultByKey = new Map((resultResult.data || []).map(row => [row.activity_id + "|" + row.student_id, row]));
+  const resultByKey = new Map((resultResult.data || []).map(row => [row.assessment_id + "|" + row.student_id, row]));
   for (const enrollment of (enrollmentResult.data || [])) {
-    const activity = activityById.get(enrollment.activity_id);
+    const activity = activityById.get(enrollment.assessment_id);
     if (!activity) continue;
     if (!activitySummaryByStudent.has(enrollment.student_id)) activitySummaryByStudent.set(enrollment.student_id, []);
     activitySummaryByStudent.get(enrollment.student_id).push({
       activity,
-      result: resultByKey.get(enrollment.activity_id + "|" + enrollment.student_id) || null
+      result: resultByKey.get(enrollment.assessment_id + "|" + enrollment.student_id) || null
     });
   }
   for (const rows of activitySummaryByStudent.values()) {
@@ -751,7 +752,7 @@ function renderActivitySummarySection(studentId) {
       : result.passed
         ? "<span class='badge good'>ผ่าน</span>"
         : "<span class='badge bad'>ไม่ผ่าน</span>";
-    const meta = [row.activity.grade_level, row.activity.term ? "ภาคเรียน " + row.activity.term : "ทั้งปี"].filter(Boolean).join(" · ");
+    const meta = row.activity.term ? "ภาคเรียน " + row.activity.term : "ทั้งปี";
     return "<div class='score-row'><span><b>" + escapeHtml(row.activity.name) + "</b>" +
       (meta ? "<br><span class='hint'>" + escapeHtml(meta) + "</span>" : "") +
       (result && !result.passed && result.note ? "<br><span class='result-note'>หมายเหตุ: " + escapeHtml(result.note) + "</span>" : "") +
