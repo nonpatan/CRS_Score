@@ -158,17 +158,9 @@
       รอบปีนับจากวันเริ่มปีนี้ ถึงวันก่อนวันเริ่มปีถัดไป — เดือนเมษายนจึงตกอยู่ในปีก่อนหน้าโดยอัตโนมัติ
     </div>
     <div id="year-list"></div>
-    <div class="row2" style="margin-top:12px">
-      <div class="field">
-        <label for="new-year">ปีการศึกษา</label>
-        <input id="new-year" type="text" placeholder="เช่น 2569" inputmode="numeric">
-      </div>
-      <div class="field">
-        <label for="new-year-start">วันเริ่มปี</label>
-        <input id="new-year-start" type="date">
-      </div>
+    <div class="field-note" style="margin-top:10px">
+      ปีการศึกษากำหนดโดยฝ่ายวิชาการที่หน้า “จัดการโครงสร้าง” ฝ่ายบุคลากรดูรายการนี้และตั้งโควตาวันลาของปีที่เปิดไว้แล้วได้ตามปกติ
     </div>
-    <button id="btn-add-year" class="ghost small">เพิ่ม/แก้ปีการศึกษา</button>
   </div>
 
   <div class="catalog-grid">
@@ -258,7 +250,7 @@
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getAcademicYears, getLeaveTypes, getLeaveQuotas,
-         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260808-12";
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260809-1";
 
 const session = await requireAuth();
 if (session) {
@@ -367,25 +359,13 @@ if (session) {
           return `<div class="year-row"><span class="name">ปีการศึกษา ${y.year}</span>
             <span class="field-note" style="margin:0">เริ่ม ${text}</span></div>`;
         }).join("")
-      : '<div class="banner warn">ยังไม่ได้กำหนดปีการศึกษา — ต้องเพิ่มอย่างน้อย 1 ปี หน้าสรุปจึงจะคิดยอดสะสมได้</div>';
+      : '<div class="banner warn">ยังไม่ได้กำหนดปีการศึกษา — กรุณาติดต่อฝ่ายวิชาการให้เปิดปีที่หน้า “จัดการโครงสร้าง” ก่อนตั้งโควตาวันลา</div>';
 
     const sel = el("quota-year");
     sel.innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
     if (years.length) loadQuotas();
-    else el("quota-list").innerHTML = '<div class="field-note">เพิ่มปีการศึกษาก่อนจึงจะตั้งโควตาได้</div>';
+    else el("quota-list").innerHTML = '<div class="field-note">กรุณาติดต่อฝ่ายวิชาการให้เปิดปีการศึกษาก่อน จึงจะตั้งโควตาได้</div>';
   }
-
-  el("btn-add-year").addEventListener("click", async () => {
-    const year = el("new-year").value.trim();
-    const start = el("new-year-start").value;
-    if (!/^\d{4}$/.test(year)) return toast("ปีการศึกษาต้องเป็นตัวเลข 4 หลัก เช่น 2569", true);
-    if (!start) return toast("กรุณาเลือกวันเริ่มปี", true);
-    const { error } = await sb.from("academic_years").upsert({ year, start_date: start }, { onConflict: "year" });
-    if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
-    el("new-year").value = ""; el("new-year-start").value = "";
-    toast("บันทึกปีการศึกษาแล้ว");
-    loadYears();
-  });
 
   // ---------- โควตาวันลา ----------
   async function loadQuotas() {

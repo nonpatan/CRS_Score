@@ -109,7 +109,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, getStudentPlacements } from "../supabase-client.js?v=20260808-12";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements } from "../supabase-client.js?v=20260809-1";
 const session=await requireAuth();
 if(!session){
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -155,6 +155,16 @@ function fill(sel, rows, label, placeholder) {
     o.textContent = label(r);
     sel.appendChild(o);
   }
+}
+function fillSelectableYears(sel, rows, preferredYear) {
+  sel.innerHTML = "<option value=''>— เลือกปี —</option>";
+  for (const row of rows) {
+    const option = document.createElement("option");
+    option.value = row.year;
+    option.textContent = row.year + (row.registered ? "" : " (ยังไม่ลงทะเบียนในระบบ)");
+    sel.appendChild(option);
+  }
+  sel.value = rows.some(row => row.year === preferredYear) ? preferredYear : (rows[0]?.year || "");
 }
 
 const STAGE_LABELS = {
@@ -238,17 +248,12 @@ function renderStageOptions() {
 }
 
 async function init() {
-  const [a, subj] = await Promise.all([
-    sb.from("competency_assessments").select("*").order("created_at", { ascending:false }),
-    sb.from("subjects").select("year")
+  const [a] = await Promise.all([
+    sb.from("competency_assessments").select("*").order("created_at", { ascending:false })
   ]);
   assessments = a.data || [];
-  const years = [...new Set([
-    ...distinctYears(subj.data || []),
-    ...assessments.map(a => a.year).filter(Boolean)
-  ])].sort().reverse();
-  fill($("f-year"), years, x => x, "— เลือกปี —");
-  $("f-year").value = getActiveYear() || years[0] || "";
+  const years = await listSelectableYears(assessments.map(a => a.year).filter(Boolean));
+  fillSelectableYears($("f-year"), years, getActiveYear());
   renderAssessments();
 }
 

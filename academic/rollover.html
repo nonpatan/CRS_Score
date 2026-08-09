@@ -110,6 +110,20 @@
 
   .summary-box { background: var(--teal-soft); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
   .warn-note { background: var(--amber-soft); color: var(--amber); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+  .year-control { display:flex; align-items:flex-end; gap:8px; }
+  .year-control select { flex:1; min-width:0; }
+  .year-control button { flex:0 0 auto; width:auto; min-height:44px; margin:0; white-space:nowrap; }
+  .year-start-note { color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:9px 11px; font-size:13px; }
+
+  .overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.4); display:none;
+    align-items:center; justify-content:center; padding:16px; z-index:10;
+  }
+  .overlay.show { display:flex; }
+  .modal { background:var(--white); border-radius:12px; padding:20px; width:100%; max-width:400px; }
+  .modal h3 { margin:0 0 14px; font-size:17px; }
+  .modal-actions { display:flex; gap:10px; margin-top:16px; }
+  .modal-actions button { flex:1; }
 
   button.primary, button.ghost {
     width: 100%; font-family: inherit; font-size: 16px; font-weight: 600;
@@ -130,6 +144,11 @@
   }
   .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
   .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
+  @media (max-width:520px) {
+    .year-pair { flex-direction:column; }
+    .year-control { align-items:stretch; flex-direction:column; }
+    .year-control button { width:100%; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
 </head>
@@ -186,14 +205,18 @@
     <!-- เลือกปี -->
     <div class="card">
       <div class="step-title"><span class="num">1</span>เลือกปีการศึกษา</div>
-      <div class="field" style="display:flex; gap:12px;">
+      <div class="field year-pair" style="display:flex; gap:12px;">
         <div style="flex:1">
           <label for="sel-source-year">ยกจากปี (ต้นทาง)</label>
           <select id="sel-source-year"><option value="">— เลือกปี —</option></select>
         </div>
         <div style="flex:1">
           <label for="inp-new-year">ไปปีใหม่</label>
-          <input type="text" id="inp-new-year" placeholder="เช่น 2569">
+          <div class="year-control">
+            <select id="inp-new-year"><option value="">— เลือกปีใหม่ —</option></select>
+            <button type="button" class="ghost" id="btn-add-academic-year">+ เพิ่มปี</button>
+          </div>
+          <div class="hint" id="target-year-note" style="margin-top:6px"></div>
         </div>
       </div>
     </div>
@@ -225,12 +248,22 @@
   </main>
 </div>
 
+<div class="overlay" id="year-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="year-modal-title">
+    <h3 id="year-modal-title">เพิ่มปีการศึกษา</h3>
+    <div class="field"><label for="new-academic-year">ปีการศึกษา</label><input type="number" id="new-academic-year" inputmode="numeric" min="1000" max="9999" step="1" placeholder="เช่น 2570"></div>
+    <div class="field"><label for="new-academic-year-start">วันเริ่มปีการศึกษา</label><input type="date" id="new-academic-year-start"></div>
+    <div class="year-start-note">ดูจากปฏิทินโรงเรียนจริง อย่ากรอกวันที่ 1 โดยอัตโนมัติ</div>
+    <div class="modal-actions"><button type="button" class="ghost" id="year-modal-cancel">ยกเลิก</button><button type="button" class="primary" id="year-modal-save" style="margin-top:0">บันทึกปีการศึกษา</button></div>
+  </div>
+</div>
+
 <script type="module">
 import {
   sb, requireAuth, signOut, getProfile,
-  getActiveYear, setActiveYear, distinctYears,
+  getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20260808-12";
+} from "../supabase-client.js?v=20260809-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -255,10 +288,12 @@ let allSubjects = [];       // วิชาทั้งหมด (ใช้ห�
 let allActiveStudents = []; // นักเรียน active ปัจจุบัน ใช้ตรวจว่าใครยังเรียนต่ออยู่
 let activeStudents = [];    // นักเรียน active พร้อมชั้น/ห้องของ "ปีต้นทางที่เลือก"
 let sourceSubjects = [];    // วิชาของปีต้นทางที่เลือก
+let selectableYears = [];   // ปีที่ลงทะเบียน + ปีที่ยังมีอยู่จริงในวิชา
 
 const elHighest = document.getElementById("sel-highest");
 const elSourceYear = document.getElementById("sel-source-year");
 const elNewYear = document.getElementById("inp-new-year");
+const elTargetYearNote = document.getElementById("target-year-note");
 const elPromoteSummary = document.getElementById("promote-summary");
 const elPromoteList = document.getElementById("promote-list");
 const elSubjectSummary = document.getElementById("subject-summary");
@@ -266,6 +301,64 @@ const elSubjectList = document.getElementById("subject-list");
 const elRunWarn = document.getElementById("run-warn");
 const elRunLog = document.getElementById("run-log");
 const btnRun = document.getElementById("btn-run");
+
+function selectableYearLabel(row) {
+  return "ปีการศึกษา " + row.year + (row.registered ? "" : " (ยังไม่ลงทะเบียนในระบบ)");
+}
+
+function fillTargetYearOptions(preferredYear = "") {
+  const keep = preferredYear || elNewYear.value;
+  elNewYear.innerHTML = "<option value=''>— เลือกปีใหม่ —</option>";
+  for (const row of selectableYears) {
+    const option = document.createElement("option");
+    option.value = row.year;
+    option.textContent = selectableYearLabel(row);
+    elNewYear.appendChild(option);
+  }
+  if (selectableYears.some(row => row.year === keep)) elNewYear.value = keep;
+}
+
+async function refreshSelectableYears(preferredYear = "") {
+  selectableYears = await listSelectableYears(distinctYears(allSubjects));
+  fillTargetYearOptions(preferredYear);
+}
+
+const elYearOverlay = document.getElementById("year-overlay");
+const elNewAcademicYear = document.getElementById("new-academic-year");
+const elNewAcademicYearStart = document.getElementById("new-academic-year-start");
+const btnYearModalSave = document.getElementById("year-modal-save");
+function closeYearModal() {
+  elYearOverlay.classList.remove("show");
+  elNewAcademicYear.value = "";
+  elNewAcademicYearStart.value = "";
+}
+document.getElementById("btn-add-academic-year").addEventListener("click", () => {
+  elNewAcademicYear.value = "";
+  elNewAcademicYearStart.value = "";
+  elYearOverlay.classList.add("show");
+  setTimeout(() => elNewAcademicYear.focus(), 0);
+});
+document.getElementById("year-modal-cancel").addEventListener("click", closeYearModal);
+elYearOverlay.addEventListener("click", event => { if (event.target === elYearOverlay) closeYearModal(); });
+btnYearModalSave.addEventListener("click", async () => {
+  btnYearModalSave.disabled = true;
+  try {
+    const enteredYear = String(elNewAcademicYear.value || "").trim();
+    if (selectableYears.some(row => row.registered && row.year === enteredYear)) {
+      throw new Error("ปีการศึกษา " + enteredYear + " มีอยู่แล้ว หากต้องแก้วันเริ่มให้ไปที่หน้า จัดการโครงสร้าง");
+    }
+    const saved = await saveAcademicYear(elNewAcademicYear.value, elNewAcademicYearStart.value);
+    await refreshSelectableYears(saved.year);
+    elNewYear.value = saved.year;
+    elTargetYearNote.textContent = "";
+    closeYearModal();
+    showToast("บันทึกปีการศึกษา " + saved.year + " แล้ว", true);
+  } catch (error) {
+    showToast(error.message, false);
+  } finally {
+    btnYearModalSave.disabled = false;
+  }
+});
 
 // ---------- เริ่มต้น: เช็คว่าเป็น admin ไหม แล้วโหลดข้อมูล ----------
 async function init() {
@@ -289,6 +382,12 @@ async function init() {
 
   const { data: subjData } = await sb.from("subjects").select("*").order("created_at");
   allSubjects = subjData || [];
+  try {
+    await refreshSelectableYears();
+  } catch (error) {
+    showToast(error.message, false);
+    return;
+  }
   allActiveStudents = await getActiveStudents();
 
   // เติมปีต้นทาง = ปีที่มีวิชาจริง (ตั้งค่าเริ่มต้นเป็นปีที่ทำงานอยู่)
@@ -317,7 +416,16 @@ document.getElementById("btn-save-highest").addEventListener("click", async () =
 elSourceYear.addEventListener("change", onSourceYearChange);
 async function onSourceYearChange() {
   const src = elSourceYear.value;
-  if (src && /^\d+$/.test(src) && !elNewYear.value) elNewYear.value = String(Number(src) + 1);
+  const suggestedYear = src && /^\d+$/.test(src) ? String(Number(src) + 1) : "";
+  if (suggestedYear && selectableYears.some(row => row.year === suggestedYear && row.registered)) {
+    elNewYear.value = suggestedYear;
+    elTargetYearNote.textContent = "";
+  } else {
+    elNewYear.value = "";
+    elTargetYearNote.textContent = suggestedYear
+      ? "ปี " + suggestedYear + " ยังไม่ได้ลงทะเบียน — กด “+ เพิ่มปี” และระบุวันเริ่มปีจากปฏิทินจริงก่อน"
+      : "";
+  }
   sourceSubjects = allSubjects.filter(s => s.year === src);
 
   // ใช้ชั้น/ห้องของปีต้นทางจริง ไม่อ่านค่าปัจจุบันจาก students ซึ่งอาจถูกเลื่อนชั้นทับแล้ว
@@ -685,10 +793,15 @@ async function copyGradeWeightsToYear(sourceYear, newYear, addLog) {
 btnRun.addEventListener("click", async () => {
   elRunLog.textContent = "";
   const src = elSourceYear.value;
-  const newYear = elNewYear.value.trim();
+  const newYear = elNewYear.value;
   if (!src) { showToast("เลือกปีต้นทางก่อน", false); return; }
-  if (!newYear) { showToast("กรอกปีใหม่ก่อน", false); return; }
+  if (!newYear) { showToast("เลือกปีใหม่ หรือกดเพิ่มปีการศึกษาก่อน", false); return; }
   if (newYear === src) { showToast("ปีใหม่ต้องต่างจากปีต้นทาง", false); return; }
+  const selectedTargetYear = selectableYears.find(row => row.year === newYear);
+  if (!selectedTargetYear || !selectedTargetYear.registered) {
+    showToast("ปี " + newYear + " ยังไม่ได้ลงทะเบียน — กดเพิ่มปีและระบุวันเริ่มปีก่อน", false);
+    return;
+  }
 
   // กันก๊อปซ้ำ: ปีใหม่ต้องยังไม่มีวิชา
   const existing = allSubjects.filter(s => s.year === newYear);
@@ -732,6 +845,11 @@ btnRun.addEventListener("click", async () => {
   function addLog(line) { log.push(line); elRunLog.textContent = log.join("\n"); }
 
   try {
+    // ตรวจจากฐานข้อมูลสดอีกครั้ง: ปีใหม่ต้องมีจริงก่อนคัดลอกอัตราส่วน/แตะนักเรียน/ก๊อปวิชา
+    const latestYears = await listSelectableYears(distinctYears(allSubjects));
+    if (!latestYears.some(row => row.year === newYear && row.registered)) {
+      throw new Error("ปี " + newYear + " ยังไม่มีในตารางปีการศึกษา — กระบวนการถูกหยุดก่อนแตะข้อมูล");
+    }
     // ต้องสำเร็จก่อนเริ่มเปลี่ยนชั้น/ก๊อปวิชา ไม่งั้นปีใหม่จะมีวิชาแต่คำนวณเกรดไม่ได้
     await copyGradeWeightsToYear(src, newYear, addLog);
 

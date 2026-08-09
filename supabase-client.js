@@ -2311,6 +2311,48 @@ export async function getAcademicYears() {
   const { data } = await sb.from("academic_years").select("*").order("year");
   return data || [];
 }
+
+// รายการปีสำหรับจุดที่สร้าง/แก้ข้อมูล = ปีที่ลงทะเบียนไว้ + ปีเก่าที่มีอยู่จริงในข้อมูล
+// คืนค่าเรียงจากใหม่ไปเก่า และติด registered=false เพื่อให้หน้าจอเตือนโดยไม่ทำค่าปีเดิมหาย
+export async function listSelectableYears(extraYears = []) {
+  const { data, error } = await sb.from("academic_years").select("year,start_date").order("year");
+  if (error) throw new Error("โหลดรายการปีการศึกษาไม่สำเร็จ: " + error.message);
+
+  const byYear = new Map();
+  for (const row of (data || [])) {
+    if (!row.year) continue;
+    byYear.set(String(row.year), {
+      year: String(row.year),
+      start_date: row.start_date || null,
+      registered: true
+    });
+  }
+  for (const item of (extraYears || [])) {
+    const year = String(typeof item === "string" ? item : (item && item.year) || "").trim();
+    if (!year || byYear.has(year)) continue;
+    byYear.set(year, { year, start_date: null, registered: false });
+  }
+  return [...byYear.values()].sort((a, b) =>
+    b.year.localeCompare(a.year, "th", { numeric: true })
+  );
+}
+
+// เพิ่ม/แก้ปีการศึกษาจากจุดสร้างข้อมูล — วันเริ่มปีต้องมาจากปฏิทินโรงเรียนจริงเสมอ
+export async function saveAcademicYear(year, startDate) {
+  const normalizedYear = String(year == null ? "" : year).trim();
+  const normalizedStartDate = String(startDate == null ? "" : startDate).trim();
+  if (!/^\d{4}$/.test(normalizedYear)) {
+    throw new Error("ปีการศึกษาต้องเป็นตัวเลข 4 หลัก เช่น 2570");
+  }
+  if (!normalizedStartDate) throw new Error("กรุณาเลือกวันเริ่มปี");
+
+  const { data, error } = await sb.from("academic_years")
+    .upsert({ year: normalizedYear, start_date: normalizedStartDate }, { onConflict: "year" })
+    .select("year,start_date")
+    .single();
+  if (error) throw new Error("บันทึกปีการศึกษาไม่สำเร็จ: " + error.message);
+  return data;
+}
 export function academicYearRange(year, years) {
   const list = [...years].sort((a, b) => a.year.localeCompare(b.year));
   const idx = list.findIndex(y => y.year === year);

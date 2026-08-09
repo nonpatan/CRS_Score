@@ -57,7 +57,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
-  select, input[type="number"], input[type="text"] {
+  select, input[type="number"], input[type="text"], input[type="date"] {
     width: 100%;
     font-family: inherit;
     font-size: 16px;
@@ -137,6 +137,15 @@
   .weight-missing { background:var(--amber-soft); color:var(--amber); padding:10px 12px; border-radius:8px; margin-bottom:14px; font-size:14px; }
   .weight-missing button { width:100%; min-height:44px; margin-top:10px; }
   #btn-save-weights { min-height:44px; }
+  .year-control { display:flex; align-items:flex-end; gap:8px; }
+  .year-control select { flex:1; min-width:0; }
+  .year-control button { flex:0 0 auto; width:auto; min-height:44px; margin:0; white-space:nowrap; }
+  .year-start-note { color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:9px 11px; font-size:13px; }
+  .academic-year-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .academic-year-row:last-child { border-bottom:0; }
+  .academic-year-row .year-detail { flex:1; min-width:0; }
+  .academic-year-row .year-name { font-weight:600; }
+  .academic-year-row button { flex:0 0 auto; min-height:44px; }
   .exam-status { padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
   .exam-status.closed { border-color:var(--amber); background:var(--amber-soft); }
   .exam-status .status-title { font-weight:600; }
@@ -144,8 +153,12 @@
   .exam-actions button { min-height:44px; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
 
   @media (max-width: 520px) {
+    .year-control { align-items:stretch; flex-direction:column; }
+    .year-control button { width:100%; }
     .exam-actions { align-items:stretch; flex-direction:column; }
     .exam-actions button { width:100%; }
+    .academic-year-row { align-items:stretch; flex-direction:column; }
+    .academic-year-row button { width:100%; }
   }
 
   /* กล่อง popup สำหรับเพิ่ม/แก้ node */
@@ -278,7 +291,7 @@
     <div class="row2">
       <div class="field">
         <label for="f-year">ปีการศึกษา</label>
-        <input type="text" id="f-year" placeholder="เช่น 2568">
+        <select id="f-year"><option value="">— เลือกปีการศึกษา —</option></select>
       </div>
       <div class="field" id="field-term">
         <label for="f-term">ภาคเรียน</label>
@@ -395,6 +408,18 @@
     <button class="primary" id="btn-save-weights" disabled>บันทึกอัตราส่วน</button>
   </div>
 
+  <div class="card" id="academic-years-card">
+    <div class="section-title">ปีการศึกษา</div>
+    <div class="field-note" style="margin-bottom:10px">
+      รายการกลางของทั้งโรงเรียน วันเริ่มปีมีผลต่อปฏิทิน เช็คชื่อ เวลาทำงาน และวันลา
+    </div>
+    <div id="academic-year-list"><div class="field-note">กำลังโหลดรายการปีการศึกษา…</div></div>
+    <div class="weight-readonly" id="academic-years-readonly" style="display:none; margin-top:12px; margin-bottom:0">
+      คุณดูรายการได้อย่างเดียว เฉพาะ admin หรือฝ่ายวิชาการเท่านั้นที่เพิ่มหรือแก้วันเริ่มปีได้
+    </div>
+    <button type="button" class="primary" id="btn-add-academic-year">เพิ่มปีการศึกษา</button>
+  </div>
+
   <div class="toast" id="toast"></div>
   </main>
 </div>
@@ -429,8 +454,28 @@
   </div>
 </div>
 
+<!-- popup เพิ่มปีการศึกษา — วันเริ่มปีต้องมาจากปฏิทินจริง ไม่สร้างค่าเดา -->
+<div class="overlay" id="year-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="year-modal-title">
+    <h3 id="year-modal-title">เพิ่มปีการศึกษา</h3>
+    <div class="field">
+      <label for="new-academic-year">ปีการศึกษา</label>
+      <input type="number" id="new-academic-year" inputmode="numeric" min="1000" max="9999" step="1" placeholder="เช่น 2570">
+    </div>
+    <div class="field">
+      <label for="new-academic-year-start">วันเริ่มปีการศึกษา</label>
+      <input type="date" id="new-academic-year-start">
+    </div>
+    <div class="year-start-note">ดูจากปฏิทินโรงเรียนจริง อย่ากรอกวันที่ 1 โดยอัตโนมัติ</div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="year-modal-cancel">ยกเลิก</button>
+      <button type="button" class="primary" id="year-modal-save" style="margin-top:0">บันทึกปีการศึกษา</button>
+    </div>
+  </div>
+</div>
+
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, getAcademicYears, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260808-12";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260809-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -509,6 +554,14 @@ const fOwner = document.getElementById("f-owner");
 const fieldCredits = document.getElementById("field-credits");
 const fieldTerm = document.getElementById("field-term");
 const fieldOwner = document.getElementById("field-owner");
+const btnAddAcademicYear = document.getElementById("btn-add-academic-year");
+const elAcademicYearList = document.getElementById("academic-year-list");
+const elAcademicYearsReadonly = document.getElementById("academic-years-readonly");
+const elYearOverlay = document.getElementById("year-overlay");
+const elYearModalTitle = document.getElementById("year-modal-title");
+const elNewAcademicYear = document.getElementById("new-academic-year");
+const elNewAcademicYearStart = document.getElementById("new-academic-year-start");
+const btnYearModalSave = document.getElementById("year-modal-save");
 
 // การสร้างวิชาใหม่ทำได้เฉพาะ admin
 if (!isAdminUser) {
@@ -794,7 +847,8 @@ let modalContext = null;      // เก็บว่ากำลังเพิ�
 let allSubjects = [];         // วิชาทั้งหมด (ใช้เลือกวิชาพื้นฐานมาเป็นสมาชิกวิชาบูรณาการ)
 let members = [];             // แถว integration_members ของวิชาบูรณาการที่กำลังดูอยู่
 let savedGradeWeights = new Map();
-let academicYears = [];
+let selectableYears = [];
+let editingAcademicYear = null;
 const DEFAULT_GRADE_WEIGHTS = [
   { level: "ประถม", collect_weight: 80, exam_weight: 20 },
   { level: "มัธยม", collect_weight: 70, exam_weight: 30 }
@@ -806,12 +860,72 @@ function showToast(msg, ok) {
   setTimeout(() => { elToast.className = "toast"; }, 3000);
 }
 
+function selectableYearLabel(row) {
+  return "ปีการศึกษา " + row.year + (row.registered ? "" : " (ยังไม่ลงทะเบียนในระบบ)");
+}
+
+function formatAcademicYearStart(startDate) {
+  if (!startDate) return "ยังไม่ได้ลงทะเบียนวันเริ่มปี";
+  return "เริ่ม " + new Date(startDate + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day: "numeric", month: "long", year: "numeric", timeZone: "UTC"
+  });
+}
+
+function renderAcademicYears() {
+  elAcademicYearList.innerHTML = "";
+  if (selectableYears.length === 0) {
+    elAcademicYearList.innerHTML = '<div class="weight-missing" style="margin:0">ยังไม่มีปีการศึกษาในระบบ — ฝ่ายวิชาการต้องเพิ่มปีพร้อมวันเริ่มจากปฏิทินโรงเรียนจริง</div>';
+  }
+  for (const row of selectableYears) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "academic-year-row";
+    const detail = document.createElement("div");
+    detail.className = "year-detail";
+    const name = document.createElement("div");
+    name.className = "year-name";
+    name.textContent = "ปีการศึกษา " + row.year + (row.registered ? "" : " (ยังไม่ลงทะเบียนในระบบ)");
+    const start = document.createElement("div");
+    start.className = "field-note";
+    start.style.margin = "0";
+    start.textContent = formatAcademicYearStart(row.start_date);
+    detail.append(name, start);
+    wrapper.appendChild(detail);
+    if (canEditWeights) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "ghost";
+      edit.textContent = row.registered ? "แก้วันเริ่ม" : "ลงทะเบียนปีนี้";
+      edit.addEventListener("click", () => openYearModal(row));
+      wrapper.appendChild(edit);
+    }
+    elAcademicYearList.appendChild(wrapper);
+  }
+  btnAddAcademicYear.style.display = canEditWeights ? "block" : "none";
+  elAcademicYearsReadonly.style.display = canEditWeights ? "none" : "block";
+}
+
+function fillSubjectYearOptions(preferredYear = "") {
+  const keep = preferredYear || fYear.value;
+  fYear.innerHTML = "<option value=''>— เลือกปีการศึกษา —</option>";
+  for (const row of selectableYears) {
+    const option = document.createElement("option");
+    option.value = row.year;
+    option.textContent = selectableYearLabel(row);
+    fYear.appendChild(option);
+  }
+  if (selectableYears.some(row => row.year === keep)) fYear.value = keep;
+}
+
+async function refreshSelectableYears(preferredYear = "") {
+  selectableYears = await listSelectableYears(distinctYears(allSubjects));
+  fillSubjectYearOptions(preferredYear);
+  fillWeightYearOptions();
+  renderAcademicYears();
+}
+
 function fillWeightYearOptions() {
   const previous = elWeightYear.value;
-  const years = [...new Set([
-    ...distinctYears(allSubjects),
-    ...academicYears.map(row => row.year).filter(Boolean)
-  ])].sort((a, b) => b.localeCompare(a, "th", { numeric: true }));
+  const years = selectableYears.map(row => row.year);
   elWeightYear.innerHTML = "";
   if (years.length === 0) {
     elWeightYear.innerHTML = "<option value=''>— ยังไม่มีปีการศึกษา —</option>";
@@ -826,6 +940,58 @@ function fillWeightYearOptions() {
   const preferred = previous || getActiveYear();
   elWeightYear.value = years.includes(preferred) ? preferred : years[0];
 }
+
+function closeYearModal() {
+  elYearOverlay.classList.remove("show");
+  editingAcademicYear = null;
+  elNewAcademicYear.disabled = false;
+  elNewAcademicYear.value = "";
+  elNewAcademicYearStart.value = "";
+}
+
+function openYearModal(row = null) {
+  editingAcademicYear = row && row.registered ? row : null;
+  elYearModalTitle.textContent = row
+    ? (row.registered ? "แก้วันเริ่มปีการศึกษา " + row.year : "ลงทะเบียนปีการศึกษา " + row.year)
+    : "เพิ่มปีการศึกษา";
+  elNewAcademicYear.value = row?.year || "";
+  elNewAcademicYear.disabled = !!row;
+  elNewAcademicYearStart.value = row?.start_date || "";
+  elYearOverlay.classList.add("show");
+  setTimeout(() => (row ? elNewAcademicYearStart : elNewAcademicYear).focus(), 0);
+}
+
+btnAddAcademicYear.addEventListener("click", () => openYearModal());
+document.getElementById("year-modal-cancel").addEventListener("click", closeYearModal);
+elYearOverlay.addEventListener("click", event => {
+  if (event.target === elYearOverlay) closeYearModal();
+});
+btnYearModalSave.addEventListener("click", async () => {
+  btnYearModalSave.disabled = true;
+  try {
+    const enteredYear = String(elNewAcademicYear.value || "").trim();
+    const registeredYear = selectableYears.find(row => row.registered && row.year === enteredYear) || editingAcademicYear;
+    if (registeredYear) {
+      const agreed = await window.crsAskConfirm({
+        title: "ยืนยันแก้วันเริ่มปี " + registeredYear.year,
+        message: "การเปลี่ยนวันเริ่มปีจะเปลี่ยนช่วงเวลาของทั้งโรงเรียนย้อนหลัง " +
+                 "รวมปฏิทิน เช็คชื่อรายวัน สรุปเวลาทำงาน และวันลา",
+        okLabel: "ยืนยันการเปลี่ยนวันเริ่ม",
+        danger: true
+      });
+      if (!agreed) return;
+    }
+    const preferredSubjectYear = fYear.value;
+    const saved = await saveAcademicYear(elNewAcademicYear.value, elNewAcademicYearStart.value);
+    await refreshSelectableYears(preferredSubjectYear);
+    closeYearModal();
+    showToast("บันทึกปีการศึกษา " + saved.year + " แล้ว", true);
+  } catch (error) {
+    showToast(error.message, false);
+  } finally {
+    btnYearModalSave.disabled = false;
+  }
+});
 
 function setWeightInputsDisabled(disabled) {
   for (const fields of Object.values(weightInputs)) {
@@ -1080,7 +1246,12 @@ async function loadSubjects(selectId) {
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
   allSubjects = data || [];
   fillYearOptions();
-  fillWeightYearOptions();
+  try {
+    await refreshSelectableYears(fYear.value);
+  } catch (yearError) {
+    showToast(yearError.message, false);
+    return;
+  }
   if (selectId) {
     // เพิ่ง สร้าง/แก้ไข วิชานี้มา — ตั้งตัวกรองให้ตรงกับวิชานี้ จะได้ไม่หายไปจากลิสต์
     const target = allSubjects.find(s => s.id === selectId);
@@ -1165,8 +1336,10 @@ function fillSubjectForm(subj) {
   updateLevelDependentFields();
   fMax.value = subj ? subj.max_score : 100;
   fCredits.value = subj && subj.credits ? subj.credits : "";
-  // สร้างวิชาใหม่: เติมปีการศึกษาที่ทำงานอยู่ให้อัตโนมัติ (ครูไม่ต้องพิมพ์ซ้ำ แก้ได้)
-  fYear.value = subj && subj.year ? subj.year : getActiveYear();
+  // สร้างวิชาใหม่: เลือกปีที่ทำงานอยู่ให้อัตโนมัติเมื่อปีนั้นอยู่ในรายการกลาง
+  const preferredYear = subj && subj.year ? subj.year : getActiveYear();
+  fillSubjectYearOptions(preferredYear);
+  fYear.value = selectableYears.some(row => row.year === preferredYear) ? preferredYear : "";
   fTerm.value = subj && subj.term ? subj.term : "1";
   fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
   if (isAdminUser) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
@@ -1182,8 +1355,8 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
   if (!code) { showToast("กรุณากรอกรหัสวิชา", false); return; }
   const gradeLevel = fGrade.value;
   if (!gradeLevel) { showToast("กรุณาเลือกชั้น", false); return; }
-  const year = fYear.value.trim();
-  if (!year) { showToast("กรุณากรอกปีการศึกษา (บังคับ เพื่อกันข้อมูลปนกันข้ามปี)", false); return; }
+  const year = fYear.value;
+  if (!year) { showToast("กรุณาเลือกปีการศึกษา (บังคับ เพื่อกันข้อมูลปนกันข้ามปี)", false); return; }
   if (isAdminUser && !fOwner.value) { showToast("กรุณาเลือกอีเมลครูเจ้าของวิชา", false); return; }
   const maxScore = Number(fMax.value);
   if (isNaN(maxScore) || maxScore <= 0) { showToast("คะแนนเต็มวิชาต้องมากกว่า 0", false); return; }
@@ -1907,7 +2080,6 @@ function hideAll() {
 await loadHighestGrade();
 populateFilterGradeOptions();
 updateGradeOptions();
-academicYears = await getAcademicYears();
 await loadSubjects();
 await loadWeightSettings();
 }

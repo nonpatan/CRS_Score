@@ -197,7 +197,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, distinctYears, getStudentPlacements, competencyStageForGrade } from "../supabase-client.js?v=20260808-12";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade } from "../supabase-client.js?v=20260809-1";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -206,7 +206,7 @@ const profile = await getProfile(session.user.id);
 const isAdmin = profile && profile.role === "admin";
 document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
 
-let assessments = [], assessmentYears = [], current = null, targets = [], members = [], students = [], competencies = [], elements = [], allProfiles = [];
+let assessments = [], assessmentYears = [], selectableAssessmentYears = [], current = null, targets = [], members = [], students = [], competencies = [], elements = [], allProfiles = [];
 let profilesById = new Map();
 const $ = id => document.getElementById(id);
 function esc(v) { return String(v || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
@@ -219,6 +219,16 @@ function ownerLabel(assessment) {
   return "ผู้กำหนด: " + (owner && (owner.name || owner.email) || "ไม่ระบุ");
 }
 function fill(sel, rows, label, placeholder) { sel.innerHTML="<option value=''>"+placeholder+"</option>"; for(const r of rows){ const o=document.createElement("option"); o.value=r.id || r; o.textContent=label(r); sel.appendChild(o); } }
+function fillSelectableYearSelect(sel, preferred, placeholder="— เลือกปี —"){
+  sel.innerHTML="<option value=''>"+placeholder+"</option>";
+  for(const row of selectableAssessmentYears){
+    const option=document.createElement("option");
+    option.value=row.year;
+    option.textContent=row.year+(row.registered?"":" (ยังไม่ลงทะเบียนในระบบ)");
+    sel.appendChild(option);
+  }
+  if(selectableAssessmentYears.some(row=>row.year===preferred))sel.value=preferred;
+}
 
 // ชั้น/ห้องในหน้ากิจกรรมต้องอ้างอิงปีของรายการ ไม่ใช่ข้อมูลปัจจุบันใน students
 function applyYearPlacement(student, placement) {
@@ -258,12 +268,10 @@ async function init() {
   assessments=a.data||[]; competencies=c.data||[]; elements=e.data||[];
   allProfiles=p.data||[];
   profilesById = new Map(allProfiles.map(person => [person.id, person]));
-  const years=[...new Set([...distinctYears((await sb.from("subjects").select("year")).data||[]), ...assessments.map(assessment=>assessment.year).filter(Boolean)])];
-  const currentThaiYear=String(new Date().getFullYear()+543);
-  if(!years.includes(currentThaiYear)) years.unshift(currentThaiYear);
-  assessmentYears=years;
-  fill($("f-year"), years, y=>y, "— เลือกปี —");
-  $("f-year").value=getActiveYear() || years[0] || "";
+  assessmentYears=[...new Set(assessments.map(assessment=>assessment.year).filter(Boolean))].sort((a,b)=>b.localeCompare(a,"th",{numeric:true}));
+  selectableAssessmentYears=await listSelectableYears(assessmentYears);
+  const preferredYear=getActiveYear() || (selectableAssessmentYears[0]&&selectableAssessmentYears[0].year) || "";
+  fillSelectableYearSelect($("f-year"),preferredYear);
   refreshAssessmentYearFilter();
   fill($("sel-competency"),competencies,c=>c.name,"— เลือกสมรรถนะ —");
   if(isAdmin){
@@ -418,8 +426,7 @@ let editingAssessment=null, editingAssessmentHasSessions=false;
 async function openAssessmentModal(assessment){
   editingAssessment=assessment;
   $("assessment-edit-name").value=assessment.name;
-  fill($("assessment-edit-year"),assessmentYears,year=>year,"— เลือกปี —");
-  $("assessment-edit-year").value=assessment.year;
+  fillSelectableYearSelect($("assessment-edit-year"),assessment.year);
   $("assessment-edit-type").value=assessment.source_type;
   $("assessment-edit-term").value=assessment.term||"";
   if(isAdmin)$("assessment-edit-owner").value=assessment.owner_id;
