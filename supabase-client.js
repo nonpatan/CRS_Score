@@ -305,6 +305,15 @@ export function competencyStageForGrade(grade) {
   return "";
 }
 
+// ช่วงชั้นที่โรงเรียนเปิดสอนจริง — คำนวณจาก highest_grade ไม่ใช้รายการตายตัวในแต่ละหน้า
+// ถ้ายังไม่ได้ตั้งค่า/ค่าไม่รู้จัก ให้คืนครบทุกช่วงชั้นเหมือน isGradeAllowed() เพื่อไม่ล็อกข้อมูลออก
+export function availableCompetencyStages(highestGrade) {
+  const stages = ["ช่วงชั้น 1", "ช่วงชั้น 2", "ช่วงชั้น 3", "ช่วงชั้น 4"];
+  const highestStage = competencyStageForGrade(highestGrade);
+  const lastIndex = stages.indexOf(highestStage);
+  return lastIndex === -1 ? stages : stages.slice(0, lastIndex + 1);
+}
+
 // ============================================================
 // ตรรกะสรุปสมรรถนะ 3 แหล่ง ใช้ร่วมกันจากหน้ารายงาน
 // แยกไว้ที่ไฟล์กลางเพื่อไม่ให้สูตรถ่วงน้ำหนัก/การเช็คข้อมูลครบกระจายหลายหน้า

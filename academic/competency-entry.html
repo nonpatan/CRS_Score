@@ -80,7 +80,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260809-2"></script>
+    <script src="../app-shell.js?v=20260809-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -120,7 +120,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements } from "../supabase-client.js?v=20260809-1";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements, getSetting, availableCompetencyStages } from "../supabase-client.js?v=20260809-2";
 const session=await requireAuth();
 if(!session){
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -138,6 +138,7 @@ let sessionStudents = [];
 let scoreMap = new Map();
 let assessmentMembers = [];
 let activityPassResults = [];
+let allowedCompetencyStages = [];
 const $ = id => document.getElementById(id);
 
 function esc(v) {
@@ -292,7 +293,9 @@ function availableStagesForAssessment(memberRows, targetRows, sessionRows) {
   const sessionStages = new Set((sessionRows || [])
     .map(session => targetStageById.get(session.target_id))
     .filter(Boolean));
-  return ["ช่วงชั้น 1", "ช่วงชั้น 2", "ช่วงชั้น 3"]
+  const stageOrder = [...new Set([...allowedCompetencyStages, ...targetStages, ...sessionStages])]
+    .sort((a,b) => Number(a.replace(/\D/g,"")) - Number(b.replace(/\D/g,"")));
+  return stageOrder
     .filter(stage => targetStages.has(stage) && (memberStages.has(stage) || sessionStages.has(stage)));
 }
 
@@ -318,10 +321,12 @@ function renderStageOptions() {
 }
 
 async function init() {
-  const [a] = await Promise.all([
-    sb.from("competency_assessments").select("*").order("created_at", { ascending:false })
+  const [a, highestGrade] = await Promise.all([
+    sb.from("competency_assessments").select("*").order("created_at", { ascending:false }),
+    getSetting("highest_grade")
   ]);
   assessments = a.data || [];
+  allowedCompetencyStages = availableCompetencyStages(highestGrade);
   const years = await listSelectableYears(assessments.map(a => a.year).filter(Boolean));
   fillSelectableYears($("f-year"), years, getActiveYear());
   renderAssessments();

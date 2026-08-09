@@ -109,7 +109,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260809-2"></script>
+    <script src="../app-shell.js?v=20260809-3"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -197,7 +197,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade } from "../supabase-client.js?v=20260809-1";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages } from "../supabase-client.js?v=20260809-2";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -208,6 +208,7 @@ document.getElementById("btn-signout").addEventListener("click", e => { e.preven
 
 let assessments = [], assessmentYears = [], selectableAssessmentYears = [], current = null, targets = [], members = [], students = [], competencies = [], elements = [], allProfiles = [];
 let profilesById = new Map();
+let allowedCompetencyStages = [];
 const $ = id => document.getElementById(id);
 function esc(v) { return String(v || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function toast(msg, ok=true) { const el=$("toast"); el.textContent=msg; el.className="toast "+(ok?"ok":"err"); setTimeout(()=>{el.className="toast";},4500); }
@@ -259,13 +260,15 @@ function resetMemberFilters() {
 }
 
 async function init() {
-  const [a,c,e,p] = await Promise.all([
+  const [a,c,e,p,highestGrade] = await Promise.all([
     sb.from("competency_assessments").select("*").order("created_at",{ascending:false}),
     sb.from("core_competencies").select("*").order("seq"),
     sb.from("core_competency_elements").select("*").order("stage").order("seq"),
-    sb.from("profiles").select("id,name,email,role")
+    sb.from("profiles").select("id,name,email,role"),
+    getSetting("highest_grade")
   ]);
   assessments=a.data||[]; competencies=c.data||[]; elements=e.data||[];
+  allowedCompetencyStages=availableCompetencyStages(highestGrade);
   allProfiles=p.data||[];
   profilesById = new Map(allProfiles.map(person => [person.id, person]));
   assessmentYears=[...new Set(assessments.map(assessment=>assessment.year).filter(Boolean))].sort((a,b)=>b.localeCompare(a,"th",{numeric:true}));
@@ -273,7 +276,7 @@ async function init() {
   const preferredYear=getActiveYear() || (selectableAssessmentYears[0]&&selectableAssessmentYears[0].year) || "";
   fillSelectableYearSelect($("f-year"),preferredYear);
   refreshAssessmentYearFilter();
-  fill($("sel-competency"),competencies,c=>c.name,"— เลือกสมรรถนะ —");
+  fill($("sel-competency"),competencies.filter(row=>row.active!==false),c=>c.name,"— เลือกสมรรถนะ —");
   if(isAdmin){
     $("field-assessment-owner").style.display="block";
     fillOwnerSelect($("f-owner")); $("f-owner").value=session.user.id;
@@ -408,7 +411,7 @@ function renderMembers() {
   const el=$("member-list");el.innerHTML="";if(!members.length)el.innerHTML="<div class='empty-note'>ยังไม่มีผู้เข้าร่วม</div>";
   for(const m of [...members].sort((a,b)=>((a.student&&a.student.grade_level)||"").localeCompare((b.student&&b.student.grade_level)||"")||((a.student&&a.student.classroom)||"").localeCompare((b.student&&b.student.classroom)||"")||((a.student&&a.student.student_no)||"").localeCompare((b.student&&b.student.student_no)||""))){const student=m.student||{};const gradeRoom=m.placementMissing?"ไม่พบชั้น/ห้อง ปี "+current.year:(student.grade_level||"")+"/"+(student.classroom||"");const row=document.createElement("div");row.className="member-row";row.innerHTML="<div class='grow'><div class='title'>"+esc(student.name||"ไม่พบข้อมูลนักเรียน")+"</div><div class='meta'>"+esc(gradeRoom)+" · "+esc(student.student_no)+"</div></div>";if(canEdit()){const b=document.createElement("button");b.className="icon-btn del";b.textContent="🗑";b.title="เอานักเรียนออก";b.setAttribute("aria-label","เอานักเรียนออก");b.onclick=()=>removeMember(m);row.appendChild(b);}el.appendChild(row);}
 }
-function renderElements(){const id=$("sel-competency").value;const rows=elements.filter(e=>e.competency_id===id);const el=$("element-options");if(!rows.length){el.textContent="ไม่มีองค์ประกอบให้เลือก";return;}let html="";for(const stage of ["ช่วงชั้น 1","ช่วงชั้น 2","ช่วงชั้น 3"]){const list=rows.filter(e=>e.stage===stage);if(!list.length)continue;html+="<div class='element-group'><h4>"+stage+"</h4>";for(const e of list){if(targets.some(t=>t.element_id===e.id))continue;html+="<label class='element-option'><input type='checkbox' data-element='"+e.id+"'><span>"+esc(e.name)+"</span><input type='number' min='0.01' step='0.01' value='10' data-score='"+e.id+"' disabled></label>";}html+="</div>";}el.innerHTML=html||"<div class='empty'>เลือกองค์ประกอบของสมรรถนะนี้ครบแล้ว</div>";el.querySelectorAll("input[type=checkbox]").forEach(c=>c.addEventListener("change",()=>{el.querySelector("[data-score='"+c.dataset.element+"']").disabled=!c.checked;}));}
+function renderElements(){const id=$("sel-competency").value;const rows=elements.filter(e=>e.competency_id===id&&e.active!==false&&allowedCompetencyStages.includes(e.stage));const el=$("element-options");if(!rows.length){el.textContent="ไม่มีองค์ประกอบที่เปิดให้เลือกในช่วงชั้นที่โรงเรียนเปิดสอน";return;}let html="";for(const stage of allowedCompetencyStages){const list=rows.filter(e=>e.stage===stage);if(!list.length)continue;html+="<div class='element-group'><h4>"+stage+"</h4>";for(const e of list){if(targets.some(t=>t.element_id===e.id))continue;html+="<label class='element-option'><input type='checkbox' data-element='"+e.id+"'><span>"+esc(e.name)+"</span><input type='number' min='0.01' step='0.01' value='10' data-score='"+e.id+"' disabled></label>";}html+="</div>";}el.innerHTML=html||"<div class='empty'>เลือกองค์ประกอบของสมรรถนะนี้ครบแล้ว</div>";el.querySelectorAll("input[type=checkbox]").forEach(c=>c.addEventListener("change",()=>{el.querySelector("[data-score='"+c.dataset.element+"']").disabled=!c.checked;}));}
 // ช่วงชั้นที่มีองค์ประกอบรองรับอยู่จริงในรายการนี้ (รวมทุกสมรรถนะ) — ใช้บล็อกนักเรียนช่วงชั้นที่ไม่มีองค์ประกอบรองรับ
 function targetStageSet(){return new Set(targets.map(t=>t.element&&t.element.stage).filter(Boolean));}
 function renderStudents(){if(!current)return;const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";const stages=targetStageSet();for(const s of rows){const stage=competencyStageForGrade(s.grade_level);const blocked=!stage||!stages.has(stage);const label=document.createElement("label");label.className="student-row"+(blocked?" blocked":"");label.innerHTML="<input type='checkbox' value='"+s.id+"'"+(blocked?" disabled":"")+"><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div>"+(blocked?"<div class='block-note'>ไม่มีองค์ประกอบรองรับ"+esc(stage||"ช่วงชั้นนี้")+" — เพิ่มองค์ประกอบก่อนจึงเพิ่มนักเรียนคนนี้ได้</div>":"")+"</div>";el.appendChild(label);}}
