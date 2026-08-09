@@ -200,7 +200,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260808-3"></script>
+    <script src="../app-shell.js?v=20260809-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -871,6 +871,34 @@ function formatAcademicYearStart(startDate) {
   });
 }
 
+async function deleteAcademicYear(row) {
+  if (!isAdminUser || !row.registered) return;
+  const { data: references, error: countError } = await sb.rpc("academic_year_reference_counts", { p_year: row.year });
+  if (countError) {
+    showToast("ตรวจข้อมูลที่ผูกกับปี " + row.year + " ไม่สำเร็จ: " + countError.message, false);
+    return;
+  }
+  if ((references || []).length > 0) {
+    const detail = references.map(item => item.ref_table + " " + item.ref_count + " แถว").join(" · ");
+    showToast("ลบปี " + row.year + " ไม่ได้ — " + detail, false);
+    return;
+  }
+  const confirmed = await window.crsAskConfirm({
+    title: "ลบปีการศึกษา " + row.year,
+    message: "ปีนี้ไม่มีข้อมูลผูกอยู่ เมื่อลบแล้วต้องเพิ่มปีและวันเริ่มใหม่หากต้องการใช้อีกครั้ง",
+    okLabel: "ลบปีการศึกษา",
+    danger: true
+  });
+  if (!confirmed) return;
+  const { error } = await sb.rpc("delete_academic_year", { p_year: row.year });
+  if (error) {
+    showToast("ลบปีการศึกษาไม่สำเร็จ: " + error.message, false);
+    return;
+  }
+  await refreshSelectableYears();
+  showToast("ลบปีการศึกษา " + row.year + " แล้ว", true);
+}
+
 function renderAcademicYears() {
   elAcademicYearList.innerHTML = "";
   if (selectableYears.length === 0) {
@@ -897,6 +925,14 @@ function renderAcademicYears() {
       edit.textContent = row.registered ? "แก้วันเริ่ม" : "ลงทะเบียนปีนี้";
       edit.addEventListener("click", () => openYearModal(row));
       wrapper.appendChild(edit);
+    }
+    if (isAdminUser && row.registered) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "ลบ";
+      remove.addEventListener("click", () => deleteAcademicYear(row));
+      wrapper.appendChild(remove);
     }
     elAcademicYearList.appendChild(wrapper);
   }
