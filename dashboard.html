@@ -262,7 +262,7 @@
     loadAcademicCalendar, pickCalendarUpcoming,
     loadAcademicProjects, filterProjectsInMonth, projectResponsibleName,
     bangkokNow, toDateStr
-  } from "./supabase-client.js?v=20260809-3";
+  } from "./supabase-client.js?v=20260811-1";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayNote = document.getElementById("student-today-note");
@@ -408,9 +408,13 @@
       projectList.innerHTML = rows.map(row => {
         const responsible = projectResponsibleName(row) || "ยังไม่ระบุ";
         const budgetText = row.budget_planned == null ? "" : `<div class="item-side">${escapeHtml(formatMoney(row.budget_planned))}</div>`;
+        const parentText = row.parent_name
+          ? `<div class="item-meta">โครงการแม่: ${escapeHtml(row.parent_name)}</div>`
+          : "";
         return `<div class="dashboard-item">
           <div class="item-main">
             <div class="item-title">${escapeHtml(row.name)}</div>
+            ${parentText}
             <div class="item-meta">${escapeHtml(formatRange(row.start_date, row.end_date))} · ผู้รับผิดชอบ: ${escapeHtml(responsible)}</div>
             <div class="item-badges"><span class="item-badge">${escapeHtml(row.kind)}</span><span class="item-badge status">${escapeHtml(row.status)}</span></div>
           </div>
@@ -552,8 +556,13 @@
 
     let monthlyProjectsResult;
     try {
+      const allProjects = resultValue(projectResult);
+      const byId = new Map(allProjects.map(row => [row.id, row]));
+      const parentIds = new Set(allProjects.map(row => row.parent_id).filter(Boolean));
       monthlyProjectsResult = {
-        value: filterProjectsInMonth(resultValue(projectResult), yearMonth)
+        value: filterProjectsInMonth(allProjects, yearMonth)
+          .filter(row => row.kind === "กิจกรรม" || !parentIds.has(row.id))
+          .map(row => ({ ...row, parent_name:byId.get(row.parent_id)?.name || "" }))
       };
     } catch (error) {
       monthlyProjectsResult = { error };

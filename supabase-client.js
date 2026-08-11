@@ -1678,6 +1678,393 @@ export function filterProjectsInMonth(rows, yearMonth) {
   );
 }
 
+// ---------- OKR: สูตรล้วน (ห้ามยิง sb ในบล็อกนี้) ----------
+export const OKR_PASS_DEFAULT = 0.7;
+export const okrRound2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+function compareOkrs(a, b) {
+  return (Number(a?.sort_order) || 0) - (Number(b?.sort_order) || 0) ||
+    String(a?.code || "").localeCompare(String(b?.code || ""), "th", { numeric: true }) ||
+    String(a?.created_at || "").localeCompare(String(b?.created_at || ""));
+}
+
+function compareProjects(a, b) {
+  return String(a?.start_date || "").localeCompare(String(b?.start_date || "")) ||
+    String(a?.name || "").localeCompare(String(b?.name || ""), "th");
+}
+
+function mapValue(mapLike, key) {
+  return mapLike instanceof Map ? mapLike.get(key) : mapLike?.[key];
+}
+
+function projectOkrIds(project) {
+  const links = Array.isArray(project?.okrs)
+    ? project.okrs
+    : (Array.isArray(project?.okr_ids) ? project.okr_ids : []);
+  return links.map(item => typeof item === "object" ? item?.id : item).filter(Boolean);
+}
+
+export function buildOkrTree(rows) {
+  const ordered = (rows || []).slice().sort(compareOkrs);
+  const objectives = ordered
+    .filter(row => !row.parent_id)
+    .map(row => ({ ...row, keyResults: [] }));
+  const objectiveById = new Map(objectives.map(row => [row.id, row]));
+  const orphans = [];
+
+  for (const row of ordered) {
+    if (!row.parent_id) continue;
+    const parent = objectiveById.get(row.parent_id);
+    if (parent) parent.keyResults.push({ ...row });
+    else orphans.push({ ...row });
+  }
+  return { objectives, orphans };
+}
+
+export function buildProjectTree(rows) {
+  const ordered = (rows || []).slice().sort(compareProjects);
+  const byId = new Map(ordered.filter(row => row?.id).map(row => [row.id, row]));
+  const rootIdById = new Map();
+  const orphanRootIds = new Set();
+
+  function resolveRoot(start) {
+    if (rootIdById.has(start.id)) return rootIdById.get(start.id);
+    const path = [];
+    const position = new Map();
+    let current = start;
+    let rootId = null;
+
+    while (current) {
+      if (rootIdById.has(current.id)) {
+        rootId = rootIdById.get(current.id);
+        break;
+      }
+      if (position.has(current.id)) {
+        const cycle = path.slice(position.get(current.id)).sort(compareProjects);
+        rootId = cycle[0].id;
+        orphanRootIds.add(rootId);
+        break;
+      }
+      position.set(current.id, path.length);
+      path.push(current);
+      if (!current.parent_id) {
+        rootId = current.id;
+        break;
+      }
+      const parent = byId.get(current.parent_id);
+      if (!parent) {
+        rootId = current.id;
+        orphanRootIds.add(rootId);
+        break;
+      }
+      current = parent;
+    }
+
+    for (const row of path) rootIdById.set(row.id, rootId);
+    return rootId;
+  }
+
+  for (const row of ordered) {
+    if (row?.id) resolveRoot(row);
+  }
+
+  const roots = new Map();
+  for (const row of ordered) {
+    if (!row?.id) continue;
+    const rootId = rootIdById.get(row.id);
+    if (rootId === row.id && !roots.has(rootId)) {
+      roots.set(rootId, {
+        ...row,
+        ...(orphanRootIds.has(rootId) ? { isOrphan: true } : {}),
+        children: []
+      });
+    }
+  }
+  for (const row of ordered) {
+    if (!row?.id) continue;
+    const rootId = rootIdById.get(row.id);
+    if (rootId !== row.id) roots.get(rootId)?.children.push({ ...row, children: [] });
+  }
+  const result = [...roots.values()].sort(compareProjects);
+  for (const root of result) root.children.sort(compareProjects);
+  return result;
+}
+
+function budgetNumber(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function projectBudgetOf(root) {
+  const children = Array.isArray(root?.children) ? root.children : [];
+  const ownPlanned = budgetNumber(root?.budget_planned);
+  const ownActual = budgetNumber(root?.budget_actual);
+  const childPlanned = children.map(row => budgetNumber(row.budget_planned)).filter(value => value != null);
+  const childActual = children.map(row => budgetNumber(row.budget_actual)).filter(value => value != null);
+  const fromChildren = childPlanned.length > 0;
+  const planned = fromChildren ? childPlanned.reduce((sum, value) => sum + value, 0) : (ownPlanned ?? 0);
+  const actual = childActual.length > 0
+    ? childActual.reduce((sum, value) => sum + value, 0)
+    : (ownActual ?? 0);
+  return {
+    planned: okrRound2(planned),
+    actual: okrRound2(actual),
+    ownPlanned,
+    fromChildren,
+    mismatch: fromChildren && ownPlanned != null && okrRound2(ownPlanned) !== okrRound2(planned)
+  };
+}
+
+export function summarizeProjectBudget(tree) {
+  const total = (tree || []).reduce((sum, root) => {
+    const budget = projectBudgetOf(root);
+    sum.planned += budget.planned;
+    sum.actual += budget.actual;
+    return sum;
+  }, { planned: 0, actual: 0 });
+  return { planned: okrRound2(total.planned), actual: okrRound2(total.actual) };
+}
+
+export function okrChipLabel(kr, okrById) {
+  const code = String(kr?.code || "");
+  if (!kr?.parent_id) return code;
+  const parent = mapValue(okrById, kr.parent_id);
+  return parent?.code ? `${parent.code} › ${code}` : code;
+}
+
+export function deriveProjectObjectives(project, okrById) {
+  const found = new Map();
+  for (const id of projectOkrIds(project)) {
+    const kr = mapValue(okrById, id);
+    if (!kr?.parent_id) continue;
+    const objective = mapValue(okrById, kr.parent_id);
+    if (objective) found.set(objective.id, objective);
+  }
+  return [...found.values()].sort(compareOkrs);
+}
+
+export function okrProgress(kr, checkin) {
+  if (!checkin) return null;
+  const target = Number(kr?.target_value);
+  if (kr?.target_value == null || !Number.isFinite(target) || target <= 0) return null;
+
+  const populationTotal = Number(checkin.population_total);
+  const usePopulation = checkin.population_total != null &&
+    Number.isFinite(populationTotal) && populationTotal > 0 && checkin.population_passed != null;
+  let actual = null;
+  if (usePopulation) {
+    const populationPassed = Number(checkin.population_passed);
+    if (!Number.isFinite(populationPassed)) return null;
+    actual = okrRound2(populationPassed / populationTotal * 100);
+  } else if (checkin.actual_value != null && checkin.actual_value !== "") {
+    actual = Number(checkin.actual_value);
+    if (!Number.isFinite(actual)) return null;
+  }
+  if (actual == null) return null;
+  return {
+    actual,
+    target,
+    ratio: okrRound2(actual / target),
+    isPopulation: usePopulation
+  };
+}
+
+export function okrScore(kr, checkin) {
+  const progress = okrProgress(kr, checkin);
+  return progress ? Math.min(okrRound2(progress.ratio), 1) : null;
+}
+
+export function okrObjectiveScore(objective, checkinsByKr, thresholds = null) {
+  const keyResults = Array.isArray(objective?.keyResults) ? objective.keyResults : [];
+  const thresholdValue = Number(thresholds?.oPass);
+  const oPass = Number.isFinite(thresholdValue) && thresholdValue >= 0 && thresholdValue <= 1
+    ? thresholdValue
+    : OKR_PASS_DEFAULT;
+  let measured = 0;
+  let textOnly = 0;
+  let sum = 0;
+  for (const kr of keyResults) {
+    const checkin = mapValue(checkinsByKr, kr.id);
+    const score = okrScore(kr, checkin);
+    if (score == null) {
+      if (checkin) textOnly += 1;
+    } else {
+      measured += 1;
+      sum += score;
+    }
+  }
+  const total = keyResults.length;
+  const score = total > 0 ? okrRound2(sum / total) : null;
+  return { score, measured, total, passed: score !== null && score >= oPass, textOnly };
+}
+
+export function indexCheckinsByOkr(checkins) {
+  const result = new Map();
+  for (const checkin of (checkins || [])) {
+    if (!checkin?.okr_id) continue;
+    const previous = result.get(checkin.okr_id);
+    if (!previous || String(checkin.measured_on || "") > String(previous.measured_on || "")) {
+      result.set(checkin.okr_id, checkin);
+    }
+  }
+  return result;
+}
+
+export function okrCoverage(okrTree, projects) {
+  const usableProjects = (projects || []).filter(project => project?.status !== "ยกเลิก");
+  const result = new Map();
+  for (const objective of (okrTree?.objectives || [])) {
+    for (const kr of (objective.keyResults || [])) {
+      const linked = usableProjects.filter(project => projectOkrIds(project).includes(kr.id));
+      const linkedIds = new Set(linked.map(project => project.id));
+      const budgetRows = linked.filter(project =>
+        !usableProjects.some(child => child.parent_id === project.id && linkedIds.has(child.id))
+      );
+      const plannedBudget = budgetRows.reduce(
+        (sum, project) => sum + (budgetNumber(project.budget_planned) ?? 0), 0
+      );
+      result.set(kr.id, {
+        projects: linked,
+        plannedBudget: okrRound2(plannedBudget),
+        isUncovered: linked.length === 0
+      });
+    }
+  }
+  return result;
+}
+
+export function buildOkrTrend(chain, checkinsByOkr) {
+  return (chain || []).slice()
+    .sort((a, b) => String(a?.year || "").localeCompare(String(b?.year || ""), "th", { numeric: true }))
+    .flatMap(kr => {
+      const checkin = mapValue(checkinsByOkr, kr.id);
+      if (!checkin) return [];
+      const populationTotal = checkin.population_total == null ? null : Number(checkin.population_total);
+      const hasPopulation = Number.isFinite(populationTotal) && populationTotal > 0 &&
+        checkin.population_passed != null;
+      const percent = hasPopulation
+        ? okrRound2(Number(checkin.population_passed) / populationTotal * 100)
+        : null;
+      const value = checkin.actual_value == null ? null : Number(checkin.actual_value);
+      const storedScore = checkin.score == null ? null : Number(checkin.score);
+      return [{
+        year: kr.year,
+        value: Number.isFinite(value) ? value : null,
+        percent,
+        score: Number.isFinite(storedScore) ? storedScore : okrScore(kr, checkin),
+        populationTotal: Number.isFinite(populationTotal) ? populationTotal : null
+      }];
+    });
+}
+
+export function suggestOkrValue(kr, ctx) {
+  if (kr?.auto_source === "นับโครงการที่เสร็จสิ้น") {
+    const range = ctx?.range;
+    if (!range?.start || !range?.end) return { value: null, explain: "" };
+    const matched = (ctx?.projects || []).filter(project =>
+      project?.status === "เสร็จสิ้น" &&
+      project.start_date >= range.start && project.start_date <= range.end &&
+      projectOkrIds(project).includes(kr.id)
+    );
+    const projectCount = matched.filter(row => row.kind === "โครงการ").length;
+    const activityCount = matched.filter(row => row.kind === "กิจกรรม").length;
+    return {
+      value: matched.length,
+      explain: `นับจาก ${projectCount} โครงการ และ ${activityCount} กิจกรรมที่เสร็จสิ้นในช่วงปีการศึกษา`
+    };
+  }
+  if (kr?.auto_source === "จำนวนนักเรียน") {
+    const current = Number(ctx?.studentCounts?.current);
+    const previous = Number(ctx?.studentCounts?.previous);
+    if (ctx?.studentCounts?.previous == null || !Number.isFinite(previous) || previous <= 0) {
+      return { value: null, explain: "ไม่มีข้อมูลนักเรียนปีก่อน จึงเทียบการเปลี่ยนแปลงไม่ได้" };
+    }
+    if (ctx?.studentCounts?.current == null || !Number.isFinite(current)) {
+      return { value: null, explain: "ไม่มีข้อมูลนักเรียนปีปัจจุบัน จึงคำนวณการเปลี่ยนแปลงไม่ได้" };
+    }
+    return {
+      value: okrRound2((current - previous) / previous * 100),
+      explain: `เทียบนักเรียนปีปัจจุบัน ${current} คน กับปีก่อน ${previous} คน`
+    };
+  }
+  return { value: null, explain: "" };
+}
+// ---------- จบสูตรล้วน OKR ----------
+
+export async function loadSchoolOkrs(year) {
+  const { data, error } = await sb.from("school_okrs")
+    .select("*")
+    .eq("year", year)
+    .order("sort_order")
+    .order("created_at");
+  if (error) throw new Error("โหลด OKR ของโรงเรียนไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function loadOkrCheckins(okrIds) {
+  const ids = [...new Set((okrIds || []).filter(Boolean))];
+  if (ids.length === 0) return [];
+  const { data, error } = await sb.from("okr_checkins").select("*").in("okr_id", ids);
+  if (error) throw new Error("โหลดผลวัด OKR ไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function loadOkrLineage(krRows) {
+  const starts = (krRows || []).filter(row => row?.id);
+  const byId = new Map(starts.map(row => [row.id, row]));
+  const seen = new Set(byId.keys());
+  let frontier = [...new Set(starts.map(row => row.carried_from_id).filter(id => id && !seen.has(id)))];
+
+  for (let depth = 0; depth < 10 && frontier.length > 0; depth += 1) {
+    const { data, error } = await sb.from("school_okrs").select("*").in("id", frontier);
+    if (error) throw new Error("โหลดสายสืบทอด OKR ไม่สำเร็จ: " + error.message);
+    const fetched = data || [];
+    for (const row of fetched) {
+      if (!row?.id || seen.has(row.id)) continue;
+      seen.add(row.id);
+      byId.set(row.id, row);
+    }
+    frontier = [...new Set(fetched
+      .map(row => row?.carried_from_id)
+      .filter(id => id && !seen.has(id)))];
+  }
+
+  const result = new Map();
+  for (const start of starts) {
+    const chain = [];
+    const localSeen = new Set();
+    let current = start;
+    for (let depth = 0; current && depth <= 10 && !localSeen.has(current.id); depth += 1) {
+      chain.push(current);
+      localSeen.add(current.id);
+      current = current.carried_from_id ? byId.get(current.carried_from_id) : null;
+    }
+    chain.sort((a, b) => String(a.year || "").localeCompare(String(b.year || ""), "th", { numeric: true }));
+    result.set(start.id, chain);
+  }
+  return result;
+}
+
+export async function loadOkrThresholds() {
+  try {
+    const [krRaw, oRaw] = await Promise.all([
+      getSetting("okr_kr_pass"),
+      getSetting("okr_o_pass")
+    ]);
+    const valid = raw => {
+      const value = Number(raw);
+      return raw !== null && String(raw).trim() !== "" &&
+        Number.isFinite(value) && value >= 0 && value <= 1
+        ? value
+        : OKR_PASS_DEFAULT;
+    };
+    return { krPass: valid(krRaw), oPass: valid(oRaw) };
+  } catch (_) {
+    return { krPass: OKR_PASS_DEFAULT, oPass: OKR_PASS_DEFAULT };
+  }
+}
+
 // เรียก Jibble สดผ่าน Edge Function scope "today"
 // basic: server คืนเฉพาะ checkedIn/total เท่านั้น · full: นับด้วย computeDayStatus() ตัวเดิม
 export async function loadTodayStaffSummary() {
