@@ -1800,10 +1800,15 @@ export function projectBudgetOf(root) {
   const children = Array.isArray(root?.children) ? root.children : [];
   const ownPlanned = budgetNumber(root?.budget_planned);
   const ownActual = budgetNumber(root?.budget_actual);
-  const childPlanned = children.map(row => budgetNumber(row.budget_planned)).filter(value => value != null);
+  const childPlanned = okrRound2(children
+    .map(row => budgetNumber(row.budget_planned))
+    .filter(value => value != null)
+    .reduce((sum, value) => sum + value, 0));
   const childActual = children.map(row => budgetNumber(row.budget_actual)).filter(value => value != null);
-  const fromChildren = childPlanned.length > 0;
-  const planned = fromChildren ? childPlanned.reduce((sum, value) => sum + value, 0) : (ownPlanned ?? 0);
+  const planned = ownPlanned != null ? ownPlanned : childPlanned;
+  const fromChildren = ownPlanned == null && childPlanned > 0;
+  const unallocated = ownPlanned != null ? Math.max(okrRound2(ownPlanned - childPlanned), 0) : 0;
+  const overAllocated = ownPlanned != null && childPlanned > ownPlanned;
   const actual = childActual.length > 0
     ? childActual.reduce((sum, value) => sum + value, 0)
     : (ownActual ?? 0);
@@ -1811,8 +1816,10 @@ export function projectBudgetOf(root) {
     planned: okrRound2(planned),
     actual: okrRound2(actual),
     ownPlanned,
+    childPlanned,
     fromChildren,
-    mismatch: fromChildren && ownPlanned != null && okrRound2(ownPlanned) !== okrRound2(planned)
+    unallocated,
+    overAllocated
   };
 }
 

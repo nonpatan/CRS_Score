@@ -150,7 +150,7 @@
           <div class="field wide"><label for="p-name">ชื่อ</label><input id="p-name" type="text" maxlength="300" required></div>
           <div class="field"><label for="p-kind">ประเภท</label><select id="p-kind"><option>โครงการ</option><option>กิจกรรม</option></select></div>
           <div class="field"><label for="p-status">สถานะ</label><select id="p-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
-          <div class="field wide" id="parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent"><option value="">— เลือกโครงการแม่ —</option></select><div class="hint">ถ้ายังไม่มีโครงการที่ใช่ ให้ฝ่ายวิชาการสร้างโครงการก่อน</div></div>
+          <div class="field wide" id="parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent"><option value="">— เลือกโครงการแม่ —</option></select><div class="hint">ถ้ายังไม่มีโครงการที่ใช่ ให้สร้างโครงการก่อน</div></div>
           <div class="field"><label for="p-start">วันเริ่ม</label><input id="p-start" type="date" required></div>
           <div class="field"><label for="p-end">วันสิ้นสุด</label><input id="p-end" type="date"><div class="hint">เว้นว่างได้ถ้าเป็นงานวันเดียว</div></div>
           <div class="field wide" id="responsible-select-field"><label for="p-responsible">ผู้รับผิดชอบ</label><select id="p-responsible"><option value="">กำลังโหลดรายชื่อ…</option></select><div class="hint" id="responsible-note"></div></div>
@@ -231,7 +231,7 @@ import {
   buildOkrTree, buildProjectTree, projectBudgetOf, summarizeProjectBudget,
   okrChipLabel, okrProgress, okrScore, okrObjectiveScore,
   indexCheckinsByOkr, okrCoverage, buildOkrTrend, suggestOkrValue, setSetting
-} from "../supabase-client.js?v=20260811-1";
+} from "../supabase-client.js?v=20260811-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -288,15 +288,15 @@ if (!session) {
   let currentSuggestion = null;
 
   const canEditProject = project => canEditAll || (
-    canEditOwn && project?.kind === "กิจกรรม" && project.responsible_staff_id === myStaffId
+    canEditOwn && project?.responsible_staff_id === myStaffId
   );
 
   if (canEditAll || canEditOwn) {
     el("add-project").hidden = false;
-    el("add-project").textContent = canEditAll ? "เพิ่มโครงการ/กิจกรรม" : "เพิ่มกิจกรรมของฉัน";
+    el("add-project").textContent = canEditAll ? "เพิ่มโครงการ/กิจกรรม" : "เพิ่มโครงการ/กิจกรรมของฉัน";
   } else {
     el("access-note").hidden = false;
-    el("access-note").innerHTML = '<div class="readonly"><b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>บัญชีนี้ยังไม่ผูกกับรายชื่อบุคลากร จึงยังเพิ่มกิจกรรมไม่ได้ กรุณาให้ผู้ดูแลผูกบัญชีกับรายชื่อบุคลากรก่อน</div>';
+    el("access-note").innerHTML = '<div class="readonly"><b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>บัญชีนี้ยังไม่ผูกกับรายชื่อบุคลากร จึงยังเพิ่มโครงการหรือกิจกรรมไม่ได้ กรุณาให้ผู้ดูแลผูกบัญชีกับรายชื่อบุคลากรก่อน</div>';
   }
   if (canEditAll) {
     el("add-objective").hidden = false;
@@ -325,21 +325,103 @@ if (!session) {
     ).join("");
   }
 
+  function activityBudgetGuard(rows, parentId, editingId, planned) {
+    const parent = (rows || []).find(row => row.id === parentId);
+    if (!parent) {
+      return { ok:false, reason:"missing-parent", parent:null, otherPlanned:0, newTotal:0, maxAllowed:null };
+    }
+    if (planned == null || Number(planned) === 0) {
+      return { ok:true, parent, otherPlanned:0, newTotal:0, maxAllowed:null };
+    }
+    const siblings = (rows || []).filter(row => row.parent_id === parentId && row.id !== editingId);
+    const otherPlanned = projectBudgetOf({ budget_planned:null, children:siblings }).childPlanned;
+    const newTotal = projectBudgetOf({
+      budget_planned:null,
+      children:[...siblings, { budget_planned:planned }]
+    }).childPlanned;
+    const parentPlanned = parent.budget_planned == null ? null : Number(parent.budget_planned);
+    if (parentPlanned == null) {
+      return { ok:false, reason:"missing-parent-budget", parent, otherPlanned, newTotal, maxAllowed:null };
+    }
+    if (newTotal > parentPlanned) {
+      return {
+        ok:false, reason:"over-parent-budget", parent, otherPlanned, newTotal,
+        maxAllowed:Math.max(parentPlanned - otherPlanned, 0)
+      };
+    }
+    return { ok:true, parent, otherPlanned, newTotal, maxAllowed:parentPlanned - otherPlanned };
+  }
+
+  function parentBudgetGuard(rows, projectId, planned) {
+    const children = (rows || []).filter(row => row.parent_id === projectId);
+    const childPlanned = projectBudgetOf({ budget_planned:planned, children }).childPlanned;
+    const parentPlanned = planned == null ? null : Number(planned);
+    const ok = childPlanned === 0 || (parentPlanned != null && parentPlanned >= childPlanned);
+    return { ok, childPlanned, childCount:children.length };
+  }
+
+  function projectKindChangeGuard(rows, editingId, nextKind) {
+    const existing = (rows || []).find(row => row.id === editingId);
+    const childCount = (rows || []).filter(row => row.parent_id === editingId).length;
+    const blocked = Boolean(
+      editingId && existing?.kind === "โครงการ" && nextKind === "กิจกรรม" && childCount > 0
+    );
+    return { ok:!blocked, childCount };
+  }
+
+  function linkedOkrIds(project) {
+    return (project?.okrs || []).map(row => typeof row === "object" ? row.id : row).filter(Boolean);
+  }
+
+  function activityKrGuard(rows, parentId, selectedIds) {
+    const selected = [...new Set(selectedIds || [])];
+    if (!selected.length) return { ok:true, invalidIds:[], parent:(rows || []).find(row => row.id === parentId) };
+    const parent = (rows || []).find(row => row.id === parentId);
+    const allowed = new Set(linkedOkrIds(parent));
+    const invalidIds = selected.filter(id => !allowed.has(id));
+    return { ok:invalidIds.length === 0, invalidIds, parent };
+  }
+
+  function parentKrGuard(rows, projectId, selectedIds) {
+    const selected = new Set(selectedIds || []);
+    const affected = new Map();
+    for (const child of (rows || []).filter(row => row.parent_id === projectId)) {
+      for (const okrId of linkedOkrIds(child)) {
+        if (selected.has(okrId)) continue;
+        if (!affected.has(okrId)) affected.set(okrId, []);
+        affected.get(okrId).push(child.name);
+      }
+    }
+    return {
+      ok:affected.size === 0,
+      affected:[...affected].map(([okrId, projectNames]) => ({ okrId, projectNames }))
+    };
+  }
+
   function projectArticle(project, child = false, context = false) {
     const end = project.end_date || project.start_date;
     const range = end === project.start_date ? fmtDate(project.start_date) : `${fmtDate(project.start_date)} – ${fmtDate(end)}`;
     const responsible = projectResponsibleName(project) || "ยังไม่ระบุ";
     const statusClass = project.status === "ยกเลิก" ? "chip cancel" : "chip";
-    const budget = !child && Array.isArray(project.children) ? projectBudgetOf(project) : null;
-    const hasActual = project.budget_actual != null || (project.children || []).some(row => row.budget_actual != null);
+    const allChildren = !child ? projects.filter(row => row.parent_id === project.id) : [];
+    const budget = !child ? projectBudgetOf({ ...project, children:allChildren }) : null;
+    const hasActual = project.budget_actual != null || allChildren.some(row => row.budget_actual != null);
     const budgetLine = budget
-      ? `งบตั้งไว้ ${fmtMoneyOrMissing(budget.ownPlanned)}${budget.fromChildren ? ` (จากลูก ${fmtMoney(budget.planned)})` : ""} · ใช้จริง ${hasActual ? fmtMoney(budget.actual) : "ยังไม่ได้กรอก"}`
+      ? budget.ownPlanned == null && budget.childPlanned > 0
+        ? `โครงการยังไม่ได้ตั้งงบ · กิจกรรมรวม ${fmtMoney(budget.childPlanned)} · ใช้จริง ${hasActual ? fmtMoney(budget.actual) : "ยังไม่ได้กรอก"}`
+        : budget.ownPlanned == null
+          ? `โครงการยังไม่ได้ตั้งงบ · กิจกรรมยังไม่ได้จัดสรรงบ · ใช้จริง ${hasActual ? fmtMoney(budget.actual) : "ยังไม่ได้กรอก"}`
+          : `งบตั้งไว้ ${fmtMoney(budget.ownPlanned)} · จัดสรรให้กิจกรรมแล้ว ${fmtMoney(budget.childPlanned)} · เหลือ ${fmtMoney(budget.unallocated)} · ใช้จริง ${hasActual ? fmtMoney(budget.actual) : "ยังไม่ได้กรอก"}`
       : `งบตั้งไว้ ${fmtMoneyOrMissing(project.budget_planned)} · ใช้จริง ${fmtMoneyOrMissing(project.budget_actual)}`;
-    const mismatch = budget?.mismatch ? '<span class="chip warn">งบแม่ไม่ตรงกับผลรวมกิจกรรม</span>' : "";
+    const budgetWarnings = budget
+      ? `${budget.unallocated > 0 ? '<span class="chip warn">ยังจัดสรรไม่หมด</span>' : ""}${budget.overAllocated ? '<span class="chip fail">จัดสรรเกินงบ</span>' : ""}${budget.ownPlanned != null && budget.actual > budget.ownPlanned ? '<span class="chip fail">ใช้เกินงบ</span>' : ""}`
+      : "";
+    const krOutside = child && !activityKrGuard(projects, project.parent_id, linkedOkrIds(project)).ok
+      ? '<span class="chip fail">KR นอกกรอบโครงการ</span>' : "";
     const links = (project.links || []).map(link => `<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`).join(" · ");
     return `<article class="${context ? "project-root context" : child ? "project-child" : "project-root"}">
       <div class="item-grid"><div><div class="item-title">${context ? "โครงการแม่: " : ""}${esc(project.name)}</div>
-        <div class="chips"><span class="chip">${esc(project.kind)}</span><span class="${statusClass}">${esc(project.status)}</span>${projectChips(project)}${mismatch}</div>
+        <div class="chips"><span class="chip">${esc(project.kind)}</span><span class="${statusClass}">${esc(project.status)}</span>${projectChips(project)}${budgetWarnings}${krOutside}</div>
         <div class="meta">${esc(range)} · ผู้รับผิดชอบ: ${esc(responsible)}</div>
         <div class="meta">${esc(budgetLine)}</div>
         ${project.standard_note ? `<div class="meta">มาตรฐาน/กลยุทธ์: ${esc(project.standard_note)}</div>` : ""}
@@ -429,12 +511,35 @@ if (!session) {
 
   function renderOkrPicker(selectedIds = []) {
     const selected = new Set(selectedIds);
+    const activity = el("p-kind").value === "กิจกรรม";
+    const parentId = el("p-parent").value;
+    if (activity && !parentId) {
+      el("project-okr-pick").innerHTML = '<div class="banner warn">เลือกโครงการแม่ก่อน แล้วจะแสดง KR ของโครงการนั้นให้เลือก</div>';
+      return;
+    }
+    const parent = activity ? projects.find(row => row.id === parentId) : null;
+    const allowed = activity ? new Set(linkedOkrIds(parent)) : null;
+    if (activity && allowed.size === 0) {
+      el("project-okr-pick").innerHTML = `<div class="banner warn">โครงการ “${esc(parent?.name || "ไม่พบชื่อ")}” ยังไม่ได้ผูก KR — ให้ฝ่ายวิชาการผูก KR ที่โครงการก่อน</div>`;
+      return;
+    }
     const groups = okrTree.objectives.map(objective => {
-      const krs = objective.keyResults.filter(kr => kr.active || selected.has(kr.id));
+      const krs = objective.keyResults.filter(kr =>
+        (!activity || allowed.has(kr.id)) && (kr.active || selected.has(kr.id))
+      );
       if (!krs.length) return "";
       return `<div class="okr-group"><div class="okr-group-title">${esc(objective.code || "O")} · ${esc(objective.objective)}</div>${krs.map(kr => `<div class="check-row"><input id="pick-${kr.id}" type="checkbox" value="${kr.id}" ${selected.has(kr.id) ? "checked" : ""}><label for="pick-${kr.id}"><b>${esc(kr.code || "KR")}</b> · ${esc(kr.key_result)}${kr.active ? "" : " · ปิดใช้งานแล้ว"}</label></div>`).join("")}</div>`;
     }).join("");
     el("project-okr-pick").innerHTML = groups || '<div class="banner warn">ปีนี้ยังไม่มี KR ให้เลือก กรุณาให้ฝ่ายวิชาการเพิ่ม KR ก่อน</div>';
+  }
+
+  function selectedProjectOkrIds() {
+    return [...el("project-okr-pick").querySelectorAll('input[type="checkbox"]:checked')]
+      .map(input => input.value);
+  }
+
+  function okrCodes(ids) {
+    return ids.map(id => okrs.find(row => row.id === id)?.code || id);
   }
 
   function staffOptions(currentId = null) {
@@ -472,11 +577,20 @@ if (!session) {
     return links;
   }
 
-  function syncProjectKind() {
+  function syncProjectKind(selectedIds = selectedProjectOkrIds(), notifyRemoved = false) {
     const activity = el("p-kind").value === "กิจกรรม";
     el("parent-field").hidden = !activity;
     el("p-parent").required = activity;
     if (!activity) el("p-parent").value = "";
+    let kept = selectedIds;
+    if (activity) {
+      const guard = activityKrGuard(projects, el("p-parent").value, selectedIds);
+      kept = selectedIds.filter(id => !guard.invalidIds.includes(id));
+      if (notifyRemoved && guard.invalidIds.length) {
+        toast(`เปลี่ยนโครงการแม่แล้ว จึงเอา ${okrCodes(guard.invalidIds).join(", ")} ออกจากกิจกรรม · เลือกได้เฉพาะ KR ที่โครงการแม่มี`, true);
+      }
+    }
+    renderOkrPicker(kept);
   }
 
   function parentOptions(currentParentId = null) {
@@ -488,10 +602,10 @@ if (!session) {
   function openProjectForm(project = null) {
     if (project ? !canEditProject(project) : !(canEditAll || canEditOwn)) return;
     editingProjectId = project?.id || null;
-    el("project-form-title").textContent = project ? "แก้โครงการ/กิจกรรม" : (canEditAll ? "เพิ่มโครงการ/กิจกรรม" : "เพิ่มกิจกรรมของฉัน");
+    el("project-form-title").textContent = project ? "แก้โครงการ/กิจกรรม" : (canEditAll ? "เพิ่มโครงการ/กิจกรรม" : "เพิ่มโครงการ/กิจกรรมของฉัน");
     el("p-name").value = project?.name || "";
-    el("p-kind").value = project?.kind || (canEditAll ? "โครงการ" : "กิจกรรม");
-    el("p-kind").disabled = !canEditAll;
+    el("p-kind").value = project?.kind || "โครงการ";
+    el("p-kind").disabled = false;
     el("p-status").value = project?.status || "วางแผน";
     el("p-start").value = project?.start_date || "";
     el("p-end").value = project?.end_date || "";
@@ -509,10 +623,10 @@ if (!session) {
       el("responsible-own-field").hidden = false;
       el("responsible-own-name").textContent = myStaff.full_name;
     }
-    renderOkrPicker((project?.okrs || []).map(okr => okr.id));
+    const selectedIds = (project?.okrs || []).map(okr => okr.id);
     el("project-link-list").innerHTML = "";
     (project?.links || []).forEach(link => addLinkRow("project-link-list", "project-link", link));
-    syncProjectKind();
+    syncProjectKind(selectedIds);
     el("project-form-card").hidden = false;
     el("project-form-card").scrollIntoView({ behavior:"smooth", block:"start" });
     el("p-name").focus({ preventScroll:true });
@@ -750,7 +864,8 @@ if (!session) {
     el("copy-source-year").innerHTML = '<option value="">— เลือกปีต้นทาง —</option>' + years.filter(row => row.year !== target).sort((a,b) => b.year.localeCompare(a.year, "th", {numeric:true})).map(row => `<option value="${esc(row.year)}">ปีการศึกษา ${esc(row.year)}</option>`).join("");
     await loadData();
   });
-  el("p-kind").addEventListener("change", syncProjectKind);
+  el("p-kind").addEventListener("change", () => syncProjectKind(selectedProjectOkrIds(), true));
+  el("p-parent").addEventListener("change", () => syncProjectKind(selectedProjectOkrIds(), true));
   el("p-responsible").addEventListener("change", updateResponsibleNote);
   el("o-mode").addEventListener("change", () => syncOkrMode(true));
   el("o-parent").addEventListener("change", () => { if (!editingOkrId) el("o-code").value = nextKrCode(el("o-parent").value); });
@@ -769,9 +884,13 @@ if (!session) {
 
   el("project-form").addEventListener("submit", async event => {
     event.preventDefault();
-    const kind = canEditAll ? el("p-kind").value : "กิจกรรม";
+    const kind = el("p-kind").value;
     const parentId = kind === "กิจกรรม" ? el("p-parent").value : null;
-    if (kind === "กิจกรรม" && !parentId) return toast("กิจกรรมต้องอยู่ใต้โครงการเสมอ — ถ้ายังไม่มีโครงการที่ใช่ ให้ฝ่ายวิชาการสร้างโครงการก่อน", true);
+    const kindGuard = projectKindChangeGuard(projects, editingProjectId, kind);
+    if (!kindGuard.ok) {
+      return toast(`โครงการนี้มีกิจกรรม ${kindGuard.childCount} รายการ กรุณาย้ายหรือลบกิจกรรมลูกก่อน`, true);
+    }
+    if (kind === "กิจกรรม" && !parentId) return toast("กิจกรรมต้องอยู่ใต้โครงการเสมอ — กรุณาเลือกโครงการแม่ หรือสร้างโครงการก่อน", true);
     const start = el("p-start").value;
     const end = el("p-end").value || null;
     if (end && end < start) return toast("วันสิ้นสุดต้องไม่ก่อนวันเริ่ม", true);
@@ -780,9 +899,36 @@ if (!session) {
     if ((planned != null && planned < 0) || (actual != null && actual < 0)) return toast("งบประมาณต้องไม่ติดลบ", true);
     let links;
     try { links = readLinks("project-link-list", "project-link"); } catch (error) { return toast(error.message, true); }
-    const selected = [...el("project-okr-pick").querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
+    const selected = selectedProjectOkrIds();
     const selectedRows = selected.map(id => okrs.find(row => row.id === id));
     if (selectedRows.some(row => !row?.parent_id)) return toast("เลือกได้เฉพาะ KR เท่านั้น", true);
+    if (kind === "กิจกรรม") {
+      const budgetGuard = activityBudgetGuard(projects, parentId, editingProjectId, planned);
+      if (!budgetGuard.ok && budgetGuard.reason === "missing-parent") {
+        return toast("ไม่พบโครงการแม่ในปีนี้ — กรุณาเลือกโครงการแม่ใหม่", true);
+      }
+      if (!budgetGuard.ok && budgetGuard.reason === "missing-parent-budget") {
+        return toast(`โครงการ “${budgetGuard.parent.name}” ยังไม่ได้ตั้งงบ — กรุณาตั้งงบโครงการแม่ก่อน หรือเว้นงบกิจกรรมนี้เป็น 0/ไม่กรอก`, true);
+      }
+      if (!budgetGuard.ok) {
+        return toast(`งบกิจกรรมรวมกันเกินงบโครงการ — โครงการ “${budgetGuard.parent.name}” ตั้งไว้ ${fmtMoney(budgetGuard.parent.budget_planned)} · กิจกรรมอื่นใช้ไปแล้ว ${fmtMoney(budgetGuard.otherPlanned)} จึงเหลือให้กิจกรรมนี้ได้ไม่เกิน ${fmtMoney(budgetGuard.maxAllowed)}`, true);
+      }
+      const krGuard = activityKrGuard(projects, parentId, selected);
+      if (!krGuard.ok) {
+        const codes = okrCodes(krGuard.invalidIds).join(", ");
+        return toast(`${codes} ไม่ได้อยู่ในโครงการ “${krGuard.parent?.name || "ไม่พบชื่อ"}” · ถ้ากิจกรรมนี้ทำเพื่อ ${codes} จริง ให้ฝ่ายวิชาการเพิ่ม KR ที่โครงการก่อน`, true);
+      }
+    } else if (editingProjectId) {
+      const budgetGuard = parentBudgetGuard(projects, editingProjectId, planned);
+      if (!budgetGuard.ok) {
+        return toast(`งบโครงการต้องไม่น้อยกว่างบที่กิจกรรมใต้โครงการจัดสรรไปแล้ว · ตอนนี้กิจกรรม ${budgetGuard.childCount} รายการใช้ไป ${fmtMoney(budgetGuard.childPlanned)} — ถ้าจะลดต่ำกว่านี้ ให้แก้งบกิจกรรมก่อน`, true);
+      }
+      const krGuard = parentKrGuard(projects, editingProjectId, selected);
+      if (!krGuard.ok) {
+        const detail = krGuard.affected.map(item => `${okrCodes([item.okrId])[0]}: ${item.projectNames.join(", ")}`).join("; ");
+        return toast(`เอา KR ออกจากโครงการนี้ไม่ได้ เพราะยังมีกิจกรรมผูกอยู่ — ${detail} · ถ้าจะเอาออก ให้แก้ที่กิจกรรมเหล่านั้นก่อน`, true);
+      }
+    }
     const responsibleOption = el("p-responsible").selectedOptions[0];
     const responsibleId = canEditAll ? (responsibleOption?.value || null) : myStaffId;
     const responsibleName = canEditAll ? (responsibleOption?.value ? (responsibleOption.dataset.name || responsibleOption.textContent.trim()) : null) : myStaff.full_name;
@@ -800,7 +946,7 @@ if (!session) {
       let projectId = editingProjectId;
       if (projectId) {
         const existing = projects.find(row => row.id === projectId);
-        if (!canEditProject(existing)) throw new Error("คุณแก้ได้เฉพาะกิจกรรมของตัวเอง");
+        if (!canEditProject(existing)) throw new Error("คุณแก้ได้เฉพาะโครงการหรือกิจกรรมของตัวเอง");
         const { error } = await sb.from("academic_projects").update(payload).eq("id", projectId);
         if (error) throw error;
       } else {
