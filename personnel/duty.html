@@ -10,11 +10,11 @@
 <style>
   :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
           --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
-          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; --blue-soft:#e8f0fb; }
+          --amber:#93690f; --amber-soft:#faf1dd; }
   * { box-sizing:border-box; }
   body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
-         margin:0; padding:16px; font-size:16px; line-height:1.55; }
-  .wrap { max-width:1200px; margin:0 auto; }
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
   header h1 { font-size:20px; font-weight:600; margin:4px 0; }
   header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
   header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
@@ -33,7 +33,7 @@
   .toolbar { display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
   .toolbar > div { flex:1 1 220px; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:14px; }
-  input[type="month"], select { width:100%; font-family:inherit; font-size:15px; padding:9px 10px;
+  input[type="month"], select { width:100%; font-family:inherit; font-size:16px; padding:9px 10px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
   button { font-family:inherit; font-size:14px; font-weight:600; padding:9px 12px;
            border:0; border-radius:8px; cursor:pointer; }
@@ -76,6 +76,10 @@
   .add-row { display:flex; gap:8px; align-items:center; }
   .add-row select { flex:1; }
   .swap-grid { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:end; }
+  .inline-swap { margin:6px 0 2px 16px; padding:10px; border-left:3px solid var(--teal);
+                 border-radius:0 8px 8px 0; background:var(--teal-soft); }
+  .holiday-row { margin-bottom:9px; padding:10px 13px; border:1px solid var(--line);
+                 border-radius:10px; background:var(--bg); color:var(--muted); font-size:14px; }
   #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
     padding:11px 18px; border-radius:10px; background:#1f2a2e; color:#fff; font-weight:600;
     opacity:0; pointer-events:none; transition:opacity .18s; z-index:60; }
@@ -131,16 +135,6 @@
       <div id="pattern-grid" class="matrix-scroll"></div>
     </div>
 
-    <div id="swap-card" class="card" hidden>
-      <div class="section-title">สลับเวร</div>
-      <div id="swap-label" class="field-note" style="margin-bottom:8px">—</div>
-      <div class="swap-grid">
-        <div><label for="swap-staff">เปลี่ยนเป็น</label><select id="swap-staff"></select></div>
-        <button id="btn-confirm-swap" class="primary">ยืนยันการสลับ</button>
-        <button id="btn-cancel-swap" class="ghost">ยกเลิก</button>
-      </div>
-    </div>
-
     <div class="card">
       <div class="section-title">ตารางจริงรายวัน — จัดกลุ่มตามงาน</div>
       <div id="days"></div>
@@ -182,6 +176,7 @@ if (session) {
     const today = toDateStr(bangkokNow());
     const THAI_DAY = { 1:"จันทร์", 2:"อังคาร", 3:"พุธ", 4:"พฤหัสบดี", 5:"ศุกร์" };
     let ctx, dutyTypes = [], pattern = [], range, monthSync = null, swapState = null;
+    let holidayNames = new Map(), openDays = new Set();
     let staffById = new Map(), typeByCode = new Map(), activeStaff = [];
     el("month").value = today.slice(0, 7);
 
@@ -278,15 +273,22 @@ if (session) {
     function renderDays() {
       const dates = eachDate(range.from, range.to).filter(date => {
         const schedule = ctx.schedule.get(isoWeekday(date));
-        return schedule?.is_working_day && !ctx.holidays.has(date);
+        return schedule?.is_working_day;
       });
       el("days").innerHTML = dates.map(date => {
         const d = new Date(date + "T00:00:00Z");
         const label = d.toLocaleDateString("th-TH", {
           weekday:"long", day:"numeric", month:"long", year:"numeric", timeZone:"UTC"
         });
+        if (ctx.holidays.has(date)) {
+          const name = holidayNames.get(date);
+          const nameText = name ? ` — ${esc(name)}` : "";
+          return `<div class="holiday-row">${esc(label)} · วันหยุด${nameText}` +
+            " · ไม่มีเวรและไม่นับเวลาทำงาน</div>";
+        }
         const total = (ctx.dutyRoster || []).filter(row => row.duty_date === date).length;
-        return `<details class="day${date === today ? " today" : ""}" ${date === today ? "open" : ""}>
+        const shouldOpen = date === today || openDays.has(date) || swapState?.date === date;
+        return `<details class="day${date === today ? " today" : ""}" data-date="${date}" ${shouldOpen ? "open" : ""}>
           <summary>${esc(label)} · ${total} รายการ${date === today ? " · วันนี้" : ""}</summary>
           ${dutyTypes.map(type => {
             const rows = rosterFor(date, type.code);
@@ -299,14 +301,23 @@ if (session) {
                 const staff = staffById.get(row.staff_id);
                 if (!staff) return "";
                 const status = dutyStatus(staff, date, type);
-                return `<div class="roster-row"><span class="name">${esc(staff.full_name)}${row.note
-                  ? `<span class="field-note" style="display:block;overflow-wrap:anywhere">${esc(row.note)}</span>`
-                  : ""}</span>
-                  ${status ? `<span class="status ${status.css}">${esc(status.text)}</span>` : ""}
-                  <button class="ghost small" data-swap data-date="${date}" data-duty-type="${esc(type.code)}"
-                    data-staff="${staff.id}">สลับ</button>
-                  <button class="danger small" data-remove-date="${date}" data-duty-type="${esc(type.code)}"
-                    data-staff="${staff.id}">ถอด</button></div>`;
+                const isSwapping = swapState?.date === date && swapState?.dutyType === type.code &&
+                  swapState?.oldStaffId === staff.id;
+                return `<div class="roster-entry"><div class="roster-row"><span class="name">${esc(staff.full_name)}${row.note
+                    ? `<span class="field-note" style="display:block;overflow-wrap:anywhere">${esc(row.note)}</span>`
+                    : ""}</span>
+                    ${status ? `<span class="status ${status.css}">${esc(status.text)}</span>` : ""}
+                    <button class="ghost small" data-swap data-date="${date}" data-duty-type="${esc(type.code)}"
+                      data-staff="${staff.id}">สลับ</button>
+                    <button class="danger small" data-remove-date="${date}" data-duty-type="${esc(type.code)}"
+                      data-staff="${staff.id}">ถอด</button></div>
+                  ${isSwapping ? `<div class="inline-swap"><div class="field-note" style="margin-bottom:6px">
+                      ${esc(date)} · ${esc(type.code)} · แทน ${esc(staff.full_name)}</div>
+                    <div class="swap-grid"><div><label for="swap-staff-inline">เปลี่ยนเป็น</label>
+                      <select id="swap-staff-inline" data-swap-staff>
+                        <option value="">— เลือกคนใหม่ —</option>${staffOptions(excluded)}</select></div>
+                      <button class="primary" data-confirm-swap>ยืนยันการสลับ</button>
+                      <button class="ghost" data-cancel-swap>ยกเลิก</button></div></div>` : ""}</div>`;
               }).join("") || '<span class="empty">ยังไม่มีคน</span>'}</div>
               ${type.active ? `<div class="add-row"><select data-day-select="${date}|${esc(type.code)}">
                 <option value="">— เลือกบุคลากร —</option>${staffOptions(excluded)}</select>
@@ -315,6 +326,12 @@ if (session) {
             </section>`;
           }).join("")}</details>`;
       }).join("") || '<div class="empty">เดือนนี้ไม่มีวันทำงานตามตาราง Jibble</div>';
+      el("days").querySelectorAll("details.day").forEach(details => {
+        details.addEventListener("toggle", () => {
+          if (details.open) openDays.add(details.dataset.date);
+          else openDays.delete(details.dataset.date);
+        });
+      });
     }
 
     async function loadData() {
@@ -322,10 +339,16 @@ if (session) {
       if (!range) return;
       el("days").innerHTML = '<div class="empty">กำลังโหลด…</div>';
       try {
-        const syncRes = await sb.from("duty_month_sync").select("*")
-          .eq("year_month", el("month").value).maybeSingle();
+        const [syncRes, holidayRes] = await Promise.all([
+          sb.from("duty_month_sync").select("*")
+            .eq("year_month", el("month").value).maybeSingle(),
+          sb.from("work_holidays").select("holiday_date,name")
+            .gte("holiday_date", range.from).lte("holiday_date", range.to)
+        ]);
         if (syncRes.error) throw new Error("ตรวจสถานะเดือนที่สร้างไม่สำเร็จ: " + syncRes.error.message);
+        if (holidayRes.error) throw new Error("โหลดชื่อวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
         monthSync = syncRes.data;
+        holidayNames = new Map((holidayRes.data || []).map(row => [row.holiday_date, row.name]));
         [ctx, pattern, dutyTypes] = await Promise.all([
           loadWorkContext(range.from, range.to), getDutyPattern(), getDutyTypes(true)
         ]);
@@ -348,7 +371,7 @@ if (session) {
     }
 
     el("month").addEventListener("change", () => {
-      swapState = null; el("swap-card").hidden = true; loadData();
+      swapState = null; openDays.clear(); loadData();
     });
     el("btn-generate").addEventListener("click", async () => {
       if (monthSync && !await window.crsAskConfirm({
@@ -413,6 +436,33 @@ if (session) {
     });
 
     el("days").addEventListener("click", async event => {
+      const cancelSwap = event.target.closest("[data-cancel-swap]");
+      if (cancelSwap) {
+        swapState = null;
+        renderDays();
+        return;
+      }
+      const confirmSwap = event.target.closest("[data-confirm-swap]");
+      if (confirmSwap) {
+        if (!swapState) return;
+        const newStaff = staffById.get(el("days").querySelector("[data-swap-staff]")?.value);
+        const type = typeByCode.get(swapState.dutyType);
+        if (!newStaff) return toast("กรุณาเลือกคนใหม่", true);
+        if (!await confirmWarnings(newStaff, type, swapState.date)) return;
+        confirmSwap.disabled = true;
+        try {
+          await saveDutyRosterEntry(swapState.date, swapState.dutyType, newStaff.id, session.user.id);
+          await removeDutyRosterEntry(swapState.date, swapState.dutyType, swapState.oldStaffId);
+          swapState = null;
+          await loadData();
+          toast("สลับเวรแล้ว");
+        } catch (error) {
+          toast(error.message || "สลับเวรไม่สำเร็จ", true);
+        } finally {
+          confirmSwap.disabled = false;
+        }
+        return;
+      }
       const add = event.target.closest("[data-add-date]");
       if (add) {
         const type = typeByCode.get(add.dataset.dutyType);
@@ -448,26 +498,10 @@ if (session) {
         const options = staffOptions(new Set(rows.map(row => row.staff_id)));
         if (!options) return toast("ไม่มีบุคลากรคนอื่นให้สลับ", true);
         swapState = { date:swap.dataset.date, dutyType:swap.dataset.dutyType, oldStaffId:swap.dataset.staff };
-        el("swap-label").textContent = `${swap.dataset.date} · ${swap.dataset.dutyType} · แทน ${staffById.get(swap.dataset.staff)?.full_name || "บุคลากร"}`;
-        el("swap-staff").innerHTML = '<option value="">— เลือกคนใหม่ —</option>' + options;
-        el("swap-card").hidden = false;
-        el("swap-card").scrollIntoView({ behavior:"smooth", block:"center" });
+        openDays.add(swap.dataset.date);
+        renderDays();
+        el("days").querySelector("[data-swap-staff]")?.focus({ preventScroll:true });
       }
-    });
-    el("btn-cancel-swap").addEventListener("click", () => { swapState = null; el("swap-card").hidden = true; });
-    el("btn-confirm-swap").addEventListener("click", async () => {
-      if (!swapState) return;
-      const newStaff = staffById.get(el("swap-staff").value);
-      const type = typeByCode.get(swapState.dutyType);
-      if (!newStaff) return toast("กรุณาเลือกคนใหม่", true);
-      if (!confirmWarnings(newStaff, type, swapState.date)) return;
-      const button = el("btn-confirm-swap"); button.disabled = true;
-      try {
-        await saveDutyRosterEntry(swapState.date, swapState.dutyType, newStaff.id, session.user.id);
-        await removeDutyRosterEntry(swapState.date, swapState.dutyType, swapState.oldStaffId);
-        swapState = null; el("swap-card").hidden = true; await loadData(); toast("สลับเวรแล้ว");
-      } catch (error) { toast(error.message || "สลับเวรไม่สำเร็จ", true); }
-      finally { button.disabled = false; }
     });
     await loadData();
   }

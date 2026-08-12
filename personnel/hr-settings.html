@@ -46,6 +46,8 @@
   input:disabled { background:#f4f6f6; color:var(--muted); }
   .field { margin-bottom:14px; } .field:last-child { margin-bottom:0; }
   .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
+  .schedule-sync.stale { color:var(--amber); background:var(--amber-soft); padding:8px 10px;
+                         border-radius:8px; margin-top:8px; }
   .row2 { display:flex; gap:12px; } .row2 > * { flex:1; }
   button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
            border:none; border-radius:8px; cursor:pointer; }
@@ -127,6 +129,7 @@
     </div>
     <div class="field">
       <div class="locked"><span>เวลาเข้างาน</span><b id="v-start">—</b></div>
+      <div id="schedule-sync-status" class="field-note schedule-sync" hidden></div>
     </div>
     <div class="field">
       <div class="locked"><span>วันทำงาน</span><b id="v-days">—</b></div>
@@ -309,6 +312,24 @@ if (session) {
     el("v-days").textContent = working.length
       ? THAI_DAY[working[0].weekday] + "–" + THAI_DAY[working[working.length-1].weekday] + ` (${working.length} วัน)`
       : "ยังไม่มีข้อมูล";
+    const scheduleSyncStatus = el("schedule-sync-status");
+    const syncTimes = sched.map(row => new Date(row.synced_at).getTime()).filter(Number.isFinite);
+    if (!sched.length || !syncTimes.length) {
+      scheduleSyncStatus.hidden = true;
+      scheduleSyncStatus.textContent = "";
+    } else {
+      const latestSync = Math.max(...syncTimes);
+      const isStale = Date.now() - latestSync > 30 * 24 * 60 * 60 * 1000;
+      const syncedLabel = new Date(latestSync).toLocaleString("th-TH", {
+        dateStyle:"medium", timeStyle:"short"
+      });
+      scheduleSyncStatus.hidden = false;
+      scheduleSyncStatus.className = "field-note schedule-sync" + (isStale ? " stale" : "");
+      scheduleSyncStatus.textContent = isStale
+        ? `ดึงจาก Jibble เมื่อ ${syncedLabel} · ข้อมูลตารางงานค้างมานาน ` +
+          "ถ้าเพิ่งแก้ใน Jibble ให้ไปกดดึงรายชื่อใหม่ที่ทะเบียนบุคลากร"
+        : `ดึงจาก Jibble เมื่อ ${syncedLabel}`;
+    }
     el("v-final").textContent = settings.dayFinalTime + " น.";
     el("grace").value = settings.lateGraceMinutes;
     el("late-permission-until").value = permitSettingRes.data?.value

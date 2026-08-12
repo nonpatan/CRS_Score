@@ -188,7 +188,7 @@ if (session) {
     offsite: "ปฏิบัติหน้าที่นอกสถานที่", absent: "ขาด", pending: "รอครบวัน"
   };
 
-  function renderToday(ctx, today, syncWarning = "") {
+  function renderToday(ctx, today, holidayName = "", syncWarning = "") {
     const active = ctx.staff.filter(s => s.is_active);
     const rows = active.map(staff => computeDayStatus(staff, today, ctx));
     const counts = { present: 0, late: 0, leave: 0, offsite: 0, absent: 0, pending: 0 };
@@ -224,7 +224,9 @@ if (session) {
     const note = el("today-status");
     note.className = "today-note";
     if (isHoliday) {
-      note.textContent = "วันนี้เป็นวันหยุด จึงไม่นับสถานะการทำงาน";
+      note.textContent = holidayName
+        ? `วันนี้เป็นวันหยุด — ${holidayName} · จึงไม่นับสถานะการทำงาน`
+        : "วันนี้เป็นวันหยุด จึงไม่นับสถานะการทำงาน";
       note.classList.add("holiday");
     } else if (syncWarning) {
       note.textContent = `แสดงข้อมูลที่ซิงก์ไว้ล่าสุด · ${syncWarning}`;
@@ -243,23 +245,8 @@ if (session) {
     });
     el("today-date").textContent = dateLabel;
 
-    const { data: allHolidays } = await sb.from("work_holidays").select("holiday_date");
     const canSync = canManageHr;
     let ctx = await loadWorkContext(today, today);
-    const scheduleRows = [...ctx.schedule.values()];
-    const active = ctx.staff.filter(s => s.is_active);
-
-    el("n-staff").textContent = active.length;
-    el("n-exempt").textContent = active.filter(s => s.exempt).length;
-    el("n-holiday").textContent = (allHolidays || []).length;
-    el("n-workday").textContent = scheduleRows.filter(r => r.is_working_day).length;
-
-    if (ctx.staff.length === 0 || scheduleRows.length === 0) {
-      el("setup-warn").innerHTML =
-        '<div class="banner warn"><b>ยังไม่ได้ดึงข้อมูลจาก Jibble</b><br>' +
-        'ไปที่ <a href="staff.html">ทะเบียนบุคลากร</a> แล้วกด “ดึงรายชื่อจาก Jibble” ก่อน ' +
-        'ระบบจึงจะรู้จักรายชื่อ วันทำงาน และวันหยุด</div>';
-    }
 
     const sched = ctx.schedule.get(isoWeekday(today));
     const isWorkday = !!sched?.is_working_day && !ctx.holidays.has(today);
@@ -273,7 +260,27 @@ if (session) {
         syncWarning = "อัปเดต Jibble ไม่สำเร็จ: " + e.message;
       }
     }
-    renderToday(ctx, today, syncWarning);
+
+    // อ่านหลังซิงก์ เพื่อให้ชื่อวันหยุดที่เพิ่งดึงมาแสดงได้ในการเปิดหน้าครั้งเดียว
+    const { data: allHolidays, error: holidayError } = await sb.from("work_holidays")
+      .select("holiday_date,name");
+    if (holidayError) throw new Error("โหลดปฏิทินวันหยุดไม่สำเร็จ: " + holidayError.message);
+    const scheduleRows = [...ctx.schedule.values()];
+    const active = ctx.staff.filter(s => s.is_active);
+    const todayHoliday = (allHolidays || []).find(row => row.holiday_date === today);
+
+    el("n-staff").textContent = active.length;
+    el("n-exempt").textContent = active.filter(s => s.exempt).length;
+    el("n-holiday").textContent = (allHolidays || []).length;
+    el("n-workday").textContent = scheduleRows.filter(r => r.is_working_day).length;
+
+    if (ctx.staff.length === 0 || scheduleRows.length === 0) {
+      el("setup-warn").innerHTML =
+        '<div class="banner warn"><b>ยังไม่ได้ดึงข้อมูลจาก Jibble</b><br>' +
+        'ไปที่ <a href="staff.html">ทะเบียนบุคลากร</a> แล้วกด “ดึงรายชื่อจาก Jibble” ก่อน ' +
+        'ระบบจึงจะรู้จักรายชื่อ วันทำงาน และวันหยุด</div>';
+    }
+    renderToday(ctx, today, todayHoliday?.name || "", syncWarning);
 
     const log = await getLastSyncLog();
     el("sync-status").textContent = log
