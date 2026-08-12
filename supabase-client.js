@@ -1592,6 +1592,236 @@ export function projectResponsibleName(project) {
   return project?.responsible_staff?.full_name || project?.responsible_name || "";
 }
 
+// ============================================================
+// อนุมัติโครงการ/กิจกรรม — ตรรกะกลางสำหรับทุกหน้า
+// ------------------------------------------------------------
+// ป้ายสถานะและการเรียก RPC ต้องอยู่ไฟล์นี้ที่เดียว เพื่อไม่ให้หน้าโครงการ หน้าอนุมัติ
+// งานของฉัน และ dashboard ตีความสถานะชุดเดียวกันคนละแบบ
+// ============================================================
+
+export async function isProjectApprover() {
+  const { data, error } = await sb.rpc("is_project_approver");
+  if (error) return false;
+  return data === true;
+}
+
+function approvalHistoryOf(project) {
+  const rows = project?.approval_history || project?.approvals || [];
+  return Array.isArray(rows) ? rows : [];
+}
+
+function latestApprovalAction(project, action) {
+  return approvalHistoryOf(project)
+    .filter(row => row?.action === action)
+    .sort((a, b) => String(b?.created_at || "").localeCompare(String(a?.created_at || "")))[0] || null;
+}
+
+function formatApprovalDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}
+
+// คืน tone ที่ใส่ต่อท้ายคลาส chip เดิมได้ทันที: ค่าว่าง = ผ่าน, warn = ยังต้องทำต่อ,
+// fail = ตัดสินไม่อนุมัติแล้ว (ตรงกับความหมายสีใน UI-STANDARD)
+export function projectApprovalBadge(project) {
+  const status = project?.approval_status || "ร่าง";
+  const wasApproved = Boolean(project?.approved_at);
+
+  if (status === "ร่าง" && !wasApproved) {
+    return { label: "ร่าง — ยังไม่ได้ส่ง", tone: "warn", note: "" };
+  }
+  if (status === "ร่าง" && wasApproved) {
+    const revision = latestApprovalAction(project, "ขอแก้ไขแผน");
+    return {
+      label: "อนุมัติแล้ว · กำลังแก้ไขแผน",
+      tone: "warn",
+      note: revision?.note || project?.revision_reason || ""
+    };
+  }
+  if (status === "รออนุมัติ" && !wasApproved) {
+    const submitted = formatApprovalDate(project?.submitted_at);
+    return {
+      label: "รออนุมัติ",
+      tone: "warn",
+      note: submitted ? `ส่งเมื่อ ${submitted}` : ""
+    };
+  }
+  if (status === "รออนุมัติ" && wasApproved) {
+    return { label: "อนุมัติแล้ว · ขอแก้ไข รอพิจารณา", tone: "warn", note: "" };
+  }
+  if (status === "อนุมัติ" && wasApproved) {
+    const approved = latestApprovalAction(project, "อนุมัติ");
+    const actor = approved?.acted_by_name || project?.approved_by_name || "ผู้อนุมัติ";
+    const approvedAt = formatApprovalDate(project?.approved_at);
+    return {
+      label: "อนุมัติแล้ว",
+      tone: "",
+      note: approvedAt ? `อนุมัติโดย ${actor} เมื่อ ${approvedAt}` : `อนุมัติโดย ${actor}`
+    };
+  }
+  if (status === "ส่งกลับให้แก้") {
+    return { label: "ส่งกลับให้แก้", tone: "warn", note: project?.approval_note || "" };
+  }
+  if (status === "ไม่อนุมัติ" && !wasApproved) {
+    return { label: "ไม่อนุมัติ", tone: "fail", note: project?.approval_note || "" };
+  }
+
+  // ข้อมูลที่ไม่ตรง constraint/ตารางความจริงให้แสดงค่าจริงแบบเตือน แทนการทำเหมือนอนุมัติแล้ว
+  return { label: status, tone: "warn", note: project?.approval_note || "" };
+}
+
+async function enrichApprovalProjects(projects) {
+  const rows = projects || [];
+  if (rows.length === 0) return [];
+
+  const projectIds = rows.map(row => row.id);
+  const parentIds = [...new Set(rows.map(row => row.parent_id).filter(Boolean))];
+  const staffIds = [...new Set(rows.map(row => row.responsible_staff_id).filter(Boolean))];
+  const [parentsRes, staffRes, historyRes, linksRes] = await Promise.all([
+    parentIds.length
+      ? sb.from("academic_projects").select("id,name").in("id", parentIds)
+      : Promise.resolve({ data: [], error: null }),
+    staffIds.length
+      ? sb.from("staff").select("id,full_name").in("id", staffIds)
+      : Promise.resolve({ data: [], error: null }),
+    sb.from("academic_project_approvals")
+      .select("project_id,action,note,acted_by,acted_by_name,created_at")
+      .in("project_id", projectIds)
+      .order("created_at", { ascending: false }),
+    sb.from("academic_project_links")
+      .select("*")
+      .in("project_id", projectIds)
+      .order("sort_order")
+  ]);
+
+  for (const res of [parentsRes, staffRes, historyRes, linksRes]) {
+    if (res.error) throw new Error("โหลดรายละเอียดการอนุมัติโครงการไม่สำเร็จ: " + res.error.message);
+  }
+
+  const parentById = new Map((parentsRes.data || []).map(row => [row.id, row]));
+  const staffById = new Map((staffRes.data || []).map(row => [row.id, row]));
+  const historyByProject = new Map();
+  for (const item of (historyRes.data || [])) {
+    if (!historyByProject.has(item.project_id)) historyByProject.set(item.project_id, []);
+    historyByProject.get(item.project_id).push(item);
+  }
+  const linksByProject = new Map();
+  for (const link of (linksRes.data || [])) {
+    if (!linksByProject.has(link.project_id)) linksByProject.set(link.project_id, []);
+    linksByProject.get(link.project_id).push(link);
+  }
+
+  return rows.map(project => {
+    const responsibleStaff = staffById.get(project.responsible_staff_id) || null;
+    const parent = parentById.get(project.parent_id) || null;
+    return {
+      ...project,
+      responsible_staff: responsibleStaff,
+      responsible_display_name: projectResponsibleName({
+        ...project,
+        responsible_staff: responsibleStaff
+      }),
+      parent,
+      parent_name: parent?.name || "",
+      approval_history: historyByProject.get(project.id) || [],
+      links: linksByProject.get(project.id) || []
+    };
+  });
+}
+
+export async function loadMyProjects(year, staffId) {
+  if (!year || !staffId) return [];
+  const { data, error } = await sb.from("academic_projects")
+    .select("*")
+    .eq("year", year)
+    .eq("responsible_staff_id", staffId)
+    .order("start_date")
+    .order("name");
+  if (error) throw new Error("โหลดโครงการ/กิจกรรมของฉันไม่สำเร็จ: " + error.message);
+  return enrichApprovalProjects(data || []);
+}
+
+export async function loadPendingApprovals(year) {
+  if (!year) return [];
+  const { data, error } = await sb.from("academic_projects")
+    .select("*")
+    .eq("year", year)
+    .eq("approval_status", "รออนุมัติ")
+    .order("submitted_at")
+    .order("name");
+  if (error) throw new Error("โหลดคิวอนุมัติโครงการ/กิจกรรมไม่สำเร็จ: " + error.message);
+  return enrichApprovalProjects(data || []);
+}
+
+export async function loadProjectApprovalHistory(projectId) {
+  if (!projectId) return [];
+  const { data, error } = await sb.from("academic_project_approvals")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error("โหลดประวัติการอนุมัติโครงการไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+async function callProjectApprovalRpc(functionName, args, errorLabel) {
+  const { data, error } = await sb.rpc(functionName, args);
+  if (error) throw new Error(errorLabel + ": " + error.message);
+  return data;
+}
+
+export async function submitProjectForApproval(id) {
+  return callProjectApprovalRpc(
+    "submit_project_for_approval", { p_project_id: id }, "ส่งขออนุมัติโครงการไม่สำเร็จ"
+  );
+}
+
+export async function withdrawProjectApproval(id) {
+  return callProjectApprovalRpc(
+    "withdraw_project_approval", { p_project_id: id }, "ถอนคำขออนุมัติโครงการไม่สำเร็จ"
+  );
+}
+
+export async function requestProjectRevision(id, reason) {
+  return callProjectApprovalRpc(
+    "request_project_revision",
+    { p_project_id: id, p_reason: reason },
+    "ขอแก้ไขแผนโครงการไม่สำเร็จ"
+  );
+}
+
+export async function decideProjectApproval(id, decision, note) {
+  return callProjectApprovalRpc(
+    "decide_project_approval",
+    { p_project_id: id, p_decision: decision, p_note: note || null },
+    "บันทึกผลการอนุมัติโครงการไม่สำเร็จ"
+  );
+}
+
+export async function reopenRejectedProject(id, reason) {
+  return callProjectApprovalRpc(
+    "reopen_rejected_project",
+    { p_project_id: id, p_reason: reason },
+    "ปลดล็อกรายการที่ไม่อนุมัติไม่สำเร็จ"
+  );
+}
+
+export async function reportProjectProgress(id, status, budgetActual) {
+  return callProjectApprovalRpc(
+    "report_project_progress",
+    {
+      p_project_id: id,
+      p_status: status,
+      p_budget_actual: budgetActual === "" || budgetActual == null ? null : budgetActual
+    },
+    "รายงานผลโครงการไม่สำเร็จ"
+  );
+}
+
 export async function loadAcademicProjects(year) {
   if (!year) return [];
   const { data: projects, error: projectError } = await sb.from("academic_projects")
@@ -1655,12 +1885,25 @@ export async function loadAcademicProjects(year) {
   });
 }
 
-// คำนวณล้วน — ช่วงโครงการคาบเกี่ยวเดือน และไม่แสดงรายการที่ยกเลิก
-export function filterProjectsInMonth(rows, yearMonth) {
-  if (!/^\d{4}-\d{2}$/.test(String(yearMonth || ""))) return [];
+function projectMonthRange(yearMonth) {
+  if (!/^\d{4}-\d{2}$/.test(String(yearMonth || ""))) return null;
   const [year, month] = yearMonth.split("-").map(Number);
-  const monthStart = `${yearMonth}-01`;
-  const monthEnd = toDateStr(new Date(Date.UTC(year, month, 0)));
+  return {
+    start: `${yearMonth}-01`,
+    end: toDateStr(new Date(Date.UTC(year, month, 0)))
+  };
+}
+
+function projectOverlapsMonth(project, range) {
+  if (!range || !project?.start_date) return false;
+  const endDate = project.end_date || project.start_date;
+  return project.start_date <= range.end && endDate >= range.start;
+}
+
+// คำนวณล้วน — ช่วงโครงการคาบเกี่ยวเดือน ผ่านการอนุมัติแล้ว และไม่ถูกยกเลิก
+export function filterProjectsInMonth(rows, yearMonth) {
+  const range = projectMonthRange(yearMonth);
+  if (!range) return [];
   const statusOrder = new Map([
     ["กำลังดำเนินการ", 0],
     ["วางแผน", 1],
@@ -1668,14 +1911,23 @@ export function filterProjectsInMonth(rows, yearMonth) {
   ]);
 
   return (rows || []).filter(project => {
-    if (project.status === "ยกเลิก" || !project.start_date) return false;
-    const endDate = project.end_date || project.start_date;
-    return project.start_date <= monthEnd && endDate >= monthStart;
+    if (project.status === "ยกเลิก" || !project.approved_at) return false;
+    return projectOverlapsMonth(project, range);
   }).sort((a, b) =>
     (statusOrder.get(a.status) ?? 99) - (statusOrder.get(b.status) ?? 99) ||
     String(a.start_date).localeCompare(String(b.start_date)) ||
     String(a.name || "").localeCompare(String(b.name || ""), "th")
   );
+}
+
+export function countPendingProjectsInMonth(rows, yearMonth) {
+  const range = projectMonthRange(yearMonth);
+  if (!range) return 0;
+  return (rows || []).filter(project =>
+    project?.approval_status === "รออนุมัติ" &&
+    project?.status !== "ยกเลิก" &&
+    projectOverlapsMonth(project, range)
+  ).length;
 }
 
 // ---------- OKR: สูตรล้วน (ห้ามยิง sb ในบล็อกนี้) ----------
@@ -1971,6 +2223,7 @@ export function suggestOkrValue(kr, ctx) {
     if (!range?.start || !range?.end) return { value: null, explain: "" };
     const matched = (ctx?.projects || []).filter(project =>
       project?.status === "เสร็จสิ้น" &&
+      project?.approved_at &&
       project.start_date >= range.start && project.start_date <= range.end &&
       projectOkrIds(project).includes(kr.id)
     );
@@ -1978,7 +2231,7 @@ export function suggestOkrValue(kr, ctx) {
     const activityCount = matched.filter(row => row.kind === "กิจกรรม").length;
     return {
       value: matched.length,
-      explain: `นับจาก ${projectCount} โครงการ และ ${activityCount} กิจกรรมที่เสร็จสิ้นในช่วงปีการศึกษา`
+      explain: `นับเฉพาะที่ผ่านการอนุมัติ: ${projectCount} โครงการ และ ${activityCount} กิจกรรมที่เสร็จสิ้นในช่วงปีการศึกษา`
     };
   }
   if (kr?.auto_source === "จำนวนนักเรียน") {

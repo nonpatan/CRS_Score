@@ -85,6 +85,13 @@
   .field-duty-row { padding:13px 0; border-bottom:1px solid var(--line); }
   .field-duty-row:last-child { border-bottom:none; }
   .field-duty-row b { display:block; }
+  .project-status { display:inline-flex; margin-top:6px; padding:2px 8px; border-radius:99px;
+                    background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; }
+  .project-status.warn { background:var(--amber-soft); color:var(--amber); }
+  .project-status.fail { background:var(--danger-soft); color:var(--danger); }
+  .project-note { margin-top:7px; padding:8px 10px; border-radius:8px;
+                  background:var(--amber-soft); color:var(--amber); font-size:13px; }
+  .project-note.fail { background:var(--danger-soft); color:var(--danger); }
   .report-entry { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:start; margin-top:9px; }
   .report-entry button { width:auto; white-space:nowrap; }
   .report-status { min-height:20px; color:var(--muted); font-size:13px; margin-top:4px; }
@@ -112,7 +119,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260809-3"></script>
+    <script src="../app-shell.js?v=20260812-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -134,6 +141,11 @@
         ก่อนส่งลิงก์ โปรดตั้งสิทธิ์แชร์ไฟล์ใน Google Drive ให้ฝ่ายบุคคลเปิดดูได้
       </div>
       <div id="my-field-duty-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card" id="my-project-card">
+      <div class="section-title">โครงการ/กิจกรรมของฉัน</div>
+      <div id="my-project-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
     <div class="card">
@@ -171,7 +183,8 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260811-2";
+         loadMyProjects, projectApprovalBadge,
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260812-2";
 
 const session = await requireAuth();
 if (session) {
@@ -340,6 +353,57 @@ if (session) {
         }).join("") : '<div class="muted-empty">ยังไม่มีรายการออกปฏิบัติหน้าที่หรืออบรมของคุณ</div>';
       } catch {
         box.innerHTML = '<div class="banner warn">โหลดรายการออกปฏิบัติหน้าที่ไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+      }
+    }
+
+    async function renderMyProjects(loadProjects = loadMyProjects) {
+      const box = el("my-project-list");
+      try {
+        const year = academicYearOf(today, years);
+        if (!year) {
+          box.innerHTML = '<div class="muted-empty">ยังไม่ได้กำหนดปีการศึกษาที่ครอบคลุมวันนี้</div>';
+          return;
+        }
+        const rows = await loadProjects(year, me.id);
+        const actionRank = project => {
+          if (project.approval_status === "ส่งกลับให้แก้") return 0;
+          if (project.approval_status === "ร่าง" && !project.approved_at) return 1;
+          if (project.approval_status === "รออนุมัติ") return 2;
+          if (project.approved_at) return 3;
+          if (project.approval_status === "ไม่อนุมัติ") return 4;
+          return 99;
+        };
+        const ordered = [...rows].sort((a, b) =>
+          actionRank(a) - actionRank(b) ||
+          String(a.name || "").localeCompare(String(b.name || ""), "th")
+        );
+        box.innerHTML = ordered.length ? ordered.map(project => {
+          const badge = projectApprovalBadge(project);
+          const end = project.end_date || project.start_date;
+          const formatDate = value => value ? new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+            day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+          }) : "—";
+          const range = end === project.start_date
+            ? formatDate(project.start_date)
+            : `${formatDate(project.start_date)} – ${formatDate(end)}`;
+          const parent = project.kind === "กิจกรรม" && project.parent_name
+            ? `<div class="my-duty-meta">โครงการแม่: ${escapeHtml(project.parent_name)}</div>` : "";
+          const showDecisionReason = ["ส่งกลับให้แก้", "ไม่อนุมัติ"].includes(project.approval_status);
+          const reason = showDecisionReason && badge.note
+            ? `<div class="project-note ${badge.tone === "fail" ? "fail" : ""}"><b>เหตุผลจากผู้อนุมัติ:</b> ${escapeHtml(badge.note)}</div>` : "";
+          return `<div class="my-duty-row">
+            <b>${escapeHtml(project.name)}</b>
+            ${parent}
+            <div class="my-duty-meta">${escapeHtml(range)}</div>
+            <span class="project-status ${escapeHtml(badge.tone)}">${escapeHtml(badge.label)}</span>
+            ${reason}
+            <div class="field-note" style="margin-top:7px"><a class="report-link" href="../academic/projects.html">ไปแก้ไข</a></div>
+          </div>`;
+        }).join("")
+          : '<div class="muted-empty">ยังไม่มีโครงการ/กิจกรรมที่คุณรับผิดชอบในปีการศึกษานี้</div>';
+      } catch {
+        // การ์ดนี้เป็นข้อมูลข้ามฝ่าย ต้องล้มเฉพาะตัวเอง ไม่ขวางข้อมูลเวลาทำงานที่ครูใช้ทุกวัน
+        box.innerHTML = '<div class="banner warn">โหลดโครงการ/กิจกรรมของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่ หรือไปที่หน้าโครงการ/กิจกรรม</div>';
       }
     }
 
@@ -643,6 +707,7 @@ if (session) {
     await renderMyCoverage();
     await renderMyDuties();
     await renderMyFieldDuties();
+    await renderMyProjects();
     await renderPermitCard();
     await renderMonth();
     await renderYear();

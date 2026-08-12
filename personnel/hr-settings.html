@@ -116,7 +116,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260809-3"></script>
+    <script src="../app-shell.js?v=20260812-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -253,7 +253,7 @@
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getAcademicYears, getLeaveTypes, getLeaveQuotas,
-         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260811-2";
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260812-2";
 
 const session = await requireAuth();
 if (session) {
@@ -540,6 +540,11 @@ if (session) {
                 <input type="checkbox" data-position-active${position.active ? " checked" : ""}>
                 ใช้งานอยู่
               </label>
+              <label class="check-label" title="${isAdmin ? "" : "แก้ธงนี้ได้เฉพาะผู้ดูแลระบบ"}">
+                <input type="checkbox" data-position-approver${position.is_approver ? " checked" : ""}
+                       ${isAdmin ? "" : "disabled"}>
+                อนุมัติโครงการ/กิจกรรมได้
+              </label>
               <span class="usage">${count ? `${count} คนถืออยู่` : "ยังไม่มีคนถือ"}</span>
               <button class="ghost small" type="button" data-save-position>บันทึก</button>
               ${isAdmin
@@ -576,11 +581,13 @@ if (session) {
     const row = event.target.closest("[data-position-row]");
     if (!row) return;
     const original = row.dataset.original;
+    const current = positions.find(position => position.code === original);
 
     if (event.target.closest("[data-save-position]")) {
       const code = row.querySelector("[data-position-name]").value.trim();
       const sortOrder = validSortOrder(row.querySelector("[data-position-order]").value);
       const active = row.querySelector("[data-position-active]").checked;
+      const isApprover = row.querySelector("[data-position-approver]").checked;
       if (!code) return toast("ชื่อตำแหน่งห้ามว่าง", true);
       if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
       const { error } = await sb.from("staff_positions")
@@ -588,6 +595,17 @@ if (session) {
         .eq("code", original);
       if (error?.code === "23505") return toast("มีตำแหน่งชื่อนี้อยู่แล้ว", true);
       if (error) return toast("บันทึกตำแหน่งไม่สำเร็จ กรุณาลองใหม่", true);
+      if (isAdmin && isApprover !== !!current?.is_approver) {
+        const { error: approverError } = await sb.rpc("set_position_approver", {
+          p_code: code,
+          p_is_approver: isApprover
+        });
+        if (approverError) {
+          toast("บันทึกข้อมูลตำแหน่งแล้ว แต่บันทึกสิทธิ์อนุมัติไม่สำเร็จ กรุณาลองใหม่", true);
+          await loadPositions();
+          return;
+        }
+      }
       toast("บันทึกตำแหน่งแล้ว");
       await loadPositions();
       return;

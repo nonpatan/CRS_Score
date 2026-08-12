@@ -239,6 +239,7 @@
         <article class="panel">
           <div class="panel-head"><h2 class="panel-title"><span class="symbol">◆</span>โครงการ/กิจกรรมเดือนนี้</h2><a class="panel-link" href="academic/projects.html">ดูทั้งหมด</a></div>
           <div class="dashboard-list" id="project-list"><div class="load-note">กำลังโหลดโครงการ…</div></div>
+          <div class="panel-footer" id="project-pending" hidden></div>
           <div class="panel-footer"><span id="project-footer">กำลังสรุปงบประมาณ…</span><a class="panel-link" href="academic/projects.html">จัดการโครงการ</a></div>
         </article>
       </section>
@@ -260,9 +261,9 @@
     loadDailyAttendanceToday, summarizeDailyAttendance,
     loadTodayStaffSummary,
     loadAcademicCalendar, pickCalendarUpcoming,
-    loadAcademicProjects, filterProjectsInMonth, projectResponsibleName,
+    loadAcademicProjects, filterProjectsInMonth, countPendingProjectsInMonth, projectResponsibleName,
     bangkokNow, toDateStr
-  } from "./supabase-client.js?v=20260811-2";
+  } from "./supabase-client.js?v=20260812-2";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayNote = document.getElementById("student-today-note");
@@ -273,6 +274,7 @@
   const calendarList = document.getElementById("calendar-list");
   const calendarFooter = document.getElementById("calendar-footer");
   const projectList = document.getElementById("project-list");
+  const projectPending = document.getElementById("project-pending");
   const projectFooter = document.getElementById("project-footer");
   const yearChip = document.getElementById("year-chip");
 
@@ -397,7 +399,9 @@
 
   function renderProjectPanel(result) {
     try {
-      const rows = resultValue(result);
+      const { rows, pendingCount } = resultValue(result);
+      projectPending.hidden = pendingCount === 0;
+      projectPending.textContent = pendingCount > 0 ? `มี ${pendingCount} รายการรออนุมัติ` : "";
       const budget = rows.reduce((sum, row) => sum + Number(row.budget_planned || 0), 0);
       projectFooter.textContent = `เดือนนี้ ${rows.length} รายการ · งบตั้งไว้รวม ${formatMoney(budget)}`;
       if (!rows.length) {
@@ -422,6 +426,8 @@
         </div>`;
       }).join("");
     } catch (error) {
+      projectPending.hidden = true;
+      projectPending.textContent = "";
       projectFooter.textContent = "อัปเดตโครงการไม่สำเร็จ";
       projectList.innerHTML = `<div class="empty" style="color:var(--danger)">${escapeHtml(errorMessage(error))}</div>`;
     }
@@ -560,9 +566,12 @@
       const byId = new Map(allProjects.map(row => [row.id, row]));
       const parentIds = new Set(allProjects.map(row => row.parent_id).filter(Boolean));
       monthlyProjectsResult = {
-        value: filterProjectsInMonth(allProjects, yearMonth)
-          .filter(row => row.kind === "กิจกรรม" || !parentIds.has(row.id))
-          .map(row => ({ ...row, parent_name:byId.get(row.parent_id)?.name || "" }))
+        value: {
+          rows: filterProjectsInMonth(allProjects, yearMonth)
+            .filter(row => row.kind === "กิจกรรม" || !parentIds.has(row.id))
+            .map(row => ({ ...row, parent_name:byId.get(row.parent_id)?.name || "" })),
+          pendingCount: countPendingProjectsInMonth(allProjects, yearMonth)
+        }
       };
     } catch (error) {
       monthlyProjectsResult = { error };
