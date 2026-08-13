@@ -35,6 +35,7 @@
   input:focus, select:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
   .field { margin-bottom:14px; } .field:last-child { margin-bottom:0; }
   .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
+  #quota-hint { white-space:pre-line; }
   .row2 { display:flex; gap:12px; } .row2 > * { flex:1; }
   button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
            border:none; border-radius:8px; cursor:pointer; }
@@ -52,6 +53,11 @@
   .leave-row .info { flex:1; min-width:0; }
   .leave-row .who { font-weight:600; }
   .leave-row .meta { color:var(--muted); font-size:13.5px; }
+  .leave-row.just-saved { animation:just-saved-flash 3s ease-out 1; }
+  @keyframes just-saved-flash {
+    from { background:var(--teal-soft); }
+    to { background:transparent; }
+  }
   .chip { font-size:12px; font-weight:600; padding:2px 9px; border-radius:99px;
           background:var(--teal-soft); color:var(--teal); }
   .chip.half { background:var(--amber-soft); color:var(--amber); }
@@ -165,6 +171,7 @@ if (session) {
   } else {
   let staffList = [], leaves = [], years = [];
   let leaveCtxCache = null;   // { year, from, to, ctx }
+  let justSavedId = null;
 
   if (!canEdit) {
     el("gate").style.display = "";
@@ -210,38 +217,82 @@ if (session) {
   }
 
   // ---------- เตือนโควตาคงเหลือ (เตือนเฉย ๆ ไม่บล็อก — ดุลยพินิจอยู่ที่โรงเรียน) ----------
+  const fmtOverlapDate = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+  });
+
+  function overlapWarning(staffId, start, end) {
+    if (!staffId || !start || !end) return "";
+    const overlaps = leaves.filter(l =>
+      l.staff_id === staffId && l.start_date <= end && start <= l.end_date);
+    if (!overlaps.length) return "";
+    const shown = overlaps.slice(0, 3).map(l => {
+      const range = l.start_date === l.end_date
+        ? fmtOverlapDate(l.start_date)
+        : `${fmtOverlapDate(l.start_date)}–${fmtOverlapDate(l.end_date)}`;
+      return `${l.leave_type} ${range}`;
+    }).join(" · ");
+    const more = overlaps.length > 3 ? ` · และอีก ${overlaps.length - 3} ใบ` : "";
+    return `⚠ ครูคนนี้มีใบลาคร่อมช่วงนี้อยู่แล้ว: ${shown}${more} — ถ้าต้องการแก้ใบเดิม ให้ลบใบเก่าก่อน`;
+  }
+
   async function updateQuotaHint() {
     const staffId = el("f-staff").value;
     const type = el("f-type").value;
+    const portion = el("f-portion").value;
     const start = el("f-start").value;
-    el("quota-hint").textContent = "";
+    const end = portion === "full" ? (el("f-end").value || start) : start;
+    const overlap = overlapWarning(staffId, start, end);
+    el("quota-hint").textContent = overlap;
     if (!staffId || !type || !start || years.length === 0) return;
 
     const year = academicYearOf(start, years);
-    if (!year) { el("quota-hint").textContent = "วันที่นี้ยังไม่อยู่ในรอบปีทำงานที่กำหนดไว้"; return; }
+    if (!year) {
+      el("quota-hint").textContent = [
+        "วันที่นี้ยังไม่อยู่ในรอบปีทำงานที่กำหนดไว้", overlap
+      ].filter(Boolean).join("\n");
+      return;
+    }
     const [yearCtx, quotas] = await Promise.all([getLeaveCtx(year), getLeaveQuotas(year)]);
-    if (quotas[type] === undefined) { el("quota-hint").textContent = `รอบปีทำงาน ${year} · ประเภทนี้ไม่ได้กำหนดโควตา`; return; }
+    if (quotas[type] === undefined) {
+      el("quota-hint").textContent = [
+        `รอบปีทำงาน ${year} · ประเภทนี้ไม่ได้กำหนดโควตา`, overlap
+      ].filter(Boolean).join("\n");
+      return;
+    }
 
     const usedByType = countLeaveDaysByType(
       staffId, yearCtx.from, yearCtx.to, yearCtx.ctx);
     const used = usedByType[type] || 0;
     const left = quotas[type] - used;
-    el("quota-hint").textContent =
+    const quotaText =
       `รอบปีทำงาน ${year} · ${type} ใช้ไปแล้ว ${used} วัน จากสิทธิ์ ${quotas[type]} วัน` +
       (left < 0 ? ` — เกินสิทธิ์ ${Math.abs(left)} วัน` : ` (เหลือ ${left} วัน)`);
+    el("quota-hint").textContent = [quotaText, overlap].filter(Boolean).join("\n");
   }
-  ["f-staff", "f-type", "f-start"].forEach(id => el(id)?.addEventListener("change", updateQuotaHint));
+
+  function syncPortionFields() {
+    const half = el("f-portion").value !== "full";
+    el("f-end").disabled = half;
+    if (half) {
+      el("f-end").value = el("f-start").value;
+      el("end-note").textContent = "ลาครึ่งวันต้องเป็นวันเดียว";
+    } else {
+      el("end-note").textContent = "ลาวันเดียวใส่วันเดียวกันได้";
+    }
+  }
 
   // ครึ่งวันต้องเป็นวันเดียว (ฐานข้อมูลบังคับอยู่แล้ว ฝั่งนี้ช่วยไม่ให้ผู้ใช้กรอกแล้วโดนปฏิเสธ)
   el("f-portion")?.addEventListener("change", () => {
-    const half = el("f-portion").value !== "full";
-    el("f-end").disabled = half;
-    if (half) { el("f-end").value = el("f-start").value; el("end-note").textContent = "ลาครึ่งวันต้องเป็นวันเดียว"; }
-    else el("end-note").textContent = "ลาวันเดียวใส่วันเดียวกันได้";
+    syncPortionFields();
+    updateQuotaHint();
   });
   el("f-start")?.addEventListener("change", () => {
     if (el("f-portion").value !== "full" || !el("f-end").value) el("f-end").value = el("f-start").value;
+    updateQuotaHint();
   });
+  ["f-staff", "f-type", "f-end"].forEach(id =>
+    el(id)?.addEventListener("change", updateQuotaHint));
 
   function render() {
     const q = el("q").value.trim().toLowerCase();
@@ -251,17 +302,19 @@ if (session) {
 
     if (rows.length === 0) {
       el("list").innerHTML = '<div class="muted-empty">ยังไม่มีใบลาที่บันทึกไว้</div>';
+      justSavedId = null;
       return;
     }
     const fmt = d => new Date(d + "T00:00:00Z")
       .toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
 
+    const savedId = justSavedId;
     el("list").innerHTML = rows.map(l => {
       const range = l.start_date === l.end_date ? fmt(l.start_date) : `${fmt(l.start_date)} – ${fmt(l.end_date)}`;
       const chip = l.day_portion === "full"
         ? `<span class="chip">${l.leave_type}</span>`
         : `<span class="chip half">${l.leave_type} · ${PORTION_LABEL[l.day_portion]}</span>`;
-      return `<div class="leave-row">
+      return `<div class="leave-row${l.id === savedId ? " just-saved" : ""}" data-leave-id="${l.id}">
         <div class="info">
           <div class="who">${nameOf(l.staff_id)} ${chip}</div>
           <div class="meta">${range}${l.reason ? " · " + l.reason : ""}</div>
@@ -269,6 +322,11 @@ if (session) {
         ${canEdit ? `<button class="danger small" data-del="${l.id}">ลบ</button>` : ""}
       </div>`;
     }).join("");
+    justSavedId = null;
+    if (savedId) {
+      el("list").querySelector(`[data-leave-id="${savedId}"]`)
+        ?.scrollIntoView({ behavior:"smooth", block:"center" });
+    }
   }
   el("q").addEventListener("input", render);
 
@@ -286,16 +344,28 @@ if (session) {
 
     const btn = el("btn-save");
     btn.disabled = true;
-    const { error } = await sb.from("staff_leaves").insert({
+    const { data, error } = await sb.from("staff_leaves").insert({
       staff_id: staffId, leave_type: type, day_portion: portion,
       start_date: start, end_date: end,
       reason: el("f-reason").value.trim() || null,
       created_by: session.user.id
-    });
+    }).select("id").single();
     btn.disabled = false;
-    if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
+    if (error) {
+      const dup = error.code === "23505" ||
+        /staff_leaves_no_exact_dup/.test(error.message || "");
+      return toast(dup
+        ? "มีใบลาแบบเดียวกันของครูคนนี้ในช่วงวันเดียวกันอยู่แล้ว ไม่ต้องบันทึกซ้ำ"
+        : "บันทึกไม่สำเร็จ: " + error.message, true);
+    }
 
+    justSavedId = data.id;
+    el("f-start").value = "";
+    el("f-end").value = "";
     el("f-reason").value = "";
+    el("f-portion").value = "full";
+    syncPortionFields();
+    el("q").value = "";
     toast("บันทึกใบลาแล้ว");
     leaveCtxCache = null;
     await loadAll();
