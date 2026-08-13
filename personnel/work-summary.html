@@ -54,6 +54,13 @@
   .stat span { color:var(--muted); font-size:13px; }
   .stat.warn b { color:var(--amber); } .stat.bad b { color:var(--danger); }
 
+  .quota-row { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); }
+  .quota-row:last-child { border-bottom:none; }
+  .quota-row .name { flex:1; font-weight:500; }
+  .quota-row .used { color:var(--muted); font-size:14px; }
+  .quota-row .left { font-weight:700; color:var(--teal); }
+  .quota-row .left.none { color:var(--danger); }
+
   table { width:100%; border-collapse:collapse; font-size:14.5px; }
   th, td { padding:9px 6px; text-align:right; border-bottom:1px solid var(--line); }
   th:first-child, td:first-child { text-align:left; }
@@ -110,7 +117,7 @@
         <select id="mode">
           <option value="month">รายเดือน</option>
           <option value="range">สะสมตามช่วงเดือน</option>
-          <option value="year">สะสมทั้งปีการศึกษา</option>
+          <option value="year">สะสมทั้งรอบปีทำงาน</option>
         </select>
       </div>
       <div class="field" id="month-field">
@@ -130,7 +137,7 @@
         </div>
       </div>
       <div class="field" id="year-field" style="display:none">
-        <label for="year">ปีการศึกษา</label>
+        <label for="year">รอบปีทำงาน</label>
         <select id="year"></select>
       </div>
     </div>
@@ -176,6 +183,8 @@
       <div class="section-title" id="detail-title">รายละเอียดรายคน</div>
       <div id="detail-permit"></div>
       <div id="detail-stats" class="stats" style="margin-bottom:14px"></div>
+      <div class="section-title" id="detail-quota-title" style="margin-top:16px">สิทธิ์วันลา</div>
+      <div id="detail-quota"></div>
       <div id="detail-days"></div>
     </div>
   </div>
@@ -186,9 +195,10 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-         loadWorkContext, loadCoverageStats, summarizeAll, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, academicYearOf, getDutyTypes,
-         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260812-2";
+         loadWorkContext, loadCoverageStats, summarizeAll, WORK_STATUS_LABEL,
+         loadLeaveContext, countLeaveDaysByType,
+         getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
+         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260813-2";
 
 const session = await requireAuth();
 if (session) {
@@ -217,23 +227,23 @@ if (session) {
     box.innerHTML = personnelAccessDeniedHtml();
     document.querySelector(".wrap").appendChild(box);
   } else {
-  let years = [], summaries = [], ctx = null, coverageStats = new Map();
+  let years = [], summaries = [], ctx = null, coverageStats = new Map(), loadedRange = null;
   let attendanceDutyName = "งานที่ผูกเกณฑ์เข้างาน";
 
   [years, attendanceDutyName] = await Promise.all([
-    getAcademicYears(),
+    getWorkYears(),
     getDutyTypes(true).then(rows =>
       rows.find(type => type.affects_attendance)?.code || "งานที่ผูกเกณฑ์เข้างาน")
   ]);
   el("report-description").textContent =
     `ภาพรวมการมา สาย ขาด ลา ออกปฏิบัติหน้าที่ และ “${attendanceDutyName}” ของบุคลากรทั้งโรงเรียน`;
-  el("year").innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
+  el("year").innerHTML = years.map(y => `<option value="${y.year}">รอบปีทำงาน ${y.year}</option>`).join("");
   const today = toDateStr(bangkokNow());
   const currentMonth = today.slice(0, 7);
-  const currentAcademicYear = academicYearOf(today, years);
-  const currentAcademicYearRow = years.find(y => y.year === currentAcademicYear);
+  const currentWorkYear = academicYearOf(today, years);
+  const currentWorkYearRow = years.find(y => y.year === currentWorkYear);
   el("month").value = currentMonth;
-  el("range-from").value = currentAcademicYearRow?.start_date.slice(0, 7) || currentMonth;
+  el("range-from").value = currentWorkYearRow?.start_date.slice(0, 7) || currentMonth;
   el("range-to").value = currentMonth;
 
   el("mode").addEventListener("change", () => {
@@ -253,7 +263,7 @@ if (session) {
       if (!r) return null;
       // ไม่ต้องคิดเลยวันนี้ (อนาคตยังไม่มีข้อมูล)
       const today = toDateStr(bangkokNow());
-      return { from: r.start, to: r.end > today ? today : r.end, label: `ปีการศึกษา ${y}` };
+      return { from: r.start, to: r.end > today ? today : r.end, label: `รอบปีทำงาน ${y}` };
     }
     if (mode === "range") {
       const fromMonth = el("range-from").value;
@@ -267,10 +277,10 @@ if (session) {
       const monthEnd = new Date(Date.UTC(yy, mm, 0)).toISOString().slice(0, 10);
       const today = toDateStr(bangkokNow());
       const firstDay = fromMonth + "-01";
-      const academicYearStartingInMonth = years.find(y =>
+      const workYearStartingInMonth = years.find(y =>
         y.start_date.slice(0, 7) === fromMonth);
-      // เดือนเปิดปีการศึกษาเริ่มนับจากวันเปิดเทอมจริง ไม่สร้างวันขาดก่อนเปิดเทอม
-      const from = academicYearStartingInMonth?.start_date || firstDay;
+      // เดือนเปิดรอบปีทำงานเริ่มนับจากวันที่ครูเริ่มทำงานจริง ไม่สร้างวันขาดก่อนหน้านั้น
+      const from = workYearStartingInMonth?.start_date || firstDay;
       const fromLabel = new Date(fromMonth + "-01T00:00:00Z")
         .toLocaleDateString("th-TH", { month: "long", year: "numeric", timeZone: "UTC" });
       const toLabel = new Date(toMonth + "-01T00:00:00Z")
@@ -288,6 +298,23 @@ if (session) {
     const label = new Date(m + "-01T00:00:00Z")
       .toLocaleDateString("th-TH", { month: "long", year: "numeric", timeZone: "UTC" });
     return { from: m + "-01", to: last, label };
+  }
+
+  // ยอดใช้ทั้งรอบปีต้องคิดจากช่วงของรอบปี ไม่ใช่ช่วงที่เลือกในรายงาน
+  // โหลด context ของรอบปีครั้งเดียวแล้ว cache ไว้ ผู้ใช้คลิกดูทีละคนหลายคนจะได้ไม่โหลดซ้ำ
+  let yearCtxCache = null;   // { year, from, to, leaveCtx, quotas }
+  async function getYearContext(rangeFrom) {
+    const year = academicYearOf(rangeFrom, years);
+    if (!year) return null;
+    if (yearCtxCache?.year === year) return yearCtxCache;
+    const range = academicYearRange(year, years);
+    // ทั้งรอบปี ไม่ตัดที่วันนี้ — ใบลาล่วงหน้าต้องตัดโควตาด้วย
+    const [leaveCtx, quotas] = await Promise.all([
+      loadLeaveContext(range.start, range.end),
+      getLeaveQuotas(year)
+    ]);
+    yearCtxCache = { year, from:range.start, to:range.end, leaveCtx, quotas };
+    return yearCtxCache;
   }
 
   // เดือนทั้งหมดที่คาบเกี่ยวช่วงนี้ (ใช้สั่งซิงก์ทีละเดือน)
@@ -338,6 +365,8 @@ if (session) {
       if (!reverseRange) toast("กรุณาเลือกรอบรายงาน", true);
       return;
     }
+    // รอบรายงานอาจเปลี่ยนปี ต้องทิ้ง context ทั้งปีเดิมก่อนโหลดชุดใหม่
+    yearCtxCache = null;
     el("btn-load").disabled = true; el("btn-resync").disabled = true;
     el("status").textContent = "กำลังเตรียมข้อมูล…";
     try {
@@ -347,6 +376,7 @@ if (session) {
         loadWorkContext(range.from, range.to),
         loadCoverageStats(range.from, range.to)
       ]);
+      loadedRange = range;
       summaries = summarizeAll(range.from, range.to, ctx);
       const attendanceType = ctx.dutyTypes.find(type => type.affects_attendance);
       attendanceDutyName = attendanceType?.code || "งานที่ผูกเกณฑ์เข้างาน";
@@ -391,9 +421,9 @@ if (session) {
       const fromYear = academicYearOf(range.from, years);
       const toYear = academicYearOf(range.to, years);
       if (fromYear !== toYear) {
-        warnings.push(`<div class="banner warn">ช่วงที่เลือกคร่อม 2 ปีการศึกษา
-          (${esc(fromYear || "ไม่พบข้อมูลปีของวันเริ่ม")} และ
-          ${esc(toYear || "ไม่พบข้อมูลปีของวันสิ้นสุด")}) ตัวเลขจึงรวมข้ามปีการศึกษา</div>`);
+        warnings.push(`<div class="banner warn">ช่วงที่เลือกคร่อม 2 รอบปีทำงาน
+          (${esc(fromYear || "ไม่พบรอบปีทำงานของวันเริ่ม")} และ
+          ${esc(toYear || "ไม่พบรอบปีทำงานของวันสิ้นสุด")}) ตัวเลขจึงรวมข้ามรอบปีทำงาน</div>`);
       }
     }
     const active = ctx.staff.filter(s => s.is_active && !s.exempt);
@@ -465,7 +495,8 @@ if (session) {
     return `สายสะสม ${total} นาที — เทียบเท่า ${days} วัน ${remainder} นาที รอฝ่ายบุคลากรพิจารณา`;
   }
 
-  el("tbody").addEventListener("click", ev => {
+  let detailRequest = 0;
+  el("tbody").addEventListener("click", async ev => {
     const tr = ev.target.closest("[data-staff]");
     if (!tr) return;
     const s = summaries.find(x => x.staff.id === tr.dataset.staff);
@@ -482,7 +513,7 @@ if (session) {
       <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
       <div class="stat warn"><b>${s.late} ครั้ง</b><span>${lateReviewText(s.lateMinutes)}</span></div>
       <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
-      <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
+      <div class="stat"><b>${s.leaveDays}</b><span>ลาในช่วงที่เลือก: ${leaveText}</span></div>
       <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
       <div class="stat"><b>${ownDutyDays}</b><span>วันเวร${s.dutySubstituteDays > 0 ? ` · +${s.dutySubstituteDays} แทน` : ""}</span></div>
       <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
@@ -504,6 +535,41 @@ if (session) {
 
     el("detail-card").style.display = "";
     el("detail-card").scrollIntoView({ behavior: "smooth", block: "start" });
+
+    const request = ++detailRequest;
+    el("detail-quota-title").textContent = "สิทธิ์วันลา";
+    el("detail-quota").innerHTML = '<div class="field-note">กำลังคำนวณยอดทั้งรอบปี…</div>';
+    try {
+      const yc = loadedRange ? await getYearContext(loadedRange.from) : null;
+      if (request !== detailRequest) return;
+      if (!yc) {
+        el("detail-quota").innerHTML = '<div class="field-note">วันที่ในช่วงนี้ยังไม่อยู่ในรอบปีทำงานที่กำหนดไว้</div>';
+      } else {
+        const usedByType = countLeaveDaysByType(s.staff.id, yc.from, yc.to, yc.leaveCtx);
+        const codes = new Set([...Object.keys(yc.quotas), ...Object.keys(usedByType)]);
+        el("detail-quota-title").textContent =
+          `สิทธิ์วันลา — รอบปีทำงาน ${yc.year} (นับทั้งรอบปี รวมใบลาที่ลงล่วงหน้า)`;
+        el("detail-quota").innerHTML = codes.size
+          ? [...codes].map(code => {
+              const used = usedByType[code] || 0;
+              const quota = yc.quotas[code];
+              if (quota === undefined) {
+                return `<div class="quota-row"><span class="name">${esc(code)}</span>
+                  <span class="used">ใช้ไป ${used} วัน</span><span class="left">ไม่จำกัด</span></div>`;
+              }
+              const left = quota - used;
+              return `<div class="quota-row"><span class="name">${esc(code)}</span>
+                <span class="used">ใช้ไป ${used} จาก ${quota} วัน</span>
+                <span class="left ${left <= 0 ? "none" : ""}">${left <= 0 ? "หมดสิทธิ์" : "เหลือ " + left + " วัน"}</span></div>`;
+            }).join("")
+          : '<div class="field-note">ยังไม่ได้กำหนดโควตาวันลาสำหรับรอบปีนี้</div>';
+      }
+    } catch (error) {
+      if (request !== detailRequest) return;
+      el("detail-quota").innerHTML = '<div class="field-note">โหลดสิทธิ์วันลาไม่สำเร็จ กรุณาลองใหม่</div>';
+      toast(error?.message || "โหลดสิทธิ์วันลาไม่สำเร็จ", true);
+    }
+
   });
 
   el("btn-load").addEventListener("click", () => loadReport(false));

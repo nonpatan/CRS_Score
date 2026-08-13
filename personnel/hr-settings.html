@@ -69,9 +69,11 @@
   .quota-row:last-child { border-bottom:none; }
   .quota-row .name { flex:1; font-weight:500; }
   .quota-row input { width:110px; }
-  .year-row { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); }
+  .year-row { display:grid; grid-template-columns:minmax(150px,.7fr) minmax(150px,.7fr) minmax(260px,1.6fr);
+              align-items:start; gap:10px; padding:12px 0; border-bottom:1px solid var(--line); }
   .year-row:last-child { border-bottom:none; }
-  .year-row .name { flex:1; font-weight:600; }
+  .year-row .name { font-weight:600; padding-top:9px; }
+  .year-row .summary { margin-top:0; padding-top:9px; }
   .position-row { padding:12px 0; border-bottom:1px solid var(--line); }
   .position-row:last-child { border-bottom:none; }
   .position-fields { display:grid; grid-template-columns:minmax(0,1fr) 96px; gap:10px; }
@@ -88,6 +90,8 @@
   @media (max-width:720px) {
     .catalog-grid { grid-template-columns:1fr; }
     .duty-fields { grid-template-columns:1fr 1fr; }
+    .year-row { grid-template-columns:1fr; }
+    .year-row .name, .year-row .summary { padding-top:0; }
   }
   @media (max-width:420px) {
     .row2, .position-fields, .duty-fields { display:block; }
@@ -106,7 +110,7 @@
 <div class="wrap">
   <header>
     <h1>ตั้งค่างานบุคคล</h1>
-    <p>เกณฑ์เข้าสาย ปีการศึกษา รายการควบคุม และโควตาวันลา</p>
+    <p>เกณฑ์เข้าสาย รอบปีทำงาน รายการควบคุม และโควตาวันลา</p>
     <div class="nav">
       <a href="index.html">ภาพรวมบุคลากร</a>
       <a href="leave.html">บันทึกการลา</a>
@@ -156,14 +160,17 @@
   </div>
 
   <div class="card single-card">
-    <div class="section-title">ปีการศึกษา</div>
+    <div class="section-title">รอบปีทำงานของฝ่ายบุคคล</div>
     <div class="banner info">
-      รอบปีนับจากวันเริ่มปีนี้ ถึงวันก่อนวันเริ่มปีถัดไป — เดือนเมษายนจึงตกอยู่ในปีก่อนหน้าโดยอัตโนมัติ
+      ครูเริ่มทำงานก่อนนักเรียนเปิดเรียนเพื่อเตรียมการ รอบปีของฝ่ายบุคคลจึงตั้งแยกได้ ·
+      รอบนับจากวันเริ่มปีนี้ ถึงวันก่อนวันเริ่มปีถัดไป
     </div>
     <div id="year-list"></div>
     <div class="field-note" style="margin-top:10px">
-      ปีการศึกษากำหนดโดยฝ่ายวิชาการที่หน้า “จัดการโครงสร้าง” ฝ่ายบุคลากรดูรายการนี้และตั้งโควตาวันลาของปีที่เปิดไว้แล้วได้ตามปกติ
+      วันเปิดเรียนของนักเรียนกำหนดโดยฝ่ายวิชาการที่หน้า “จัดการโครงสร้าง” ·
+      วันเริ่มรอบปีทำงานของครูฝ่ายบุคลากรตั้งเองที่นี่
     </div>
+    <button id="btn-save-hr-years" class="primary">บันทึกวันเริ่มรอบปีทำงาน</button>
   </div>
 
   <div class="catalog-grid">
@@ -239,7 +246,7 @@
   <div class="card single-card">
     <div class="section-title">โควตาวันลา</div>
     <div class="field">
-      <label for="quota-year">โควตาของปีการศึกษา</label>
+      <label for="quota-year">โควตาของรอบปีทำงาน</label>
       <select id="quota-year"></select>
     </div>
     <div id="quota-list"></div>
@@ -252,8 +259,9 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-         getAcademicYears, getLeaveTypes, getLeaveQuotas,
-         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260812-2";
+         getWorkYears, saveHrYearStart, clearHrYearStart, academicYearRange,
+         getLeaveTypes, getLeaveQuotas,
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260813-2";
 
 const session = await requireAuth();
 if (session) {
@@ -370,23 +378,94 @@ if (session) {
     await loadWorkTime();
   });
 
-  // ---------- ปีการศึกษา ----------
+  const fmtDate = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+  });
+
+  function draftWorkYears() {
+    return years.map(y => {
+      const input = el("year-list").querySelector(`[data-hr-year="${y.year}"]`);
+      return { ...y, start_date: input?.value || y.academic_start_date };
+    });
+  }
+
+  function updateYearSummaries() {
+    const draft = draftWorkYears();
+    for (const y of years) {
+      const input = el("year-list").querySelector(`[data-hr-year="${y.year}"]`);
+      const summary = el("year-list").querySelector(`[data-year-summary="${y.year}"]`);
+      const range = academicYearRange(y.year, draft);
+      if (!input || !summary || !range) continue;
+      const source = input.value
+        ? `นักเรียนเปิดเรียน ${fmtDate(y.academic_start_date)}`
+        : `ยังไม่ได้ตั้ง — ใช้วันเปิดเรียน ${fmtDate(y.academic_start_date)}`;
+      summary.textContent = `${source} · รอบนี้ = ${fmtDate(range.start)} – ${fmtDate(range.end)}`;
+    }
+  }
+
+  // ---------- รอบปีทำงาน ----------
   async function loadYears() {
-    years = await getAcademicYears();
+    years = await getWorkYears();
     el("year-list").innerHTML = years.length
-      ? years.map(y => {
-          const d = new Date(y.start_date + "T00:00:00Z");
-          const text = d.toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-          return `<div class="year-row"><span class="name">ปีการศึกษา ${y.year}</span>
-            <span class="field-note" style="margin:0">เริ่ม ${text}</span></div>`;
-        }).join("")
+      ? years.map(y => `<div class="year-row">
+          <span class="name">รอบปีทำงาน ${esc(y.year)}</span>
+          <input type="date" data-hr-year="${esc(y.year)}" value="${esc(y.hr_start_date || "")}"
+                 placeholder="ยังไม่ได้ตั้ง" aria-label="วันเริ่มรอบปีทำงาน ${esc(y.year)}">
+          <span class="field-note summary" data-year-summary="${esc(y.year)}"></span>
+        </div>`).join("")
       : '<div class="banner warn">ยังไม่ได้กำหนดปีการศึกษา — กรุณาติดต่อฝ่ายวิชาการให้เปิดปีที่หน้า “จัดการโครงสร้าง” ก่อนตั้งโควตาวันลา</div>';
+    updateYearSummaries();
+    el("year-list").querySelectorAll("input[data-hr-year]").forEach(input => {
+      input.disabled = !canEdit;
+      input.addEventListener("input", updateYearSummaries);
+    });
+    el("btn-save-hr-years").disabled = !canEdit || !years.length;
 
     const sel = el("quota-year");
-    sel.innerHTML = years.map(y => `<option value="${y.year}">ปีการศึกษา ${y.year}</option>`).join("");
+    sel.innerHTML = years.map(y => `<option value="${y.year}">รอบปีทำงาน ${y.year}</option>`).join("");
     if (years.length) loadQuotas();
     else el("quota-list").innerHTML = '<div class="field-note">กรุณาติดต่อฝ่ายวิชาการให้เปิดปีการศึกษาก่อน จึงจะตั้งโควตาได้</div>';
   }
+
+  el("btn-save-hr-years").addEventListener("click", async () => {
+    const rows = years.map(y => ({
+      year: String(y.year),
+      value: el("year-list").querySelector(`[data-hr-year="${y.year}"]`)?.value.trim() || "",
+      academicStart: y.academic_start_date,
+      previousValue: y.hr_start_date || ""
+    })).sort((a, b) => a.year.localeCompare(b.year, "th", { numeric:true }));
+    const effective = rows.map(row => ({
+      year: row.year,
+      start_date: row.value || row.academicStart
+    }));
+    for (let i = 1; i < effective.length; i++) {
+      if (effective[i].start_date <= effective[i - 1].start_date) {
+        return toast(`วันเริ่มรอบปี ${effective[i].year} ต้องอยู่หลังวันเริ่มรอบปี ${effective[i - 1].year}`, true);
+      }
+    }
+
+    const saves = rows.filter(row => row.value && row.value !== row.previousValue);
+    const clears = rows.filter(row => !row.value && row.previousValue);
+    if (clears.length && !isAdmin) return toast("ล้างค่าได้เฉพาะผู้ดูแลระบบ", true);
+    if (!saves.length && !clears.length) return toast("ยังไม่มีการเปลี่ยนแปลง");
+
+    const hasLateStart = rows.some(row => row.value && row.value > row.academicStart);
+    el("btn-save-hr-years").disabled = true;
+    try {
+      await Promise.all([
+        ...saves.map(row => saveHrYearStart(row.year, row.value)),
+        ...clears.map(row => clearHrYearStart(row.year))
+      ]);
+      await loadYears();
+      toast(hasLateStart
+        ? "บันทึกแล้ว · ปกติครูเริ่มก่อนหรือพร้อมนักเรียน — วันที่กรอกอยู่หลังวันเปิดเรียน โปรดตรวจอีกครั้ง"
+        : "บันทึกวันเริ่มรอบปีทำงานแล้ว");
+    } catch (error) {
+      toast(error?.message || "บันทึกวันเริ่มรอบปีทำงานไม่สำเร็จ กรุณาลองใหม่", true);
+    } finally {
+      el("btn-save-hr-years").disabled = !canEdit || !years.length;
+    }
+  });
 
   // ---------- โควตาวันลา ----------
   async function loadQuotas() {
@@ -407,7 +486,7 @@ if (session) {
 
   el("btn-save-quota").addEventListener("click", async () => {
     const year = el("quota-year").value;
-    if (!year) return toast("ยังไม่ได้เลือกปีการศึกษา", true);
+    if (!year) return toast("ยังไม่ได้เลือกรอบปีทำงาน", true);
     const rows = [];
     const clears = [];
     el("quota-list").querySelectorAll("input[data-type]").forEach(i => {

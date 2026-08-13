@@ -2950,6 +2950,64 @@ export function summarizeStaff(staff, from, to, ctx) {
   return sum;
 }
 
+// ---------- วันลาที่ตัดโควตา ----------
+// นับ "วันที่ลาจริง" ไม่ใช่ "จำนวนใบ" — ใบซ้ำหรือใบซ้อนวันกันจึงไม่ถูกนับซ้ำ
+// 🪤 จงใจไม่ใช้ computeDayStatus()/summarizeStaff() เพราะตัวนั้นตอบ "pending" ให้วันในอนาคต
+//    ก่อนจะดูใบลา ใบที่ลงล่วงหน้าจึงหายไปจากยอด
+//    มติผู้ใช้ 2026-08-13: สิทธิ์ที่ผูกไปแล้วต้องตัดโควตาทันที
+//    เหตุผลเต็ม: personnel/PLAN.md หัวข้อ "⭐ นิยาม วันลาที่ตัดโควตา"
+export async function loadLeaveContext(from, to) {
+  const [leaveRes, holRes, schedRes] = await Promise.all([
+    sb.from("staff_leaves").select("staff_id,leave_type,day_portion,start_date,end_date")
+      .lte("start_date", to).gte("end_date", from),
+    sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to),
+    sb.from("work_schedule").select("weekday,is_working_day")
+  ]);
+  if (leaveRes.error) throw new Error("โหลดใบลาไม่สำเร็จ: " + leaveRes.error.message);
+  if (holRes.error)   throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holRes.error.message);
+  if (schedRes.error) throw new Error("โหลดตารางงานไม่สำเร็จ: " + schedRes.error.message);
+  const schedule = new Map();
+  (schedRes.data || []).forEach(r => schedule.set(r.weekday, r));
+  return {
+    leaves: leaveRes.data || [],
+    holidays: new Set((holRes.data || []).map(r => r.holiday_date)),
+    schedule
+  };
+}
+
+// → { 'ลากิจ': 3.5, 'ลาป่วย': 1, ... }
+export function countLeaveDaysByType(staffId, from, to, ctx) {
+  const out = {};
+  for (const d of eachDate(from, to)) {
+    const sched = ctx.schedule.get(isoWeekday(d));
+    if (!sched || !sched.is_working_day || ctx.holidays.has(d)) continue;
+
+    // ใบของวันเดียวกัน ยุบด้วยคู่ (ประเภท|ช่วงวัน) — ใบซ้ำเป๊ะ ๆ จึงเหลือใบเดียว
+    const seen = new Map();
+    for (const l of ctx.leaves) {
+      if (l.staff_id !== staffId || l.start_date > d || d > l.end_date) continue;
+      seen.set(l.leave_type + "|" + l.day_portion, l);
+    }
+    if (!seen.size) continue;
+
+    const rows = [...seen.values()];
+    const full = rows.find(l => l.day_portion === "full");
+    if (full) {
+      out[full.leave_type] = (out[full.leave_type] || 0) + 1;
+      continue;
+    }
+    // ครึ่งวันหลายใบ (คนละประเภทได้) นับ 0.5 ต่อใบ แต่รวมทั้งวันต้องไม่เกิน 1 วัน
+    let budget = 1;
+    for (const l of rows) {
+      const w = Math.min(0.5, budget);
+      if (w <= 0) break;
+      out[l.leave_type] = (out[l.leave_type] || 0) + w;
+      budget -= w;
+    }
+  }
+  return out;
+}
+
 // สรุปทุกคน (ใช้ที่หน้าสรุปเวลาทำงานของผู้บริหาร)
 export function summarizeAll(from, to, ctx, { activeOnly = true } = {}) {
   return ctx.staff
@@ -2981,9 +3039,53 @@ export async function loadCoverageStats(from, to) {
 // ---------- ปีการศึกษา ----------
 // รอบปี = [วันเริ่มปีนี้, วันเริ่มปีถัดไป) → เดือนเมษายนตกอยู่ในปีก่อนหน้าอัตโนมัติ
 // ทำให้ทุกวันในปฏิทินมีปีการศึกษาสังกัดเสมอ ไม่มีวันไหนตกหล่น
+// ⚠️ ฝ่ายบุคคลใช้รอบของตัวเอง ดู getWorkYears() ด้านล่าง
 export async function getAcademicYears() {
   const { data } = await sb.from("academic_years").select("*").order("year");
   return data || [];
+}
+
+// รอบปีทำงานของฝ่ายบุคคล — ครูเริ่มทำงานก่อนนักเรียนเปิดเรียนเพื่อเตรียมการ
+// คืน "รูปแบบเดียวกับ getAcademicYears()" แต่สลับ start_date เป็นวันเริ่มรอบปีของครู
+// → academicYearRange() / academicYearOf() ตัวเดิมใช้ต่อได้ทั้งดุ้น ไม่ต้องเขียนสูตรรอบปีซ้ำ
+//   (จงใจไม่ทำ hrYearRange() ขึ้นมาใหม่ เพราะสูตรจะกลายเป็น 2 ชุดที่ต้องแก้คู่กัน)
+// ปีที่ยังไม่ได้ตั้งวันเริ่มของฝ่ายบุคคล → ใช้วันเปิดเทอมเดิม ระบบเก่าจึงไม่พัง
+export async function getWorkYears() {
+  const [yearsRes, hrRes] = await Promise.all([
+    sb.from("academic_years").select("*").order("year"),
+    sb.from("hr_years").select("year,staff_start_date")
+  ]);
+  if (yearsRes.error) throw new Error("โหลดรายการปีไม่สำเร็จ: " + yearsRes.error.message);
+  if (hrRes.error) throw new Error("โหลดวันเริ่มรอบปีทำงานไม่สำเร็จ: " + hrRes.error.message);
+
+  const override = new Map((hrRes.data || []).map(r => [String(r.year), r.staff_start_date]));
+  return (yearsRes.data || []).map(y => ({
+    ...y,
+    start_date: override.get(String(y.year)) || y.start_date,
+    academic_start_date: y.start_date,
+    hr_start_date: override.get(String(y.year)) || null
+  }));
+}
+
+// บันทึกวันเริ่มรอบปีทำงานของฝ่ายบุคคล (หน้า personnel/hr-settings.html)
+export async function saveHrYearStart(year, startDate) {
+  const y = String(year == null ? "" : year).trim();
+  const d = String(startDate == null ? "" : startDate).trim();
+  if (!/^\d{4}$/.test(y)) throw new Error("ปีต้องเป็นตัวเลข 4 หลัก");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error("กรุณาเลือกวันเริ่มรอบปีทำงาน");
+
+  const { data, error } = await sb.from("hr_years")
+    .upsert({ year: y, staff_start_date: d }, { onConflict: "year" })
+    .select("year,staff_start_date")
+    .single();
+  if (error) throw new Error("บันทึกวันเริ่มรอบปีทำงานไม่สำเร็จ: " + error.message);
+  return data;
+}
+
+// ล้างค่าที่ตั้งไว้ กลับไปใช้วันเปิดเทอมเดิม (ลบได้เฉพาะ admin ตาม RLS)
+export async function clearHrYearStart(year) {
+  const { error } = await sb.from("hr_years").delete().eq("year", String(year).trim());
+  if (error) throw new Error("ล้างค่าไม่สำเร็จ: " + error.message);
 }
 
 // รายการปีสำหรับจุดที่สร้าง/แก้ข้อมูล = ปีที่ลงทะเบียนไว้ + ปีเก่าที่มีอยู่จริงในข้อมูล

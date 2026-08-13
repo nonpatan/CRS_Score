@@ -162,10 +162,11 @@
     </div>
 
     <div class="card">
-      <div class="section-title" id="year-title">สะสมทั้งปีการศึกษา</div>
+      <div class="section-title" id="year-title">สะสมทั้งรอบปีทำงาน</div>
       <div class="stats" id="year-stats"></div>
       <div style="margin-top:14px">
         <div class="section-title">สิทธิ์วันลา</div>
+        <div class="field-note">นับทั้งรอบปี รวมใบที่ลงล่วงหน้า</div>
         <div id="quota-list"></div>
       </div>
     </div>
@@ -181,10 +182,11 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
-         getAcademicYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
+         loadLeaveContext, countLeaveDaysByType,
+         getAcademicYears, getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260812-2";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260813-2";
 
 const session = await requireAuth();
 if (session) {
@@ -207,13 +209,19 @@ if (session) {
     const today = toDateStr(bangkokNow());
     el("month").value = today.slice(0, 7);
 
-    const years = await getAcademicYears();
-    const dutyTypeCatalog = await getDutyTypes(true);
+    const [years, workYears, dutyTypeCatalog] = await Promise.all([
+      getAcademicYears(),
+      getWorkYears(),
+      getDutyTypes(true)
+    ]);
     const attendanceDutyType = dutyTypeCatalog.find(type => type.affects_attendance);
     el("page-description").textContent = attendanceDutyType
       ? `สรุปการมา สาย ขาด “${attendanceDutyType.code}” และสิทธิ์วันลาคงเหลือของคุณ`
       : "สรุปการมา สาย ขาด และสิทธิ์วันลาคงเหลือของคุณ";
     const THAI_WD = ["อา","จ","อ","พ","พฤ","ศ","ส"];
+    const fmt = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+      day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+    });
     let permitBusy = false;
     const reportBusy = new Set();
 
@@ -359,6 +367,7 @@ if (session) {
     async function renderMyProjects(loadProjects = loadMyProjects) {
       const box = el("my-project-list");
       try {
+        // โครงการ/กิจกรรมเป็นข้อมูลฝ่ายวิชาการ จึงต้องใช้ years ไม่ใช่ workYears
         const year = academicYearOf(today, years);
         if (!year) {
           box.innerHTML = '<div class="muted-empty">ยังไม่ได้กำหนดปีการศึกษาที่ครอบคลุมวันนี้</div>';
@@ -601,19 +610,24 @@ if (session) {
     });
 
     async function renderYear() {
-      const year = academicYearOf(today, years);
+      const year = academicYearOf(today, workYears);
       if (!year) {
-        el("year-title").textContent = "สะสมทั้งปีการศึกษา";
-        el("year-stats").innerHTML = '<div class="banner warn" style="grid-column:1/-1">ยังไม่ได้กำหนดปีการศึกษาในระบบ (ตั้งได้ที่หน้าตั้งค่างานบุคคล)</div>';
+        el("year-title").textContent = "สะสมทั้งรอบปีทำงาน";
+        el("year-stats").innerHTML = '<div class="banner warn" style="grid-column:1/-1">ยังไม่ได้กำหนดรอบปีทำงานในระบบ (ตั้งได้ที่หน้าตั้งค่างานบุคคล)</div>';
         el("quota-list").innerHTML = "";
         return;
       }
-      const range = academicYearRange(year, years);
+      const range = academicYearRange(year, workYears);
       const to = range.end > today ? today : range.end;
-      const ctx = await loadWorkContext(range.start, to);
+      const [ctx, leaveCtx, quotas] = await Promise.all([
+        loadWorkContext(range.start, to),
+        loadLeaveContext(range.start, range.end),
+        getLeaveQuotas(year)
+      ]);
       const s = summarizeStaff(me, range.start, to, ctx);
+      const usedByType = countLeaveDaysByType(me.id, range.start, range.end, leaveCtx);
 
-      el("year-title").textContent = `สะสมปีการศึกษา ${year} (ถึงวันนี้)`;
+      el("year-title").textContent = `สะสมรอบปีทำงาน ${year} (${fmt(range.start)} – ถึงวันนี้)`;
       el("year-stats").innerHTML = `
         <div class="stat"><b>${s.workDays}</b><span>วันทำงาน</span></div>
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
@@ -624,11 +638,10 @@ if (session) {
         <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
         <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
 
-      const quotas = await getLeaveQuotas(year);
-      const codes = new Set([...Object.keys(quotas), ...Object.keys(s.leaveByType)]);
+      const codes = new Set([...Object.keys(quotas), ...Object.keys(usedByType)]);
       el("quota-list").innerHTML = codes.size
         ? [...codes].map(code => {
-            const used = s.leaveByType[code] || 0;
+            const used = usedByType[code] || 0;
             const quota = quotas[code];
             if (quota === undefined) {
               return `<div class="quota-row"><span class="name">${code}</span>

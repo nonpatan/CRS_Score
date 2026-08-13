@@ -136,8 +136,9 @@
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getLeaveTypes,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-         getAcademicYears, academicYearOf, academicYearRange, getLeaveQuotas,
-         bangkokNow, toDateStr } from "../supabase-client.js?v=20260812-2";
+         loadLeaveContext, countLeaveDaysByType,
+         getWorkYears, academicYearOf, academicYearRange, getLeaveQuotas,
+         bangkokNow, toDateStr } from "../supabase-client.js?v=20260813-2";
 
 const session = await requireAuth();
 if (session) {
@@ -163,6 +164,7 @@ if (session) {
     document.querySelector(".wrap").appendChild(box);
   } else {
   let staffList = [], leaves = [], years = [];
+  let leaveCtxCache = null;   // { year, from, to, ctx }
 
   if (!canEdit) {
     el("gate").style.display = "";
@@ -183,7 +185,7 @@ if (session) {
       sb.from("staff").select("id,full_name,is_active").eq("is_active", true).order("full_name"),
       getLeaveTypes(),
       sb.from("staff_leaves").select("*").order("start_date", { ascending: false }).limit(300),
-      getAcademicYears()
+      getWorkYears()
     ]);
     staffList = staffRes.data || [];
     leaves = leaveRes.data || [];
@@ -197,6 +199,16 @@ if (session) {
     render();
   }
 
+  async function getLeaveCtx(year) {
+    if (leaveCtxCache?.year === year) return leaveCtxCache;
+    const range = academicYearRange(year, years);
+    leaveCtxCache = {
+      year, from:range.start, to:range.end,
+      ctx:await loadLeaveContext(range.start, range.end)
+    };
+    return leaveCtxCache;
+  }
+
   // ---------- เตือนโควตาคงเหลือ (เตือนเฉย ๆ ไม่บล็อก — ดุลยพินิจอยู่ที่โรงเรียน) ----------
   async function updateQuotaHint() {
     const staffId = el("f-staff").value;
@@ -206,23 +218,16 @@ if (session) {
     if (!staffId || !type || !start || years.length === 0) return;
 
     const year = academicYearOf(start, years);
-    if (!year) { el("quota-hint").textContent = "วันที่นี้ยังไม่อยู่ในปีการศึกษาที่กำหนดไว้"; return; }
-    const range = academicYearRange(year, years);
-    const quotas = await getLeaveQuotas(year);
-    if (quotas[type] === undefined) { el("quota-hint").textContent = `ปีการศึกษา ${year} · ประเภทนี้ไม่ได้กำหนดโควตา`; return; }
+    if (!year) { el("quota-hint").textContent = "วันที่นี้ยังไม่อยู่ในรอบปีทำงานที่กำหนดไว้"; return; }
+    const [yearCtx, quotas] = await Promise.all([getLeaveCtx(year), getLeaveQuotas(year)]);
+    if (quotas[type] === undefined) { el("quota-hint").textContent = `รอบปีทำงาน ${year} · ประเภทนี้ไม่ได้กำหนดโควตา`; return; }
 
-    // นับที่ใช้ไปแล้วในปีนั้น (ไม่รวมใบที่กำลังจะบันทึก)
-    const used = leaves
-      .filter(l => l.staff_id === staffId && l.leave_type === type &&
-                   l.start_date >= range.start && l.start_date <= range.end)
-      .reduce((sum, l) => {
-        if (l.day_portion !== "full") return sum + 0.5;
-        const a = new Date(l.start_date + "T00:00:00Z"), b = new Date(l.end_date + "T00:00:00Z");
-        return sum + Math.round((b - a) / 86400000) + 1;   // นับรวมวันแรกและวันสุดท้าย
-      }, 0);
+    const usedByType = countLeaveDaysByType(
+      staffId, yearCtx.from, yearCtx.to, yearCtx.ctx);
+    const used = usedByType[type] || 0;
     const left = quotas[type] - used;
     el("quota-hint").textContent =
-      `ปีการศึกษา ${year} · ${type} ใช้ไปแล้ว ${used} วัน จากสิทธิ์ ${quotas[type]} วัน` +
+      `รอบปีทำงาน ${year} · ${type} ใช้ไปแล้ว ${used} วัน จากสิทธิ์ ${quotas[type]} วัน` +
       (left < 0 ? ` — เกินสิทธิ์ ${Math.abs(left)} วัน` : ` (เหลือ ${left} วัน)`);
   }
   ["f-staff", "f-type", "f-start"].forEach(id => el(id)?.addEventListener("change", updateQuotaHint));
@@ -292,8 +297,9 @@ if (session) {
 
     el("f-reason").value = "";
     toast("บันทึกใบลาแล้ว");
+    leaveCtxCache = null;
     await loadAll();
-    updateQuotaHint();
+    await updateQuotaHint();
   });
 
   el("list").addEventListener("click", async ev => {
@@ -308,7 +314,9 @@ if (session) {
     // ตามกติกาสิทธิ์: ลบได้เฉพาะ admin — ฝ่ายบุคคลจะโดน RLS ปฏิเสธ จึงต้องบอกให้ชัด
     if (error) return toast("ลบไม่สำเร็จ (การลบสงวนไว้ที่ผู้ดูแลระบบ): " + error.message, true);
     toast("ลบใบลาแล้ว");
-    loadAll();
+    leaveCtxCache = null;
+    await loadAll();
+    await updateQuotaHint();
   });
 
   // ตั้งค่าเริ่มต้นเป็นวันนี้ตามเวลาไทย

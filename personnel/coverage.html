@@ -70,6 +70,16 @@
   .item-body { margin-top:8px; }
   .item.covered { background:#f7fcfa; margin:0 -8px; padding:11px 8px; border-radius:8px; }
   .item-foot { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+
+  /* บล็อกของ "คน" ต้องหนักกว่าบล็อกของ "งาน" อย่างเห็นได้ชัด */
+  .person { padding:18px 0 6px; border-top:2px solid var(--line); }
+  .person:first-child { border-top:0; padding-top:2px; }
+  .person-left { margin-left:auto; }
+
+  /* กลุ่มประเภทงาน — แยกด้วยการรวมกลุ่มและย่อหน้า ไม่ใช่ด้วยสี */
+  .kind-group { margin-top:14px; padding-left:12px; border-left:3px solid var(--line); }
+  .kind-group .section-title { margin:0 0 2px; }
+  .kind-group .section-title .n { font-weight:400; }
   .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
   #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
            border-radius:10px; background:#1f2a2e; color:#fff; font-weight:600; opacity:0;
@@ -152,7 +162,7 @@ import {
   loadCoverageDay, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260812-2";
+} from "../supabase-client.js?v=20260813-2";
 
 const session = await requireAuth();
 if (session) {
@@ -187,6 +197,7 @@ if (session) {
       "ลา": "leave", "ออกปฏิบัติหน้าที่": "offsite", "เหตุสุดวิสัย": "urgent"
     };
     const PORTION_LABEL = { full:"เต็มวัน", morning:"ครึ่งวันเช้า", afternoon:"ครึ่งวันบ่าย" };
+    const COVERAGE_KIND_ORDER = ["วิชา", "ครูประจำชั้น", "เวร"];
 
     // ---------- คำอธิบายว่าทำไมคนนี้ไม่มา ----------
     const whyText = entry => {
@@ -224,49 +235,71 @@ if (session) {
 
       box.innerHTML = people.map(entry => {
         const chip = SOURCE_CHIP[entry.source] || "kind";
+        const coveredCount = entry.items.reduce((count, item) =>
+          count + (day.byKey.has(item.key) ? 1 : 0), 0);
+        const coverageChip = entry.items.length
+          ? coveredCount < entry.items.length
+            ? "<span class='chip urgent person-left'>ยังไม่มีคนแทน " +
+              (entry.items.length - coveredCount) + " จาก " + entry.items.length + " งาน</span>"
+            : "<span class='chip done person-left'>จัดครบแล้ว " + entry.items.length + " งาน</span>"
+          : "";
         const head =
           "<div class='person-head'><span class='person-name'>" + esc(entry.staff.full_name) +
-          "</span><span class='chip " + chip + "'>" + esc(entry.source) + "</span></div>" +
+          "</span><span class='chip " + chip + "'>" + esc(entry.source) + "</span>" +
+          coverageChip + "</div>" +
           "<div class='person-why'>" + esc(whyText(entry)) + "</div>";
 
         if (!entry.items.length) {
-          return "<div class='item' style='border-top:0'>" + head +
+          return "<div class='person'>" + head +
             "<div class='field-note'>ไม่พบวิชา งานครูประจำชั้น หรือเวรของคนนี้ในวันนี้ " +
             "— ไม่มีอะไรต้องหาคนแทน</div></div>";
         }
 
-        const items = entry.items.map(item => {
-          const saved = day.byKey.get(item.key) || null;
-          const sub = saved ? day.staffById.get(saved.substitute_staff_id) : null;
-          const noLogin = sub && !sub.user_id;
-          return "<div class='item" + (saved ? " covered" : "") + "'>" +
-            "<div class='item-head'><span class='chip kind'>" + esc(item.kind) + "</span>" +
-            "<span class='item-label'>" + esc(item.label) + "</span>" +
-            (item.sub ? "<span class='item-sub'>" + esc(item.sub) + "</span>" : "") +
-            "</div>" +
-            "<div class='item-body'>" +
-              "<select data-key='" + esc(item.key) + "' data-staff='" + esc(entry.staff.id) + "'>" +
-                substituteOptions(entry.staff.id, saved?.substitute_staff_id || "") +
-              "</select>" +
-              (item.kind === "วิชา" && saved
-                ? "<input type='text' class='worksheet' data-id='" + esc(saved.id) + "' " +
-                  "placeholder='ใบงานที่ครูฝากไว้ (ไม่บังคับ)' value='" +
-                  esc(saved.worksheet_note || "") + "' style='margin-top:8px'>"
+        const groups = new Map();
+        for (const item of entry.items) {
+          if (!groups.has(item.kind)) groups.set(item.kind, []);
+          groups.get(item.kind).push(item);
+        }
+        const kinds = [
+          ...COVERAGE_KIND_ORDER.filter(kind => groups.has(kind)),
+          ...[...groups.keys()].filter(kind => !COVERAGE_KIND_ORDER.includes(kind))
+        ];
+        const items = kinds.map(kind => {
+          const rows = groups.get(kind).map(item => {
+            const saved = day.byKey.get(item.key) || null;
+            const sub = saved ? day.staffById.get(saved.substitute_staff_id) : null;
+            const noLogin = sub && !sub.user_id;
+            return "<div class='item" + (saved ? " covered" : "") + "'>" +
+              "<div class='item-head'><span class='item-label'>" + esc(item.label) + "</span>" +
+              (item.sub ? "<span class='item-sub'>" + esc(item.sub) + "</span>" : "") +
+              "</div>" +
+              "<div class='item-body'>" +
+                "<select data-key='" + esc(item.key) + "' data-staff='" + esc(entry.staff.id) + "'>" +
+                  substituteOptions(entry.staff.id, saved?.substitute_staff_id || "") +
+                "</select>" +
+                (item.kind === "วิชา" && saved
+                  ? "<input type='text' class='worksheet' data-id='" + esc(saved.id) + "' " +
+                    "placeholder='ใบงานที่ครูฝากไว้ (ไม่บังคับ)' value='" +
+                    esc(saved.worksheet_note || "") + "' style='margin-top:8px'>"
+                  : "") +
+              "</div>" +
+              (saved
+                ? "<div class='item-foot'>" +
+                    (noLogin
+                      ? "<span class='chip nologin'>ไม่มีบัญชีล็อกอิน — กดในระบบไม่ได้</span>"
+                      : "<span class='chip done'>บันทึกแล้ว</span>") +
+                    (item.kind === "เวร"
+                      ? "<span class='item-sub'>เพิ่มชื่อเข้าตารางเวรวันนี้ให้แล้ว</span>" : "") +
+                  "</div>"
                 : "") +
-            "</div>" +
-            (saved
-              ? "<div class='item-foot'>" +
-                  (noLogin
-                    ? "<span class='chip nologin'>ไม่มีบัญชีล็อกอิน — กดในระบบไม่ได้</span>"
-                    : "<span class='chip done'>บันทึกแล้ว</span>") +
-                  (item.kind === "เวร"
-                    ? "<span class='item-sub'>เพิ่มชื่อเข้าตารางเวรวันนี้ให้แล้ว</span>" : "") +
-                "</div>"
-              : "");
+              "</div>";
+          }).join("");
+          return "<div class='kind-group'><div class='section-title'>" + esc(kind) +
+            " <span class='n'>· " + groups.get(kind).length + " งาน</span></div>" + rows + "</div>";
         }).join("");
 
-        return "<div class='item' style='border-top:0'>" + head + items + "</div>";
-      }).join("<hr style='border:0;border-top:1px solid var(--line);margin:14px 0'>");
+        return "<div class='person'>" + head + items + "</div>";
+      }).join("");
 
       box.querySelectorAll("select[data-key]").forEach(sel =>
         sel.addEventListener("change", () => onPick(sel)));
@@ -387,7 +420,7 @@ if (session) {
       el("day-note").textContent = day.year
         ? "ปีการศึกษา " + day.year + " · คนที่ไม่มา " + day.absentees.length +
           " คน · จัดคนแทนแล้ว " + covered + " รายการ"
-        : "⚠ ยังไม่ได้ตั้งปีการศึกษาในหน้าตั้งค่างานบุคคล — จะยังหาวิชาและครูประจำชั้นไม่เจอ";
+        : "⚠ ยังไม่ได้ตั้งปีการศึกษา — ให้ฝ่ายวิชาการเปิดปีที่หน้า \"จัดการโครงสร้าง\" ก่อน จะยังหาวิชาและครูประจำชั้นไม่เจอ";
 
       const picker = el("f-urgent");
       picker.innerHTML = "<option value=''>— เลือกคน —</option>" + day.staff
