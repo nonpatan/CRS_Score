@@ -1125,11 +1125,14 @@ export function isPrimaryGrade(grade) {
 // ต้อง order ด้วยคีย์ที่ไม่ซ้ำเสมอ ไม่งั้นการแบ่งหน้าอาจได้แถวซ้ำ/ตกหล่น
 const PAGE_SIZE = 1000;
 export async function fetchAllRows(makeQuery, orderColumn = "id") {
+  // รับได้ทั้ง "id" และ ["duty_date","duty_type","staff_id"]
+  // 🪤 ตารางที่ไม่มีคีย์เดี่ยว ต้องเรียงให้ครบคีย์หลัก ไม่งั้นแถวคาบรอยต่อหน้าจะหายหรือซ้ำ
+  const columns = Array.isArray(orderColumn) ? orderColumn : [orderColumn];
   const out = [];
   for (let page = 0; ; page++) {
-    const { data, error } = await makeQuery()
-      .order(orderColumn)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    let query = makeQuery();
+    for (const col of columns) query = query.order(col);
+    const { data, error } = await query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (error) return { data: null, error };
     const rows = data || [];
     out.push(...rows);
@@ -2482,14 +2485,13 @@ export async function getDutyPattern() {
 }
 
 export async function getDutyRoster(from, to) {
-  let query = sb.from("duty_roster")
-    .select("duty_date,duty_type,staff_id,note,created_by,created_at")
-    .order("duty_date")
-    .order("duty_type")
-    .order("staff_id");
-  if (from) query = query.gte("duty_date", from);
-  if (to) query = query.lte("duty_date", to);
-  const { data, error } = await query;
+  const { data, error } = await fetchAllRows(() => {
+    let query = sb.from("duty_roster")
+      .select("duty_date,duty_type,staff_id,note,created_by,created_at");
+    if (from) query = query.gte("duty_date", from);
+    if (to) query = query.lte("duty_date", to);
+    return query;
+  }, ["duty_date", "duty_type", "staff_id"]);
   if (error) throw new Error("โหลดตารางเวรไม่สำเร็จ: " + error.message);
   return data || [];
 }
@@ -2751,7 +2753,9 @@ function timeToMinutes(t) {
 export async function loadWorkContext(from, to) {
   const [staffRes, attRes, holRes, schedRes, leaveRes, fieldDutyRes, permitRes, dutyRes, dutyTypeRes, settings] = await Promise.all([
     sb.from("staff").select("*").order("full_name"),
-    sb.from("work_attendance").select("*").gte("work_date", from).lte("work_date", to),
+    // 🪤 สองตารางนี้ทะลุ 1,000 แถวเมื่อดูสะสมทั้งรอบปี ห้ามกลับไปใช้ .select() ตรง ๆ
+    fetchAllRows(() => sb.from("work_attendance").select("*")
+      .gte("work_date", from).lte("work_date", to), "id"),
     sb.from("work_holidays").select("*").gte("holiday_date", from).lte("holiday_date", to),
     sb.from("work_schedule").select("*"),
     // ใบลาที่ "คาบเกี่ยว" ช่วงนี้ (เริ่มก่อนช่วงแต่ยังไม่จบ ก็ต้องเอามาด้วย)
@@ -2759,7 +2763,9 @@ export async function loadWorkContext(from, to) {
     // งานนอกสถานที่ที่ "คาบเกี่ยว" ช่วงนี้ — ห้ามใช้ between เพราะรายการข้ามเดือนจะหาย
     sb.from("staff_field_duties").select("*").lte("start_date", to).gte("end_date", from),
     sb.from("late_permissions").select("*").gte("permit_date", from).lte("permit_date", to),
-    sb.from("duty_roster").select("*").gte("duty_date", from).lte("duty_date", to),
+    fetchAllRows(() => sb.from("duty_roster").select("*")
+      .gte("duty_date", from).lte("duty_date", to),
+      ["duty_date", "duty_type", "staff_id"]),
     sb.from("duty_types").select("*").order("sort_order").order("code"),
     getHrSettings()
   ]);
