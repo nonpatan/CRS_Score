@@ -593,6 +593,38 @@ export function computeAvailableToWithdraw(txns, pendingRequests) {
   return computeSavingsBalance(txns) - pending;
 }
 
+// ยอดค้างส่ง = เฉพาะเงินฝากที่ยังไม่ถูกผูกกับรอบส่งเงิน
+// รายการถอน/ยอดยกมาไม่เกี่ยว เพราะฝ่ายการเงินเป็นผู้จ่ายเงินถอนเอง
+export function computeUnremitted(txns) {
+  return (Array.isArray(txns) ? txns : []).reduce((total, txn) => {
+    if (txn?.kind !== "ฝาก" || txn.remittance_id != null) return total;
+    const amount = Number(txn.amount);
+    return Number.isFinite(amount) ? total + amount : total;
+  }, 0);
+}
+
+// สรุปรายงานออมทรัพย์: รายรับ/ถอนอิงช่วงวันที่ แต่ยอดคงเหลือและค้างส่งเป็นยอดสะสมตลอดกาล
+export function summarizeSavingsReport(txns, { from, to } = {}) {
+  const rows = Array.isArray(txns) ? txns : [];
+  const inRange = txn => (!from || txn?.txn_date >= from) && (!to || txn?.txn_date <= to);
+  let collectedInRange = 0;
+  let withdrawnInRange = 0;
+
+  for (const txn of rows) {
+    const amount = Number(txn?.amount);
+    if (!Number.isFinite(amount) || !inRange(txn)) continue;
+    if (txn.kind === "ฝาก") collectedInRange += amount;
+    if (txn.kind === "ถอน") withdrawnInRange += amount;
+  }
+
+  return {
+    collectedInRange,
+    withdrawnInRange,
+    balanceLifetime: computeSavingsBalance(rows),
+    unremitted: computeUnremitted(rows)
+  };
+}
+
 // รายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ผ่านตาราง enrollments) เรียงตามเลขที่
 // ใช้แทนการดึง "นักเรียนทั้งหมด" แบบเดิม — วิชาไหนยังไม่มีใครลงทะเบียนจะได้ [] เปล่าๆ
 // หมายเหตุ: ไม่กรอง graduated ออก เพราะเป็น "รายชื่อในวิชานั้นๆ" (ผูกปีอยู่แล้ว) เด็กจบไปแล้ว

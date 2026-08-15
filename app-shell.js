@@ -2,6 +2,53 @@
    รองรับหลายฝ่าย: ดูว่าหน้าปัจจุบันอยู่ในโฟลเดอร์ไหน แล้วเลือกชุดเมนูของฝ่ายนั้น
    (โฟลเดอร์ที่ไม่รู้จักจะถือเป็นฝ่ายวิชาการ เพื่อคงพฤติกรรมเดิมของหน้าเก่าทุกหน้า) */
 (function () {
+  // กราฟโดนัทกลาง — legend ใส่ตัวเลขและสัดส่วนเสมอ สีจึงไม่ใช่ช่องทางเดียวที่สื่อความหมาย
+  window.renderDonut = function ({
+    svgId, legendId, heroId, titleId, title, hero, unit, segments, empty
+  }) {
+    const byId = id => document.getElementById(id);
+    const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+    })[ch]);
+    const svg = byId(svgId);
+    const legend = byId(legendId);
+    const heroEl = byId(heroId);
+    if (!svg || !legend || !heroEl) return;
+
+    const cx = 90, cy = 90, r = 62, thickness = 20, gap = 2;
+    const circumference = 2 * Math.PI * r;
+    const safeSegments = Array.isArray(segments) ? segments : [];
+    const total = safeSegments.reduce((sum, segment) => sum + Number(segment.value || 0), 0);
+    const drawn = empty ? [] : safeSegments.filter(segment => Number(segment.value) > 0);
+
+    heroEl.textContent = hero;
+    let arcs = "";
+    if (empty || total === 0) {
+      arcs = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${thickness}"></circle>`;
+    } else {
+      let offset = 0;
+      for (const segment of drawn) {
+        const length = (Number(segment.value) / total) * circumference;
+        const visible = drawn.length === 1 ? length : Math.max(.5, length - gap);
+        arcs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
+          stroke="${segment.color}" stroke-width="${thickness}"
+          stroke-dasharray="${visible.toFixed(2)} ${(circumference - visible).toFixed(2)}"
+          stroke-dashoffset="${(-offset).toFixed(2)}"
+          transform="rotate(-90 ${cx} ${cy})"><title>${escapeHtml(segment.label)} ${segment.value} ${escapeHtml(unit)}</title></circle>`;
+        offset += length;
+      }
+    }
+    svg.innerHTML = `<title id="${titleId}">${escapeHtml(title)}</title>` + arcs;
+    legend.innerHTML = safeSegments.map(segment => {
+      const value = empty ? "—" : segment.value;
+      const share = empty ? "—" : `${total > 0 ? Math.round((Number(segment.value) / total) * 100) : 0}%`;
+      return `<li><span class="swatch" style="background:${segment.color}"></span>` +
+        `<span class="legend-name">${escapeHtml(segment.label)}</span>` +
+        `<span class="legend-value">${value} ${escapeHtml(unit)}</span>` +
+        `<span class="legend-share">${share}</span></li>`;
+    }).join("");
+  };
+
   // กล่องยืนยันกลางของทุกฝ่าย — ใช้แทน confirm()/prompt() ซึ่ง webview บางตัวบล็อกเงียบ ๆ
   // requireText มีค่าเมื่อการกระทำเสี่ยงสูงและต้องพิมพ์ข้อความให้ตรงก่อนยืนยัน
   window.crsAskConfirm = function ({
@@ -367,7 +414,14 @@
         {
           label: "ฝ่ายการเงิน",
           items: [
-            ["savings-payout.html", "จ่ายเงินออมทรัพย์"]
+            ["savings-payout.html", "จ่ายเงินออมทรัพย์"],
+            ["savings-remit.html", "รับเงินส่งจากครู"]
+          ]
+        },
+        {
+          label: "รายงาน",
+          items: [
+            ["savings-report.html", "รายงานออมทรัพย์"]
           ]
         },
         {
@@ -397,6 +451,16 @@
           title: "จ่ายเงินออมทรัพย์",
           description: "ตรวจคิวรอจ่าย ยืนยันผู้รับ และตัดยอดออกจากสมุดออมทรัพย์",
           steps: ["ตรวจคิว", "ยืนยันผู้รับ", "จ่ายเงิน"]
+        },
+        "savings-remit.html": {
+          title: "รับเงินส่งจากครู",
+          description: "เลือกห้อง ตรวจรายการฝากและเงินสด แล้วบันทึกการรับเงินด้วยยอดที่ตรงกัน",
+          steps: ["เลือกห้อง", "นับเงิน", "ยืนยันรับเงิน"]
+        },
+        "savings-report.html": {
+          title: "รายงานออมทรัพย์",
+          description: "เลือกช่วงวัน ดูภาพรวมระดับโรงเรียน ห้อง และสมุดรายคน",
+          steps: ["เลือกช่วง", "ดูรายห้อง", "ดูรายคน"]
         }
       }
     }

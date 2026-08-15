@@ -99,7 +99,7 @@
     <h1>ภาพรวมบริหารทั่วไป</h1>
     <p>ติดตามการเช็คชื่อประจำวันทั้งโรงเรียน และเห็นห้องที่ต้องตามได้ทันที</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260815-2"></script>
+    <script src="../app-shell.js?v=20260815-3"></script>
   </header>
 
   <main class="academic-content">
@@ -168,7 +168,7 @@ import {
   requireAuth, signOut, getAcademicYears, academicYearOf, getStudentPlacements,
   getActiveStudents, loadDailyAttendanceToday, summarizeDailyAttendance,
   bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260815-3";
+} from "../supabase-client.js?v=20260815-4";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -194,45 +194,6 @@ function showBanner(html, type = "warn") {
 // ลาใช้น้ำเงินชุดเดียวกับจุด "ลา" ของหน้าภาพรวมฝ่ายบุคคล เพื่อไม่ให้ 4 ชิ้นชนกัน
 const STATUS_COLORS = { present:"#12946f", late:"#c47f00", leave:"#1f5aa8", absent:"#9e2a35" };
 
-// ตัววาดโดนัทตัวเดียวใช้ทั้ง 2 วง — เพิ่มวงใหม่ห้ามก๊อปฟังก์ชันนี้ ให้ส่ง segments เข้ามาแทน
-// empty = true → วงเทาเปล่า + legend เป็น "—" (วันหยุด หรือยังไม่มีข้อมูลให้แบ่ง)
-function renderDonut({ svgId, legendId, heroId, titleId, title, hero, unit, segments, empty }) {
-  const svg = el(svgId);
-  const cx = 90, cy = 90, r = 62, thickness = 20, gap = 2;
-  const circumference = 2 * Math.PI * r;
-  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
-  const drawn = empty ? [] : segments.filter(segment => segment.value > 0);
-
-  el(heroId).textContent = hero;
-  let arcs = "";
-  if (empty || total === 0) {
-    arcs = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${thickness}"></circle>`;
-  } else {
-    let offset = 0;
-    for (const segment of drawn) {
-      const length = (segment.value / total) * circumference;
-      const visible = drawn.length === 1 ? length : Math.max(.5, length - gap);
-      arcs += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none"
-        stroke="${segment.color}" stroke-width="${thickness}"
-        stroke-dasharray="${visible.toFixed(2)} ${(circumference - visible).toFixed(2)}"
-        stroke-dashoffset="${(-offset).toFixed(2)}"
-        transform="rotate(-90 ${cx} ${cy})"><title>${esc(segment.label)} ${segment.value} ${esc(unit)}</title></circle>`;
-      offset += length;
-    }
-  }
-  svg.innerHTML = `<title id="${titleId}">${esc(title)}</title>` + arcs;
-
-  // ตัวเลขกำกับทุกชิ้น — สีจึงไม่ใช่ช่องทางเดียวที่บอกความหมาย
-  el(legendId).innerHTML = segments.map(segment => {
-    const value = empty ? "—" : segment.value;
-    const shareText = empty ? "—" : `${total > 0 ? Math.round((segment.value / total) * 100) : 0}%`;
-    return `<li><span class="swatch" style="background:${segment.color}"></span>` +
-      `<span class="legend-name">${esc(segment.label)}</span>` +
-      `<span class="legend-value">${value} ${esc(unit)}</span>` +
-      `<span class="legend-share">${shareText}</span></li>`;
-  }).join("");
-}
-
 function renderMetricDonuts(summary) {
   const holiday = summary.state === "holiday";
   const roomsTotal = summary.roomsTotal;
@@ -242,7 +203,7 @@ function renderMetricDonuts(summary) {
   // ที่สุดของหน้านี้ — หัวหน้าฝ่ายต้องเห็นแล้วตามครูได้ทันเช้า · สีเทาอ่อนบนพื้นการ์ดอ่านเป็น
   // "รางว่าง" และทำให้ "ยังไม่มีห้องไหนเช็ค" หน้าตาเหมือน "วันหยุด" เป๊ะ แยกได้แค่ตัวเลขกลางวง
   // (วงเปล่าตอนวันหยุด/ไม่มีห้อง ยังใช้ var(--line) ต่อไป เพราะนั่นคือ "ไม่มีข้อมูล" จริง ๆ)
-  renderDonut({
+  window.renderDonut({
     svgId:"rooms-donut", legendId:"rooms-legend", heroId:"rooms-hero",
     titleId:"rooms-donut-title", title:"สัดส่วนห้องที่เช็คชื่อแล้วและยังไม่เช็ค",
     hero: holiday ? "—" : `${summary.roomsChecked}/${roomsTotal}`,
@@ -256,7 +217,7 @@ function renderMetricDonuts(summary) {
 
   // วงนี้แบ่ง "เฉพาะนักเรียนที่ถูกเช็คแล้ว" ไม่ใช่นักเรียนทั้งโรงเรียน — ห้องที่ครูยังไม่เช็ค
   // ยังไม่มีข้อมูลของใครเลย จะเอามานับเป็น "ขาด" ไม่ได้ · แบนเนอร์ด้านบนบอกอยู่แล้วว่าเลขยังไม่ครบ
-  renderDonut({
+  window.renderDonut({
     svgId:"students-donut", legendId:"students-legend", heroId:"students-hero",
     titleId:"students-donut-title", title:"สัดส่วนนักเรียนตามสถานะการมาโรงเรียนวันนี้",
     hero: holiday ? "—" : String(summary.present),

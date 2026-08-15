@@ -27,6 +27,26 @@
     border:1px solid var(--line); border-radius:12px; background:var(--white);
   }
   .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
+  .overview-grid { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:12px; }
+  .stat-stack { display:grid; gap:12px; }
+  .stat { padding:15px; border-radius:12px; background:var(--teal-soft); }
+  .stat.pending { background:var(--amber-soft); }
+  .stat span { display:block; color:var(--muted); font-size:13px; }
+  .stat b { display:block; color:var(--teal); font-size:25px; overflow-wrap:anywhere; }
+  .stat a { color:var(--teal); font-size:13px; font-weight:700; }
+  .metric { padding:14px; border-radius:12px; background:#f4f8f7; }
+  .metric-title { margin-bottom:10px; color:var(--muted); font-size:13px; font-weight:600; text-align:center; }
+  .donut-wrap { display:flex; align-items:center; justify-content:center; gap:16px; flex-wrap:wrap; }
+  .donut-figure { position:relative; flex:0 0 auto; width:148px; height:148px; }
+  .donut-figure svg { width:100%; height:100%; display:block; }
+  .donut-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; pointer-events:none; }
+  .donut-hero { font-size:28px; font-weight:700; line-height:1; }
+  .donut-hero-label { margin-top:3px; color:var(--muted); font-size:11px; }
+  .legend { flex:1 1 150px; min-width:0; list-style:none; margin:0; padding:0; }
+  .legend li { display:flex; align-items:baseline; gap:8px; padding:5px 0; font-size:14px; }
+  .legend .swatch { flex:0 0 auto; width:10px; height:10px; border-radius:3px; transform:translateY(1px); }
+  .legend-name { flex:1; min-width:0; } .legend-value { font-weight:600; white-space:nowrap; } .legend-share { color:var(--muted); font-size:13px; white-space:nowrap; }
+  .empty { padding:18px 8px; color:var(--muted); text-align:center; }
   .link-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
   .task-link {
     display:block; min-height:132px; padding:16px; border:1px solid var(--line);
@@ -42,6 +62,8 @@
   .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
   .toast.err { display:block; background:var(--danger); }
   .toast.ok { display:block; }
+  [hidden] { display:none !important; }
+  @media (max-width:680px) { .overview-grid { grid-template-columns:1fr; } }
   @media (max-width:560px) { .link-grid { grid-template-columns:1fr; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
@@ -52,10 +74,27 @@
     <h1>ภาพรวมการเงิน</h1>
     <p>รับฝาก แจ้งเบิก และจ่ายเงินออมทรัพย์จากจุดเดียว</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260815-2"></script>
+    <script src="../app-shell.js?v=20260815-3"></script>
   </header>
 
   <main class="academic-content">
+    <section class="card">
+      <div class="section">สถานะวันนี้</div>
+      <div class="overview-grid">
+        <div class="stat-stack">
+          <div class="stat"><span>ออมทรัพย์ที่เก็บได้วันนี้</span><b id="today-total">กำลังโหลด…</b><span id="today-count"></span></div>
+          <div class="stat pending"><span>ยอดค้างส่งถึงฝ่ายการเงิน</span><b id="pending-total">กำลังโหลด…</b><span id="pending-rooms"></span><a href="savings-remit.html">ไปรับเงินส่งจากครู →</a></div>
+        </div>
+        <div class="metric">
+          <div class="metric-title">ห้องที่เก็บออมทรัพย์วันนี้</div>
+          <div class="donut-wrap">
+            <div class="donut-figure"><svg id="savings-donut" viewBox="0 0 180 180" role="img" aria-labelledby="savings-donut-title"><title id="savings-donut-title">สัดส่วนห้องที่เก็บออมทรัพย์แล้วและยังไม่เก็บวันนี้</title></svg><div class="donut-center"><div class="donut-hero" id="savings-hero">—</div><div class="donut-hero-label">ห้องที่เก็บแล้ว</div></div></div>
+            <ul class="legend" id="savings-legend"></ul>
+          </div>
+          <div id="donut-empty" class="empty" hidden>วันนี้ยังไม่มีห้องไหนเก็บออมทรัพย์</div>
+        </div>
+      </div>
+    </section>
     <section class="card">
       <div class="section">ออมทรัพย์นักเรียน</div>
       <div class="link-grid">
@@ -79,6 +118,12 @@
           <b>ยอดยกมาออมทรัพย์</b>
           <span>นำเข้ายอดคงเหลือจากสมุดเดิมก่อนเริ่มใช้งานระบบ</span>
         </a>
+        <a class="task-link" href="savings-remit.html">
+          <span class="icon" aria-hidden="true">⇢</span><b>รับเงินส่งจากครู</b><span>ฝ่ายการเงินนับเงินจริงและยืนยันยอดค้างส่งรายห้อง</span>
+        </a>
+        <a class="task-link" href="savings-report.html">
+          <span class="icon" aria-hidden="true">◫</span><b>รายงานออมทรัพย์</b><span>ดูยอดเก็บ ถอน คงเหลือ และค้างส่งระดับโรงเรียนถึงรายคน</span>
+        </a>
       </div>
     </section>
     <div id="toast" class="toast"></div>
@@ -86,13 +131,55 @@
 </div>
 
 <script type="module">
-import { requireAuth, signOut } from "../supabase-client.js?v=20260815-3";
+import {
+  sb, requireAuth, signOut, fetchAllRows, getAcademicYears, academicYearOf,
+  getStudentPlacements, activePlacements, roomsFromPlacements, bangkokNow, toDateStr,
+  computeUnremitted, formatMoney
+} from "../supabase-client.js?v=20260815-4";
+const el = id => document.getElementById(id);
+async function loadOverview() {
+  const today = toDateStr(bangkokNow());
+  const years = await getAcademicYears();
+  const year = academicYearOf(today, years);
+  if (!year) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
+  const [placementRes, todayRes, pendingRes] = await Promise.all([
+    getStudentPlacements(year),
+    fetchAllRows(() => sb.from("savings_txns").select("id,year,grade_level,classroom,txn_date,kind,amount,remittance_id").eq("kind", "ฝาก").eq("txn_date", today), ["grade_level","classroom","id"]),
+    fetchAllRows(() => sb.from("savings_txns").select("id,year,grade_level,classroom,txn_date,kind,amount,remittance_id").eq("kind", "ฝาก").is("remittance_id", null), ["year","grade_level","classroom","id"])
+  ]);
+  if (placementRes.error) throw new Error(placementRes.error.message);
+  if (todayRes.error) throw new Error(todayRes.error.message);
+  if (pendingRes.error) throw new Error(pendingRes.error.message);
+  const rooms = roomsFromPlacements(activePlacements(placementRes.data || []), year);
+  const todayRows = todayRes.data || [];
+  const collectedKeys = new Set(todayRows.filter(row => row.year === year).map(row => `${row.grade_level}\u0000${row.classroom}`));
+  const collectedRooms = rooms.filter(room => collectedKeys.has(`${room.grade_level}\u0000${room.classroom}`)).length;
+  const pendingRows = pendingRes.data || [];
+  const pendingRoomKeys = new Set(pendingRows.map(row => `${row.year}\u0000${row.grade_level}\u0000${row.classroom}`));
+  el("today-total").textContent = formatMoney(todayRows.reduce((sum,row) => sum + Number(row.amount || 0), 0));
+  el("today-count").textContent = `${todayRows.length} รายการ`;
+  el("pending-total").textContent = formatMoney(computeUnremitted(pendingRows));
+  el("pending-rooms").textContent = `${pendingRoomKeys.size} ห้อง`;
+  const empty = collectedRooms === 0;
+  el("donut-empty").hidden = !empty;
+  window.renderDonut({ svgId:"savings-donut", legendId:"savings-legend", heroId:"savings-hero", titleId:"savings-donut-title", title:"สัดส่วนห้องที่เก็บออมทรัพย์แล้วและยังไม่เก็บวันนี้", hero:empty ? "—" : `${collectedRooms}/${rooms.length}`, unit:"ห้อง", segments:[
+    { label:"เก็บแล้ววันนี้", value:collectedRooms, color:"var(--teal)" },
+    { label:"ยังไม่เก็บวันนี้", value:Math.max(0, rooms.length - collectedRooms), color:"var(--amber)" }
+  ], empty });
+}
 const session = await requireAuth();
 if (session) {
   document.getElementById("btn-signout")?.addEventListener("click", event => {
     event.preventDefault();
     signOut();
   });
+  try { await loadOverview(); }
+  catch (error) {
+    el("today-total").textContent = "โหลดไม่สำเร็จ";
+    el("pending-total").textContent = "โหลดไม่สำเร็จ";
+    document.getElementById("toast").textContent = "โหลดภาพรวมการเงินไม่สำเร็จ: " + error.message;
+    document.getElementById("toast").className = "toast err";
+  }
 }
 </script>
 </body>
