@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จ่ายเงินออมทรัพย์ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
+  .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .summary { padding:14px; border-radius:10px; background:var(--teal-soft); }
+  .summary span { display:block; color:var(--muted); font-size:13px; }
+  .summary b { display:block; color:var(--teal); font-size:24px; }
+  .filters { display:grid; grid-template-columns:1fr 1fr auto; gap:12px; align-items:end; }
+  .field { margin-bottom:14px; }
+  .filters .field { margin:0; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button { min-height:44px; padding:10px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; cursor:pointer; }
+  button.primary { color:var(--white); background:var(--teal); }
+  button.ghost { color:var(--teal); background:var(--teal-soft); }
+  button:disabled { opacity:.55; cursor:default; }
+  .readonly, .banner.bad { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
+  .queue-list { border-top:1px solid var(--line); }
+  .queue-row { display:grid; grid-template-columns:minmax(180px,1.35fr) minmax(130px,.8fr) minmax(120px,.75fr) minmax(180px,1fr); gap:14px; align-items:start; padding:15px 0; border-bottom:1px solid var(--line); }
+  .queue-row:last-child { border-bottom:0; }
+  .student-name { min-width:0; font-weight:700; overflow-wrap:anywhere; }
+  .meta, .hint { display:block; color:var(--muted); font-size:13px; font-weight:400; }
+  .money b { display:block; color:var(--teal); font-size:17px; }
+  .money.insufficient b { color:var(--danger); }
+  .payout-box { padding:10px; border-radius:10px; background:var(--bg); }
+  .check-line { display:flex; align-items:flex-start; gap:8px; margin-bottom:9px; font-size:13px; font-weight:600; }
+  .check-line input { width:20px; height:20px; margin-top:2px; flex:0 0 auto; }
+  .payout-box input[type="text"] { margin-bottom:9px; }
+  .retry-note { margin-bottom:8px; padding:8px; border-radius:8px; color:var(--danger); background:var(--danger-soft); font-size:12px; }
+  .empty { padding:28px 8px; color:var(--muted); text-align:center; }
+  .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:820px) {
+    .queue-row { grid-template-columns:minmax(0,1fr) 1fr; }
+    .payout-box { grid-column:1/-1; }
+  }
+  @media (max-width:560px) {
+    .summary-grid, .filters, .queue-row { grid-template-columns:1fr; }
+    .payout-box { grid-column:auto; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>จ่ายเงินออมทรัพย์</h1>
+    <p>ฝ่ายการเงินตรวจคิว ยืนยันผู้รับ และจ่ายเงินออกจากสมุดออมทรัพย์</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260815-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="access-card" class="card" hidden></section>
+    <div id="finance-content" hidden>
+      <section class="card">
+        <div class="section">คิวที่ต้องเตรียมจ่าย</div>
+        <div class="summary-grid">
+          <div class="summary"><span>คำขอรอจ่าย</span><b id="queue-count">0 รายการ</b></div>
+          <div class="summary"><span>ยอดรวมที่ต้องเตรียม</span><b id="queue-total">0.00 บาท</b></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section">กรองคิว</div>
+        <div class="filters">
+          <div class="field"><label for="grade-filter">ชั้น</label><select id="grade-filter"><option value="">ทุกชั้น</option></select></div>
+          <div class="field"><label for="room-filter">ห้อง</label><select id="room-filter"><option value="">ทุกห้อง</option></select></div>
+          <button id="clear-filter" class="ghost" type="button">ล้างตัวกรอง</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section">คิวรอจ่าย · เรียงวันเก่าสุดก่อน</div>
+        <div id="queue-list" class="queue-list"><div class="empty">กำลังโหลด…</div></div>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, bangkokNow, toDateStr,
+  fetchAllRows, summarizeSavingsByStudent, formatMoney
+} from "../supabase-client.js?v=20260815-3";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const today = toDateStr(bangkokNow());
+const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok"
+}).format(new Date(dateStr + "T00:00:00+07:00"));
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 6500);
+}
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("savings_txn_withdrawal_uniq")) return "คำขอนี้ถูกจ่ายไปแล้ว กรุณาโหลดคิวล่าสุด";
+  if (message.includes("sw_parent_needs_consent")) return "ผู้ปกครองรับเงินได้เมื่อยืนยันความยินยอมของนักเรียนแล้ว";
+  if (message.includes("sw_paid_needs_txn")) return "ยังไม่มีรายการถอนที่ผูกกับคำขอนี้";
+  if (message.includes("ยอดคงเหลือ")) return message;
+  return message;
+}
+
+let session = null;
+let queue = [];
+let balanceByStudent = new Map();
+const createdTxnByRequest = new Map();
+const withdrawalNote = request => `จ่ายตามคำขอเบิกวันที่ ${request.request_date}`;
+
+async function recoverOrphanTxn(request) {
+  const { data, error } = await sb.from("savings_txns")
+    .select("id")
+    .eq("withdrawal_id", request.id)
+    .maybeSingle();
+  if (error) throw new Error("ตรวจรายการถอนของคำขอไม่สำเร็จ: " + error.message);
+  if (data?.id) createdTxnByRequest.set(request.id, data.id);
+}
+
+function updateRoomOptions() {
+  const grade = el("grade-filter").value;
+  const rooms = [...new Set(queue.filter(row => !grade || row.grade_level === grade).map(row => row.classroom))]
+    .sort((a, b) => String(a).localeCompare(String(b), "th", { numeric:true }));
+  const current = el("room-filter").value;
+  el("room-filter").innerHTML = '<option value="">ทุกห้อง</option>' + rooms.map(room => `<option value="${esc(room)}">${esc(room)}</option>`).join("");
+  if (rooms.includes(current)) el("room-filter").value = current;
+}
+
+function visibleQueue() {
+  const grade = el("grade-filter").value;
+  const room = el("room-filter").value;
+  return queue.filter(row => (!grade || row.grade_level === grade) && (!room || row.classroom === room));
+}
+
+function renderQueue() {
+  const rows = visibleQueue();
+  el("queue-list").innerHTML = rows.map(row => {
+    const student = row.student || {};
+    const balance = balanceByStudent.get(row.student_id) || 0;
+    const isParent = row.requester_type === "ผู้ปกครอง";
+    const retryTxnId = createdTxnByRequest.get(row.id) || "";
+    const insufficient = !retryTxnId && balance < Number(row.amount);
+    const requester = isParent ? `ผู้ปกครอง${row.requester_name ? " · " + esc(row.requester_name) : ""}` : "นักเรียน";
+    return `<div class="queue-row" data-request-id="${esc(row.id)}">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
+        <span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(row.grade_level)} · ${esc(row.classroom)}</span>
+        <span class="meta">แจ้ง ${thaiDate(row.request_date)} · ผู้ขอ: ${requester}${row.note ? " · " + esc(row.note) : ""}</span>
+      </div>
+      <div class="money"><span class="meta">ยอดขอเบิก</span><b>${formatMoney(row.amount)}</b></div>
+      <div class="money${insufficient ? " insufficient" : ""}"><span class="meta">คงเหลือปัจจุบัน</span><b>${formatMoney(balance)}</b>${insufficient ? '<span class="meta">ยอดไม่พอ กรุณาตรวจสมุด</span>' : ""}</div>
+      <div class="payout-box">
+        ${retryTxnId ? '<div class="retry-note">เงินตัดจากสมุดแล้ว แต่คำขอยังค้าง · กดซ้ำเพื่อผูกคำขอเดิม ห้ามสร้างรายการถอนใหม่</div>' : ""}
+        ${isParent ? `<label class="check-line"><input class="student-confirmed" type="checkbox"> ยืนยันว่าตรวจสอบความยินยอมของนักเรียนแล้ว</label>
+        <label class="meta" for="receiver-${esc(row.id)}">ชื่อผู้รับเงินจริง</label>
+        <input id="receiver-${esc(row.id)}" class="receiver-name" type="text" maxlength="200" value="${esc(row.requester_name || "")}" autocomplete="name">` : `<span class="meta">ผู้รับเงินจริง: ${esc(student.name || "นักเรียน")}</span>`}
+        <button class="primary payout-button" type="button"${insufficient ? " disabled" : ""}>${retryTxnId ? "ผูกคำขออีกครั้ง" : "ยืนยันและจ่ายเงิน"}</button>
+      </div>
+    </div>`;
+  }).join("") || '<div class="empty">ไม่มีคำขอรอจ่ายตามตัวกรองนี้</div>';
+}
+
+async function loadQueue() {
+  const queueRes = await fetchAllRows(() => sb.from("savings_withdrawals")
+    .select("id,student_id,year,grade_level,classroom,request_date,amount,requester_type,requester_name,note,status,requested_at,student:student_id(id,student_no,name)")
+    .eq("status", "รอจ่าย"), ["request_date", "requested_at", "id"]);
+  if (queueRes.error) throw new Error("โหลดคิวรอจ่ายไม่สำเร็จ: " + queueRes.error.message);
+  queue = queueRes.data || [];
+  const studentIds = [...new Set(queue.map(row => row.student_id))];
+  if (studentIds.length) {
+    const txnRes = await fetchAllRows(() => sb.from("savings_txns")
+      .select("id,student_id,kind,amount,txn_date").in("student_id", studentIds), ["student_id", "txn_date", "id"]);
+    if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
+    const txnRows = txnRes.data || [];
+    balanceByStudent = summarizeSavingsByStudent(txnRows);
+    await Promise.all(queue.map(recoverOrphanTxn));
+  } else {
+    balanceByStudent = new Map();
+  }
+  el("queue-count").textContent = `${queue.length} รายการ`;
+  el("queue-total").textContent = formatMoney(queue.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  const grades = [...new Set(queue.map(row => row.grade_level))].sort((a, b) => String(a).localeCompare(String(b), "th", { numeric:true }));
+  el("grade-filter").innerHTML = '<option value="">ทุกชั้น</option>' + grades.map(grade => `<option value="${esc(grade)}">${esc(grade)}</option>`).join("");
+  updateRoomOptions();
+  renderQueue();
+}
+
+async function finishRequest(request, txnId, studentConfirmed, receivedByName) {
+  const { data, error } = await sb.from("savings_withdrawals").update({
+    status:"จ่ายแล้ว", student_confirmed:studentConfirmed, received_by_name:receivedByName,
+    paid_by:session.user.id, paid_at:new Date().toISOString(), savings_txn_id:txnId
+  }).eq("id", request.id).eq("status", "รอจ่าย").select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("คำขอนี้ไม่ได้อยู่ในสถานะรอจ่ายแล้ว กรุณาโหลดคิวใหม่");
+}
+
+el("grade-filter").addEventListener("change", () => { updateRoomOptions(); renderQueue(); });
+el("room-filter").addEventListener("change", renderQueue);
+el("clear-filter").addEventListener("click", () => {
+  el("grade-filter").value = "";
+  updateRoomOptions();
+  el("room-filter").value = "";
+  renderQueue();
+});
+el("queue-list").addEventListener("click", async event => {
+  const button = event.target.closest(".payout-button");
+  if (!button) return;
+  const rowEl = button.closest(".queue-row");
+  const request = queue.find(row => row.id === rowEl?.dataset.requestId);
+  if (!request) return toast("ไม่พบคำขอ กรุณาโหลดหน้าใหม่", true);
+  const isParent = request.requester_type === "ผู้ปกครอง";
+  const confirmed = isParent ? Boolean(rowEl.querySelector(".student-confirmed")?.checked) : false;
+  const receivedByName = isParent
+    ? (rowEl.querySelector(".receiver-name")?.value.trim() || "")
+    : (request.student?.name || "นักเรียน");
+  if (isParent && !confirmed) return toast("กรุณายืนยันว่าตรวจสอบความยินยอมของนักเรียนแล้ว", true);
+  if (isParent && !receivedByName) return toast("กรุณาระบุชื่อผู้รับเงินจริง", true);
+  const balance = balanceByStudent.get(request.student_id) || 0;
+  const existingTxnId = createdTxnByRequest.get(request.id) || null;
+  if (!existingTxnId && balance < Number(request.amount)) return toast(`ยอดคงเหลือ ${formatMoney(balance)} ไม่พอสำหรับจ่าย ${formatMoney(request.amount)}`, true);
+  if (!await window.crsAskConfirm({
+    title:"ยืนยันจ่ายเงินออมทรัพย์",
+    message:`${request.student?.name || "นักเรียน"} · ${formatMoney(request.amount)}\nผู้รับเงินจริง: ${receivedByName}`,
+    okLabel:"จ่ายเงิน",
+    danger:false
+  })) return;
+
+  button.disabled = true;
+  button.textContent = "กำลังจ่าย…";
+  let txnId = existingTxnId;
+  if (!txnId) {
+    const { data, error } = await sb.from("savings_txns").insert({
+      student_id:request.student_id, year:request.year, grade_level:request.grade_level,
+      classroom:request.classroom, txn_date:today, kind:"ถอน", amount:Number(request.amount),
+      withdrawal_id:request.id, note:withdrawalNote(request), recorded_by:session.user.id
+    }).select("id").single();
+    if (error) {
+      button.disabled = false;
+      button.textContent = "ยืนยันและจ่ายเงิน";
+      return toast(friendlyError(error), true);
+    }
+    txnId = data.id;
+    createdTxnByRequest.set(request.id, txnId);
+  }
+
+  try {
+    await finishRequest(request, txnId, confirmed, receivedByName);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "ผูกคำขออีกครั้ง";
+    renderQueue();
+    return toast(`เงินตัดจากสมุดแล้ว แต่คำขอยังค้าง · ${friendlyError(error)} · กดจ่ายซ้ำเพื่อผูกคำขอเดิม`, true);
+  }
+  createdTxnByRequest.delete(request.id);
+  queue = queue.filter(row => row.id !== request.id);
+  el("queue-count").textContent = `${queue.length} รายการ`;
+  el("queue-total").textContent = formatMoney(queue.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  renderQueue();
+  toast(`จ่าย ${formatMoney(request.amount)} และตัดยอดออมทรัพย์แล้ว`);
+  try { await loadQueue(); }
+  catch (error) { toast(`จ่ายเงินสำเร็จแล้ว แต่โหลดคิวล่าสุดไม่สำเร็จ · ${friendlyError(error)}`, true); }
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    const canFinance = await checkDepartment("การเงิน");
+    if (!canFinance) {
+      el("access-card").hidden = false;
+      el("access-card").innerHTML = '<div class="readonly"><b>คุณไม่มีสิทธิ์จ่ายเงินออมทรัพย์</b><br>หน้านี้ใช้สำหรับผู้ที่ได้รับสิทธิ์ฝ่ายการเงินเท่านั้น</div>';
+    } else {
+      el("finance-content").hidden = false;
+      await loadQueue();
+    }
+  } catch (error) {
+    el("access-card").hidden = false;
+    el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าจ่ายเงินไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+  }
+}
+</script>
+</body>
+</html>

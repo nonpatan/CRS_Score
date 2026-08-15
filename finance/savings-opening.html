@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ยอดยกมาออมทรัพย์ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6;
+  }
+  .wrap { max-width:760px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; overflow:hidden;
+    border:1px solid var(--line); border-radius:12px; background:var(--white);
+  }
+  .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .field { margin-bottom:14px; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  input.invalid { border-color:var(--danger); background:var(--danger-soft); }
+  input:disabled { color:var(--muted); background:var(--bg); opacity:1; }
+  button {
+    min-height:44px; padding:10px 14px; border:0; border-radius:9px;
+    font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary { color:var(--white); background:var(--teal); }
+  button.icon-btn { min-width:44px; padding:8px; color:var(--teal); background:var(--teal-soft); }
+  button:disabled { opacity:.55; cursor:default; }
+  .year-note { padding:11px 13px; border-radius:10px; color:var(--teal); background:var(--teal-soft); font-weight:600; }
+  .readonly { margin-bottom:16px; padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
+  .banner { margin:0; padding:12px 14px; border-radius:10px; font-size:14px; }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .progress { padding:8px 12px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:13px; font-weight:700; white-space:nowrap; }
+  .student-list { border-top:1px solid var(--line); }
+  .student-row {
+    display:grid; grid-template-columns:minmax(210px,1fr) minmax(150px,180px) 48px;
+    gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line);
+  }
+  .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
+  .meta { display:block; color:var(--muted); font-size:13px; font-weight:400; }
+  .amount-wrap label { margin:0 0 4px; color:var(--muted); font-size:12px; }
+  .save-bar {
+    position:sticky; bottom:10px; display:flex; align-items:center; justify-content:space-between;
+    gap:12px; margin-top:14px; padding:12px; border:1px solid var(--line);
+    border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 10px 28px rgba(25,77,73,.14);
+  }
+  .save-bar span { color:var(--muted); font-size:13px; }
+  .empty { padding:26px 10px; color:var(--muted); text-align:center; }
+  .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:620px) {
+    .row2 { grid-template-columns:1fr; }
+    .student-row { grid-template-columns:minmax(0,1fr) 48px; }
+    .amount-wrap { grid-row:2; grid-column:1/-1; }
+  }
+  @media (max-width:440px) {
+    .section-head { display:block; }
+    .progress { display:inline-block; margin-top:8px; }
+    .save-bar { align-items:stretch; flex-direction:column; }
+    .save-bar button { width:100%; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ยอดยกมาออมทรัพย์</h1>
+    <p>นำเข้ายอดคงเหลือจากสมุดเดิมครั้งเดียวต่อคน</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260815-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card">
+      <div class="row2">
+        <div class="field">
+          <label for="grade-select">ชั้นเรียน</label>
+          <select id="grade-select" disabled><option value="">กำลังโหลด…</option></select>
+        </div>
+        <div class="field">
+          <label for="room-select">ห้องเรียน</label>
+          <select id="room-select" disabled><option value="">— เลือกชั้นก่อน —</option></select>
+        </div>
+      </div>
+      <div id="year-note" class="year-note">กำลังตรวจปีการศึกษา…</div>
+    </section>
+
+    <div id="readonly-note" class="readonly" hidden></div>
+    <section id="error-card" class="card" hidden></section>
+
+    <section id="opening-card" class="card" hidden>
+      <div class="section-head">
+        <div>
+          <h2 id="room-title">รายชื่อนักเรียน</h2>
+          <p>รายการที่ตั้งแล้วจะล็อกไว้ กด ✎ ก่อนแก้ยอดจริง</p>
+        </div>
+        <span id="progress" class="progress">ตั้งแล้ว 0 / 0 คน</span>
+      </div>
+      <div id="student-list" class="student-list"></div>
+      <div class="save-bar">
+        <span id="save-note">กรอกยอดจากสมุดเดิมให้ตรงก่อนบันทึก</span>
+        <button id="save-button" class="primary" type="button">บันทึกยอดยกมาทั้งห้อง</button>
+      </div>
+    </section>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  getStudentPlacements, roomsFromPlacements, activePlacements, bangkokNow, toDateStr,
+  fetchAllRows, formatMoney
+} from "../supabase-client.js?v=20260815-3";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const today = toDateStr(bangkokNow());
+const studentCompare = (a, b) =>
+  String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) ||
+  String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"long", year:"numeric", timeZone:"Asia/Bangkok"
+}).format(new Date(dateStr + "T00:00:00+07:00"));
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 4200);
+}
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("savings_txns_amount_positive")) return "ยอดยกมาต้องมากกว่า 0 บาท";
+  if (message.includes("savings_opening_uniq") || message.includes("duplicate key")) return "นักเรียนคนนี้มียอดยกมาแล้ว กรุณาโหลดข้อมูลใหม่ก่อนแก้";
+  return message;
+}
+
+let session = null;
+let canFinance = false;
+let years = [];
+let currentYear = "";
+let openingDate = "";
+let placements = [];
+let rooms = [];
+let roster = [];
+let openingsByStudent = new Map();
+let unlockedIds = new Set();
+
+function renderRoster() {
+  const setCount = roster.filter(row => openingsByStudent.has(row.student_id)).length;
+  el("progress").textContent = `ตั้งแล้ว ${setCount} / ${roster.length} คน`;
+  el("student-list").innerHTML = roster.map(placement => {
+    const student = placement.student || {};
+    const existing = openingsByStudent.get(placement.student_id) || null;
+    const unlocked = existing && unlockedIds.has(existing.id);
+    const editable = canFinance && (!existing || unlocked);
+    return `<div class="student-row">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
+        <span class="meta">รหัส ${esc(student.student_no || "—")}</span>
+        ${existing ? `<span class="meta">ยอดเดิม ${formatMoney(existing.amount)}</span>` : '<span class="meta">ยังไม่ตั้งยอดยกมา</span>'}
+      </div>
+      <div class="amount-wrap">
+        <label for="opening-${esc(placement.student_id)}">ยอดยกมา (บาท)</label>
+        <input id="opening-${esc(placement.student_id)}" class="opening-input" type="number" min="0.01" step="0.01"
+          inputmode="decimal" data-student-id="${esc(placement.student_id)}" data-existing-id="${esc(existing?.id || "")}" data-original="${esc(existing?.amount || "")}" 
+          value="${existing ? Number(existing.amount).toFixed(2) : ""}" placeholder="กรอกยอดจากสมุดเดิม"${editable ? "" : " disabled"}>
+      </div>
+      ${existing && canFinance ? `<button class="icon-btn" type="button" data-edit-id="${esc(existing.id)}" data-student-name="${esc(student.name || "นักเรียน")}" aria-label="แก้ยอดยกมาของ ${esc(student.name || "นักเรียน")}"${unlocked ? " disabled" : ""}>✎</button>` : '<span aria-hidden="true"></span>'}
+    </div>`;
+  }).join("");
+  el("save-button").disabled = !canFinance;
+}
+
+async function loadRoom(roomIndex) {
+  el("opening-card").hidden = true;
+  unlockedIds.clear();
+  const room = rooms[Number(roomIndex)] || null;
+  if (!room) return;
+  roster = activePlacements(placements).filter(row =>
+    row.grade_level === room.grade_level && row.classroom === room.classroom
+  ).sort(studentCompare);
+  if (!roster.length) {
+    el("error-card").hidden = false;
+    el("error-card").innerHTML = '<div class="banner bad"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจ student_year_placements ที่หน้าจัดการนักเรียน</div>';
+    return;
+  }
+  el("error-card").hidden = true;
+  const studentIds = roster.map(row => row.student_id);
+  const openingRes = await fetchAllRows(() => sb.from("savings_txns")
+    .select("id,student_id,amount,txn_date,year,grade_level,classroom,updated_at")
+    .eq("kind", "ยอดยกมา")
+    .in("student_id", studentIds), ["student_id", "id"]);
+  if (openingRes.error) throw new Error("โหลดยอดยกมาไม่สำเร็จ: " + openingRes.error.message);
+  openingsByStudent = new Map((openingRes.data || []).map(row => [row.student_id, row]));
+  el("room-title").textContent = `${room.grade_level} · ${room.classroom} (${roster.length} คน)`;
+  renderRoster();
+  el("opening-card").hidden = false;
+}
+
+function syncRoomOptions() {
+  el("opening-card").hidden = true;
+  const grade = el("grade-select").value;
+  const roomIndexes = rooms.map((room, index) => ({ room, index })).filter(item => item.room.grade_level === grade);
+  el("room-select").innerHTML = '<option value="">— เลือกห้อง —</option>' + roomIndexes.map(item =>
+    `<option value="${item.index}">${esc(item.room.classroom)}</option>`
+  ).join("");
+  el("room-select").disabled = roomIndexes.length === 0;
+  if (roomIndexes.length === 1) {
+    el("room-select").value = String(roomIndexes[0].index);
+    loadRoom(roomIndexes[0].index).catch(error => toast(friendlyError(error), true));
+  }
+}
+
+async function loadContext() {
+  years = await getAcademicYears();
+  currentYear = academicYearOf(today, years);
+  const yearRow = years.find(row => row.year === currentYear);
+  openingDate = yearRow?.start_date || "";
+  if (!currentYear || !openingDate) throw new Error("ยังไม่พบวันเริ่มปีการศึกษาปัจจุบัน กรุณาตั้งค่าปีการศึกษาก่อน");
+  el("year-note").textContent = `ปีการศึกษา ${currentYear} · วันที่ยอดยกมา ${thaiDate(openingDate)}`;
+
+  const placementRes = await getStudentPlacements(currentYear);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  placements = placementRes.data || [];
+  rooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  // roomsFromPlacements() เรียงชั้นด้วยลำดับกลางไว้แล้ว จึงเก็บลำดับแรกที่พบโดยไม่สร้างสูตรซ้ำในหน้า
+  const grades = [...new Set(rooms.map(room => room.grade_level))];
+  el("grade-select").innerHTML = '<option value="">— เลือกชั้น —</option>' +
+    grades.map(grade => `<option value="${esc(grade)}">${esc(grade)}</option>`).join("");
+  el("grade-select").disabled = grades.length === 0;
+  el("room-select").innerHTML = '<option value="">— เลือกชั้นก่อน —</option>';
+  el("room-select").disabled = true;
+  if (grades.length === 1) {
+    el("grade-select").value = grades[0];
+    syncRoomOptions();
+  }
+}
+
+el("grade-select").addEventListener("change", syncRoomOptions);
+el("room-select").addEventListener("change", async () => {
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { toast("โหลดข้อมูลไม่สำเร็จ: " + friendlyError(error), true); }
+});
+el("student-list").addEventListener("input", event => {
+  const input = event.target.closest(".opening-input");
+  if (!input) return;
+  input.classList.toggle("invalid", input.value !== "" && (!Number.isFinite(Number(input.value)) || Number(input.value) <= 0));
+});
+el("student-list").addEventListener("click", async event => {
+  const button = event.target.closest("[data-edit-id]");
+  if (!button || !canFinance) return;
+  const existing = [...openingsByStudent.values()].find(row => row.id === button.dataset.editId);
+  if (!existing) return;
+  if (!await window.crsAskConfirm({
+    title:"แก้ยอดยกมาออมทรัพย์",
+    message:`ยอดของ ${button.dataset.studentName} เป็นเงินคงเหลือจริงของนักเรียน\nยอดปัจจุบัน ${formatMoney(existing.amount)} · การแก้จะเปลี่ยนยอดคงเหลือทันที`,
+    okLabel:"เปิดให้แก้ยอด",
+    danger:true
+  })) return;
+  unlockedIds.add(existing.id);
+  renderRoster();
+  el("student-list").querySelector(`[data-existing-id="${CSS.escape(existing.id)}"]`)?.focus();
+});
+el("save-button").addEventListener("click", async () => {
+  const inputs = [...el("student-list").querySelectorAll(".opening-input:not(:disabled)")];
+  const items = [];
+  let invalid = false;
+  for (const input of inputs) {
+    const raw = input.value.trim();
+    if (!raw) continue;
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      input.classList.add("invalid");
+      invalid = true;
+      continue;
+    }
+    const original = Number(input.dataset.original || 0);
+    if (input.dataset.existingId && amount === original) continue;
+    items.push({
+      studentId:input.dataset.studentId,
+      existingId:input.dataset.existingId || null,
+      amount:Math.round(amount * 100) / 100
+    });
+  }
+  if (invalid) return toast("ยอดยกมาต้องมากกว่า 0 บาท กรุณาตรวจช่องที่ทำเครื่องหมายไว้", true);
+  if (!items.length) return toast("กรุณากรอกยอดยกมาใหม่ หรือกด ✎ เพื่อแก้รายการเดิมก่อนบันทึก", true);
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  if (!await window.crsAskConfirm({
+    title:"บันทึกยอดยกมาออมทรัพย์",
+    message:`กำลังบันทึก ${items.length} คน · ยอดรวมรายการนี้ ${formatMoney(total)}\nกรุณาตรวจจากสมุดเดิมก่อนยืนยัน`,
+    okLabel:"บันทึกยอดยกมา",
+    danger:false
+  })) return;
+
+  const room = rooms[Number(el("room-select").value)];
+  const button = el("save-button");
+  button.disabled = true;
+  button.textContent = "กำลังบันทึก…";
+  let saved = 0;
+  let firstError = null;
+  for (const item of items) {
+    const request = item.existingId
+      ? sb.from("savings_txns").update({ amount:item.amount, recorded_by:session.user.id }).eq("id", item.existingId)
+      : sb.from("savings_txns").insert({
+          student_id:item.studentId,
+          year:currentYear,
+          grade_level:room.grade_level,
+          classroom:room.classroom,
+          txn_date:openingDate,
+          kind:"ยอดยกมา",
+          amount:item.amount,
+          recorded_by:session.user.id
+        });
+    const { error } = await request;
+    if (error) {
+      firstError ||= error;
+      continue;
+    }
+    saved += 1;
+  }
+  button.textContent = "บันทึกยอดยกมาทั้งห้อง";
+  if (firstError) toast(`บันทึกได้ ${saved} / ${items.length} คน · ${friendlyError(firstError)}`, true);
+  else toast(`บันทึกยอดยกมา ${saved} คนแล้ว`);
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { toast("บันทึกแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + friendlyError(error), true); }
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    if (!canFinance) {
+      el("readonly-note").hidden = false;
+      el("readonly-note").innerHTML = "<b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>การตั้งหรือแก้ยอดยกมาทำได้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายการเงิน";
+    }
+    await loadContext();
+  } catch (error) {
+    el("error-card").hidden = false;
+    el("error-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ายอดยกมาไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+  }
+}
+</script>
+</body>
+</html>

@@ -192,7 +192,7 @@
     <div class="side-brand"><span class="brand-mark"><img src="logo.png" alt="โลโก้โรงเรียน"></span><span>ภาพรวม</span></div>
     <a class="side-link active" href="dashboard.html">⌂ &nbsp;แดชบอร์ด</a>
     <a class="side-link" href="academic/index.html">▣ &nbsp;ฝ่ายวิชาการ</a>
-    <span class="side-link disabled" aria-disabled="true">฿ &nbsp;ฝ่ายการเงิน</span>
+    <a class="side-link" href="finance/index.html">฿ &nbsp;ฝ่ายการเงิน</a>
     <a class="side-link" href="personnel/index.html">♙ &nbsp;ฝ่ายบุคคล</a>
     <a class="side-link" href="general-affairs/index.html">▤ &nbsp;บริหารทั่วไป</a>
     <a class="side-link" id="link-permissions" href="permissions.html" hidden>⚙ &nbsp;จัดการสิทธิ์</a>
@@ -207,7 +207,7 @@
     <nav class="department-tabs" aria-label="ฝ่ายงาน">
       <a class="dept-tab active" href="dashboard.html">ภาพรวม</a>
       <a class="dept-tab" href="academic/index.html">วิชาการ</a>
-      <span class="dept-tab" aria-disabled="true">การเงิน</span>
+      <a class="dept-tab" href="finance/index.html">การเงิน</a>
       <a class="dept-tab" href="personnel/index.html">บุคคล</a>
       <a class="dept-tab" href="general-affairs/index.html">บริหารทั่วไป</a>
     </nav>
@@ -247,7 +247,7 @@
     <nav class="bottom-nav" aria-label="เมนูด้านล่าง">
       <a class="active" href="dashboard.html"><b>⌂</b>ภาพรวม</a>
       <a href="academic/index.html"><b>▣</b>วิชาการ</a>
-      <span><b>฿</b>การเงิน</span>
+      <a href="finance/index.html"><b>฿</b>การเงิน</a>
       <a href="personnel/index.html"><b>♙</b>บุคคล</a>
       <a href="general-affairs/index.html"><b>▤</b>ทั่วไป</a>
     </nav>
@@ -262,8 +262,8 @@
     loadTodayStaffSummary,
     loadAcademicCalendar, pickCalendarUpcoming,
     loadAcademicProjects, filterProjectsInMonth, countPendingProjectsInMonth, projectResponsibleName,
-    bangkokNow, toDateStr
-  } from "./supabase-client.js?v=20260814-1";
+    bangkokNow, toDateStr, formatMoney
+  } from "./supabase-client.js?v=20260815-3";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayNote = document.getElementById("student-today-note");
@@ -311,10 +311,6 @@
   function formatRange(startDate, endDate) {
     const end = endDate || startDate;
     return startDate === end ? formatDate(startDate) : formatDate(startDate) + " – " + formatDate(end);
-  }
-
-  function formatMoney(value) {
-    return Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 }) + " บาท";
   }
 
   function formatFetchedAt(value) {
@@ -403,7 +399,7 @@
       projectPending.hidden = pendingCount === 0;
       projectPending.textContent = pendingCount > 0 ? `มี ${pendingCount} รายการรออนุมัติ` : "";
       const budget = rows.reduce((sum, row) => sum + Number(row.budget_planned || 0), 0);
-      projectFooter.textContent = `เดือนนี้ ${rows.length} รายการ · งบตั้งไว้รวม ${formatMoney(budget)}`;
+      projectFooter.textContent = `เดือนนี้ ${rows.length} รายการ · งบตั้งไว้รวม ${formatMoney(budget, { minimumFractionDigits:0 })}`;
       if (!rows.length) {
         projectList.innerHTML =
           '<div class="empty">เดือนนี้ยังไม่มีโครงการหรือกิจกรรม<br><a class="panel-link" href="academic/projects.html">เปิดหน้าโครงการ/กิจกรรม</a></div>';
@@ -411,7 +407,7 @@
       }
       projectList.innerHTML = rows.map(row => {
         const responsible = projectResponsibleName(row) || "ยังไม่ระบุ";
-        const budgetText = row.budget_planned == null ? "" : `<div class="item-side">${escapeHtml(formatMoney(row.budget_planned))}</div>`;
+        const budgetText = row.budget_planned == null ? "" : `<div class="item-side">${escapeHtml(formatMoney(row.budget_planned, { minimumFractionDigits:0 }))}</div>`;
         const parentText = row.parent_name
           ? `<div class="item-meta">โครงการแม่: ${escapeHtml(row.parent_name)}</div>`
           : "";

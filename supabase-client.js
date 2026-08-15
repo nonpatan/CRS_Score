@@ -545,6 +545,54 @@ export async function getStudentPlacements(year, studentIds = null) {
   return { data: data || [], error };
 }
 
+// รูปแบบจำนวนเงินกลาง — หน้าการเงินใช้ทศนิยม 2 ตำแหน่งตามค่าเริ่มต้น
+// จุดที่ต้องการแบบกระชับ (เช่นงบประมาณบน dashboard) ส่ง minimumFractionDigits:0 ได้
+export function formatMoney(value, {
+  minimumFractionDigits = 2,
+  maximumFractionDigits = 2
+} = {}) {
+  const amount = Number(value);
+  return new Intl.NumberFormat("th-TH", {
+    minimumFractionDigits,
+    maximumFractionDigits
+  }).format(Number.isFinite(amount) ? amount : 0) + " บาท";
+}
+
+// ---------- ออมทรัพย์นักเรียน ----------
+// ยอดคงเหลือ = ยอดยกมา + ฝาก − ถอน − หักค่ารถ
+// รับ txns ทั้งก้อนของนักเรียนคนหนึ่ง (หรือทั้งห้องแล้วกรองเอง)
+export function computeSavingsBalance(txns) {
+  return (Array.isArray(txns) ? txns : []).reduce((balance, txn) => {
+    const amount = Number(txn?.amount);
+    if (!Number.isFinite(amount)) return balance;
+    if (txn.kind === "ยอดยกมา" || txn.kind === "ฝาก") return balance + amount;
+    if (txn.kind === "ถอน" || txn.kind === "หักค่ารถ") return balance - amount;
+    return balance;
+  }, 0);
+}
+
+// จัดกลุ่มยอดคงเหลือทั้งห้อง → Map(student_id -> ยอด) เรียกครั้งเดียวไม่ต้องวน query รายคน
+export function summarizeSavingsByStudent(txns) {
+  const grouped = new Map();
+  for (const txn of (Array.isArray(txns) ? txns : [])) {
+    if (!txn?.student_id) continue;
+    if (!grouped.has(txn.student_id)) grouped.set(txn.student_id, []);
+    grouped.get(txn.student_id).push(txn);
+  }
+  return new Map([...grouped].map(([studentId, rows]) => [studentId, computeSavingsBalance(rows)]));
+}
+
+// ยอดที่เบิกได้จริง = ยอดคงเหลือ − คำขอที่ยังรอจ่าย
+// รับรายการของนักเรียนคนเดียว; คำขอที่จ่ายแล้ว/ยกเลิกไม่กันยอดไว้
+export function computeAvailableToWithdraw(txns, pendingRequests) {
+  const pending = (Array.isArray(pendingRequests) ? pendingRequests : []).reduce((total, request) => {
+    if (request?.status !== "รอจ่าย") return total;
+    const amount = Number(request.amount);
+    return Number.isFinite(amount) ? total + amount : total;
+  }, 0);
+  return computeSavingsBalance(txns) - pending;
+}
+
 // รายชื่อนักเรียนที่ลงทะเบียนในวิชานี้ (ผ่านตาราง enrollments) เรียงตามเลขที่
 // ใช้แทนการดึง "นักเรียนทั้งหมด" แบบเดิม — วิชาไหนยังไม่มีใครลงทะเบียนจะได้ [] เปล่าๆ
 // หมายเหตุ: ไม่กรอง graduated ออก เพราะเป็น "รายชื่อในวิชานั้นๆ" (ผูกปีอยู่แล้ว) เด็กจบไปแล้ว

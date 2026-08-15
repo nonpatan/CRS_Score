@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รับฝากออมทรัพย์ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6;
+  }
+  .wrap { max-width:760px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; overflow:hidden;
+    border:1px solid var(--line); border-radius:12px; background:var(--white);
+  }
+  .field { margin-bottom:14px; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  input.invalid { border-color:var(--danger); background:var(--danger-soft); }
+  button, .button-link {
+    min-height:44px; padding:10px 14px; border:0; border-radius:9px;
+    font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary { color:var(--white); background:var(--teal); }
+  button:disabled { opacity:.55; cursor:default; }
+  .button-link { display:inline-flex; align-items:center; color:var(--amber); background:var(--amber-soft); text-decoration:none; }
+  .date-box { padding:11px 13px; border-radius:10px; color:var(--teal); background:var(--teal-soft); font-weight:600; }
+  .banner { margin:0; padding:12px 14px; border-radius:10px; font-size:14px; }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner .button-link { margin-top:9px; border:1px solid currentColor; }
+  .readonly { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .student-list { border-top:1px solid var(--line); }
+  .student-row {
+    display:grid; grid-template-columns:minmax(190px,1fr) 150px 150px;
+    gap:12px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line);
+  }
+  .student-row.blocked { opacity:.68; }
+  .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
+  .meta { display:block; color:var(--muted); font-size:13px; font-weight:400; }
+  .meta.bad { color:var(--danger); }
+  .balance { color:var(--teal); font-weight:700; text-align:right; }
+  .balance.pending { color:var(--amber); font-size:13px; }
+  .amount-wrap label { margin:0 0 4px; color:var(--muted); font-size:12px; }
+  .save-bar {
+    position:sticky; bottom:10px; display:flex; align-items:center; justify-content:space-between;
+    gap:12px; margin-top:14px; padding:12px; border:1px solid var(--line);
+    border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 10px 28px rgba(25,77,73,.14);
+  }
+  .save-bar span { color:var(--muted); font-size:13px; }
+  .empty { padding:26px 10px; color:var(--muted); text-align:center; }
+  .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:680px) {
+    .student-row { grid-template-columns:minmax(0,1fr) 132px; }
+    .amount-wrap { grid-column:1/-1; }
+  }
+  @media (max-width:440px) {
+    .section-head { display:block; }
+    .student-row { grid-template-columns:minmax(0,1fr) 116px; }
+    .save-bar { align-items:stretch; flex-direction:column; }
+    .save-bar button { width:100%; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>รับฝากออมทรัพย์</h1>
+    <p>บันทึกยอดฝากวันนี้หลังเช็คชื่อประจำวันเรียบร้อยแล้ว</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260815-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card">
+      <div class="field">
+        <label for="room-select">ห้องเรียน</label>
+        <select id="room-select" disabled><option value="">กำลังโหลด…</option></select>
+      </div>
+      <div class="date-box" id="date-note">กำลังตรวจวันที่และปีการศึกษา…</div>
+    </section>
+
+    <section id="attendance-warning" class="card" hidden></section>
+    <section id="opening-warning" class="card" hidden></section>
+    <section id="access-warning" class="card" hidden></section>
+
+    <section id="entry-card" class="card" hidden>
+      <div class="section-head">
+        <div>
+          <h2 id="room-title">รายชื่อนักเรียน</h2>
+          <p id="room-note">กำลังโหลด…</p>
+        </div>
+      </div>
+      <div id="student-list" class="student-list"></div>
+      <div class="save-bar">
+        <span id="save-note">กรอกเฉพาะคนที่นำเงินมาฝากวันนี้</span>
+        <button id="save-button" class="primary" type="button">บันทึกการฝากทั้งห้อง</button>
+      </div>
+    </section>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  getStudentPlacements, roomsFromPlacements, activePlacements, bangkokNow, toDateStr,
+  getMyCoverageFor, fetchAllRows, summarizeSavingsByStudent, formatMoney
+} from "../supabase-client.js?v=20260815-3";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const today = toDateStr(bangkokNow());
+const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+const studentCompare = (a, b) =>
+  String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) ||
+  String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"long", year:"numeric", timeZone:"Asia/Bangkok"
+}).format(new Date(dateStr + "T00:00:00+07:00"));
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 4200);
+}
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("savings_txns_amount_positive")) return "ยอดฝากต้องมากกว่า 0 บาท";
+  return message;
+}
+
+let session = null;
+let years = [];
+let currentYear = "";
+let placements = [];
+let availableRooms = [];
+let selectedRoom = null;
+let roster = [];
+let attendanceByStudent = new Map();
+let txns = [];
+let balanceByStudent = new Map();
+let openingStudentIds = new Set();
+let depositByStudent = new Map();
+let canFinance = false;
+let writableRoomKeys = new Set();
+
+function hideRoom() {
+  selectedRoom = null;
+  roster = [];
+  el("entry-card").hidden = true;
+  for (const id of ["attendance-warning", "opening-warning", "access-warning"]) {
+    el(id).hidden = true;
+    el(id).innerHTML = "";
+  }
+}
+
+function showReadonly(message) {
+  el("access-warning").hidden = false;
+  el("access-warning").innerHTML = `<div class="readonly"><b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>${message}</div>`;
+}
+
+function latestDeposit(rows) {
+  return [...rows].sort((a, b) =>
+    String(b.updated_at || b.recorded_at || "").localeCompare(String(a.updated_at || a.recorded_at || ""))
+  )[0] || null;
+}
+
+function renderRoster({ roomChecked, canWrite }) {
+  el("student-list").innerHTML = roster.map(placement => {
+    const student = placement.student || {};
+    const attendance = attendanceByStudent.get(placement.student_id);
+    const canReceive = attendance?.status === "มา" || attendance?.status === "มาสาย";
+    const blocked = !roomChecked || !canWrite || !canReceive;
+    const existing = depositByStudent.get(placement.student_id) || null;
+    const hasOpening = openingStudentIds.has(placement.student_id);
+    const hasTransactions = balanceByStudent.has(placement.student_id);
+    const balance = balanceByStudent.get(placement.student_id) ?? 0;
+    const balanceText = hasOpening
+      ? formatMoney(balance)
+      : hasTransactions
+        ? `${formatMoney(balance)} · ยังไม่รวมสมุดเดิม`
+        : "ยังไม่ตั้งยอดยกมา";
+    const statusText = !attendance
+      ? "ยังไม่มีข้อมูลเช็คชื่อ — รับเงินไม่ได้"
+      : (canReceive ? `สถานะวันนี้: ${attendance.status}` : `${attendance.status}วันนี้ — รับเงินไม่ได้`);
+    return `<div class="student-row${blocked ? " blocked" : ""}">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
+        <span class="meta">รหัส ${esc(student.student_no || "—")}</span>
+        <span class="meta${canReceive ? "" : " bad"}">${esc(statusText)}</span>
+      </div>
+      <div class="balance${hasOpening ? "" : " pending"}">${balanceText}</div>
+      <div class="amount-wrap">
+        <label for="deposit-${esc(placement.student_id)}">ยอดฝากวันนี้ (บาท)</label>
+        <input id="deposit-${esc(placement.student_id)}" class="deposit-input" type="number" min="0.01" step="0.01"
+          inputmode="decimal" data-student-id="${esc(placement.student_id)}" data-existing-id="${esc(existing?.id || "")}" data-old-amount="${esc(existing?.amount || "")}" 
+          value="${existing ? Number(existing.amount).toFixed(2) : ""}" placeholder="เว้นว่างถ้าไม่ฝาก"${blocked ? " disabled" : ""}>
+        ${existing ? `<span class="meta">บันทึกแล้ววันนี้ · แก้ยอดแล้วกดบันทึกทับได้</span>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  el("save-button").disabled = !roomChecked || !canWrite;
+}
+
+async function loadRoom(index) {
+  hideRoom();
+  selectedRoom = availableRooms[Number(index)] || null;
+  if (!selectedRoom) return;
+
+  roster = activePlacements(placements).filter(placement =>
+    placement.grade_level === selectedRoom.grade_level && placement.classroom === selectedRoom.classroom
+  ).sort(studentCompare);
+  if (!roster.length) {
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = '<div class="banner warn"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจ student_year_placements ที่หน้าจัดการนักเรียน</div>';
+    return;
+  }
+
+  const studentIds = roster.map(row => row.student_id);
+  const [attendanceRes, txnRes] = await Promise.all([
+    sb.from("daily_attendance")
+      .select("student_id,status")
+      .eq("attend_date", today)
+      .eq("year", currentYear)
+      .eq("grade_level", selectedRoom.grade_level)
+      .eq("classroom", selectedRoom.classroom),
+    fetchAllRows(() => sb.from("savings_txns")
+      .select("id,student_id,txn_date,kind,amount,recorded_at,updated_at")
+      .in("student_id", studentIds), ["student_id", "txn_date", "id"])
+  ]);
+  if (attendanceRes.error) throw new Error("โหลดข้อมูลเช็คชื่อไม่สำเร็จ: " + attendanceRes.error.message);
+  if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
+
+  attendanceByStudent = new Map((attendanceRes.data || []).map(row => [row.student_id, row]));
+  txns = txnRes.data || [];
+  balanceByStudent = summarizeSavingsByStudent(txns);
+  openingStudentIds = new Set(txns.filter(row => row.kind === "ยอดยกมา").map(row => row.student_id));
+  const deposits = new Map();
+  for (const row of txns.filter(row => row.kind === "ฝาก" && row.txn_date === today)) {
+    if (!deposits.has(row.student_id)) deposits.set(row.student_id, []);
+    deposits.get(row.student_id).push(row);
+  }
+  depositByStudent = new Map([...deposits].map(([studentId, rows]) => [studentId, latestDeposit(rows)]));
+
+  const missingAttendance = roster.filter(row => !attendanceByStudent.has(row.student_id)).length;
+  const roomChecked = missingAttendance === 0;
+  const canWrite = canFinance || writableRoomKeys.has(roomKey(selectedRoom));
+  const missingOpening = roster.filter(row => !openingStudentIds.has(row.student_id)).length;
+
+  if (!roomChecked) {
+    el("attendance-warning").hidden = false;
+    el("attendance-warning").innerHTML = `<div class="banner warn"><b>ห้องนี้ยังเช็คชื่อวันนี้ไม่ครบ ${missingAttendance} คน</b><br>
+      ต้องเช็คชื่อให้ครบก่อน ระบบจึงจะเปิดช่องรับฝาก
+      <br><a class="button-link" href="../general-affairs/daily-attendance.html">ไปหน้าเช็คชื่อรายวัน</a></div>`;
+  }
+  if (missingOpening > 0) {
+    el("opening-warning").hidden = false;
+    el("opening-warning").innerHTML = `<div class="banner warn"><b>ยังไม่ได้ตั้งยอดยกมา ${missingOpening} คน</b><br>
+      ยอดคงเหลือที่เห็นยังไม่รวมสมุดเดิมของ ${missingOpening} คน</div>`;
+  }
+  if (!canWrite) showReadonly("คุณไม่ได้เป็นครูประจำชั้นหรือคนแทนของห้องนี้ในวันนี้ กรุณาติดต่อฝ่ายบริหารทั่วไปหากข้อมูลไม่ถูกต้อง");
+
+  el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${roster.length} คน)`;
+  el("room-note").textContent = roomChecked
+    ? "เช็คชื่อครบแล้ว · รับฝากได้เฉพาะนักเรียนสถานะ มา หรือ มาสาย"
+    : `เช็คชื่อแล้ว ${roster.length - missingAttendance} / ${roster.length} คน`;
+  el("save-note").textContent = roomChecked && canWrite
+    ? "กรอกเฉพาะคนที่นำเงินมาฝากวันนี้"
+    : "ช่องกรอกถูกปิดจนกว่าสิทธิ์และการเช็คชื่อจะพร้อม";
+  renderRoster({ roomChecked, canWrite });
+  el("entry-card").hidden = false;
+}
+
+async function loadContext() {
+  years = await getAcademicYears();
+  currentYear = academicYearOf(today, years);
+  if (!currentYear) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
+  el("date-note").textContent = `รับฝากประจำวันที่ ${thaiDate(today)} · ปีการศึกษา ${currentYear}`;
+
+  const [placementRes, homeroomRes, ownStaffRes, coverage] = await Promise.all([
+    getStudentPlacements(currentYear),
+    sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
+    sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
+    getMyCoverageFor(today)
+  ]);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (homeroomRes.error) throw new Error("โหลดข้อมูลครูประจำชั้นไม่สำเร็จ: " + homeroomRes.error.message);
+  if (ownStaffRes.error) throw new Error("โหลดข้อมูลบุคลากรของคุณไม่สำเร็จ: " + ownStaffRes.error.message);
+
+  placements = placementRes.data || [];
+  const allRooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  const ownStaffId = ownStaffRes.data?.id || null;
+  writableRoomKeys = new Set(
+    (homeroomRes.data || [])
+      .filter(row => ownStaffId && row.staff_id === ownStaffId)
+      .map(roomKey)
+  );
+  for (const key of coverage.roomKeys) writableRoomKeys.add(key);
+  availableRooms = canFinance ? allRooms : allRooms.filter(room => writableRoomKeys.has(roomKey(room)));
+
+  if (!availableRooms.length) {
+    el("room-select").innerHTML = '<option value="">— ไม่มีห้องที่รับผิดชอบ —</option>';
+    el("room-select").disabled = true;
+    if (!ownStaffId && !canFinance) {
+      showReadonly("ยังไม่พบบัญชีบุคลากรที่ผูกกับการเข้าสู่ระบบนี้ กรุณาติดต่อฝ่ายบริหารทั่วไปให้ตรวจการผูกบัญชีและครูประจำชั้น");
+    } else {
+      showReadonly("วันนี้คุณไม่ได้รับผิดชอบห้องใดในฐานะครูประจำชั้นหรือคนแทน");
+    }
+    return;
+  }
+
+  el("room-select").innerHTML =
+    (availableRooms.length === 1 ? "" : '<option value="">— เลือกห้อง —</option>') +
+    availableRooms.map((room, index) =>
+      `<option value="${index}">${esc(room.grade_level)} · ${esc(room.classroom)}</option>`
+    ).join("");
+  el("room-select").disabled = false;
+  if (availableRooms.length === 1) {
+    el("room-select").value = "0";
+    await loadRoom(0);
+  }
+}
+
+el("room-select").addEventListener("change", async () => {
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { toast("โหลดข้อมูลไม่สำเร็จ: " + friendlyError(error), true); }
+});
+el("student-list").addEventListener("input", event => {
+  const input = event.target.closest(".deposit-input");
+  if (!input) return;
+  input.classList.toggle("invalid", input.value !== "" && (!Number.isFinite(Number(input.value)) || Number(input.value) <= 0));
+});
+el("save-button").addEventListener("click", async () => {
+  if (!selectedRoom) return;
+  const inputs = [...el("student-list").querySelectorAll(".deposit-input:not(:disabled)")];
+  const items = [];
+  let invalidMessage = "";
+  for (const input of inputs) {
+    const raw = input.value.trim();
+    const oldAmount = Number(input.dataset.oldAmount || 0);
+    if (!raw) {
+      if (input.dataset.existingId) invalidMessage = "รายการที่เคยบันทึกแล้วห้ามเว้นว่าง กรุณาใส่ยอดที่ถูกต้อง";
+      continue;
+    }
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      input.classList.add("invalid");
+      invalidMessage = "ยอดฝากต้องมากกว่า 0 บาท กรุณาตรวจช่องที่ทำเครื่องหมายไว้";
+      continue;
+    }
+    const currentBalance = balanceByStudent.get(input.dataset.studentId) || 0;
+    if (currentBalance - oldAmount + amount < 0) {
+      input.classList.add("invalid");
+      invalidMessage = "ยอดที่แก้จะทำให้ยอดคงเหลือติดลบ กรุณาตรวจยอดฝากเดิม";
+      continue;
+    }
+    items.push({
+      studentId:input.dataset.studentId,
+      existingId:input.dataset.existingId || null,
+      amount:Math.round(amount * 100) / 100
+    });
+  }
+  if (invalidMessage) return toast(invalidMessage, true);
+  if (!items.length) return toast("กรุณากรอกยอดฝากอย่างน้อย 1 คนก่อนบันทึก", true);
+
+  const total = items.reduce((sum, item) => sum + item.amount, 0);
+  if (!await window.crsAskConfirm({
+    title:"บันทึกการฝากทั้งห้อง",
+    message:`กำลังบันทึก ${items.length} คน · ยอดรวม ${formatMoney(total)}\nกรุณาตรวจยอดก่อนยืนยัน`,
+    okLabel:"บันทึกยอดฝาก",
+    danger:false
+  })) return;
+
+  const button = el("save-button");
+  button.disabled = true;
+  button.textContent = "กำลังบันทึก…";
+  let saved = 0;
+  let firstError = null;
+  for (const item of items) {
+    const request = item.existingId
+      ? sb.from("savings_txns").update({ amount:item.amount, recorded_by:session.user.id }).eq("id", item.existingId)
+      : sb.from("savings_txns").insert({
+          student_id:item.studentId,
+          year:currentYear,
+          grade_level:selectedRoom.grade_level,
+          classroom:selectedRoom.classroom,
+          txn_date:today,
+          kind:"ฝาก",
+          amount:item.amount,
+          recorded_by:session.user.id
+        });
+    const { error } = await request;
+    if (error) {
+      firstError ||= error;
+      continue;
+    }
+    saved += 1;
+  }
+  button.textContent = "บันทึกการฝากทั้งห้อง";
+  if (firstError) {
+    toast(`บันทึกได้ ${saved} / ${items.length} คน · ${friendlyError(firstError)}`, true);
+  } else {
+    toast(`บันทึกยอดฝาก ${saved} คน · รวม ${formatMoney(total)} แล้ว`);
+  }
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { toast("บันทึกแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + friendlyError(error), true); }
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    await loadContext();
+  } catch (error) {
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับฝากไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+  }
+}
+</script>
+</body>
+</html>

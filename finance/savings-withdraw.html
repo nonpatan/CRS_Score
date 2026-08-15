@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แจ้งเบิกออมทรัพย์ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
+  .field { margin-bottom:14px; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  textarea { min-height:82px; resize:vertical; }
+  button { min-height:44px; padding:10px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; cursor:pointer; }
+  button.primary { width:100%; color:var(--white); background:var(--teal); }
+  button.danger { color:var(--danger); background:var(--danger-soft); }
+  button:disabled { opacity:.55; cursor:default; }
+  .date-box { padding:11px 13px; border-radius:10px; color:var(--teal); background:var(--teal-soft); font-weight:600; }
+  .banner { margin:0; padding:12px 14px; border-radius:10px; font-size:14px; }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad, .readonly { color:var(--danger); background:var(--danger-soft); }
+  .student-list, .request-list { border-top:1px solid var(--line); }
+  .student-row { display:grid; grid-template-columns:minmax(180px,1fr) repeat(3,minmax(98px,auto)); gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line); }
+  .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
+  .money-cell { text-align:right; }
+  .money-cell b { display:block; color:var(--teal); }
+  .money-cell.pending b { color:var(--amber); }
+  .money-cell span, .meta, .hint { color:var(--muted); font-size:13px; }
+  .request-row { display:grid; grid-template-columns:minmax(180px,1fr) minmax(110px,auto) minmax(120px,auto); gap:12px; align-items:start; padding:13px 0; border-bottom:1px solid var(--line); }
+  .request-row:last-child, .student-row:last-child { border-bottom:0; }
+  .status { display:inline-block; margin-top:4px; padding:2px 8px; border-radius:999px; color:var(--amber); background:var(--amber-soft); font-size:12px; font-weight:700; }
+  .status.paid { color:var(--teal); background:var(--teal-soft); }
+  .status.cancelled { color:var(--danger); background:var(--danger-soft); }
+  .cancel-box input { margin-bottom:7px; }
+  .empty { padding:24px 8px; color:var(--muted); text-align:center; }
+  .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:680px) {
+    .student-row { grid-template-columns:minmax(0,1fr) 1fr 1fr 1fr; }
+    .student-name { grid-column:1/-1; }
+    .request-row { grid-template-columns:minmax(0,1fr) auto; }
+    .cancel-box { grid-column:1/-1; }
+  }
+  @media (max-width:440px) {
+    .row2 { grid-template-columns:1fr; gap:0; }
+    .student-row { grid-template-columns:1fr; }
+    .money-cell { display:flex; justify-content:space-between; text-align:left; }
+    .request-row { grid-template-columns:1fr; }
+    .cancel-box { grid-column:auto; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>แจ้งเบิกออมทรัพย์</h1>
+    <p>ครูประจำชั้นบันทึกคำขอ แล้วฝ่ายการเงินจ่ายจากคิวรอจ่าย</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260815-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card">
+      <div class="field">
+        <label for="room-select">ห้องเรียน</label>
+        <select id="room-select" disabled><option value="">กำลังโหลด…</option></select>
+      </div>
+      <div class="date-box" id="date-note">กำลังตรวจวันที่และปีการศึกษา…</div>
+    </section>
+    <section id="access-warning" class="card" hidden></section>
+
+    <section id="student-card" class="card" hidden>
+      <div class="section">ยอดออมทรัพย์ของนักเรียน</div>
+      <div id="student-list" class="student-list"></div>
+    </section>
+
+    <section id="request-card" class="card" hidden>
+      <div class="section">บันทึกคำขอเบิก</div>
+      <div class="field">
+        <label for="student-select">นักเรียน</label>
+        <select id="student-select"><option value="">— เลือกนักเรียน —</option></select>
+        <div id="available-note" class="hint">เลือกนักเรียนเพื่อดูยอดที่เบิกได้</div>
+      </div>
+      <div class="field">
+        <label for="amount">จำนวนเงิน (บาท)</label>
+        <input id="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="requester-type">ใครมาขอเบิก</label>
+          <select id="requester-type">
+            <option value="นักเรียน">นักเรียน</option>
+            <option value="ผู้ปกครอง">ผู้ปกครอง</option>
+          </select>
+        </div>
+        <div id="requester-name-field" class="field" hidden>
+          <label for="requester-name">ชื่อผู้ปกครอง</label>
+          <input id="requester-name" type="text" maxlength="200" autocomplete="name">
+        </div>
+      </div>
+      <div class="field">
+        <label for="note">หมายเหตุ (ถ้ามี)</label>
+        <textarea id="note" maxlength="1000"></textarea>
+      </div>
+      <button id="submit-button" class="primary" type="button">ส่งคำขอเข้าคิวรอจ่าย</button>
+    </section>
+
+    <section id="history-card" class="card" hidden>
+      <div class="section">คำขอของห้องนี้</div>
+      <div id="request-list" class="request-list"></div>
+    </section>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  getStudentPlacements, roomsFromPlacements, activePlacements, bangkokNow, toDateStr,
+  getMyCoverageFor, fetchAllRows, computeSavingsBalance, computeAvailableToWithdraw, formatMoney
+} from "../supabase-client.js?v=20260815-3";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const today = toDateStr(bangkokNow());
+const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok"
+}).format(new Date(dateStr + "T00:00:00+07:00"));
+const studentCompare = (a, b) =>
+  String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) ||
+  String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 5000);
+}
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("sw_amount_positive")) return "จำนวนเงินที่ขอต้องมากกว่า 0 บาท";
+  if (message.includes("sw_cancel_needs_reason")) return "กรุณาระบุเหตุผลที่ยกเลิกคำขอ";
+  return message;
+}
+
+let session = null;
+let currentYear = "";
+let placements = [];
+let availableRooms = [];
+let selectedRoom = null;
+let roster = [];
+let txnsByStudent = new Map();
+let requestsByStudent = new Map();
+let roomRequests = [];
+let writableRoomKeys = new Set();
+let canFinance = false;
+
+function studentNumbers(studentId) {
+  const txns = txnsByStudent.get(studentId) || [];
+  const requests = requestsByStudent.get(studentId) || [];
+  const balance = computeSavingsBalance(txns);
+  const pending = requests.filter(row => row.status === "รอจ่าย").reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  return { balance, pending, available:computeAvailableToWithdraw(txns, requests) };
+}
+
+function renderStudents() {
+  el("student-list").innerHTML = roster.map(placement => {
+    const student = placement.student || {};
+    const values = studentNumbers(placement.student_id);
+    return `<div class="student-row">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")}</span></div>
+      <div class="money-cell"><span>คงเหลือ</span><b>${formatMoney(values.balance)}</b></div>
+      <div class="money-cell pending"><span>รอจ่าย</span><b>${formatMoney(values.pending)}</b></div>
+      <div class="money-cell"><span>เบิกได้</span><b>${formatMoney(values.available)}</b></div>
+    </div>`;
+  }).join("") || '<div class="empty">ยังไม่มีรายชื่อนักเรียนในห้องนี้</div>';
+
+  el("student-select").innerHTML = '<option value="">— เลือกนักเรียน —</option>' + roster.map(placement =>
+    `<option value="${esc(placement.student_id)}">${esc(placement.student?.student_no || "—")} · ${esc(placement.student?.name || "ไม่พบชื่อ")}</option>`
+  ).join("");
+  updateAvailableNote();
+}
+
+function renderRequests() {
+  const sorted = [...roomRequests].sort((a, b) =>
+    String(b.request_date || "").localeCompare(String(a.request_date || "")) ||
+    String(b.requested_at || "").localeCompare(String(a.requested_at || ""))
+  );
+  el("request-list").innerHTML = sorted.map(row => {
+    const student = roster.find(item => item.student_id === row.student_id)?.student || {};
+    const statusClass = row.status === "จ่ายแล้ว" ? "paid" : row.status === "ยกเลิก" ? "cancelled" : "";
+    const requester = row.requester_type === "ผู้ปกครอง"
+      ? `ผู้ปกครอง${row.requester_name ? " · " + esc(row.requester_name) : ""}`
+      : "นักเรียน";
+    return `<div class="request-row">
+      <div><b>${esc(student.name || "ไม่พบชื่อนักเรียน")}</b>
+        <span class="meta">แจ้ง ${thaiDate(row.request_date)} · ${requester}${row.note ? " · " + esc(row.note) : ""}</span>
+        <span class="status ${statusClass}">${esc(row.status)}</span>
+      </div>
+      <div class="money-cell"><span>ยอดขอเบิก</span><b>${formatMoney(row.amount)}</b></div>
+      ${row.status === "รอจ่าย" ? `<div class="cancel-box">
+        <label class="meta" for="cancel-${esc(row.id)}">เหตุผลที่ยกเลิก</label>
+        <input id="cancel-${esc(row.id)}" class="cancel-reason" type="text" maxlength="500" data-request-id="${esc(row.id)}">
+        <button class="danger cancel-button" type="button" data-request-id="${esc(row.id)}">ยกเลิกคำขอ</button>
+      </div>` : `<div class="meta">${row.status === "ยกเลิก" ? "เหตุผล: " + esc(row.cancel_reason || "—") : "จ่ายเงินแล้ว"}</div>`}
+    </div>`;
+  }).join("") || '<div class="empty">ยังไม่มีคำขอเบิกของห้องนี้</div>';
+}
+
+function updateAvailableNote() {
+  const studentId = el("student-select").value;
+  if (!studentId) {
+    el("available-note").textContent = "เลือกนักเรียนเพื่อดูยอดที่เบิกได้";
+    return;
+  }
+  const values = studentNumbers(studentId);
+  el("available-note").textContent = `คงเหลือ ${formatMoney(values.balance)} · รอจ่าย ${formatMoney(values.pending)} · เบิกได้ ${formatMoney(values.available)}`;
+}
+
+async function loadRoom(index) {
+  selectedRoom = availableRooms[Number(index)] || null;
+  for (const id of ["student-card", "request-card", "history-card"]) el(id).hidden = true;
+  if (!selectedRoom) return;
+
+  roster = activePlacements(placements).filter(row =>
+    row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom
+  ).sort(studentCompare);
+  if (!roster.length) {
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = '<div class="banner warn"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจรายชื่อในปีการศึกษาปัจจุบัน</div>';
+    return;
+  }
+  el("access-warning").hidden = true;
+  const studentIds = roster.map(row => row.student_id);
+  const [txnRes, withdrawalRes] = await Promise.all([
+    fetchAllRows(() => sb.from("savings_txns")
+      .select("id,student_id,kind,amount,txn_date").in("student_id", studentIds), ["student_id", "txn_date", "id"]),
+    fetchAllRows(() => sb.from("savings_withdrawals")
+      .select("id,student_id,request_date,amount,requester_type,requester_name,note,status,cancel_reason,requested_at")
+      .eq("year", currentYear).eq("grade_level", selectedRoom.grade_level).eq("classroom", selectedRoom.classroom), ["request_date", "id"])
+  ]);
+  if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
+  if (withdrawalRes.error) throw new Error("โหลดคำขอเบิกไม่สำเร็จ: " + withdrawalRes.error.message);
+
+  txnsByStudent = new Map();
+  for (const row of txnRes.data || []) {
+    if (!txnsByStudent.has(row.student_id)) txnsByStudent.set(row.student_id, []);
+    txnsByStudent.get(row.student_id).push(row);
+  }
+  roomRequests = withdrawalRes.data || [];
+  requestsByStudent = new Map();
+  for (const row of roomRequests) {
+    if (!requestsByStudent.has(row.student_id)) requestsByStudent.set(row.student_id, []);
+    requestsByStudent.get(row.student_id).push(row);
+  }
+  renderStudents();
+  renderRequests();
+  for (const id of ["student-card", "request-card", "history-card"]) el(id).hidden = false;
+}
+
+async function loadContext() {
+  const years = await getAcademicYears();
+  currentYear = academicYearOf(today, years);
+  if (!currentYear) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
+  el("date-note").textContent = `แจ้งคำขอประจำวันที่ ${thaiDate(today)} · ปีการศึกษา ${currentYear}`;
+
+  const [placementRes, homeroomRes, ownStaffRes, coverage] = await Promise.all([
+    getStudentPlacements(currentYear),
+    sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
+    sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
+    getMyCoverageFor(today)
+  ]);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (homeroomRes.error) throw new Error("โหลดข้อมูลครูประจำชั้นไม่สำเร็จ: " + homeroomRes.error.message);
+  if (ownStaffRes.error) throw new Error("โหลดข้อมูลบุคลากรของคุณไม่สำเร็จ: " + ownStaffRes.error.message);
+  placements = placementRes.data || [];
+  const allRooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  const ownStaffId = ownStaffRes.data?.id || null;
+  writableRoomKeys = new Set((homeroomRes.data || []).filter(row => ownStaffId && row.staff_id === ownStaffId).map(roomKey));
+  for (const key of coverage.roomKeys) writableRoomKeys.add(key);
+  availableRooms = canFinance ? allRooms : allRooms.filter(room => writableRoomKeys.has(roomKey(room)));
+
+  if (!availableRooms.length) {
+    el("room-select").innerHTML = '<option value="">— ไม่มีห้องที่รับผิดชอบ —</option>';
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = `<div class="readonly"><b>เปิดคำขอเบิกไม่ได้</b><br>${ownStaffId ? "วันนี้คุณไม่ได้เป็นครูประจำชั้นหรือคนแทนของห้องใด" : "ยังไม่พบบัญชีบุคลากรที่ผูกกับการเข้าสู่ระบบนี้"}</div>`;
+    return;
+  }
+  el("room-select").innerHTML = (availableRooms.length === 1 ? "" : '<option value="">— เลือกห้อง —</option>') +
+    availableRooms.map((room, index) => `<option value="${index}">${esc(room.grade_level)} · ${esc(room.classroom)}</option>`).join("");
+  el("room-select").disabled = false;
+  if (availableRooms.length === 1) {
+    el("room-select").value = "0";
+    await loadRoom(0);
+  }
+}
+
+el("room-select").addEventListener("change", async () => {
+  try { await loadRoom(el("room-select").value); }
+  catch (error) { toast(friendlyError(error), true); }
+});
+el("student-select").addEventListener("change", updateAvailableNote);
+el("requester-type").addEventListener("change", () => {
+  const isParent = el("requester-type").value === "ผู้ปกครอง";
+  el("requester-name-field").hidden = !isParent;
+  if (!isParent) el("requester-name").value = "";
+});
+el("submit-button").addEventListener("click", async () => {
+  const studentId = el("student-select").value;
+  const amount = Number(el("amount").value);
+  const requesterType = el("requester-type").value;
+  const requesterName = el("requester-name").value.trim();
+  if (!studentId) return toast("กรุณาเลือกนักเรียน", true);
+  if (!Number.isFinite(amount) || amount <= 0) return toast("จำนวนเงินที่ขอต้องมากกว่า 0 บาท", true);
+  if (requesterType === "ผู้ปกครอง" && !requesterName) return toast("กรุณาระบุชื่อผู้ปกครองที่มาขอเบิก", true);
+  const available = studentNumbers(studentId).available;
+  if (amount > available) return toast(`ขอเบิกได้ไม่เกิน ${formatMoney(available)}`, true);
+  const student = roster.find(row => row.student_id === studentId)?.student;
+  if (!await window.crsAskConfirm({
+    title:"ส่งคำขอเบิกออมทรัพย์",
+    message:`${student?.name || "นักเรียน"} · ${formatMoney(amount)}\nคำขอจะเข้าคิวรอฝ่ายการเงินจ่าย`,
+    okLabel:"ส่งคำขอ",
+    danger:false
+  })) return;
+
+  const button = el("submit-button");
+  button.disabled = true;
+  button.textContent = "กำลังส่งคำขอ…";
+  const { error } = await sb.from("savings_withdrawals").insert({
+    student_id:studentId, year:currentYear, grade_level:selectedRoom.grade_level,
+    classroom:selectedRoom.classroom, request_date:today, amount:Math.round(amount * 100) / 100,
+    requester_type:requesterType, requester_name:requesterType === "ผู้ปกครอง" ? requesterName : null,
+    note:el("note").value.trim() || null, requested_by:session.user.id
+  });
+  button.disabled = false;
+  button.textContent = "ส่งคำขอเข้าคิวรอจ่าย";
+  if (error) return toast(friendlyError(error), true);
+  el("amount").value = "";
+  el("requester-name").value = "";
+  el("note").value = "";
+  toast("ส่งคำขอเข้าคิวรอจ่ายแล้ว");
+  await loadRoom(el("room-select").value);
+});
+
+el("request-list").addEventListener("click", async event => {
+  const button = event.target.closest(".cancel-button");
+  if (!button) return;
+  const request = roomRequests.find(row => row.id === button.dataset.requestId);
+  const reasonInput = el(`cancel-${button.dataset.requestId}`);
+  const reason = reasonInput?.value.trim() || "";
+  if (!request || request.status !== "รอจ่าย") return toast("คำขอนี้ไม่ได้อยู่ในสถานะรอจ่ายแล้ว", true);
+  if (!reason) return toast("กรุณาระบุเหตุผลที่ยกเลิกคำขอ", true);
+  if (!await window.crsAskConfirm({
+    title:"ยกเลิกคำขอเบิก",
+    message:`ยกเลิกคำขอ ${formatMoney(request.amount)} · เหตุผล: ${reason}`,
+    okLabel:"ยกเลิกคำขอ",
+    danger:true
+  })) return;
+  button.disabled = true;
+  const { error } = await sb.from("savings_withdrawals")
+    .update({ status:"ยกเลิก", cancel_reason:reason })
+    .eq("id", request.id).eq("status", "รอจ่าย");
+  if (error) {
+    button.disabled = false;
+    return toast(friendlyError(error), true);
+  }
+  toast("ยกเลิกคำขอแล้ว");
+  await loadRoom(el("room-select").value);
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    await loadContext();
+  } catch (error) {
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้าแจ้งเบิกไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+  }
+}
+</script>
+</body>
+</html>
