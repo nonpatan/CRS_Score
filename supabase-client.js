@@ -79,17 +79,21 @@ export async function canUseDepartment(userId, department, profile = null) {
 // ⚠ นี่คือชั้น "ซ่อนปุ่ม" เท่านั้น ตัวจริงที่กันข้อมูลคือ RLS (staff/work_attendance/staff_leaves
 //   อ่านได้เฉพาะฝ่ายบุคคลหรือแถวของตัวเอง)
 // ------------------------------------------------------------
-export function applyPersonnelMenuAccess(canManageHr) {
-  const links = document.querySelectorAll('header .nav a[data-restricted]');
+export function applyRestrictedMenuAccess(allowed) {
+  const links = document.querySelectorAll('a[data-restricted]');
   links.forEach(a => {
-    if (canManageHr) a.removeAttribute("hidden");
+    if (allowed) a.removeAttribute("hidden");
     else a.remove();
   });
-  if (canManageHr) return;
+  if (allowed) return;
   // กลุ่มเมนูที่ไม่เหลือลิงก์แล้ว ต้องซ่อนด้วย ไม่งั้นจะเห็นหัวข้อกลุ่มลอย ๆ
   document.querySelectorAll("header .nav .nav-group").forEach(group => {
     if (!group.querySelector(".nav-group-links a")) group.remove();
   });
+}
+
+export function applyPersonnelMenuAccess(canManageHr) {
+  applyRestrictedMenuAccess(canManageHr);
 }
 
 // การ์ดแจ้งเตือนสำหรับหน้าที่ครูทั่วไปเข้าไม่ได้ (ใช้ข้อความเดียวกันทุกหน้า)

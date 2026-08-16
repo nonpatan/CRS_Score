@@ -403,6 +403,8 @@
       kicker: "การเงิน",
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
+      // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html"],
       groups: [
         {
           label: "บันทึก",
@@ -491,7 +493,9 @@
     // ไม่ดึง document รุ่นเก่าจาก browser/GitHub Pages cache
     if (shellVersion) target.searchParams.set("v", shellVersion);
     const classes = [extraClass, href === current ? "active" : ""].filter(Boolean).join(" ");
-    const restricted = (mod.hrOnly || []).includes(href) ? ' data-restricted="1" hidden' : "";
+    const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || [])].includes(href)
+      ? ' data-restricted="1" hidden'
+      : "";
     return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${restricted}>${label}</a>`;
   };
 

@@ -74,11 +74,15 @@
     <h1>ภาพรวมการเงิน</h1>
     <p>รับฝาก แจ้งเบิก และจ่ายเงินออมทรัพย์จากจุดเดียว</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260815-3"></script>
+    <script src="../app-shell.js?v=20260816-1"></script>
   </header>
 
   <main class="academic-content">
-    <section class="card">
+    <section id="teacher-shortcut" class="card" hidden>
+      <div class="section">ห้องของคุณ</div>
+      <p class="empty">ดูยอดและทำรายการของห้องที่คุณรับผิดชอบได้จาก “รับฝากออมทรัพย์” และ “แจ้งเบิกออมทรัพย์” ด้านล่าง</p>
+    </section>
+    <section id="finance-status" class="card">
       <div class="section">สถานะวันนี้</div>
       <div class="overview-grid">
         <div class="stat-stack">
@@ -108,20 +112,20 @@
           <b>แจ้งเบิกออมทรัพย์</b>
           <span>ครูประจำชั้นส่งคำขอเบิกเข้าคิวรอฝ่ายการเงินจ่าย</span>
         </a>
-        <a class="task-link" href="savings-payout.html">
+        <a class="task-link" href="savings-payout.html" data-restricted="1" hidden>
           <span class="icon" aria-hidden="true">✓</span>
           <b>จ่ายเงินออมทรัพย์</b>
           <span>ฝ่ายการเงินตรวจผู้รับ จ่ายเงิน และตัดยอดจากสมุด</span>
         </a>
-        <a class="task-link" href="savings-opening.html">
+        <a class="task-link" href="savings-opening.html" data-restricted="1" hidden>
           <span class="icon" aria-hidden="true">↗</span>
           <b>ยอดยกมาออมทรัพย์</b>
           <span>นำเข้ายอดคงเหลือจากสมุดเดิมก่อนเริ่มใช้งานระบบ</span>
         </a>
-        <a class="task-link" href="savings-remit.html">
+        <a class="task-link" href="savings-remit.html" data-restricted="1" hidden>
           <span class="icon" aria-hidden="true">⇢</span><b>รับเงินส่งจากครู</b><span>ฝ่ายการเงินนับเงินจริงและยืนยันยอดค้างส่งรายห้อง</span>
         </a>
-        <a class="task-link" href="savings-report.html">
+        <a class="task-link" href="savings-report.html" data-restricted="1" hidden>
           <span class="icon" aria-hidden="true">◫</span><b>รายงานออมทรัพย์</b><span>ดูยอดเก็บ ถอน คงเหลือ และค้างส่งระดับโรงเรียนถึงรายคน</span>
         </a>
       </div>
@@ -134,8 +138,8 @@
 import {
   sb, requireAuth, signOut, fetchAllRows, getAcademicYears, academicYearOf,
   getStudentPlacements, activePlacements, roomsFromPlacements, bangkokNow, toDateStr,
-  computeUnremitted, formatMoney
-} from "../supabase-client.js?v=20260815-4";
+  computeUnremitted, formatMoney, checkDepartment, applyRestrictedMenuAccess
+} from "../supabase-client.js?v=20260816-1";
 const el = id => document.getElementById(id);
 async function loadOverview() {
   const today = toDateStr(bangkokNow());
@@ -173,7 +177,13 @@ if (session) {
     event.preventDefault();
     signOut();
   });
-  try { await loadOverview(); }
+  try {
+    const canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance);
+    el("finance-status").hidden = !canFinance;
+    el("teacher-shortcut").hidden = canFinance;
+    if (canFinance) await loadOverview();
+  }
   catch (error) {
     el("today-total").textContent = "โหลดไม่สำเร็จ";
     el("pending-total").textContent = "โหลดไม่สำเร็จ";

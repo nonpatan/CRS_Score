@@ -51,7 +51,7 @@
 <link rel="stylesheet" href="../app-shell.css?v=20260725-6">
 </head>
 <body><div class="wrap">
-  <header><h1>รายงานออมทรัพย์</h1><p>ดูยอดตามช่วงวัน พร้อมยอดคงเหลือสะสมของโรงเรียน ห้อง และนักเรียน</p><div class="nav"></div><script src="../app-shell.js?v=20260815-3"></script></header>
+  <header><h1>รายงานออมทรัพย์</h1><p>ดูยอดตามช่วงวัน พร้อมยอดคงเหลือสะสมระดับห้องและนักเรียน</p><div class="nav"></div><script src="../app-shell.js?v=20260816-1"></script></header>
   <main class="academic-content">
     <section id="error-card" class="card" hidden></section>
     <section class="card"><div class="section-head"><div><h2>ช่วงรายงาน</h2><p id="year-note">กำลังตรวจปีการศึกษา…</p></div></div><div class="filters">
@@ -59,13 +59,13 @@
       <div><label for="to-date">ถึงวันที่</label><input id="to-date" type="date"></div>
       <button id="apply-range" class="primary" type="button">ดูรายงาน</button>
     </div></section>
-    <section class="card"><div class="section-head"><div><h2>ภาพรวมโรงเรียน</h2><p>ยอดเก็บและถอนอิงช่วงที่เลือก · ยอดคงเหลือและค้างส่งเป็นยอดสะสม</p></div></div><div class="metric-grid">
+    <section id="school-overview" class="card"><div class="section-head"><div><h2>ภาพรวมโรงเรียน</h2><p>ยอดเก็บและถอนอิงช่วงที่เลือก · ยอดคงเหลือและค้างส่งเป็นยอดสะสม</p></div></div><div class="metric-grid">
       <div class="metric"><span>เก็บได้ (ในช่วง)</span><b id="school-collected">0.00 บาท</b></div>
       <div class="metric"><span>ถอน (ในช่วง)</span><b id="school-withdrawn">0.00 บาท</b></div>
       <div class="metric"><span>คงเหลือ (สะสมทั้งหมด)</span><b id="school-balance">0.00 บาท</b></div>
       <div class="metric"><span>ค้างส่ง (สะสมปัจจุบัน)</span><b id="school-unremitted">0.00 บาท</b></div>
     </div></section>
-    <section class="card"><div class="section-head"><div><h2>สรุปรายห้อง</h2><p>กดหัวคอลัมน์เพื่อเรียง · กดแถวเพื่อดูรายคน</p></div></div><div class="table-wrap"><table><thead><tr>
+    <section class="card"><div class="section-head"><div><h2 id="room-summary-title">สรุปรายห้อง</h2><p id="room-summary-note">กดหัวคอลัมน์เพื่อเรียง · กดแถวเพื่อดูรายคน</p></div></div><div class="table-wrap"><table><thead><tr>
       <th><button data-sort="room">ห้อง</button></th><th class="money"><button data-sort="collectedInRange">เก็บได้ (ในช่วง)</button></th><th class="money"><button data-sort="withdrawnInRange">ถอน (ในช่วง)</button></th><th class="money"><button data-sort="balanceLifetime">คงเหลือ (สะสมทั้งหมด)</button></th><th class="money"><button data-sort="unremitted">ค้างส่ง (ปัจจุบัน)</button></th>
     </tr></thead><tbody id="room-body"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
     <section id="student-card" class="card" hidden><div class="section-head"><div><h2 id="student-title">รายชื่อนักเรียน</h2><p>ยอดคงเหลือเป็นยอดสะสมตลอดกาล · กดชื่อเพื่อดูรายการเดินบัญชี</p></div></div><div class="student-grid"><div id="student-list" class="student-list"></div><div id="ledger" class="ledger"><div class="empty">เลือกนักเรียนเพื่อดูรายการเดินบัญชี</div></div></div></section>
@@ -73,14 +73,14 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, fetchAllRows, academicYearOf, academicYearRange, bangkokNow, toDateStr, summarizeSavingsReport, computeSavingsBalance, formatMoney }
-  from "../supabase-client.js?v=20260815-4";
+import { sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, fetchAllRows, academicYearOf, academicYearRange, bangkokNow, toDateStr, summarizeSavingsReport, computeSavingsBalance, formatMoney }
+  from "../supabase-client.js?v=20260816-1";
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 const today = toDateStr(bangkokNow());
 const roomKey = row => [row.grade_level, row.classroom].join("\u0000");
 const thaiDate = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
-let currentYear = "", txns = [], placements = [], roomSummaries = [], selectedRoom = null, selectedStudentId = null, sortKey = "room", sortDirection = 1, toastTimer;
+let currentYear = "", txns = [], placements = [], roomSummaries = [], selectedRoom = null, selectedStudentId = null, sortKey = "room", sortDirection = 1, canFinance = false, toastTimer;
 function toast(message) { el("toast").textContent = message; el("toast").className = "toast err"; clearTimeout(toastTimer); toastTimer = setTimeout(() => el("toast").className = "toast", 6000); }
 function studentRows(studentId) { return txns.filter(row => row.student_id === studentId); }
 function range() { return { from:el("from-date").value, to:el("to-date").value }; }
@@ -168,12 +168,36 @@ async function loadReport() {
   ]);
   if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
   if (placementRes.error) throw new Error("โหลดรายชื่อห้องไม่สำเร็จ: " + placementRes.error.message);
-  txns = txnRes.data || []; placements = placementRes.data || []; renderReport();
+  txns = txnRes.data || [];
+  placements = placementRes.data || [];
+  if (!canFinance) {
+    const roomMap = new Map();
+    for (const placement of placements) roomMap.set(roomKey(placement), placement);
+    const accessChecks = await Promise.all([...roomMap.entries()].map(async ([key, room]) => {
+      const { data, error } = await sb.rpc("can_read_room_money", {
+        p_year:currentYear, p_grade:room.grade_level, p_classroom:room.classroom
+      });
+      if (error) throw new Error("ตรวจสิทธิ์รายห้องไม่สำเร็จ: " + error.message);
+      return data === true ? key : null;
+    }));
+    const allowedRooms = new Set(accessChecks.filter(Boolean));
+    placements = placements.filter(placement => allowedRooms.has(roomKey(placement)));
+  }
+  renderReport();
 }
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
-  try { await loadReport(); }
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance);
+    if (!canFinance) {
+      el("school-overview").hidden = true;
+      el("room-summary-title").textContent = "ห้องของคุณ";
+      el("room-summary-note").textContent = "แสดงเฉพาะห้องที่คุณรับผิดชอบ · กดแถวเพื่อดูรายคน";
+    }
+    await loadReport();
+  }
   catch (error) { el("error-card").hidden = false; el("error-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารายงานออมทรัพย์ไม่สำเร็จ</b><br>${esc(error.message)}</div>`; el("room-body").innerHTML = '<tr><td colspan="5" class="empty">โหลดข้อมูลไม่สำเร็จ</td></tr>'; }
 }
 </script></body></html>
