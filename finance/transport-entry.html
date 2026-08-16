@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>รับเงินค่ารถ — CRS MIS</title>
+<style>
+  :root { --ink:#17324d; --muted:#607084; --line:#d9e2ec; --paper:#fff; --soft:#f4f8fb; --teal:#0f766e; --blue:#2563eb; --warn:#9a5b00; --danger:#b42318; --ok:#087f5b; }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--ink); background:#edf3f7; font-family:system-ui,-apple-system,"Noto Sans Thai",sans-serif; }
+  .wrap { max-width:1240px; margin:0 auto; padding:18px; }
+  header h1 { margin:0; font-size:clamp(1.55rem,4vw,2.25rem); }
+  header p { margin:5px 0 12px; color:var(--muted); }
+  .card { margin:14px 0; padding:18px; border:1px solid var(--line); border-radius:16px; background:var(--paper); box-shadow:0 8px 24px rgba(31,55,78,.06); }
+  .selector { display:grid; grid-template-columns:minmax(210px,360px) minmax(250px,1fr); gap:14px; align-items:end; }
+  label { display:block; margin-bottom:6px; font-weight:700; }
+  input, select, button { min-height:44px; border:1px solid #b8c5d2; border-radius:10px; padding:9px 11px; font:inherit; }
+  input, select { width:100%; color:var(--ink); background:#fff; }
+  button { cursor:pointer; font-weight:750; color:var(--ink); background:#fff; }
+  button.primary { border-color:var(--teal); color:#fff; background:var(--teal); }
+  button.secondary { border-color:var(--blue); color:var(--blue); }
+  button:disabled { cursor:not-allowed; opacity:.48; }
+  .date-box { padding:12px 14px; border-radius:12px; color:#24536d; background:#edf7fb; }
+  .banner { padding:13px 15px; border-radius:12px; line-height:1.55; }
+  .banner.warn { color:#684000; background:#fff3cd; }
+  .banner.bad { color:#842029; background:#fde2e2; }
+  .banner.info { color:#174d68; background:#eaf6fb; }
+  .button-link { display:inline-block; margin-top:8px; padding:8px 12px; border-radius:9px; color:#fff; background:var(--blue); text-decoration:none; font-weight:750; }
+  .section-head { display:flex; align-items:start; justify-content:space-between; gap:12px; }
+  .section-head h2 { margin:0; font-size:1.22rem; }
+  .section-head p, .meta { display:block; margin:3px 0 0; color:var(--muted); font-size:.88rem; }
+  .warning-stack { display:grid; gap:9px; }
+  details { margin-top:7px; }
+  summary { cursor:pointer; font-weight:700; }
+  .date-list { margin:8px 0 0; padding-left:22px; columns:3 150px; }
+  .student-list { display:grid; gap:10px; margin-top:14px; }
+  .student-row { display:grid; grid-template-columns:minmax(180px,1.35fr) repeat(3,minmax(120px,.75fr)) minmax(245px,1.35fr); gap:10px; align-items:center; padding:13px; border:1px solid var(--line); border-radius:13px; background:#fff; }
+  .student-name { font-weight:800; }
+  .money-cell span { display:block; color:var(--muted); font-size:.78rem; }
+  .money-cell b { display:block; margin-top:3px; }
+  .money-cell.unknown b { color:var(--warn); }
+  .actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .actions .amount { grid-column:1/-1; }
+  .actions .override-button { grid-column:1/-1; }
+  .status-bad { color:var(--danger); }
+  .status-ok { color:var(--ok); }
+  .status-warn { color:var(--warn); }
+  .stopped-group { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
+  .stopped-group > summary { color:var(--warn); }
+  .empty { padding:24px; border:1px dashed #b8c5d2; border-radius:12px; color:var(--muted); text-align:center; }
+  .editor-grid { display:grid; grid-template-columns:minmax(170px,.8fr) minmax(170px,.8fr) minmax(240px,1.4fr); gap:12px; }
+  .preset-row { display:flex; flex-wrap:wrap; gap:7px; margin:12px 0; }
+  .editor-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+  .toast { position:sticky; bottom:10px; display:none; z-index:4; margin-top:12px; padding:12px 15px; border-radius:10px; color:#fff; background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:980px) { .student-row { grid-template-columns:minmax(180px,1.4fr) repeat(2,minmax(120px,.8fr)); } .actions { grid-column:1/-1; grid-template-columns:minmax(150px,.7fr) 1fr 1fr 1fr; } .actions .amount, .actions .override-button { grid-column:auto; } }
+  @media (max-width:680px) { .selector, .editor-grid, .student-row { grid-template-columns:1fr; } .actions { grid-template-columns:1fr 1fr; } .actions .amount, .actions .override-button { grid-column:1/-1; } .date-list { columns:2 130px; } }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>รับเงินค่ารถ</h1>
+    <p>ดูยอดค้างรายคน รับเงินสด หักจากออมทรัพย์ และแก้ยอดที่ต้องเก็บ</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260816-3"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card selector">
+      <div><label for="room-select">ห้องเรียน</label><select id="room-select" disabled><option value="">กำลังโหลด…</option></select></div>
+      <div id="date-note" class="date-box">กำลังตรวจวันที่และปีการศึกษา…</div>
+    </section>
+    <section id="access-warning" class="card" hidden></section>
+    <section id="warnings" class="card warning-stack" hidden></section>
+
+    <section id="roster-card" class="card" hidden>
+      <div class="section-head"><div><h2 id="room-title">รายการค่ารถ</h2><p id="room-note"></p></div></div>
+      <div id="student-list" class="student-list"></div>
+      <details id="stopped-group" class="stopped-group" hidden>
+        <summary id="stopped-summary">เลิกใช้รถแล้ว · ยังค้าง 0 คน</summary>
+        <div id="stopped-list" class="student-list"></div>
+      </details>
+    </section>
+
+    <section id="override-card" class="card" hidden>
+      <div class="section-head"><div><h2 id="override-title">แก้ยอดค่ารถ</h2><p id="override-note">ยอดนี้จะแช่ไว้และไม่ขยับตามอัตราที่แก้ภายหลัง</p></div></div>
+      <div class="editor-grid">
+        <div><label for="override-date">วันที่ที่ต้องการแก้</label><input id="override-date" type="date"></div>
+        <div><label for="override-amount">ยอดที่ต้องเก็บ (บาท)</label><input id="override-amount" type="number" min="0" step="0.01" inputmode="decimal"></div>
+        <div><label for="override-reason">เหตุผลที่แก้</label><input id="override-reason" maxlength="500" placeholder="เช่น ผู้ปกครองมารับเอง"></div>
+      </div>
+      <div id="preset-row" class="preset-row"></div>
+      <div class="editor-actions"><button id="override-cancel" type="button">ยกเลิก</button><button id="override-save" class="primary" type="button">บันทึกยอดที่แก้</button></div>
+    </section>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess,
+  getAcademicYears, academicYearOf, academicYearRange, getStudentPlacements,
+  roomsFromPlacements, activePlacements, bangkokNow, toDateStr, getMyCoverageFor,
+  fetchAllRows, summarizeSavingsByStudent, computeTransportCharges,
+  computeTransportOutstanding, TRANSPORT_CHARGE_STATUSES, formatMoney
+} from "../supabase-client.js?v=20260816-2";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
+const today = toDateStr(bangkokNow());
+const currentYm = today.slice(0, 7) + "-01";
+const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+const monthStart = date => String(date).slice(0, 7) + "-01";
+const thaiDate = date => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(date + "T00:00:00+07:00"));
+const thaiMonth = ym => new Intl.DateTimeFormat("th-TH", { month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(ym + "T00:00:00+07:00"));
+const studentCompare = (a, b) => String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) || String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+
+let toastTimer;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 5000);
+}
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการเงินของห้องนี้";
+  if (message.includes("transport_payments_amount_positive")) return "ยอดรับต้องมากกว่า 0 บาท";
+  if (message.includes("transport_day_overrides_reason")) return "กรุณาระบุเหตุผลที่แก้ยอด";
+  return message;
+}
+
+let session = null;
+let years = [];
+let currentYear = "";
+let yearRange = null;
+let placements = [];
+let availableRooms = [];
+let selectedRoom = null;
+let roster = [];
+let transportRoster = [];
+let activeTransportRoster = [];
+let stoppedTransportRoster = [];
+let periods = [];
+let attendance = [];
+let roomAttendance = [];
+let overrides = [];
+let monthRates = [];
+let payments = [];
+let zones = [];
+let balanceByStudent = new Map();
+let stateByStudent = new Map();
+let writableRoomKeys = new Set();
+let canFinance = false;
+let editingStudentId = null;
+
+function groupByStudent(rows) {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    if (!grouped.has(row.student_id)) grouped.set(row.student_id, []);
+    grouped.get(row.student_id).push(row);
+  }
+  return grouped;
+}
+
+function currentPeriod(studentId) {
+  return periods.find(row => row.student_id === studentId && row.start_date <= today && (!row.end_date || row.end_date >= today)) || null;
+}
+
+function periodForDate(studentId, date) {
+  return periods.find(row => row.student_id === studentId && row.start_date <= date && (!row.end_date || row.end_date >= date)) || null;
+}
+
+function isWeekday(date) {
+  const day = new Date(date + "T00:00:00Z").getUTCDay();
+  return day >= 1 && day <= 5;
+}
+
+function missingStudentRoomDates(roomRows, studentId) {
+  const checkedDates = new Set((roomRows || []).filter(row => isWeekday(row.attend_date)).map(row => row.attend_date));
+  const studentDates = new Set((roomRows || []).filter(row => row.student_id === studentId).map(row => row.attend_date));
+  return [...checkedDates].filter(date => !studentDates.has(date)).sort();
+}
+
+function splitTransportRoster(rows, states) {
+  const active = [];
+  const stoppedOutstanding = [];
+  for (const placement of rows || []) {
+    const state = states.get(placement.student_id);
+    if (state?.period) active.push(placement);
+    else if (state && state.outstanding > 0) stoppedOutstanding.push(placement);
+  }
+  return { active, stoppedOutstanding };
+}
+
+function buildState() {
+  const periodsByStudent = groupByStudent(periods);
+  const overridesByStudent = groupByStudent(overrides);
+  const paymentsByStudent = groupByStudent(payments);
+  const attendanceByStudent = groupByStudent(attendance);
+  stateByStudent = new Map();
+  for (const placement of transportRoster) {
+    const studentId = placement.student_id;
+    const studentPeriods = periodsByStudent.get(studentId) || [];
+    const charges = computeTransportCharges({
+      periods:studentPeriods,
+      attendance:attendanceByStudent.get(studentId) || [],
+      overrides:overridesByStudent.get(studentId) || [],
+      monthRates,
+      from:yearRange.start,
+      to:today
+    });
+    stateByStudent.set(studentId, {
+      charges,
+      outstanding:computeTransportOutstanding(charges, paymentsByStudent.get(studentId) || []),
+      balance:balanceByStudent.get(studentId) || 0,
+      period:currentPeriod(studentId),
+      lastPeriod:[...studentPeriods].sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)))[0] || null,
+      attendance:(attendanceByStudent.get(studentId) || []).find(row => row.attend_date === today) || null,
+      missingStudentRoomDates:missingStudentRoomDates(roomAttendance, studentId)
+    });
+  }
+  const groups = splitTransportRoster(transportRoster, stateByStudent);
+  activeTransportRoster = groups.active;
+  stoppedTransportRoster = groups.stoppedOutstanding;
+}
+
+function renderWarnings() {
+  const missingToday = roster.filter(row => !roomAttendance.some(item => item.student_id === row.student_id && item.attend_date === today));
+  const roomCheckedDates = new Set(roomAttendance.map(row => row.attend_date));
+  const missingDates = new Set();
+  const unannounced = new Set();
+  for (const state of stateByStudent.values()) {
+    state.charges.missingAttendanceDates.filter(date => !roomCheckedDates.has(date)).forEach(date => missingDates.add(date));
+    state.charges.unannouncedMonths.forEach(ym => unannounced.add(ym));
+  }
+  const blocks = [];
+  if (missingToday.length) {
+    blocks.push(`<div class="banner warn"><b>วันนี้ห้องนี้ยังเช็คชื่อไม่ครบ ${missingToday.length} คน</b><br>ระบบปิดการรับเงินสดของคนที่ไม่มีข้อมูลไว้ก่อน
+      <br><a class="button-link" href="../general-affairs/daily-attendance.html">ไปหน้าเช็คชื่อรายวัน</a></div>`);
+  }
+  if (unannounced.size) {
+    blocks.push(`<div class="banner warn"><b>ยังคำนวณยอดค้างไม่ได้: ฝ่ายการเงินยังไม่ประกาศยอด ${[...unannounced].sort().map(thaiMonth).join(", ")}</b><br>กรุณาติดต่อฝ่ายการเงิน ยอดดังกล่าวไม่ใช่ 0 บาท</div>`);
+  }
+  if (missingDates.size) {
+    const dates = [...missingDates].sort();
+    blocks.push(`<div class="banner info"><b>ช่วงนี้มีวันจันทร์–ศุกร์ที่ห้องยังไม่ได้เช็คชื่อ ${dates.length} วัน (รวมวันหยุดพิเศษด้วย)</b>
+      <details><summary>ดูรายการวันที่</summary><ul class="date-list">${dates.map(date => `<li>${thaiDate(date)}</li>`).join("")}</ul></details></div>`);
+  }
+  el("warnings").innerHTML = blocks.join("");
+  el("warnings").hidden = !blocks.length;
+}
+
+function actionAvailability(studentId, amount) {
+  const state = stateByStudent.get(studentId);
+  const unknown = Boolean(state?.charges.unannouncedMonths.length);
+  const valid = Number.isFinite(amount) && amount > 0 && !unknown && amount <= state.outstanding;
+  const cashStatus = state?.attendance?.status || null;
+  return {
+    cash:valid && TRANSPORT_CHARGE_STATUSES.includes(cashStatus),
+    savings:valid && state.balance >= amount,
+    unknown,
+    cashStatus
+  };
+}
+
+function renderStudentRows(rows, { showOverride }) {
+  return rows.map(placement => {
+    const student = placement.student || {};
+    const state = stateByStudent.get(placement.student_id);
+    const period = state.period || state.lastPeriod;
+    const stopped = !state.period;
+    const unknown = state.charges.unannouncedMonths.length > 0;
+    const todayDay = state.charges.days.find(row => row.date === today);
+    const thisMonth = state.charges.months.find(row => row.ym === currentYm);
+    const currentCharge = stopped ? null : (period?.billing_mode === "รายเดือน" ? thisMonth : todayDay);
+    const currentText = stopped ? "เลิกใช้รถแล้ว" : currentCharge && currentCharge.announced !== false ? formatMoney(currentCharge.amount) : (currentCharge?.announced === false ? "ยังไม่ประกาศ" : formatMoney(0));
+    const cashAllowed = TRANSPORT_CHARGE_STATUSES.includes(state.attendance?.status);
+    const cashReason = !state.attendance ? "ยังไม่มีข้อมูลเช็คชื่อวันนี้" : cashAllowed ? `วันนี้ ${state.attendance.status} · รับเงินสดได้` : `วันนี้ ${state.attendance.status} จึงรับเงินสดไม่ได้`;
+    const historyWarning = state.missingStudentRoomDates.length
+      ? `<span class="meta status-warn">มี ${state.missingStudentRoomDates.length} วันที่ไม่มีข้อมูลของนักเรียนคนนี้ (อาจย้ายห้องระหว่างปีหรือเข้าเรียนภายหลัง) ยอดค้างที่แสดงอาจไม่ครบ — ให้ฝ่ายการเงินตรวจ</span>`
+      : "";
+    return `<div class="student-row" data-student-id="${esc(placement.student_id)}">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(period?.billing_mode || "—")} / ${esc(period?.trip_mode || "—")}${stopped && period?.end_date ? ` · สิ้นสุด ${thaiDate(period.end_date)}` : ""}</span><span class="meta ${cashAllowed ? "status-ok" : "status-bad"}">${esc(cashReason)}</span>${historyWarning}</div>
+      <div class="money-cell ${unknown ? "unknown" : ""}"><span>ยอดค้างสะสม</span><b>${unknown ? "ยังคำนวณไม่ได้" : formatMoney(state.outstanding)}</b></div>
+      <div class="money-cell ${currentCharge?.announced === false ? "unknown" : ""}"><span>${!stopped && period?.billing_mode === "รายเดือน" ? "ยอดเดือนนี้" : "ยอดของวันนี้"}</span><b>${currentText}</b></div>
+      <div class="money-cell"><span>ออมทรัพย์คงเหลือ</span><b>${formatMoney(state.balance)}</b></div>
+      <div class="actions">
+        <input class="amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="ยอดรับ/ยอดหัก (บาท)" aria-label="ยอดรับหรือยอดหักของ ${esc(student.name || "นักเรียน")}">
+        <button class="cash-button primary" type="button" disabled>รับเงินสด</button>
+        <button class="savings-button secondary" type="button" disabled>หักออมทรัพย์</button>
+        ${showOverride ? '<button class="override-button" type="button">แก้ยอดของวัน</button>' : ""}
+        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `ค้าง ${formatMoney(state.outstanding)} · ออมเหลือ ${formatMoney(state.balance)}`}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderRoster() {
+  el("student-list").innerHTML = activeTransportRoster.length
+    ? renderStudentRows(activeTransportRoster, { showOverride:true })
+    : '<div class="empty">ห้องนี้ไม่มีนักเรียนที่กำลังใช้รถรับส่งอยู่</div>';
+  el("stopped-group").hidden = stoppedTransportRoster.length === 0;
+  el("stopped-summary").textContent = `เลิกใช้รถแล้ว · ยังค้าง ${stoppedTransportRoster.length} คน`;
+  el("stopped-list").innerHTML = renderStudentRows(stoppedTransportRoster, { showOverride:false });
+}
+
+function updateActionRow(row) {
+  const studentId = row.dataset.studentId;
+  const input = row.querySelector(".amount");
+  const amount = Number(input.value);
+  const available = actionAvailability(studentId, amount);
+  row.querySelector(".cash-button").disabled = !available.cash;
+  row.querySelector(".savings-button").disabled = !available.savings;
+  const state = stateByStudent.get(studentId);
+  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `ค้าง ${formatMoney(state.outstanding)} · ออมเหลือ ${formatMoney(state.balance)}`;
+  if (Number.isFinite(amount) && amount > state.outstanding) note = `รับเกินยอดค้างไม่ได้ · ค้าง ${formatMoney(state.outstanding)}`;
+  else if (Number.isFinite(amount) && amount > state.balance) note = `ออมทรัพย์เหลือ ${formatMoney(state.balance)} · ปุ่มหักถูกปิด`;
+  if (!TRANSPORT_CHARGE_STATUSES.includes(available.cashStatus)) note += ` · เงินสดปิดเพราะสถานะ ${available.cashStatus || "ยังไม่เช็คชื่อ"}`;
+  row.querySelector(".action-note").textContent = note;
+}
+
+async function loadRoom(index) {
+  selectedRoom = availableRooms[Number(index)] || null;
+  el("roster-card").hidden = true;
+  el("override-card").hidden = true;
+  el("warnings").hidden = true;
+  if (!selectedRoom) return;
+
+  roster = activePlacements(placements).filter(row => row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom).sort(studentCompare);
+  const rosterIds = roster.map(row => row.student_id);
+  if (!rosterIds.length) {
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = '<div class="banner warn"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจรายชื่อในปีการศึกษาปัจจุบัน</div>';
+    return;
+  }
+  el("access-warning").hidden = true;
+
+  const periodRes = await fetchAllRows(() => sb.from("student_transport")
+    .select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date")
+    .eq("year", currentYear).in("student_id", rosterIds)
+    .lte("start_date", today).or(`end_date.is.null,end_date.gte.${yearRange.start}`), ["student_id","start_date","id"]);
+  if (periodRes.error) throw new Error("โหลดช่วงใช้รถไม่สำเร็จ: " + periodRes.error.message);
+  periods = periodRes.data || [];
+  const transportIds = new Set(periods.map(row => row.student_id));
+  transportRoster = roster.filter(row => transportIds.has(row.student_id));
+  const studentIds = transportRoster.map(row => row.student_id);
+  if (!studentIds.length) {
+    stateByStudent = new Map();
+    activeTransportRoster = [];
+    stoppedTransportRoster = [];
+    renderRoster();
+    el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom}`;
+    el("room-note").textContent = "ยังไม่มีประวัติใช้รถรับส่งของนักเรียนในห้องนี้";
+    el("roster-card").hidden = false;
+    return;
+  }
+
+  const [attendanceRes, roomAttendanceRes, overrideRes, rateRes, paymentRes, savingsRes, zoneRes] = await Promise.all([
+    fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status")
+      .eq("year", currentYear).in("student_id", studentIds)
+      .gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
+    fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status")
+      .eq("year", currentYear).eq("grade_level", selectedRoom.grade_level).eq("classroom", selectedRoom.classroom)
+      .gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_day_overrides").select("id,student_id,charge_date,amount,reason,overridden_at")
+      .eq("year", currentYear).in("student_id", studentIds)
+      .gte("charge_date", yearRange.start).lte("charge_date", today), ["charge_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_month_rates").select("year,ym,zone_id,trip_mode,amount")
+      .eq("year", currentYear).gte("ym", monthStart(yearRange.start)).lte("ym", currentYm), ["year","ym","zone_id","trip_mode"]),
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,pay_date,amount,method")
+      .eq("year", currentYear).in("student_id", studentIds)
+      .gte("pay_date", yearRange.start).lte("pay_date", today), ["pay_date","student_id","id"]),
+    fetchAllRows(() => sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").in("student_id", studentIds), ["student_id","txn_date","id"]),
+    fetchAllRows(() => sb.from("transport_zones").select("id,year,name,daily_round,daily_one_way,monthly_round,monthly_one_way")
+      .eq("year", currentYear), ["year","name","id"])
+  ]);
+  const failed = [["ข้อมูลเช็คชื่อรายคน",attendanceRes],["ข้อมูลเช็คชื่อของห้อง",roomAttendanceRes],["ยอดที่แก้",overrideRes],["ยอดรายเดือน",rateRes],["การรับเงิน",paymentRes],["สมุดออมทรัพย์",savingsRes],["อัตราโซน",zoneRes]].find(([, result]) => result.error);
+  if (failed) throw new Error(`โหลด${failed[0]}ไม่สำเร็จ: ${failed[1].error.message}`);
+  attendance = attendanceRes.data || [];
+  roomAttendance = roomAttendanceRes.data || [];
+  overrides = overrideRes.data || [];
+  monthRates = rateRes.data || [];
+  payments = paymentRes.data || [];
+  zones = zoneRes.data || [];
+  balanceByStudent = summarizeSavingsByStudent(savingsRes.data || []);
+  buildState();
+  renderWarnings();
+  renderRoster();
+  el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${activeTransportRoster.length} คนกำลังใช้รถ)`;
+  el("room-note").textContent = "ยอดค้างสะสมตั้งแต่ต้นปีการศึกษาถึงวันนี้ · ผู้ที่เลิกใช้รถแต่ยังค้างอยู่ในกลุ่มพับได้ท้ายรายการ";
+  el("roster-card").hidden = false;
+}
+
+function overrideContext(studentId, selectedDate) {
+  const period = periodForDate(studentId, selectedDate);
+  if (!period) return null;
+  const chargeDate = period.billing_mode === "รายเดือน" && period.start_date > monthStart(selectedDate) ? period.start_date : (period.billing_mode === "รายเดือน" ? monthStart(selectedDate) : selectedDate);
+  const zone = zones.find(row => row.id === period.zone_id) || null;
+  const preset = tripMode => {
+    if (period.billing_mode === "รายวัน") return Number(zone?.[tripMode === "ไป-กลับ" ? "daily_round" : "daily_one_way"]);
+    const rate = monthRates.find(row => row.year === period.year && row.ym === monthStart(selectedDate) && row.zone_id === period.zone_id && row.trip_mode === tripMode);
+    return rate ? Number(rate.amount) : NaN;
+  };
+  return { period, chargeDate, zone, round:preset("ไป-กลับ"), oneWay:preset("ขาเดียว") };
+}
+
+function refreshOverrideEditor() {
+  const context = overrideContext(editingStudentId, el("override-date").value);
+  if (!context) {
+    el("preset-row").innerHTML = '<span class="meta status-bad">วันที่นี้ไม่มีช่วงใช้รถของนักเรียน จึงแก้ยอดไม่ได้</span>';
+    el("override-save").disabled = true;
+    return;
+  }
+  const existing = overrides.find(row => row.student_id === editingStudentId && row.charge_date === context.chargeDate);
+  if (existing) {
+    el("override-amount").value = Number(existing.amount).toFixed(2);
+    el("override-reason").value = existing.reason || "";
+  } else {
+    el("override-amount").value = "";
+    el("override-reason").value = "";
+  }
+  const presetButton = (label, value) => `<button type="button" class="preset-button" data-amount="${Number.isFinite(value) ? value : ""}"${Number.isFinite(value) ? "" : " disabled"}>${label}${Number.isFinite(value) ? ` · ${formatMoney(value)}` : " · ยังไม่ประกาศ"}</button>`;
+  el("preset-row").innerHTML = presetButton("ไป-กลับ", context.round) + presetButton("ขาเดียว", context.oneWay) + presetButton("ไม่ใช้รถวันนี้", 0) + '<button type="button" class="preset-button" data-custom="1">กรอกเอง</button>';
+  el("override-note").textContent = `${context.period.billing_mode} · วันที่บันทึกจริง ${thaiDate(context.chargeDate)}${existing ? " · มีรายการเดิม กดบันทึกเพื่อแก้ทับ" : ""}`;
+  el("override-save").disabled = false;
+}
+
+function openOverride(studentId) {
+  editingStudentId = studentId;
+  const placement = transportRoster.find(row => row.student_id === studentId);
+  el("override-title").textContent = `แก้ยอดค่ารถ · ${placement?.student?.name || "นักเรียน"}`;
+  el("override-date").min = yearRange.start;
+  el("override-date").max = today;
+  el("override-date").value = today;
+  el("override-card").hidden = false;
+  refreshOverrideEditor();
+  el("override-card").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+async function receiveCash(studentId, amount, button) {
+  const placement = transportRoster.find(row => row.student_id === studentId);
+  const state = stateByStudent.get(studentId);
+  if (!actionAvailability(studentId, amount).cash) return toast("รับเงินสดไม่ได้ กรุณาตรวจยอดค้าง ยอดที่กรอก และสถานะเช็คชื่อ", true);
+  if (!await window.crsAskConfirm({ title:"ยืนยันรับเงินสดค่ารถ", message:`${placement?.student?.name || "นักเรียน"}\nยอดค้าง ${formatMoney(state.outstanding)} · รับเงินสด ${formatMoney(amount)}`, okLabel:"ยืนยันรับเงินสด", danger:false })) return;
+  button.disabled = true;
+  const { error } = await sb.from("transport_payments").insert({
+    student_id:studentId, year:currentYear, grade_level:selectedRoom.grade_level, classroom:selectedRoom.classroom,
+    pay_date:today, amount:Math.round(amount * 100) / 100, method:"เงินสด", recorded_by:session.user.id
+  });
+  if (error) { updateActionRow(button.closest(".student-row")); return toast(friendlyError(error), true); }
+  toast(`รับเงินสด ${formatMoney(amount)} แล้ว`);
+  await loadRoom(el("room-select").value);
+}
+
+async function deductSavings(studentId, amount, button) {
+  const placement = transportRoster.find(row => row.student_id === studentId);
+  const state = stateByStudent.get(studentId);
+  if (!actionAvailability(studentId, amount).savings) return toast(`หักไม่ได้ กรุณาตรวจยอดค้างและยอดออมทรัพย์ที่เหลือ ${formatMoney(state.balance)}`, true);
+  if (!await window.crsAskConfirm({ title:"ยืนยันหักออมทรัพย์เป็นค่ารถ", message:`${placement?.student?.name || "นักเรียน"}\nยอดค้าง ${formatMoney(state.outstanding)} · หัก ${formatMoney(amount)} · ออมทรัพย์จะเหลือ ${formatMoney(state.balance - amount)}`, okLabel:"ยืนยันหักออมทรัพย์", danger:false })) return;
+  button.disabled = true;
+  const { error } = await sb.rpc("pay_transport_from_savings", {
+    p_student_id:studentId, p_year:currentYear, p_grade:selectedRoom.grade_level,
+    p_classroom:selectedRoom.classroom, p_amount:Math.round(amount * 100) / 100, p_note:null
+  });
+  if (error) { updateActionRow(button.closest(".student-row")); return toast(friendlyError(error), true); }
+  toast(`หักออมทรัพย์ ${formatMoney(amount)} และลงรับค่ารถครบแล้ว`);
+  await loadRoom(el("room-select").value);
+}
+
+async function loadContext() {
+  years = await getAcademicYears();
+  currentYear = academicYearOf(today, years);
+  if (!currentYear) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
+  yearRange = academicYearRange(currentYear, years);
+  el("date-note").textContent = `ประจำวันที่ ${thaiDate(today)} · ปีการศึกษา ${currentYear} · คิดยอดตั้งแต่ ${thaiDate(yearRange.start)}`;
+  const [placementRes, homeroomRes, ownStaffRes, coverage] = await Promise.all([
+    getStudentPlacements(currentYear),
+    sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
+    sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
+    getMyCoverageFor(today)
+  ]);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (homeroomRes.error) throw new Error("โหลดข้อมูลครูประจำชั้นไม่สำเร็จ: " + homeroomRes.error.message);
+  if (ownStaffRes.error) throw new Error("โหลดข้อมูลบุคลากรของคุณไม่สำเร็จ: " + ownStaffRes.error.message);
+  placements = placementRes.data || [];
+  const allRooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  const ownStaffId = ownStaffRes.data?.id || null;
+  writableRoomKeys = new Set((homeroomRes.data || []).filter(row => ownStaffId && row.staff_id === ownStaffId).map(roomKey));
+  for (const key of coverage.roomKeys) writableRoomKeys.add(key);
+  availableRooms = canFinance ? allRooms : allRooms.filter(room => writableRoomKeys.has(roomKey(room)));
+  if (!availableRooms.length) {
+    el("room-select").innerHTML = '<option value="">— ไม่มีห้องที่รับผิดชอบ —</option>';
+    el("access-warning").hidden = false;
+    el("access-warning").innerHTML = `<div class="banner warn"><b>เปิดหน้ารับเงินค่ารถไม่ได้</b><br>${!ownStaffId && !canFinance ? "ยังไม่พบบัญชีบุคลากรที่ผูกกับการเข้าสู่ระบบนี้ กรุณาติดต่อฝ่ายบริหารทั่วไป" : "วันนี้คุณไม่ได้เป็นครูประจำชั้นหรือคนแทนของห้องใด"}</div>`;
+    return;
+  }
+  el("room-select").innerHTML = (availableRooms.length === 1 ? "" : '<option value="">— เลือกห้อง —</option>') + availableRooms.map((room, index) => `<option value="${index}">${esc(room.grade_level)} · ${esc(room.classroom)}</option>`).join("");
+  el("room-select").disabled = false;
+  if (availableRooms.length === 1) { el("room-select").value = "0"; await loadRoom(0); }
+}
+
+el("room-select").addEventListener("change", async () => { try { await loadRoom(el("room-select").value); } catch (error) { toast(friendlyError(error), true); } });
+el("student-list").addEventListener("input", event => { const row = event.target.closest(".student-row"); if (row) updateActionRow(row); });
+el("student-list").addEventListener("click", async event => {
+  const row = event.target.closest(".student-row");
+  if (!row) return;
+  const studentId = row.dataset.studentId;
+  const amount = Math.round(Number(row.querySelector(".amount").value) * 100) / 100;
+  try {
+    if (event.target.closest(".cash-button")) await receiveCash(studentId, amount, event.target.closest(".cash-button"));
+    else if (event.target.closest(".savings-button")) await deductSavings(studentId, amount, event.target.closest(".savings-button"));
+    else if (event.target.closest(".override-button")) openOverride(studentId);
+  } catch (error) { toast(friendlyError(error), true); }
+});
+el("override-date").addEventListener("change", refreshOverrideEditor);
+el("preset-row").addEventListener("click", event => {
+  const button = event.target.closest(".preset-button");
+  if (!button || button.disabled) return;
+  if (button.dataset.custom) { el("override-amount").focus(); el("override-amount").select(); return; }
+  el("override-amount").value = Number(button.dataset.amount).toFixed(2);
+});
+el("override-cancel").addEventListener("click", () => { editingStudentId = null; el("override-card").hidden = true; });
+el("override-save").addEventListener("click", async () => {
+  const selectedDate = el("override-date").value;
+  const context = overrideContext(editingStudentId, selectedDate);
+  const amount = Number(el("override-amount").value);
+  const reason = el("override-reason").value.trim();
+  if (!context) return toast("วันที่นี้ไม่มีช่วงใช้รถของนักเรียน", true);
+  if (!Number.isFinite(amount) || amount < 0) return toast("ยอดที่แก้ต้องเป็น 0 บาทหรือมากกว่า", true);
+  if (!reason) return toast("กรุณาระบุเหตุผลที่แก้ยอด", true);
+  const placement = transportRoster.find(row => row.student_id === editingStudentId);
+  if (!await window.crsAskConfirm({ title:"ยืนยันแก้ยอดค่ารถ", message:`${placement?.student?.name || "นักเรียน"} · ${thaiDate(context.chargeDate)}\nยอดใหม่ ${formatMoney(amount)} · เหตุผล: ${reason}`, okLabel:"บันทึกยอดที่แก้", danger:false })) return;
+  el("override-save").disabled = true;
+  const { data, error } = await sb.from("transport_day_overrides").upsert({
+    student_id:editingStudentId, year:currentYear, grade_level:selectedRoom.grade_level,
+    classroom:selectedRoom.classroom, charge_date:context.chargeDate,
+    amount:Math.round(amount * 100) / 100, reason
+  }, { onConflict:"student_id,charge_date" }).select("id");
+  el("override-save").disabled = false;
+  if (error) return toast(friendlyError(error), true);
+  if (!data?.length) return toast("ฐานข้อมูลไม่ได้แก้รายการ คุณอาจไม่มีสิทธิ์ของวันที่เลือก กรุณาโหลดหน้าใหม่หรือติดต่อฝ่ายการเงิน", true);
+  toast(`บันทึกยอดที่แก้เป็น ${formatMoney(amount)} แล้ว`);
+  editingStudentId = null;
+  el("override-card").hidden = true;
+  await loadRoom(el("room-select").value);
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try { canFinance = await checkDepartment("การเงิน"); applyRestrictedMenuAccess(canFinance); await loadContext(); }
+  catch (error) { el("access-warning").hidden = false; el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินค่ารถไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; }
+}
+</script>
+</body>
+</html>

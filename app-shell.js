@@ -404,13 +404,14 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html"],
       groups: [
         {
           label: "บันทึก",
           items: [
             ["savings-entry.html", "รับฝากออมทรัพย์"],
-            ["savings-withdraw.html", "แจ้งเบิกออมทรัพย์"]
+            ["savings-withdraw.html", "แจ้งเบิกออมทรัพย์"],
+            ["transport-entry.html", "รับเงินค่ารถ"]
           ]
         },
         {
@@ -429,7 +430,8 @@
         {
           label: "กำหนดค่า",
           items: [
-            ["savings-opening.html", "ยอดยกมาออมทรัพย์"]
+            ["savings-opening.html", "ยอดยกมาออมทรัพย์"],
+            ["transport-settings.html", "ตั้งค่าค่ารถ"]
           ]
         }
       ],
@@ -449,6 +451,11 @@
           description: "เลือกห้อง ตรวจยอดที่เบิกได้ แล้วส่งคำขอเข้าคิวของฝ่ายการเงิน",
           steps: ["เลือกนักเรียน", "กรอกคำขอ", "ส่งเข้าคิว"]
         },
+        "transport-entry.html": {
+          title: "รับเงินค่ารถ",
+          description: "เลือกห้อง ตรวจยอดค้างรายคน แล้วรับเงินสด หักออมทรัพย์ หรือแก้ยอดที่ต้องเก็บ",
+          steps: ["เลือกห้อง", "ตรวจยอดค้าง", "ยืนยันรายการ"]
+        },
         "savings-payout.html": {
           title: "จ่ายเงินออมทรัพย์",
           description: "ตรวจคิวรอจ่าย ยืนยันผู้รับ และตัดยอดออกจากสมุดออมทรัพย์",
@@ -463,6 +470,11 @@
           title: "รายงานออมทรัพย์",
           description: "เลือกช่วงวัน ดูภาพรวมระดับโรงเรียน ห้อง และสมุดรายคน",
           steps: ["เลือกช่วง", "ดูรายห้อง", "ดูรายคน"]
+        },
+        "transport-settings.html": {
+          title: "ตั้งค่าค่ารถ",
+          description: "ตั้งโซนและอัตรา ผูกนักเรียน แล้วประกาศยอดที่จะเก็บรายเดือน",
+          steps: ["ตั้งโซน", "ผูกนักเรียน", "ประกาศยอด"]
         }
       }
     }

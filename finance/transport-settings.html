@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตั้งค่าค่ารถ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6;
+  }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
+  .field { margin-bottom:14px; }
+  .field label { display:block; margin-bottom:6px; font-weight:600; }
+  .row2, .row4 { display:grid; gap:12px; }
+  .row2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .row4 { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  textarea { min-height:78px; resize:vertical; }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+  .primary { color:var(--white); background:var(--teal); }
+  .ghost { color:var(--teal); background:var(--teal-soft); }
+  .danger { color:var(--danger); background:var(--danger-soft); }
+  .icon-btn { min-width:44px; padding:8px; color:var(--teal); background:transparent; }
+  .tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:16px; }
+  .tab { color:var(--muted); background:var(--bg); border:1px solid var(--line); }
+  .tab[aria-selected="true"] { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); }
+  .tab-panel[hidden], [hidden] { display:none !important; }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .section-head h2 { margin:0; font-size:19px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:14px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+  .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; min-width:700px; }
+  th, td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { color:var(--muted); background:var(--bg); font-size:13px; white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  .money { white-space:nowrap; text-align:right; }
+  .meta { display:block; color:var(--muted); font-size:13px; }
+  .hint { color:var(--muted); font-size:14px; }
+  .empty { padding:22px 8px; color:var(--muted); text-align:center; }
+  .readonly { margin-bottom:16px; padding:14px; color:var(--danger); background:var(--danger-soft); border-radius:10px; }
+  .banner { padding:14px; border-radius:10px; background:var(--amber-soft); color:var(--amber); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .status { display:inline-flex; align-items:center; min-height:28px; padding:3px 9px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:13px; font-weight:600; }
+  .status.off, .status.pending { color:var(--amber); background:var(--amber-soft); }
+  .summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+  .summary { padding:12px; border-radius:10px; background:var(--teal-soft); }
+  .summary span { display:block; color:var(--muted); font-size:13px; }
+  .summary b { color:var(--teal); font-size:22px; }
+  .editor { border:1px solid var(--teal); background:var(--teal-soft); }
+  .editor h3 { margin:0 0 12px; font-size:18px; }
+  .rate-preview { min-height:44px; padding:10px 12px; border:1px dashed var(--teal); border-radius:8px; background:var(--white); font-weight:700; }
+  .student-list { display:grid; gap:10px; }
+  .student-row { display:grid; grid-template-columns:minmax(180px,1.2fr) minmax(210px,1.3fr) auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:10px; }
+  .student-name { font-weight:600; }
+  .student-actions { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
+  .month-rate-grid { display:grid; grid-template-columns:minmax(180px,1.2fr) repeat(2,minmax(150px,1fr)); gap:12px; align-items:end; padding:12px 0; border-bottom:1px solid var(--line); }
+  .month-rate-grid:last-child { border-bottom:0; }
+  .month-rate-grid .field { margin:0; }
+  .save-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+  .toast { position:sticky; bottom:10px; display:none; z-index:20; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  @media (max-width:820px) {
+    .row4 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .student-row { grid-template-columns:1fr; }
+    .student-actions { justify-content:flex-start; }
+  }
+  @media (max-width:620px) {
+    .row2, .row4, .month-rate-grid { grid-template-columns:1fr; }
+    .tabs { grid-template-columns:1fr; }
+    .section-head, .save-bar { align-items:stretch; flex-direction:column; }
+    .actions { justify-content:flex-start; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ตั้งค่าค่ารถ</h1>
+    <p>ตั้งโซน ผูกนักเรียน และประกาศยอดที่จะเก็บรายเดือน</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260816-3"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="access-card" class="card" hidden></section>
+    <div id="settings-app" hidden>
+      <section class="card">
+        <div class="field">
+          <label for="year-select">ปีการศึกษา</label>
+          <select id="year-select" disabled><option value="">กำลังโหลด…</option></select>
+        </div>
+        <div id="year-range" class="hint">เลือกปีเพื่อโหลดข้อมูลค่ารถ</div>
+      </section>
+
+      <div class="tabs" role="tablist" aria-label="หัวข้อตั้งค่าค่ารถ">
+        <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="zones-panel" data-tab="zones-panel">1 · โซน/อัตรา</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="students-panel" data-tab="students-panel">2 · ผูกนักเรียน</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="months-panel" data-tab="months-panel">3 · ประกาศยอดรายเดือน</button>
+      </div>
+
+      <section id="zones-panel" class="tab-panel" role="tabpanel">
+        <div class="card">
+          <div class="section-head">
+            <div><h2>โซนและอัตรา</h2><p>อัตราขาเดียวกรอกแยกเอง และการแก้เรตไม่เปลี่ยนเรตที่แช่ไว้กับนักเรียนแล้ว</p></div>
+            <button id="add-zone" class="primary" type="button">เพิ่มโซน</button>
+          </div>
+          <div id="zones-list"></div>
+        </div>
+        <form id="zone-form" class="card editor" hidden>
+          <h3 id="zone-form-title">เพิ่มโซน</h3>
+          <div class="field"><label for="zone-name">ชื่อโซน</label><input id="zone-name" type="text" maxlength="120" required></div>
+          <div class="section">รายวัน</div>
+          <div class="row2">
+            <div class="field"><label for="daily-round">ไป-กลับ (บาท/วัน)</label><input id="daily-round" type="number" min="0" step="0.01" inputmode="decimal" required></div>
+            <div class="field"><label for="daily-one-way">ขาเดียว (บาท/วัน)</label><input id="daily-one-way" type="number" min="0" step="0.01" inputmode="decimal" required></div>
+          </div>
+          <div class="section">รายเดือน</div>
+          <div class="row2">
+            <div class="field"><label for="monthly-round">ไป-กลับ (บาท/เดือน)</label><input id="monthly-round" type="number" min="0" step="0.01" inputmode="decimal" required></div>
+            <div class="field"><label for="monthly-one-way">ขาเดียว (บาท/เดือน)</label><input id="monthly-one-way" type="number" min="0" step="0.01" inputmode="decimal" required></div>
+          </div>
+          <div class="actions"><button id="cancel-zone" class="ghost" type="button">ยกเลิก</button><button class="primary" type="submit">บันทึกโซน</button></div>
+        </form>
+      </section>
+
+      <section id="students-panel" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <div class="row2">
+            <div class="field"><label for="grade-select">ชั้นเรียน</label><select id="grade-select" disabled><option value="">— เลือกชั้น —</option></select></div>
+            <div class="field"><label for="room-select">ห้องเรียน</label><select id="room-select" disabled><option value="">— เลือกชั้นก่อน —</option></select></div>
+          </div>
+        </div>
+        <section id="assignment-editor" class="card editor" hidden>
+          <h3 id="assignment-title">ผูกนักเรียนกับรถรับส่ง</h3>
+          <div id="assignment-stop-note" class="banner" hidden></div>
+          <div id="assignment-fields">
+            <div class="row2">
+              <div class="field"><label for="assignment-zone">โซน</label><select id="assignment-zone"></select></div>
+              <div class="field"><label for="assignment-date">วันเริ่ม</label><input id="assignment-date" type="date"></div>
+            </div>
+            <div class="row2">
+              <div class="field"><label for="billing-mode">แบบจ่าย</label><select id="billing-mode"><option>รายวัน</option><option>รายเดือน</option></select></div>
+              <div class="field"><label for="trip-mode">เที่ยวรถ</label><select id="trip-mode"><option>ไป-กลับ</option><option>ขาเดียว</option></select></div>
+            </div>
+            <div class="field"><label>เรตที่จะแช่ไว้กับนักเรียน</label><div id="rate-preview" class="rate-preview">เลือกโซนเพื่อดูเรต</div></div>
+            <div class="field"><label for="assignment-note">หมายเหตุ</label><textarea id="assignment-note" placeholder="ไม่บังคับ"></textarea></div>
+          </div>
+          <div class="actions"><button id="cancel-assignment" class="ghost" type="button">ยกเลิก</button><button id="save-assignment" class="primary" type="button">บันทึก</button></div>
+        </section>
+        <section id="students-card" class="card" hidden>
+          <div class="section-head"><div><h2 id="room-title">รายชื่อนักเรียน</h2><p>เปลี่ยนโซนหรือเรตด้วยการปิดแถวเดิมแล้วเปิดแถวใหม่เท่านั้น</p></div></div>
+          <div id="room-summary" class="summary-grid"></div>
+          <div id="student-list" class="student-list"></div>
+        </section>
+      </section>
+
+      <section id="months-panel" class="tab-panel" role="tabpanel" hidden>
+        <div class="card">
+          <div class="field"><label for="month-select">เดือนที่จะประกาศยอด</label><select id="month-select" disabled><option value="">— เลือกเดือน —</option></select></div>
+          <div id="month-status" class="hint">เดือนที่ยังไม่ประกาศจะแสดงข้อความ “ยังไม่ประกาศ”</div>
+        </div>
+        <section id="month-editor" class="card" hidden>
+          <div class="section-head"><div><h2 id="month-title">ประกาศยอดรายเดือน</h2><p>ยอดที่กรอกคือยอดที่จะเก็บเงินจริง ไม่มีสูตรหารหรือคูณจากจำนวนวัน</p></div><span id="month-badge" class="status pending">ยังไม่ประกาศ</span></div>
+          <div class="row2">
+            <div class="field"><label for="open-days">จำนวนวันเปิดเรียน</label><input id="open-days" type="number" min="0" max="31" step="1" inputmode="numeric"><div id="weekday-hint" class="hint"></div></div>
+            <div class="field"><label for="month-note">หมายเหตุ</label><input id="month-note" type="text" maxlength="300" placeholder="เช่น ปิดกลางภาค 5 วัน"></div>
+          </div>
+          <p class="hint">เดือนที่โรงเรียนเปิดไม่ครบ ให้กรอกยอดตามจริงที่จะเก็บ</p>
+          <div class="section">ยอดรายโซน</div>
+          <div id="month-rates"></div>
+          <div class="save-bar"><span class="hint">บันทึกแล้ว ยอดเดือนนั้นจะไม่ขยับตามการแก้อัตราโซนภายหลัง</span><button id="save-month" class="primary" type="button">บันทึกและประกาศยอด</button></div>
+        </section>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess,
+  getAcademicYears, academicYearOf, academicYearRange, getStudentPlacements,
+  roomsFromPlacements, activePlacements, bangkokNow, toDateStr, fetchAllRows, formatMoney
+} from "../supabase-client.js?v=20260816-2";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const today = toDateStr(bangkokNow());
+const moneyValue = value => Number(value || 0).toFixed(2);
+const isoDayBefore = dateStr => {
+  const date = new Date(dateStr + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+};
+const isoDayAfter = dateStr => {
+  const date = new Date(dateStr + "T00:00:00Z");
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+};
+const thaiMonth = ym => new Intl.DateTimeFormat("th-TH", { month:"long", year:"numeric", timeZone:"Asia/Bangkok" })
+  .format(new Date(ym + "T00:00:00+07:00"));
+const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" })
+  .format(new Date(dateStr + "T00:00:00+07:00"));
+const studentCompare = (a, b) =>
+  String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) ||
+  String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+
+let session = null;
+let years = [];
+let currentYear = "";
+let zones = [];
+let placements = [];
+let rooms = [];
+let assignments = [];
+let announcedMonths = new Map();
+let editingZoneId = null;
+let assignmentAction = null;
+let assignmentStudentId = null;
+let selectedMonth = "";
+let monthRates = [];
+let toastTimer = null;
+
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 5000);
+}
+
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("transport_zones_year_name_uniq") || message.includes("duplicate key")) return "ชื่อโซนนี้มีอยู่แล้วในปีการศึกษาที่เลือก";
+  if (message.includes("student_transport_no_overlap") || message.includes("conflicting key value violates exclusion")) return "ช่วงใช้รถของนักเรียนคนนี้ทับกับรายการเดิม กรุณาตรวจวันเริ่มและวันสิ้นสุด";
+  if (message.includes("student_transport_dates_ok")) return "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
+  return message;
+}
+
+function setTab(panelId) {
+  document.querySelectorAll("[data-tab]").forEach(button => button.setAttribute("aria-selected", String(button.dataset.tab === panelId)));
+  document.querySelectorAll(".tab-panel").forEach(panel => { panel.hidden = panel.id !== panelId; });
+}
+
+function currentRange() {
+  return academicYearRange(currentYear, years);
+}
+
+function defaultDate() {
+  const range = currentRange();
+  if (!range) return today;
+  return today >= range.start && today <= range.end ? today : range.start;
+}
+
+function rateFor(zone, billingMode, tripMode) {
+  if (!zone) return null;
+  const key = billingMode === "รายวัน"
+    ? (tripMode === "ไป-กลับ" ? "daily_round" : "daily_one_way")
+    : (tripMode === "ไป-กลับ" ? "monthly_round" : "monthly_one_way");
+  return Number(zone[key]);
+}
+
+function renderZones() {
+  if (!zones.length) {
+    el("zones-list").innerHTML = '<div class="empty">ยังไม่มีโซนในปีนี้ กด “เพิ่มโซน” เพื่อเริ่มตั้งค่า</div>';
+    return;
+  }
+  el("zones-list").innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>โซน</th><th class="money">รายวัน<br>ไป-กลับ</th><th class="money">รายวัน<br>ขาเดียว</th><th class="money">รายเดือน<br>ไป-กลับ</th><th class="money">รายเดือน<br>ขาเดียว</th><th>จัดการ</th></tr></thead>
+    <tbody>${zones.map(zone => `<tr>
+      <td><b>${esc(zone.name)}</b><span class="meta"><span class="status ${zone.active ? "" : "off"}">${zone.active ? "ใช้งาน" : "ปิดใช้งาน"}</span></span></td>
+      <td class="money">${formatMoney(zone.daily_round)}</td><td class="money">${formatMoney(zone.daily_one_way)}</td>
+      <td class="money">${formatMoney(zone.monthly_round)}</td><td class="money">${formatMoney(zone.monthly_one_way)}</td>
+      <td><div class="actions"><button class="ghost" type="button" data-edit-zone="${zone.id}">แก้</button><button class="${zone.active ? "danger" : "ghost"}" type="button" data-toggle-zone="${zone.id}">${zone.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button></div></td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function openZoneForm(zone = null) {
+  editingZoneId = zone?.id || null;
+  el("zone-form-title").textContent = zone ? `แก้โซน ${zone.name}` : "เพิ่มโซน";
+  el("zone-name").value = zone?.name || "";
+  el("daily-round").value = zone ? moneyValue(zone.daily_round) : "";
+  el("daily-one-way").value = zone ? moneyValue(zone.daily_one_way) : "";
+  el("monthly-round").value = zone ? moneyValue(zone.monthly_round) : "";
+  el("monthly-one-way").value = zone ? moneyValue(zone.monthly_one_way) : "";
+  el("zone-form").hidden = false;
+  el("zone-name").focus();
+}
+
+async function saveZone(event) {
+  event.preventDefault();
+  const name = el("zone-name").value.trim();
+  const rates = ["daily-round", "daily-one-way", "monthly-round", "monthly-one-way"].map(id => Number(el(id).value));
+  if (!name) return toast("กรุณากรอกชื่อโซน", true);
+  if (rates.some(value => !Number.isFinite(value) || value < 0)) return toast("อัตราทั้ง 4 ช่องต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป", true);
+  const payload = {
+    year:currentYear, name, daily_round:rates[0], daily_one_way:rates[1],
+    monthly_round:rates[2], monthly_one_way:rates[3], updated_at:new Date().toISOString()
+  };
+  const request = editingZoneId
+    ? sb.from("transport_zones").update(payload).eq("id", editingZoneId)
+    : sb.from("transport_zones").insert({ ...payload, created_by:session.user.id });
+  const { error } = await request;
+  if (error) return toast(friendlyError(error), true);
+  el("zone-form").hidden = true;
+  toast(editingZoneId ? "แก้ข้อมูลโซนแล้ว เรตเดิมของนักเรียนยังคงเดิม" : "เพิ่มโซนแล้ว");
+  editingZoneId = null;
+  await loadZones();
+  renderStudents();
+  if (selectedMonth) await loadMonth(selectedMonth);
+}
+
+async function toggleZone(zone) {
+  let currentCount = 0;
+  if (zone.active) {
+    const { count, error } = await sb.from("student_transport").select("id", { count:"exact", head:true }).eq("zone_id", zone.id).is("end_date", null);
+    if (error) throw error;
+    currentCount = count || 0;
+  }
+  const message = zone.active
+    ? `โซน ${zone.name} มีนักเรียนที่ยังใช้อยู่ ${currentCount} คน\nการปิดจะกันไม่ให้ผูกคนใหม่ แต่ไม่ลบประวัติหรือเปลี่ยนเรตเดิม`
+    : `เปิดโซน ${zone.name} ให้เลือกผูกกับนักเรียนใหม่ได้อีกครั้ง`;
+  if (!await window.crsAskConfirm({ title:zone.active ? "ปิดใช้งานโซน" : "เปิดใช้งานโซน", message, okLabel:zone.active ? "ปิดใช้งาน" : "เปิดใช้งาน", danger:zone.active })) return;
+  const { error } = await sb.from("transport_zones").update({ active:!zone.active, updated_at:new Date().toISOString() }).eq("id", zone.id);
+  if (error) throw error;
+  toast(zone.active ? "ปิดใช้งานโซนแล้ว" : "เปิดใช้งานโซนแล้ว");
+  await loadZones();
+  renderStudents();
+}
+
+async function loadZones() {
+  const result = await fetchAllRows(() => sb.from("transport_zones").select("id,year,name,daily_round,daily_one_way,monthly_round,monthly_one_way,active,created_at,updated_at").eq("year", currentYear), ["name", "id"]);
+  if (result.error) throw new Error("โหลดโซนไม่สำเร็จ: " + result.error.message);
+  zones = result.data || [];
+  renderZones();
+}
+
+function syncRoomOptions() {
+  el("students-card").hidden = true;
+  el("assignment-editor").hidden = true;
+  const grade = el("grade-select").value;
+  const choices = rooms.map((room, index) => ({ room, index })).filter(item => item.room.grade_level === grade);
+  el("room-select").innerHTML = '<option value="">— เลือกห้อง —</option>' + choices.map(item => `<option value="${item.index}">${esc(item.room.classroom)}</option>`).join("");
+  el("room-select").disabled = choices.length === 0;
+  if (choices.length === 1) {
+    el("room-select").value = String(choices[0].index);
+    renderStudents();
+  }
+}
+
+function currentAssignment(studentId) {
+  return assignments.find(row => row.student_id === studentId && row.end_date == null) || null;
+}
+
+function selectedRoster() {
+  const room = rooms[Number(el("room-select").value)];
+  if (!room) return [];
+  return activePlacements(placements).filter(row => row.grade_level === room.grade_level && row.classroom === room.classroom).sort(studentCompare);
+}
+
+function renderStudents() {
+  const room = rooms[Number(el("room-select").value)];
+  if (!room) return;
+  const roster = selectedRoster();
+  const activeRows = roster.map(row => currentAssignment(row.student_id)).filter(Boolean);
+  const daily = activeRows.filter(row => row.billing_mode === "รายวัน").length;
+  const monthly = activeRows.filter(row => row.billing_mode === "รายเดือน").length;
+  el("room-title").textContent = `${room.grade_level} · ${room.classroom} (${roster.length} คน)`;
+  el("room-summary").innerHTML = [
+    ["ใช้รถ", activeRows.length], ["รายวัน", daily], ["รายเดือน", monthly], ["ยังไม่ตั้ง", roster.length - activeRows.length]
+  ].map(([label, value]) => `<div class="summary"><span>${label}</span><b>${value}</b><span>คน</span></div>`).join("");
+  el("student-list").innerHTML = roster.length ? roster.map(placement => {
+    const student = placement.student || {};
+    const assignment = currentAssignment(placement.student_id);
+    const zone = zones.find(item => item.id === assignment?.zone_id);
+    return `<div class="student-row">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")}</span></div>
+      <div>${assignment
+        ? `<b>${esc(zone?.name || "ไม่พบโซน")}</b><span class="meta">${esc(assignment.billing_mode)} · ${esc(assignment.trip_mode)} · แช่เรต ${formatMoney(assignment.rate_amount)}</span><span class="meta">เริ่ม ${thaiDate(assignment.start_date)}${zone && !zone.active ? " · โซนปิดใช้งานแล้ว" : ""}</span>`
+        : '<span class="status pending">ยังไม่ตั้งค่ารถ</span>'}</div>
+      <div class="student-actions">${assignment
+        ? `<button class="ghost" type="button" data-assignment="replace" data-student-id="${placement.student_id}">เปลี่ยน (ปิดของเดิม เปิดใหม่)</button><button class="danger" type="button" data-assignment="stop" data-student-id="${placement.student_id}">เลิกใช้รถ</button>`
+        : `<button class="primary" type="button" data-assignment="new" data-student-id="${placement.student_id}">ตั้งค่ารถ</button>`}</div>
+    </div>`;
+  }).join("") : '<div class="empty">ห้องนี้ยังไม่มีรายชื่อนักเรียนที่ใช้งานอยู่</div>';
+  el("students-card").hidden = false;
+}
+
+function syncRatePreview() {
+  const zone = zones.find(item => item.id === el("assignment-zone").value);
+  const rate = rateFor(zone, el("billing-mode").value, el("trip-mode").value);
+  el("rate-preview").textContent = rate == null ? "เลือกโซนเพื่อดูเรต" : `${formatMoney(rate)} · ค่านี้จะถูกแช่ไว้ แม้อัตราโซนเปลี่ยนภายหลัง`;
+}
+
+function openAssignmentEditor(action, studentId) {
+  const placement = placements.find(row => row.student_id === studentId);
+  const existing = currentAssignment(studentId);
+  assignmentAction = action;
+  assignmentStudentId = studentId;
+  el("assignment-title").textContent = `${action === "stop" ? "เลิกใช้รถ" : action === "replace" ? "เปลี่ยนค่ารถ" : "ตั้งค่ารถ"} · ${placement?.student?.name || "นักเรียน"}`;
+  el("assignment-stop-note").hidden = action !== "stop";
+  el("assignment-fields").hidden = action === "stop";
+  el("assignment-stop-note").innerHTML = action === "stop" ? `รายการเดิมเริ่ม ${thaiDate(existing.start_date)} · เลือกวันสิ้นสุดด้านล่าง<div class="field" style="margin-top:10px"><label for="stop-date">วันสิ้นสุด</label><input id="stop-date" type="date" min="${existing.start_date}" value="${defaultDate() < existing.start_date ? existing.start_date : defaultDate()}"></div>` : "";
+  const activeZones = zones.filter(zone => zone.active);
+  el("assignment-zone").innerHTML = '<option value="">— เลือกโซน —</option>' + activeZones.map(zone => `<option value="${zone.id}">${esc(zone.name)}</option>`).join("");
+  const earliestReplacement = action === "replace" ? isoDayAfter(existing.start_date) : "";
+  el("assignment-date").value = action === "replace" && defaultDate() < earliestReplacement ? earliestReplacement : defaultDate();
+  el("assignment-date").min = earliestReplacement || currentRange()?.start || "";
+  el("assignment-date").max = currentRange()?.end || "";
+  el("billing-mode").value = existing?.billing_mode || "รายวัน";
+  el("trip-mode").value = existing?.trip_mode || "ไป-กลับ";
+  el("assignment-note").value = "";
+  if (existing && activeZones.some(zone => zone.id === existing.zone_id)) el("assignment-zone").value = existing.zone_id;
+  syncRatePreview();
+  el("save-assignment").textContent = action === "stop" ? "บันทึกวันสิ้นสุด" : action === "replace" ? "ปิดของเดิมและเปิดใหม่" : "บันทึกค่ารถ";
+  el("assignment-editor").hidden = false;
+  el("assignment-editor").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+async function saveAssignment() {
+  const placement = placements.find(row => row.student_id === assignmentStudentId);
+  const existing = currentAssignment(assignmentStudentId);
+  if (!placement) return toast("ไม่พบข้อมูลนักเรียน กรุณาโหลดหน้าใหม่", true);
+  if (assignmentAction === "stop") {
+    const endDate = el("stop-date")?.value || "";
+    if (!existing || !endDate || endDate < existing.start_date) return toast("กรุณาเลือกวันสิ้นสุดที่ไม่ก่อนวันเริ่ม", true);
+    if (!await window.crsAskConfirm({ title:"เลิกใช้รถรับส่ง", message:`ปิดรายการของ ${placement.student.name} ณ วันที่ ${thaiDate(endDate)}\nประวัติเดิมจะยังอยู่ครบ`, okLabel:"บันทึกวันสิ้นสุด", danger:true })) return;
+    const { error } = await sb.from("student_transport").update({ end_date:endDate, updated_at:new Date().toISOString() }).eq("id", existing.id);
+    if (error) return toast(friendlyError(error), true);
+    toast("บันทึกวันสิ้นสุดการใช้รถแล้ว");
+  } else {
+    const zone = zones.find(item => item.id === el("assignment-zone").value && item.active);
+    const startDate = el("assignment-date").value;
+    const billingMode = el("billing-mode").value;
+    const tripMode = el("trip-mode").value;
+    const rate = rateFor(zone, billingMode, tripMode);
+    if (!zone || !startDate || rate == null) return toast("กรุณาเลือกโซน แบบจ่าย เที่ยวรถ และวันเริ่มให้ครบ", true);
+    const range = currentRange();
+    if (range && (startDate < range.start || startDate > range.end)) return toast("วันเริ่มต้องอยู่ในปีการศึกษาที่เลือก", true);
+    if (assignmentAction === "replace" && (!existing || startDate <= existing.start_date)) return toast("วันเริ่มรายการใหม่ต้องหลังวันเริ่มของรายการเดิม", true);
+    const payload = {
+      student_id:assignmentStudentId, year:currentYear, zone_id:zone.id,
+      billing_mode:billingMode, trip_mode:tripMode, rate_amount:rate, start_date:startDate,
+      note:el("assignment-note").value.trim() || null, created_by:session.user.id
+    };
+    const message = assignmentAction === "replace"
+      ? `ปิดรายการเดิมวันที่ ${thaiDate(isoDayBefore(startDate))} แล้วเปิด ${zone.name} ตั้งแต่ ${thaiDate(startDate)}\nเรตใหม่ ${formatMoney(rate)}`
+      : `ผูก ${placement.student.name} กับ ${zone.name} ตั้งแต่ ${thaiDate(startDate)}\nแช่เรต ${formatMoney(rate)}`;
+    if (!await window.crsAskConfirm({ title:assignmentAction === "replace" ? "เปลี่ยนค่ารถ" : "บันทึกค่ารถ", message, okLabel:assignmentAction === "replace" ? "ปิดเดิมและเปิดใหม่" : "บันทึกค่ารถ", danger:false })) return;
+    if (assignmentAction === "replace") {
+      const oldEnd = isoDayBefore(startDate);
+      const closeResult = await sb.from("student_transport").update({ end_date:oldEnd, updated_at:new Date().toISOString() }).eq("id", existing.id);
+      if (closeResult.error) return toast(friendlyError(closeResult.error), true);
+      const insertResult = await sb.from("student_transport").insert(payload);
+      if (insertResult.error) {
+        const rollback = await sb.from("student_transport").update({ end_date:null, updated_at:new Date().toISOString() }).eq("id", existing.id);
+        const suffix = rollback.error ? " · คืนรายการเดิมอัตโนมัติไม่สำเร็จ กรุณาหยุดและแจ้งผู้ดูแล" : " · ระบบคืนรายการเดิมให้แล้ว";
+        return toast(friendlyError(insertResult.error) + suffix, true);
+      }
+      toast("ปิดรายการเดิมและเปิดรายการใหม่แล้ว");
+    } else {
+      const { error } = await sb.from("student_transport").insert(payload);
+      if (error) return toast(friendlyError(error), true);
+      toast("ผูกนักเรียนกับรถรับส่งแล้ว");
+    }
+  }
+  el("assignment-editor").hidden = true;
+  await loadAssignments();
+  renderStudents();
+}
+
+async function loadStudentsAndAssignments() {
+  const [placementRes, assignmentRes] = await Promise.all([
+    getStudentPlacements(currentYear),
+    fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date,note,created_at,updated_at").eq("year", currentYear), ["student_id", "start_date", "id"])
+  ]);
+  if (placementRes.error) throw new Error("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (assignmentRes.error) throw new Error("โหลดข้อมูลค่ารถนักเรียนไม่สำเร็จ: " + assignmentRes.error.message);
+  placements = placementRes.data || [];
+  assignments = assignmentRes.data || [];
+  rooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  const grades = [...new Set(rooms.map(room => room.grade_level))];
+  el("grade-select").innerHTML = '<option value="">— เลือกชั้น —</option>' + grades.map(grade => `<option value="${esc(grade)}">${esc(grade)}</option>`).join("");
+  el("grade-select").disabled = grades.length === 0;
+  el("room-select").innerHTML = '<option value="">— เลือกชั้นก่อน —</option>';
+  el("room-select").disabled = true;
+}
+
+async function loadAssignments() {
+  const result = await fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date,note,created_at,updated_at").eq("year", currentYear), ["student_id", "start_date", "id"]);
+  if (result.error) throw new Error("โหลดข้อมูลค่ารถนักเรียนไม่สำเร็จ: " + result.error.message);
+  assignments = result.data || [];
+}
+
+function monthKeys(range) {
+  if (!range) return [];
+  const out = [];
+  const cursor = new Date(range.start.slice(0, 7) + "-01T00:00:00Z");
+  const last = range.end.slice(0, 7) + "-01";
+  while (cursor.toISOString().slice(0, 10) <= last) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+function weekdayCount(ym, range) {
+  if (!ym || !range) return 0;
+  const monthStart = ym;
+  const monthEndDate = new Date(ym + "T00:00:00Z");
+  monthEndDate.setUTCMonth(monthEndDate.getUTCMonth() + 1);
+  monthEndDate.setUTCDate(0);
+  const monthEnd = monthEndDate.toISOString().slice(0, 10);
+  const start = monthStart > range.start ? monthStart : range.start;
+  const end = monthEnd < range.end ? monthEnd : range.end;
+  if (start > end) return 0;
+  const cursor = new Date(start + "T00:00:00Z");
+  let count = 0;
+  while (cursor.toISOString().slice(0, 10) <= end) {
+    const day = cursor.getUTCDay();
+    if (day >= 1 && day <= 5) count += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return count;
+}
+
+function renderMonthOptions() {
+  const keys = monthKeys(currentRange());
+  el("month-select").innerHTML = '<option value="">— เลือกเดือน —</option>' + keys.map(ym => `<option value="${ym}">${thaiMonth(ym)} · ${announcedMonths.has(ym) ? "ประกาศแล้ว" : "ยังไม่ประกาศ"}</option>`).join("");
+  el("month-select").disabled = keys.length === 0;
+  if (selectedMonth && keys.includes(selectedMonth)) el("month-select").value = selectedMonth;
+}
+
+function renderMonthEditor() {
+  const announced = announcedMonths.get(selectedMonth) || null;
+  const savedRates = new Map(monthRates.map(row => [`${row.zone_id}\u0000${row.trip_mode}`, row]));
+  const suggestedOpenDays = weekdayCount(selectedMonth, currentRange());
+  el("month-title").textContent = `ประกาศยอด ${thaiMonth(selectedMonth)}`;
+  el("month-badge").textContent = announced ? "ประกาศแล้ว" : "ยังไม่ประกาศ";
+  el("month-badge").className = "status " + (announced ? "" : "pending");
+  el("month-status").textContent = announced ? `${thaiMonth(selectedMonth)} ประกาศแล้ว · แก้ยอดและบันทึกซ้ำได้` : `${thaiMonth(selectedMonth)} ยังไม่ประกาศ`;
+  el("open-days").value = announced ? announced.open_days : suggestedOpenDays;
+  el("weekday-hint").textContent = `เดือนนี้มีวันจันทร์–ศุกร์ในปีการศึกษา ${suggestedOpenDays} วัน — แก้ได้ถ้ามีปิดเทอมหรือวันหยุดพิเศษ`;
+  el("month-note").value = announced?.note || "";
+  el("month-rates").innerHTML = zones.length ? zones.map(zone => {
+    const round = savedRates.get(`${zone.id}\u0000ไป-กลับ`)?.amount ?? zone.monthly_round;
+    const oneWay = savedRates.get(`${zone.id}\u0000ขาเดียว`)?.amount ?? zone.monthly_one_way;
+    return `<div class="month-rate-grid" data-month-zone="${zone.id}">
+      <div><b>${esc(zone.name)}</b><span class="meta">${zone.active ? "ใช้งาน" : "ปิดใช้งานแล้ว · ยังแสดงเพื่อเก็บประวัติยอด"}</span></div>
+      <div class="field"><label for="month-round-${zone.id}">ไป-กลับ (บาท)</label><input id="month-round-${zone.id}" data-trip="ไป-กลับ" type="number" min="0" step="0.01" inputmode="decimal" value="${moneyValue(round)}"></div>
+      <div class="field"><label for="month-one-${zone.id}">ขาเดียว (บาท)</label><input id="month-one-${zone.id}" data-trip="ขาเดียว" type="number" min="0" step="0.01" inputmode="decimal" value="${moneyValue(oneWay)}"></div>
+    </div>`;
+  }).join("") : '<div class="banner bad"><b>ยังประกาศยอดไม่ได้</b><br>กรุณาเพิ่มโซนและอัตราก่อน</div>';
+  el("save-month").disabled = zones.length === 0;
+  el("month-editor").hidden = false;
+}
+
+async function loadMonth(ym) {
+  selectedMonth = ym;
+  if (!ym) {
+    el("month-editor").hidden = true;
+    el("month-status").textContent = "เดือนที่ยังไม่ประกาศจะแสดงข้อความ “ยังไม่ประกาศ”";
+    return;
+  }
+  const result = await fetchAllRows(() => sb.from("transport_month_rates").select("year,ym,zone_id,trip_mode,amount,updated_at").eq("year", currentYear).eq("ym", ym), ["year", "ym", "zone_id", "trip_mode"]);
+  if (result.error) throw new Error("โหลดยอดรายเดือนไม่สำเร็จ: " + result.error.message);
+  monthRates = result.data || [];
+  renderMonthEditor();
+}
+
+async function loadMonths() {
+  const result = await fetchAllRows(() => sb.from("transport_months").select("ym,year,open_days,note,announced_by,announced_at").eq("year", currentYear), ["year", "ym"]);
+  if (result.error) throw new Error("โหลดเดือนที่ประกาศแล้วไม่สำเร็จ: " + result.error.message);
+  announcedMonths = new Map((result.data || []).map(row => [row.ym, row]));
+  selectedMonth = "";
+  el("month-editor").hidden = true;
+  renderMonthOptions();
+}
+
+async function saveMonth() {
+  if (!selectedMonth) return toast("กรุณาเลือกเดือน", true);
+  const openDays = Number(el("open-days").value);
+  if (!Number.isInteger(openDays) || openDays < 0 || openDays > 31) return toast("จำนวนวันเปิดเรียนต้องเป็นจำนวนเต็ม 0–31 วัน", true);
+  const rows = [];
+  for (const container of el("month-rates").querySelectorAll("[data-month-zone]")) {
+    for (const input of container.querySelectorAll("input[data-trip]")) {
+      const amount = Number(input.value);
+      if (!Number.isFinite(amount) || amount < 0) return toast("ยอดทุกช่องต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป", true);
+      rows.push({ year:currentYear, ym:selectedMonth, zone_id:container.dataset.monthZone, trip_mode:input.dataset.trip, amount, updated_by:session.user.id, updated_at:new Date().toISOString() });
+    }
+  }
+  if (!await window.crsAskConfirm({ title:"ประกาศยอดค่ารถรายเดือน", message:`${thaiMonth(selectedMonth)} · เปิดเรียน ${openDays} วัน\nกำลังบันทึกยอด ${rows.length} ช่อง ยอดเหล่านี้จะใช้เก็บเงินจริง`, okLabel:"บันทึกและประกาศ", danger:false })) return;
+  const monthPayload = { ym:selectedMonth, year:currentYear, open_days:openDays, note:el("month-note").value.trim() || null, announced_by:session.user.id, announced_at:new Date().toISOString() };
+  const monthResult = await sb.from("transport_months").upsert(monthPayload, { onConflict:"year,ym" });
+  if (monthResult.error) return toast(friendlyError(monthResult.error), true);
+  const ratesResult = await sb.from("transport_month_rates").upsert(rows, { onConflict:"year,ym,zone_id,trip_mode" });
+  if (ratesResult.error) return toast("บันทึกหัวเดือนได้ แต่บันทึกยอดรายโซนไม่ครบ: " + friendlyError(ratesResult.error), true);
+  toast(`ประกาศยอด ${thaiMonth(selectedMonth)} แล้ว`);
+  const keep = selectedMonth;
+  await loadMonths();
+  el("month-select").value = keep;
+  await loadMonth(keep);
+}
+
+async function loadYear() {
+  currentYear = el("year-select").value;
+  if (!currentYear) return;
+  const range = currentRange();
+  el("year-range").textContent = range ? `ช่วงปีการศึกษา ${thaiDate(range.start)} – ${thaiDate(range.end)}` : "ยังไม่พบช่วงปีการศึกษา";
+  el("zone-form").hidden = true;
+  el("assignment-editor").hidden = true;
+  el("students-card").hidden = true;
+  await Promise.all([loadZones(), loadStudentsAndAssignments(), loadMonths()]);
+}
+
+document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => setTab(button.dataset.tab)));
+el("add-zone").addEventListener("click", () => openZoneForm());
+el("cancel-zone").addEventListener("click", () => { editingZoneId = null; el("zone-form").hidden = true; });
+el("zone-form").addEventListener("submit", event => saveZone(event).catch(error => toast(friendlyError(error), true)));
+el("zones-list").addEventListener("click", event => {
+  const editButton = event.target.closest("[data-edit-zone]");
+  const toggleButton = event.target.closest("[data-toggle-zone]");
+  if (editButton) openZoneForm(zones.find(zone => zone.id === editButton.dataset.editZone));
+  if (toggleButton) toggleZone(zones.find(zone => zone.id === toggleButton.dataset.toggleZone)).catch(error => toast(friendlyError(error), true));
+});
+el("grade-select").addEventListener("change", syncRoomOptions);
+el("room-select").addEventListener("change", renderStudents);
+el("student-list").addEventListener("click", event => {
+  const button = event.target.closest("[data-assignment]");
+  if (button) openAssignmentEditor(button.dataset.assignment, button.dataset.studentId);
+});
+el("assignment-zone").addEventListener("change", syncRatePreview);
+el("billing-mode").addEventListener("change", syncRatePreview);
+el("trip-mode").addEventListener("change", syncRatePreview);
+el("cancel-assignment").addEventListener("click", () => { el("assignment-editor").hidden = true; });
+el("save-assignment").addEventListener("click", () => saveAssignment().catch(error => toast(friendlyError(error), true)));
+el("month-select").addEventListener("change", () => loadMonth(el("month-select").value).catch(error => toast(friendlyError(error), true)));
+el("save-month").addEventListener("click", () => saveMonth().catch(error => toast(friendlyError(error), true)));
+el("year-select").addEventListener("change", () => loadYear().catch(error => toast(friendlyError(error), true)));
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    const canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance);
+    if (!canFinance) {
+      el("access-card").hidden = false;
+      el("access-card").innerHTML = '<div class="readonly"><b>หน้านี้สำหรับฝ่ายการเงินเท่านั้น</b><br>การตั้งโซน ผูกนักเรียน และประกาศยอดค่ารถทำได้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายการเงิน กรุณาติดต่อผู้ดูแลระบบหากคุณควรมีสิทธิ์</div>';
+    } else {
+      years = await getAcademicYears();
+      if (!years.length) throw new Error("ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน");
+      const activeYear = academicYearOf(today, years) || years[years.length - 1].year;
+      el("year-select").innerHTML = years.map(row => `<option value="${esc(row.year)}">${esc(row.year)}</option>`).join("");
+      el("year-select").value = activeYear;
+      el("year-select").disabled = false;
+      el("settings-app").hidden = false;
+      await loadYear();
+    }
+  } catch (error) {
+    el("access-card").hidden = false;
+    el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าตั้งค่าค่ารถไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+    toast(friendlyError(error), true);
+  }
+}
+</script>
+</body>
+</html>
