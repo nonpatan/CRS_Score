@@ -141,7 +141,10 @@ let session = null;
 let queue = [];
 let balanceByStudent = new Map();
 const createdTxnByRequest = new Map();
-const withdrawalNote = request => `จ่ายตามคำขอเบิกวันที่ ${request.request_date}`;
+const withdrawalNote = request => `จ่ายตามคำขอเบิกวันที่ ${request.request_date}` +
+  (request.payout_method === "โอน"
+    ? ` · โอนเข้าบัญชี ${request.bank_name} เลขที่ลงท้าย ${String(request.bank_account_no || "").slice(-4)}`
+    : "");
 
 async function recoverOrphanTxn(request) {
   const { data, error } = await sb.from("savings_txns")
@@ -173,9 +176,11 @@ function renderQueue() {
     const student = row.student || {};
     const balance = balanceByStudent.get(row.student_id) || 0;
     const isParent = row.requester_type === "ผู้ปกครอง";
+    const isTransfer = row.payout_method === "โอน";
     const retryTxnId = createdTxnByRequest.get(row.id) || "";
     const insufficient = !retryTxnId && balance < Number(row.amount);
     const requester = isParent ? `ผู้ปกครอง${row.requester_name ? " · " + esc(row.requester_name) : ""}` : "นักเรียน";
+    const primaryLabel = isTransfer ? "ยืนยันว่าโอนแล้ว" : "ยืนยันและจ่ายเงิน";
     return `<div class="queue-row" data-request-id="${esc(row.id)}">
       <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
         <span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(row.grade_level)} · ${esc(row.classroom)}</span>
@@ -185,10 +190,14 @@ function renderQueue() {
       <div class="money${insufficient ? " insufficient" : ""}"><span class="meta">คงเหลือปัจจุบัน</span><b>${formatMoney(balance)}</b>${insufficient ? '<span class="meta">ยอดไม่พอ กรุณาตรวจสมุด</span>' : ""}</div>
       <div class="payout-box">
         ${retryTxnId ? '<div class="retry-note">เงินตัดจากสมุดแล้ว แต่คำขอยังค้าง · กดซ้ำเพื่อผูกคำขอเดิม ห้ามสร้างรายการถอนใหม่</div>' : ""}
-        ${isParent ? `<label class="check-line"><input class="student-confirmed" type="checkbox"> ยืนยันว่าตรวจสอบความยินยอมของนักเรียนแล้ว</label>
+        ${isParent ? '<label class="check-line"><input class="student-confirmed" type="checkbox"> ยืนยันว่าตรวจสอบความยินยอมของนักเรียนแล้ว</label>' : ""}
+        ${isTransfer ? `<span class="meta">โอนเข้าบัญชี</span>
+        <b>${esc(row.bank_name || "—")}</b>
+        <span class="meta">ชื่อบัญชี ${esc(row.bank_account_name || "—")}</span>
+        <span class="meta">เลขที่ ${esc(row.bank_account_no || "—")}</span>` : isParent ? `<span class="meta">รับเป็นเงินสด</span>
         <label class="meta" for="receiver-${esc(row.id)}">ชื่อผู้รับเงินจริง</label>
-        <input id="receiver-${esc(row.id)}" class="receiver-name" type="text" maxlength="200" value="${esc(row.requester_name || "")}" autocomplete="name">` : `<span class="meta">ผู้รับเงินจริง: ${esc(student.name || "นักเรียน")}</span>`}
-        <button class="primary payout-button" type="button"${insufficient ? " disabled" : ""}>${retryTxnId ? "ผูกคำขออีกครั้ง" : "ยืนยันและจ่ายเงิน"}</button>
+        <input id="receiver-${esc(row.id)}" class="receiver-name" type="text" maxlength="200" value="${esc(row.requester_name || "")}" autocomplete="name">` : `<span class="meta">รับเป็นเงินสด</span><span class="meta">ผู้รับเงินจริง: ${esc(student.name || "นักเรียน")}</span>`}
+        <button class="primary payout-button" type="button"${insufficient ? " disabled" : ""}>${retryTxnId ? "ผูกคำขออีกครั้ง" : primaryLabel}</button>
       </div>
     </div>`;
   }).join("") || '<div class="empty">ไม่มีคำขอรอจ่ายตามตัวกรองนี้</div>';
@@ -196,7 +205,7 @@ function renderQueue() {
 
 async function loadQueue() {
   const queueRes = await fetchAllRows(() => sb.from("savings_withdrawals")
-    .select("id,student_id,year,grade_level,classroom,request_date,amount,requester_type,requester_name,note,status,requested_at,student:student_id(id,student_no,name)")
+    .select("id,student_id,year,grade_level,classroom,request_date,amount,requester_type,requester_name,note,status,requested_at,payout_method,bank_name,bank_account_name,bank_account_no,student:student_id(id,student_no,name)")
     .eq("status", "รอจ่าย"), ["request_date", "requested_at", "id"]);
   if (queueRes.error) throw new Error("โหลดคิวรอจ่ายไม่สำเร็จ: " + queueRes.error.message);
   queue = queueRes.data || [];
@@ -243,18 +252,22 @@ el("queue-list").addEventListener("click", async event => {
   const request = queue.find(row => row.id === rowEl?.dataset.requestId);
   if (!request) return toast("ไม่พบคำขอ กรุณาโหลดหน้าใหม่", true);
   const isParent = request.requester_type === "ผู้ปกครอง";
+  const isTransfer = request.payout_method === "โอน";
+  const primaryLabel = isTransfer ? "ยืนยันว่าโอนแล้ว" : "ยืนยันและจ่ายเงิน";
   const confirmed = isParent ? Boolean(rowEl.querySelector(".student-confirmed")?.checked) : false;
-  const receivedByName = isParent
+  const receivedByName = isTransfer
+    ? (request.bank_account_name || "")
+    : isParent
     ? (rowEl.querySelector(".receiver-name")?.value.trim() || "")
     : (request.student?.name || "นักเรียน");
   if (isParent && !confirmed) return toast("กรุณายืนยันว่าตรวจสอบความยินยอมของนักเรียนแล้ว", true);
-  if (isParent && !receivedByName) return toast("กรุณาระบุชื่อผู้รับเงินจริง", true);
+  if (!receivedByName) return toast(isTransfer ? "คำขอนี้ไม่มีชื่อบัญชีปลายทาง กรุณาตรวจคำขอ" : "กรุณาระบุชื่อผู้รับเงินจริง", true);
   const balance = balanceByStudent.get(request.student_id) || 0;
   const existingTxnId = createdTxnByRequest.get(request.id) || null;
   if (!existingTxnId && balance < Number(request.amount)) return toast(`ยอดคงเหลือ ${formatMoney(balance)} ไม่พอสำหรับจ่าย ${formatMoney(request.amount)}`, true);
   if (!await window.crsAskConfirm({
     title:"ยืนยันจ่ายเงินออมทรัพย์",
-    message:`${request.student?.name || "นักเรียน"} · ${formatMoney(request.amount)}\nผู้รับเงินจริง: ${receivedByName}`,
+    message:`${request.student?.name || "นักเรียน"} · ${formatMoney(request.amount)}\n${isTransfer ? `โอนเข้า ${request.bank_name} · ${request.bank_account_name} · ${request.bank_account_no}` : `ผู้รับเงินจริง: ${receivedByName}`}`,
     okLabel:"จ่ายเงิน",
     danger:false
   })) return;
@@ -270,7 +283,7 @@ el("queue-list").addEventListener("click", async event => {
     }).select("id").single();
     if (error) {
       button.disabled = false;
-      button.textContent = "ยืนยันและจ่ายเงิน";
+      button.textContent = primaryLabel;
       return toast(friendlyError(error), true);
     }
     txnId = data.id;

@@ -45,6 +45,7 @@
   .money-cell b { display:block; color:var(--teal); }
   .money-cell.pending b { color:var(--amber); }
   .money-cell span, .meta, .hint { color:var(--muted); font-size:13px; }
+  .meta, .hint { display:block; }
   .request-row { display:grid; grid-template-columns:minmax(180px,1fr) minmax(110px,auto) minmax(120px,auto); gap:12px; align-items:start; padding:13px 0; border-bottom:1px solid var(--line); }
   .request-row:last-child, .student-row:last-child { border-bottom:0; }
   .status { display:inline-block; margin-top:4px; padding:2px 8px; border-radius:999px; color:var(--amber); background:var(--amber-soft); font-size:12px; font-weight:700; }
@@ -121,6 +122,34 @@
         </div>
       </div>
       <div class="field">
+        <label for="payout-method">วิธีรับเงิน</label>
+        <select id="payout-method">
+          <option value="เงินสด">เงินสด (มารับที่ฝ่ายการเงิน)</option>
+          <option value="โอน">โอนเข้าบัญชี</option>
+        </select>
+      </div>
+      <div id="transfer-fields" hidden>
+        <div class="field">
+          <label for="bank-name">ธนาคาร</label>
+          <select id="bank-name"><option value="">— เลือกธนาคาร —</option></select>
+        </div>
+        <div id="bank-other-field" class="field" hidden>
+          <label for="bank-other">ระบุชื่อธนาคาร</label>
+          <input id="bank-other" type="text" maxlength="100">
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="account-name">ชื่อบัญชี</label>
+            <input id="account-name" type="text" maxlength="200" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="account-no">เลขที่บัญชี</label>
+            <input id="account-no" type="text" inputmode="numeric" maxlength="25" autocomplete="off">
+          </div>
+        </div>
+        <div class="hint">กรอกเลขที่บัญชีเป็นตัวเลข ระบบตัดขีดและช่องว่างให้เอง · ตรวจชื่อบัญชีให้ตรงกับสมุด</div>
+      </div>
+      <div class="field">
         <label for="note">หมายเหตุ (ถ้ามี)</label>
         <textarea id="note" maxlength="1000"></textarea>
       </div>
@@ -147,6 +176,12 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
   "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
 })[ch]);
 const today = toDateStr(bangkokNow());
+const BANKS = [
+  "ธนาคารกรุงไทย", "ธนาคารกสิกรไทย", "ธนาคารไทยพาณิชย์", "ธนาคารกรุงเทพ",
+  "ธนาคารกรุงศรีอยุธยา", "ธนาคารทหารไทยธนชาต (ttb)", "ธนาคารออมสิน",
+  "ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร (ธ.ก.ส.)", "ธนาคารอิสลามแห่งประเทศไทย",
+  "ธนาคารอาคารสงเคราะห์", "ธนาคารซีไอเอ็มบี ไทย", "ธนาคารยูโอบี"
+];
 const roomKey = room => room.grade_level + "\u0000" + room.classroom;
 const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
   day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok"
@@ -181,6 +216,33 @@ let requestsByStudent = new Map();
 let roomRequests = [];
 let writableRoomKeys = new Set();
 let canFinance = false;
+
+el("bank-name").innerHTML = '<option value="">— เลือกธนาคาร —</option>' +
+  BANKS.map(bank => `<option value="${esc(bank)}">${esc(bank)}</option>`).join("") +
+  '<option value="อื่น ๆ">อื่น ๆ (ระบุเอง)</option>';
+
+function clearTransferFields() {
+  for (const id of ["bank-name", "bank-other", "account-name", "account-no"]) el(id).value = "";
+  el("bank-other-field").hidden = true;
+}
+
+function fillLatestTransfer(studentId) {
+  const latest = [...(requestsByStudent.get(studentId) || [])]
+    .filter(row => row.payout_method === "โอน" && row.status !== "ยกเลิก")
+    .sort((a, b) => String(b.requested_at || "").localeCompare(String(a.requested_at || "")))[0];
+  if (!latest) return;
+  el("payout-method").value = "โอน";
+  el("transfer-fields").hidden = false;
+  if (BANKS.includes(latest.bank_name)) {
+    el("bank-name").value = latest.bank_name;
+  } else {
+    el("bank-name").value = "อื่น ๆ";
+    el("bank-other").value = latest.bank_name || "";
+    el("bank-other-field").hidden = false;
+  }
+  el("account-name").value = latest.bank_account_name || "";
+  el("account-no").value = latest.bank_account_no || "";
+}
 
 function studentNumbers(studentId) {
   const txns = txnsByStudent.get(studentId) || [];
@@ -219,9 +281,12 @@ function renderRequests() {
     const requester = row.requester_type === "ผู้ปกครอง"
       ? `ผู้ปกครอง${row.requester_name ? " · " + esc(row.requester_name) : ""}`
       : "นักเรียน";
+    const payout = row.payout_method === "โอน"
+      ? ` · โอน ${esc(row.bank_name || "—")} ${esc(row.bank_account_no || "—")}`
+      : " · เงินสด";
     return `<div class="request-row">
       <div><b>${esc(student.name || "ไม่พบชื่อนักเรียน")}</b>
-        <span class="meta">แจ้ง ${thaiDate(row.request_date)} · ${requester}${row.note ? " · " + esc(row.note) : ""}</span>
+        <span class="meta">แจ้ง ${thaiDate(row.request_date)} · ${requester}${row.note ? " · " + esc(row.note) : ""}${payout}</span>
         <span class="status ${statusClass}">${esc(row.status)}</span>
       </div>
       <div class="money-cell"><span>ยอดขอเบิก</span><b>${formatMoney(row.amount)}</b></div>
@@ -263,7 +328,7 @@ async function loadRoom(index) {
     fetchAllRows(() => sb.from("savings_txns")
       .select("id,student_id,kind,amount,txn_date").in("student_id", studentIds), ["student_id", "txn_date", "id"]),
     fetchAllRows(() => sb.from("savings_withdrawals")
-      .select("id,student_id,request_date,amount,requester_type,requester_name,note,status,cancel_reason,requested_at")
+      .select("id,student_id,request_date,amount,requester_type,requester_name,note,status,cancel_reason,requested_at,payout_method,bank_name,bank_account_name,bank_account_no")
       .eq("year", currentYear).eq("grade_level", selectedRoom.grade_level).eq("classroom", selectedRoom.classroom), ["request_date", "id"])
   ]);
   if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
@@ -326,26 +391,51 @@ el("room-select").addEventListener("change", async () => {
   try { await loadRoom(el("room-select").value); }
   catch (error) { toast(friendlyError(error), true); }
 });
-el("student-select").addEventListener("change", updateAvailableNote);
+el("student-select").addEventListener("change", () => {
+  updateAvailableNote();
+  el("payout-method").value = "เงินสด";
+  el("transfer-fields").hidden = true;
+  clearTransferFields();
+  fillLatestTransfer(el("student-select").value);
+});
 el("requester-type").addEventListener("change", () => {
   const isParent = el("requester-type").value === "ผู้ปกครอง";
   el("requester-name-field").hidden = !isParent;
   if (!isParent) el("requester-name").value = "";
+});
+el("payout-method").addEventListener("change", () => {
+  const isTransfer = el("payout-method").value === "โอน";
+  el("transfer-fields").hidden = !isTransfer;
+  if (!isTransfer) clearTransferFields();
+});
+el("bank-name").addEventListener("change", () => {
+  const isOther = el("bank-name").value === "อื่น ๆ";
+  el("bank-other-field").hidden = !isOther;
+  if (!isOther) el("bank-other").value = "";
 });
 el("submit-button").addEventListener("click", async () => {
   const studentId = el("student-select").value;
   const amount = Number(el("amount").value);
   const requesterType = el("requester-type").value;
   const requesterName = el("requester-name").value.trim();
+  const payoutMethod = el("payout-method").value;
+  const isTransfer = payoutMethod === "โอน";
+  const bankChoice = el("bank-name").value;
+  const bankName = (bankChoice === "อื่น ๆ" ? el("bank-other").value : bankChoice).trim();
+  const accountName = el("account-name").value.trim();
+  const accountNo = el("account-no").value.replace(/\D/g, "");
   if (!studentId) return toast("กรุณาเลือกนักเรียน", true);
   if (!Number.isFinite(amount) || amount <= 0) return toast("จำนวนเงินที่ขอต้องมากกว่า 0 บาท", true);
   if (requesterType === "ผู้ปกครอง" && !requesterName) return toast("กรุณาระบุชื่อผู้ปกครองที่มาขอเบิก", true);
   const available = studentNumbers(studentId).available;
   if (amount > available) return toast(`ขอเบิกได้ไม่เกิน ${formatMoney(available)}`, true);
+  if (isTransfer && !bankName) return toast("กรุณาเลือกหรือระบุธนาคารปลายทาง", true);
+  if (isTransfer && !accountName) return toast("กรุณากรอกชื่อบัญชีปลายทาง", true);
+  if (isTransfer && (accountNo.length < 8 || accountNo.length > 20)) return toast("เลขที่บัญชีต้องเป็นตัวเลข 8–20 หลัก", true);
   const student = roster.find(row => row.student_id === studentId)?.student;
   if (!await window.crsAskConfirm({
     title:"ส่งคำขอเบิกออมทรัพย์",
-    message:`${student?.name || "นักเรียน"} · ${formatMoney(amount)}\nคำขอจะเข้าคิวรอฝ่ายการเงินจ่าย`,
+    message:`${student?.name || "นักเรียน"} · ${formatMoney(amount)}\nคำขอจะเข้าคิวรอฝ่ายการเงินจ่าย\n${isTransfer ? `โอนเข้า ${bankName} · ${accountName} · ${accountNo}` : "รับเป็นเงินสดที่ฝ่ายการเงิน"}`,
     okLabel:"ส่งคำขอ",
     danger:false
   })) return;
@@ -357,6 +447,8 @@ el("submit-button").addEventListener("click", async () => {
     student_id:studentId, year:currentYear, grade_level:selectedRoom.grade_level,
     classroom:selectedRoom.classroom, request_date:today, amount:Math.round(amount * 100) / 100,
     requester_type:requesterType, requester_name:requesterType === "ผู้ปกครอง" ? requesterName : null,
+    payout_method:payoutMethod, bank_name:isTransfer ? bankName : null,
+    bank_account_name:isTransfer ? accountName : null, bank_account_no:isTransfer ? accountNo : null,
     note:el("note").value.trim() || null, requested_by:session.user.id
   });
   button.disabled = false;
@@ -365,6 +457,9 @@ el("submit-button").addEventListener("click", async () => {
   el("amount").value = "";
   el("requester-name").value = "";
   el("note").value = "";
+  el("payout-method").value = "เงินสด";
+  el("transfer-fields").hidden = true;
+  clearTransferFields();
   toast("ส่งคำขอเข้าคิวรอจ่ายแล้ว");
   await loadRoom(el("room-select").value);
 });
