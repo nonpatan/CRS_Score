@@ -404,7 +404,7 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html"],
       groups: [
         {
           label: "บันทึก",
@@ -418,13 +418,15 @@
           label: "ฝ่ายการเงิน",
           items: [
             ["savings-payout.html", "จ่ายเงินออมทรัพย์"],
-            ["savings-remit.html", "รับเงินส่งจากครู"]
+            ["savings-remit.html", "รับเงินส่งจากครู"],
+            ["transport-remit.html", "รับเงินค่ารถจากครู"]
           ]
         },
         {
           label: "รายงาน",
           items: [
-            ["savings-report.html", "รายงานออมทรัพย์"]
+            ["savings-report.html", "รายงานออมทรัพย์"],
+            ["transport-report.html", "รายงานค่ารถ"]
           ]
         },
         {
@@ -469,6 +471,16 @@
         "savings-report.html": {
           title: "รายงานออมทรัพย์",
           description: "เลือกช่วงวัน ดูภาพรวมระดับโรงเรียน ห้อง และสมุดรายคน",
+          steps: ["เลือกช่วง", "ดูรายห้อง", "ดูรายคน"]
+        },
+        "transport-remit.html": {
+          title: "รับเงินค่ารถจากครู",
+          description: "เลือกห้อง ตรวจรายการรับเงินสดค่ารถ แล้วบันทึกการรับเงินด้วยยอดที่ตรงกัน",
+          steps: ["เลือกห้อง", "นับเงิน", "ยืนยันรับเงิน"]
+        },
+        "transport-report.html": {
+          title: "รายงานค่ารถ",
+          description: "เลือกช่วงวัน ดูยอดที่เก็บได้และยอดค้างชำระสะสมระดับโรงเรียนถึงรายคน",
           steps: ["เลือกช่วง", "ดูรายห้อง", "ดูรายคน"]
         },
         "transport-settings.html": {

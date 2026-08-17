@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>รับเงินส่งจากครู — CRS MIS</title>
+<title>รับเงินค่ารถจากครู — CRS MIS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -86,15 +86,15 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>รับเงินส่งจากครู</h1>
-    <p>ตรวจรายการฝาก นับเงินสด และยืนยันรับเงินเข้าฝ่ายการเงิน</p>
+    <h1>รับเงินค่ารถจากครู</h1>
+    <p>ตรวจรายการรับเงินสดค่ารถ นับเงินจริง และยืนยันรับเงินเข้าฝ่ายการเงิน</p>
     <div class="nav"></div>
     <script src="../app-shell.js?v=20260817-1"></script>
   </header>
   <main class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <section class="card">
-      <div class="section-head"><div><h2>ห้องที่มียอดค้างส่ง</h2><p>เรียงยอดมากไปน้อย · ยอดมาจากรายการฝากที่ยังไม่ผูกรอบส่งเงิน</p></div></div>
+      <div class="section-head"><div><h2>ห้องที่มียอดค้างส่ง</h2><p>เรียงยอดมากไปน้อย · ยอดมาจากเงินสดค่ารถที่ยังไม่ผูกรอบส่งเงิน</p></div></div>
       <div id="room-grid" class="room-grid"><div class="empty">กำลังโหลด…</div></div>
     </section>
     <section id="detail-card" class="card" hidden>
@@ -102,8 +102,8 @@
       <div class="detail-grid">
         <div>
           <div class="view-head">
-            <p>ตรวจเทียบกับสมุดครูตามรายคน หรือสลับดูรายการตามวัน</p>
-            <div class="view-toggle" role="group" aria-label="มุมมองรายการฝาก">
+            <p>ตรวจเทียบรายการค่ารถตามรายคน หรือสลับดูตามวัน</p>
+            <div class="view-toggle" role="group" aria-label="มุมมองรายการค่ารถ">
               <button id="view-person" type="button" aria-pressed="true">ตามคน</button>
               <button id="view-day" type="button" aria-pressed="false">ตามวัน</button>
             </div>
@@ -126,9 +126,9 @@
     </section>
     <div id="action-overlay" class="overlay" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="action-title" aria-describedby="action-summary">
-        <h3 id="action-title">แก้ยอดฝาก</h3>
+        <h3 id="action-title">แก้ยอดค่ารถ</h3>
         <p id="action-summary"></p>
-        <div id="amount-field" class="field"><label for="action-amount">ยอดฝากที่ถูกต้อง</label><input id="action-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+        <div id="amount-field" class="field"><label for="action-amount">ยอดค่ารถที่ถูกต้อง</label><input id="action-amount" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
         <div class="field"><label for="action-reason" id="action-reason-label">เหตุผลที่แก้ไข</label><textarea id="action-reason" maxlength="500" placeholder="ระบุเหตุผลให้ตรวจย้อนหลังได้"></textarea></div>
         <p id="action-error" class="form-error" role="alert"></p>
         <div class="modal-actions"><button id="action-cancel" class="ghost" type="button">ยกเลิก</button><button id="action-submit" class="primary" type="button">บันทึกยอดที่แก้</button></div>
@@ -138,7 +138,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getStaffNamesByUser, checkDepartment, applyRestrictedMenuAccess, fetchAllRows, computeUnremitted, formatMoney }
+import { sb, requireAuth, signOut, getProfile, getStaffNamesByUser, checkDepartment, applyRestrictedMenuAccess, fetchAllRows, formatMoney }
   from "../supabase-client.js?v=20260816-2";
 
 const el = id => document.getElementById(id);
@@ -155,7 +155,7 @@ const expandedStudents = new Set();
 function friendlyError(error) {
   const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
   if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
-  if (message.includes("savings_txns_amount_positive")) return "ยอดฝากต้องมากกว่า 0 บาท";
+  if (message.includes("transport_payments_amount_positive")) return "ยอดค่ารถต้องมากกว่า 0 บาท";
   return message;
 }
 function toast(message, isError = false) {
@@ -173,16 +173,16 @@ function buildGroups() {
   }
   groups = [...byRoom.values()].map(group => ({
     ...group,
-    total:computeUnremitted(group.rows),
-    pendingDays:new Set(group.rows.map(row => row.txn_date)).size,
-    oldest:[...group.rows].sort((a,b) => a.txn_date.localeCompare(b.txn_date))[0]?.txn_date || ""
+    total:group.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    pendingDays:new Set(group.rows.map(row => row.pay_date)).size,
+    oldest:[...group.rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date))[0]?.pay_date || ""
   })).sort((a,b) => b.total - a.total || a.key.localeCompare(b.key, "th", { numeric:true }));
 }
 function renderRooms() {
   el("room-grid").innerHTML = groups.map((group, index) => `<button type="button" class="room-card${selected?.key === group.key ? " active" : ""}" data-room-index="${index}">
     <b>${esc(group.grade_level)} · ${esc(group.classroom)}</b><strong>${formatMoney(group.total)}</strong>
     <span class="meta">ค้าง ${group.pendingDays} วัน · ${group.rows.length} รายการ</span><span class="meta">เก่าสุด ${thaiDate(group.oldest)} · ปีการศึกษา ${esc(group.year)}</span>
-  </button>`).join("") || '<div class="empty">ไม่มียอดค้างส่ง — ครูส่งเงินครบทุกห้องแล้ว</div>';
+  </button>`).join("") || '<div class="empty">ไม่มียอดค่ารถค้างส่ง — ครูส่งเงินครบทุกห้องแล้ว</div>';
 }
 function renderHistory() {
   el("history-note").textContent = `ทุกห้อง · ${remittances.length} รอบ · เรียงจากใหม่ไปเก่า`;
@@ -238,16 +238,16 @@ function renderTxnList() {
     return;
   }
   if (detailView === "day") {
-    const rows = [...selected.rows].sort((a,b) => a.txn_date.localeCompare(b.txn_date) || String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }));
+    const rows = [...selected.rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date) || String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }));
     const actionHead = canFinance ? "<th>แก้ไข</th>" : "";
-    el("txn-list").innerHTML = `<table><thead><tr><th>วันที่ฝาก</th><th>นักเรียน</th><th class="money">จำนวน</th>${actionHead}</tr></thead><tbody>${rows.map(txn => `<tr><td>${thaiDate(txn.txn_date)}</td><td>${esc(txn.student?.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(txn.student?.student_no || "—")}</span></td><td class="money">${formatMoney(txn.amount)}</td>${canFinance ? `<td><button type="button" class="txn-edit" data-edit-txn="${esc(txn.id)}">แก้ยอด</button></td>` : ""}</tr>`).join("")}</tbody></table>`;
+    el("txn-list").innerHTML = `<table><thead><tr><th>วันที่รับ</th><th>นักเรียน</th><th class="money">จำนวน</th>${actionHead}</tr></thead><tbody>${rows.map(txn => `<tr><td>${thaiDate(txn.pay_date)}</td><td>${esc(txn.student?.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(txn.student?.student_no || "—")}</span></td><td class="money">${formatMoney(txn.amount)}</td>${canFinance ? `<td><button type="button" class="txn-edit" data-edit-txn="${esc(txn.id)}">แก้ยอด</button></td>` : ""}</tr>`).join("")}</tbody></table>`;
     return;
   }
   const students = summarizeByStudent(selected.rows);
   el("txn-list").innerHTML = `<table><thead><tr><th>นักเรียน</th><th class="money">จำนวนครั้ง</th><th class="money">ยอดรวม</th></tr></thead><tbody>${students.map(group => {
     const expanded = expandedStudents.has(group.student_id);
-    const dailyRows = [...group.rows].sort((a,b) => a.txn_date.localeCompare(b.txn_date));
-    return `<tr><td><button type="button" class="person-toggle" data-student-id="${esc(group.student_id)}" aria-expanded="${expanded}"><span class="expand-icon" aria-hidden="true">${expanded ? "−" : "+"}</span><span><b>${esc(group.student?.name || "ไม่พบชื่อนักเรียน")}</b><span class="meta">รหัส ${esc(group.student?.student_no || "—")} · กดเพื่อดูรายวัน</span></span></button></td><td class="money">${group.rows.length} ครั้ง</td><td class="money"><b>${formatMoney(group.total)}</b></td></tr><tr class="person-days"${expanded ? "" : " hidden"}><td colspan="3">${dailyRows.map(txn => `<div class="daily-row"><span>${thaiDate(txn.txn_date)}</span><strong>${formatMoney(txn.amount)}</strong>${canFinance ? `<button type="button" class="txn-edit" data-edit-txn="${esc(txn.id)}">แก้ยอด</button>` : ""}</div>`).join("")}</td></tr>`;
+    const dailyRows = [...group.rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date));
+    return `<tr><td><button type="button" class="person-toggle" data-student-id="${esc(group.student_id)}" aria-expanded="${expanded}"><span class="expand-icon" aria-hidden="true">${expanded ? "−" : "+"}</span><span><b>${esc(group.student?.name || "ไม่พบชื่อนักเรียน")}</b><span class="meta">รหัส ${esc(group.student?.student_no || "—")} · กดเพื่อดูรายวัน</span></span></button></td><td class="money">${group.rows.length} ครั้ง</td><td class="money"><b>${formatMoney(group.total)}</b></td></tr><tr class="person-days"${expanded ? "" : " hidden"}><td colspan="3">${dailyRows.map(txn => `<div class="daily-row"><span>${thaiDate(txn.pay_date)}</span><strong>${formatMoney(txn.amount)}</strong>${canFinance ? `<button type="button" class="txn-edit" data-edit-txn="${esc(txn.id)}">แก้ยอด</button>` : ""}</div>`).join("")}</td></tr>`;
   }).join("")}</tbody></table>`;
 }
 function renderDetail() {
@@ -267,8 +267,8 @@ function renderDetail() {
 }
 async function loadData(preferred = selected?.key) {
   const [txnRes, remitRes, staffNames] = await Promise.all([
-    fetchAllRows(() => sb.from("savings_txns").select("id,student_id,year,grade_level,classroom,txn_date,kind,amount,backdate_reason,remittance_id,student:student_id(id,student_no,name)").eq("kind", "ฝาก").is("remittance_id", null), ["year","grade_level","classroom","txn_date","id"]),
-    fetchAllRows(() => sb.from("fee_remittances").select("id,kind,year,grade_level,classroom,txn_count,expected_total,counted_total,note,confirmed_at,status,unlocked_by,unlocked_at,unlock_reason"), ["confirmed_at","id"]),
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,year,grade_level,classroom,pay_date,method,amount,backdate_reason,remittance_id,student:student_id(id,student_no,name)").eq("method", "เงินสด").is("remittance_id", null), ["year","grade_level","classroom","pay_date","id"]),
+    fetchAllRows(() => sb.from("fee_remittances").select("id,kind,year,grade_level,classroom,txn_count,expected_total,counted_total,note,confirmed_at,status,unlocked_by,unlocked_at,unlock_reason").eq("kind", "ค่ารถ"), ["confirmed_at","id"]),
     getStaffNamesByUser()
   ]);
   if (txnRes.error) throw new Error("โหลดยอดค้างส่งไม่สำเร็จ: " + txnRes.error.message);
@@ -295,8 +295,8 @@ function openEditModal(txn) {
   actionMode = "edit";
   activeTxn = txn;
   activeRemittance = null;
-  el("action-title").textContent = "แก้ยอดฝาก";
-  el("action-summary").textContent = `${txn.student?.name || "ไม่พบชื่อนักเรียน"} · ${thaiDate(txn.txn_date)}\nแก้ได้เฉพาะยอดเงิน วันที่/นักเรียน/ชนิดรายการจะคงเดิม`;
+  el("action-title").textContent = "แก้ยอดค่ารถ";
+  el("action-summary").textContent = `${txn.student?.name || "ไม่พบชื่อนักเรียน"} · ${thaiDate(txn.pay_date)}\nแก้ได้เฉพาะยอดเงิน วันที่/นักเรียน/วิธีรับจะคงเดิม`;
   el("amount-field").hidden = false;
   el("action-amount").value = String(txn.amount ?? "");
   el("action-reason-label").textContent = "เหตุผลที่แก้ไข";
@@ -367,16 +367,17 @@ el("action-submit").addEventListener("click", async () => {
     const raw = el("action-amount").value.trim();
     const amount = Number(raw);
     if (raw === "" || !Number.isFinite(amount) || amount <= 0) {
-      el("action-error").textContent = "ยอดฝากต้องมากกว่า 0 บาท";
+      el("action-error").textContent = "ยอดค่ารถต้องมากกว่า 0 บาท";
       return;
     }
     if (!activeTxn || !canFinance) return;
     const preferred = roomKey(activeTxn);
     button.disabled = true;
     button.textContent = "กำลังบันทึก…";
-    const { data, error } = await sb.from("savings_txns")
+    const { data, error } = await sb.from("transport_payments")
       .update({ amount, backdate_reason:reason })
       .eq("id", activeTxn.id)
+      .eq("method", "เงินสด")
       .is("remittance_id", null)
       .select("id")
       .maybeSingle();
@@ -385,7 +386,7 @@ el("action-submit").addEventListener("click", async () => {
     if (error) { el("action-error").textContent = friendlyError(error); return; }
     if (!data) { el("action-error").textContent = "รายการนี้ไม่ได้อยู่ในคิวที่ยังไม่ส่งแล้ว · โหลดข้อมูลล่าสุดแล้วตรวจอีกครั้ง"; return; }
     closeActionModal();
-    toast(`แก้ยอดฝากเป็น ${formatMoney(amount)} แล้ว`);
+    toast(`แก้ยอดค่ารถเป็น ${formatMoney(amount)} แล้ว`);
     try { await loadData(preferred); } catch (loadError) { toast("บันทึกแล้ว แต่โหลดยอดล่าสุดไม่สำเร็จ: " + friendlyError(loadError), true); }
     return;
   }
@@ -396,7 +397,7 @@ el("action-submit").addEventListener("click", async () => {
   if (!await window.crsAskConfirm({ title:"ยืนยันปลดล็อกรอบส่งเงิน", message:impact, requireText:"ปลดล็อก", okLabel:"ปลดล็อกรอบนี้", danger:true })) return;
   button.disabled = true;
   button.textContent = "กำลังปลดล็อก…";
-  const { data, error } = await sb.rpc("unlock_savings_remittance", { p_remittance_id:remittance.id, p_reason:reason });
+  const { data, error } = await sb.rpc("unlock_transport_remittance", { p_remittance_id:remittance.id, p_reason:reason });
   button.disabled = false;
   button.textContent = "ตรวจและปลดล็อก";
   if (error) { el("action-error").textContent = friendlyError(error); return; }
@@ -410,11 +411,11 @@ el("confirm-button").addEventListener("click", async () => {
   if (!selected || !canFinance) return;
   const counted = Number(el("counted-total").value);
   if (counted !== selected.total) return syncCount();
-  if (!await window.crsAskConfirm({ title:"ยืนยันรับเงินส่งจากครู", message:`${selected.grade_level} · ${selected.classroom}\n${selected.rows.length} รายการ · ${formatMoney(selected.total)}`, okLabel:"ยืนยันรับเงิน", danger:false })) return;
+  if (!await window.crsAskConfirm({ title:"ยืนยันรับเงินค่ารถจากครู", message:`${selected.grade_level} · ${selected.classroom}\n${selected.rows.length} รายการ · ${formatMoney(selected.total)}`, okLabel:"ยืนยันรับเงิน", danger:false })) return;
   const button = el("confirm-button");
   button.disabled = true; button.textContent = "กำลังยืนยัน…";
   const snapshot = { ...selected };
-  const { error } = await sb.rpc("confirm_savings_remittance", {
+  const { error } = await sb.rpc("confirm_transport_remittance", {
     p_year:snapshot.year, p_grade:snapshot.grade_level, p_classroom:snapshot.classroom,
     p_expected:snapshot.total, p_counted:counted, p_note:el("remit-note").value.trim() || null
   });
@@ -435,7 +436,7 @@ if (session) {
     applyRestrictedMenuAccess(canFinance);
     if (!canFinance) { el("access-card").hidden = false; el("access-card").innerHTML = '<div class="readonly"><b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>การยืนยันรับเงินใช้ได้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายการเงิน</div>'; }
     await loadData();
-  } catch (error) { el("access-card").hidden = false; el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินส่งจากครูไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; el("room-grid").innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>'; }
+  } catch (error) { el("access-card").hidden = false; el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินค่ารถจากครูไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; el("room-grid").innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>'; }
 }
 </script>
 </body>

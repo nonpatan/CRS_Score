@@ -73,7 +73,7 @@
     <h1>จ่ายเงินออมทรัพย์</h1>
     <p>ฝ่ายการเงินตรวจคิว ยืนยันผู้รับ และจ่ายเงินออกจากสมุดออมทรัพย์</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260816-3"></script>
+    <script src="../app-shell.js?v=20260817-1"></script>
   </header>
 
   <main class="academic-content">
@@ -99,6 +99,11 @@
       <section class="card">
         <div class="section">คิวรอจ่าย · เรียงวันเก่าสุดก่อน</div>
         <div id="queue-list" class="queue-list"><div class="empty">กำลังโหลด…</div></div>
+      </section>
+      <section id="departed-card" class="card">
+        <div class="section">นักเรียนที่ออกแล้วยังมียอดคงเหลือ</div>
+        <div class="hint">รวมยอดออมทรัพย์ทุกปี · ต้องคืนเต็มยอดและบันทึกชื่อผู้รับก่อนปิดบัญชี</div>
+        <div id="departed-list" class="queue-list"><div class="empty">กำลังโหลด…</div></div>
       </section>
     </div>
     <div id="toast" class="toast"></div>
@@ -140,6 +145,7 @@ function friendlyError(error) {
 let session = null;
 let queue = [];
 let balanceByStudent = new Map();
+let departedAccounts = [];
 const createdTxnByRequest = new Map();
 const withdrawalNote = request => `จ่ายตามคำขอเบิกวันที่ ${request.request_date}` +
   (request.payout_method === "โอน"
@@ -203,22 +209,64 @@ function renderQueue() {
   }).join("") || '<div class="empty">ไม่มีคำขอรอจ่ายตามตัวกรองนี้</div>';
 }
 
+function renderDepartedAccounts() {
+  el("departed-list").innerHTML = departedAccounts.map(row => {
+    const student = row.student || {};
+    const pending = row.pendingRequest;
+    const last = row.lastTxn || {};
+    return `<div class="queue-row" data-departed-id="${esc(row.id)}">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
+        <span class="meta">รหัส ${esc(student.student_no || "—")} · ${student.left_school ? "ย้าย/ลาออก" : "จบการศึกษา"}</span>
+        <span class="meta">ข้อมูลรายการล่าสุด: ${esc(last.year || "—")} · ${esc(last.grade_level || "—")} · ${esc(last.classroom || "—")}</span>
+      </div>
+      <div class="money"><span class="meta">ยอดที่ต้องคืน</span><b>${formatMoney(row.balance)}</b></div>
+      <div>${pending ? '<span class="retry-note">มีคำขอเบิกรอจ่าย · ต้องจ่ายหรือยกเลิกคำขอนั้นก่อนปิดบัญชี</span>' : '<span class="meta">พร้อมปิดบัญชี</span>'}</div>
+      <div class="payout-box">
+        <label class="meta" for="close-receiver-${esc(row.id)}">ชื่อผู้รับเงินคืน</label>
+        <input id="close-receiver-${esc(row.id)}" class="close-receiver" type="text" maxlength="200" autocomplete="name"${pending ? " disabled" : ""}>
+        <button class="primary close-account-button" type="button"${pending ? " disabled" : ""}>ปิดบัญชีและจ่ายคืน</button>
+      </div>
+    </div>`;
+  }).join("") || '<div class="empty">ไม่มีนักเรียนที่ออกแล้วและยังมียอดคงเหลือ</div>';
+}
+
 async function loadQueue() {
-  const queueRes = await fetchAllRows(() => sb.from("savings_withdrawals")
-    .select("id,student_id,year,grade_level,classroom,request_date,amount,requester_type,requester_name,note,status,requested_at,payout_method,bank_name,bank_account_name,bank_account_no,student:student_id(id,student_no,name)")
-    .eq("status", "รอจ่าย"), ["request_date", "requested_at", "id"]);
+  const [queueRes, departedRes] = await Promise.all([
+    fetchAllRows(() => sb.from("savings_withdrawals")
+      .select("id,student_id,year,grade_level,classroom,request_date,amount,requester_type,requester_name,note,status,requested_at,payout_method,bank_name,bank_account_name,bank_account_no,student:student_id(id,student_no,name)")
+      .eq("status", "รอจ่าย"), ["request_date", "requested_at", "id"]),
+    fetchAllRows(() => sb.from("students").select("id,student_no,name,graduated,left_school")
+      .or("graduated.eq.true,left_school.eq.true"), "id")
+  ]);
   if (queueRes.error) throw new Error("โหลดคิวรอจ่ายไม่สำเร็จ: " + queueRes.error.message);
+  if (departedRes.error) throw new Error("โหลดนักเรียนที่ออกแล้วไม่สำเร็จ: " + departedRes.error.message);
   queue = queueRes.data || [];
-  const studentIds = [...new Set(queue.map(row => row.student_id))];
+  const departed = departedRes.data || [];
+  const studentIds = [...new Set([...queue.map(row => row.student_id), ...departed.map(row => row.id)])];
   if (studentIds.length) {
     const txnRes = await fetchAllRows(() => sb.from("savings_txns")
-      .select("id,student_id,kind,amount,txn_date").in("student_id", studentIds), ["student_id", "txn_date", "id"]);
+      .select("id,student_id,year,grade_level,classroom,kind,amount,txn_date,recorded_at").in("student_id", studentIds), ["student_id", "txn_date", "id"]);
     if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
     const txnRows = txnRes.data || [];
     balanceByStudent = summarizeSavingsByStudent(txnRows);
+    const txnsByStudent = new Map();
+    for (const txn of txnRows) {
+      if (!txnsByStudent.has(txn.student_id)) txnsByStudent.set(txn.student_id, []);
+      txnsByStudent.get(txn.student_id).push(txn);
+    }
+    departedAccounts = departed.map(student => {
+      const rows = txnsByStudent.get(student.id) || [];
+      const lastTxn = [...rows].sort((a, b) => String(b.txn_date || "").localeCompare(String(a.txn_date || "")) || String(b.recorded_at || "").localeCompare(String(a.recorded_at || "")) || String(b.id).localeCompare(String(a.id)))[0] || null;
+      return {
+        id:student.id, student, lastTxn,
+        balance:balanceByStudent.get(student.id) || 0,
+        pendingRequest:queue.some(request => request.student_id === student.id)
+      };
+    }).filter(row => row.balance > 0).sort((a, b) => String(a.student.student_no || "").localeCompare(String(b.student.student_no || ""), "th", { numeric:true }));
     await Promise.all(queue.map(recoverOrphanTxn));
   } else {
     balanceByStudent = new Map();
+    departedAccounts = [];
   }
   el("queue-count").textContent = `${queue.length} รายการ`;
   el("queue-total").textContent = formatMoney(queue.reduce((sum, row) => sum + Number(row.amount || 0), 0));
@@ -226,6 +274,7 @@ async function loadQueue() {
   el("grade-filter").innerHTML = '<option value="">ทุกชั้น</option>' + grades.map(grade => `<option value="${esc(grade)}">${esc(grade)}</option>`).join("");
   updateRoomOptions();
   renderQueue();
+  renderDepartedAccounts();
 }
 
 async function finishRequest(request, txnId, studentConfirmed, receivedByName) {
@@ -306,6 +355,67 @@ el("queue-list").addEventListener("click", async event => {
   toast(`จ่าย ${formatMoney(request.amount)} และตัดยอดออมทรัพย์แล้ว`);
   try { await loadQueue(); }
   catch (error) { toast(`จ่ายเงินสำเร็จแล้ว แต่โหลดคิวล่าสุดไม่สำเร็จ · ${friendlyError(error)}`, true); }
+});
+
+el("departed-list").addEventListener("click", async event => {
+  const button = event.target.closest(".close-account-button");
+  if (!button) return;
+  const rowEl = button.closest(".queue-row");
+  const account = departedAccounts.find(row => row.id === rowEl?.dataset.departedId);
+  if (!account) return toast("ไม่พบข้อมูลนักเรียน กรุณาโหลดหน้าใหม่", true);
+  if (account.pendingRequest) return toast("ต้องจ่ายหรือยกเลิกคำขอเบิกที่รอจ่ายก่อนปิดบัญชี", true);
+  const receiverName = rowEl.querySelector(".close-receiver")?.value.trim() || "";
+  if (!receiverName) return toast("กรุณาระบุชื่อผู้รับเงินคืน", true);
+  button.disabled = true;
+  button.textContent = "กำลังตรวจข้อมูล…";
+  const [pendingRes, txnRes] = await Promise.all([
+    fetchAllRows(() => sb.from("savings_withdrawals").select("id").eq("student_id", account.id).eq("status", "รอจ่าย"), "id"),
+    fetchAllRows(() => sb.from("savings_txns").select("id,student_id,year,grade_level,classroom,kind,amount,txn_date,recorded_at").eq("student_id", account.id), ["txn_date","id"])
+  ]);
+  if (pendingRes.error || txnRes.error) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีและจ่ายคืน";
+    return toast("ตรวจข้อมูลล่าสุดก่อนปิดบัญชีไม่สำเร็จ: " + friendlyError(pendingRes.error || txnRes.error), true);
+  }
+  if ((pendingRes.data || []).length) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีและจ่ายคืน";
+    return toast("ต้องจ่ายหรือยกเลิกคำขอเบิกที่รอจ่ายก่อนปิดบัญชี", true);
+  }
+  const latestRows = txnRes.data || [];
+  const currentBalance = summarizeSavingsByStudent(latestRows).get(account.id) || 0;
+  const latestTxn = [...latestRows].sort((a, b) => String(b.txn_date || "").localeCompare(String(a.txn_date || "")) || String(b.recorded_at || "").localeCompare(String(a.recorded_at || "")) || String(b.id).localeCompare(String(a.id)))[0] || null;
+  if (currentBalance <= 0 || !latestTxn) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีและจ่ายคืน";
+    toast(currentBalance <= 0 ? "บัญชีนี้ไม่มียอดคงเหลือแล้ว กำลังโหลดข้อมูลล่าสุด" : "ไม่พบข้อมูลปีและห้องจากรายการออมทรัพย์ กรุณาตรวจสมุดก่อน", true);
+    try { await loadQueue(); } catch {}
+    return;
+  }
+  if (!await window.crsAskConfirm({
+    title:"ยืนยันปิดบัญชีออมทรัพย์",
+    message:`${account.student?.name || "นักเรียน"}\nคืนเต็มยอด ${formatMoney(currentBalance)}\nผู้รับเงิน: ${receiverName}`,
+    okLabel:"ปิดบัญชีและจ่ายคืน",
+    danger:false
+  })) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีและจ่ายคืน";
+    return;
+  }
+  button.textContent = "กำลังปิดบัญชี…";
+  const { error } = await sb.from("savings_txns").insert({
+    student_id:account.id, year:latestTxn.year, grade_level:latestTxn.grade_level,
+    classroom:latestTxn.classroom, txn_date:today, kind:"ถอน", amount:currentBalance,
+    note:`ปิดบัญชี — ผู้รับเงิน: ${receiverName}`, recorded_by:session.user.id
+  });
+  if (error) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีและจ่ายคืน";
+    return toast(friendlyError(error), true);
+  }
+  toast(`ปิดบัญชี ${account.student?.name || "นักเรียน"} และคืน ${formatMoney(currentBalance)} แล้ว`);
+  try { await loadQueue(); }
+  catch (loadError) { toast(`ปิดบัญชีสำเร็จแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ · ${friendlyError(loadError)}`, true); }
 });
 
 session = await requireAuth();

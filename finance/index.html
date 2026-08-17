@@ -74,7 +74,7 @@
     <h1>ภาพรวมการเงิน</h1>
     <p>รับฝาก แจ้งเบิก และจ่ายเงินออมทรัพย์จากจุดเดียว</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260816-3"></script>
+    <script src="../app-shell.js?v=20260817-1"></script>
   </header>
 
   <main class="academic-content">
@@ -88,6 +88,8 @@
         <div class="stat-stack">
           <div class="stat"><span>ออมทรัพย์ที่เก็บได้วันนี้</span><b id="today-total">กำลังโหลด…</b><span id="today-count"></span></div>
           <div class="stat pending"><span>ยอดค้างส่งถึงฝ่ายการเงิน</span><b id="pending-total">กำลังโหลด…</b><span id="pending-rooms"></span><a href="savings-remit.html">ไปรับเงินส่งจากครู →</a></div>
+          <div class="stat pending"><span>ยอดค่ารถค้างส่งถึงฝ่ายการเงิน</span><b id="transport-pending-total">กำลังโหลด…</b><span id="transport-pending-rooms"></span><a href="transport-remit.html">ไปรับเงินค่ารถจากครู →</a></div>
+          <div id="departed-balance-card" class="stat pending" hidden><span>นักเรียนที่ออกแล้วยังมีเงินค้าง</span><b id="departed-balance-count">0 คน</b><span>ต้องคืนเงินและปิดบัญชี</span><a href="savings-payout.html#departed-card">ไปปิดบัญชี →</a></div>
         </div>
         <div class="metric">
           <div class="metric-title">ห้องที่เก็บออมทรัพย์วันนี้</div>
@@ -133,6 +135,12 @@
         <a class="task-link" href="savings-report.html" data-restricted="1" hidden>
           <span class="icon" aria-hidden="true">◫</span><b>รายงานออมทรัพย์</b><span>ดูยอดเก็บ ถอน คงเหลือ และค้างส่งระดับโรงเรียนถึงรายคน</span>
         </a>
+        <a class="task-link" href="transport-remit.html" data-restricted="1" hidden>
+          <span class="icon" aria-hidden="true">⇢</span><b>รับเงินค่ารถจากครู</b><span>ฝ่ายการเงินนับเงินจริงและยืนยันยอดค่ารถค้างส่งรายห้อง</span>
+        </a>
+        <a class="task-link" href="transport-report.html" data-restricted="1" hidden>
+          <span class="icon" aria-hidden="true">◫</span><b>รายงานค่ารถ</b><span>ดูยอดที่เก็บได้ตามช่วงวันและยอดค้างชำระสะสม</span>
+        </a>
         <a class="task-link" href="transport-settings.html" data-restricted="1" hidden>
           <span class="icon" aria-hidden="true">🚌</span><b>ตั้งค่าค่ารถ</b><span>ตั้งโซนและอัตรา ผูกนักเรียน และประกาศยอดที่จะเก็บรายเดือน</span>
         </a>
@@ -146,7 +154,7 @@
 import {
   sb, requireAuth, signOut, fetchAllRows, getAcademicYears, academicYearOf,
   getStudentPlacements, activePlacements, roomsFromPlacements, bangkokNow, toDateStr,
-  computeUnremitted, formatMoney, checkDepartment, applyRestrictedMenuAccess
+  computeUnremitted, summarizeSavingsByStudent, formatMoney, checkDepartment, applyRestrictedMenuAccess
 } from "../supabase-client.js?v=20260816-2";
 const el = id => document.getElementById(id);
 async function loadOverview() {
@@ -154,14 +162,18 @@ async function loadOverview() {
   const years = await getAcademicYears();
   const year = academicYearOf(today, years);
   if (!year) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
-  const [placementRes, todayRes, pendingRes] = await Promise.all([
+  const [placementRes, todayRes, pendingRes, transportPendingRes, departedRes] = await Promise.all([
     getStudentPlacements(year),
     fetchAllRows(() => sb.from("savings_txns").select("id,year,grade_level,classroom,txn_date,kind,amount,remittance_id").eq("kind", "ฝาก").eq("txn_date", today), ["grade_level","classroom","id"]),
-    fetchAllRows(() => sb.from("savings_txns").select("id,year,grade_level,classroom,txn_date,kind,amount,remittance_id").eq("kind", "ฝาก").is("remittance_id", null), ["year","grade_level","classroom","id"])
+    fetchAllRows(() => sb.from("savings_txns").select("id,year,grade_level,classroom,txn_date,kind,amount,remittance_id").eq("kind", "ฝาก").is("remittance_id", null), ["year","grade_level","classroom","id"]),
+    fetchAllRows(() => sb.from("transport_payments").select("id,year,grade_level,classroom,pay_date,method,amount,remittance_id").eq("method", "เงินสด").is("remittance_id", null), ["year","grade_level","classroom","pay_date","id"]),
+    fetchAllRows(() => sb.from("students").select("id,graduated,left_school").or("graduated.eq.true,left_school.eq.true"), "id")
   ]);
   if (placementRes.error) throw new Error(placementRes.error.message);
   if (todayRes.error) throw new Error(todayRes.error.message);
   if (pendingRes.error) throw new Error(pendingRes.error.message);
+  if (transportPendingRes.error) throw new Error(transportPendingRes.error.message);
+  if (departedRes.error) throw new Error(departedRes.error.message);
   const rooms = roomsFromPlacements(activePlacements(placementRes.data || []), year);
   const todayRows = todayRes.data || [];
   const collectedKeys = new Set(todayRows.filter(row => row.year === year).map(row => `${row.grade_level}\u0000${row.classroom}`));
@@ -172,6 +184,20 @@ async function loadOverview() {
   el("today-count").textContent = `${todayRows.length} รายการ`;
   el("pending-total").textContent = formatMoney(computeUnremitted(pendingRows));
   el("pending-rooms").textContent = `${pendingRoomKeys.size} ห้อง`;
+  const transportPendingRows = transportPendingRes.data || [];
+  const transportRoomKeys = new Set(transportPendingRows.map(row => `${row.year}\u0000${row.grade_level}\u0000${row.classroom}`));
+  el("transport-pending-total").textContent = formatMoney(transportPendingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  el("transport-pending-rooms").textContent = `${transportRoomKeys.size} ห้อง`;
+  const departedIds = (departedRes.data || []).map(row => row.id);
+  let departedWithBalance = 0;
+  if (departedIds.length) {
+    const departedTxnRes = await fetchAllRows(() => sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").in("student_id", departedIds), ["student_id","txn_date","id"]);
+    if (departedTxnRes.error) throw new Error(departedTxnRes.error.message);
+    const balances = summarizeSavingsByStudent(departedTxnRes.data || []);
+    departedWithBalance = departedIds.filter(studentId => (balances.get(studentId) || 0) > 0).length;
+  }
+  el("departed-balance-count").textContent = `${departedWithBalance} คน`;
+  el("departed-balance-card").hidden = departedWithBalance === 0;
   const empty = collectedRooms === 0;
   el("donut-empty").hidden = !empty;
   window.renderDonut({ svgId:"savings-donut", legendId:"savings-legend", heroId:"savings-hero", titleId:"savings-donut-title", title:"สัดส่วนห้องที่เก็บออมทรัพย์แล้วและยังไม่เก็บวันนี้", hero:empty ? "—" : `${collectedRooms}/${rooms.length}`, unit:"ห้อง", segments:[
@@ -195,6 +221,7 @@ if (session) {
   catch (error) {
     el("today-total").textContent = "โหลดไม่สำเร็จ";
     el("pending-total").textContent = "โหลดไม่สำเร็จ";
+    el("transport-pending-total").textContent = "โหลดไม่สำเร็จ";
     document.getElementById("toast").textContent = "โหลดภาพรวมการเงินไม่สำเร็จ: " + error.message;
     document.getElementById("toast").className = "toast err";
   }
