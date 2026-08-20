@@ -17,8 +17,9 @@
     --bg: #f7f8f7;
     --white: #ffffff;
     --danger: #a32d2d;
-    --amber: #8a5a00;
-    --amber-soft: #fff4df;
+    --danger-soft: #fceaea;
+    --amber: #93690f;
+    --amber-soft: #faf1dd;
     --amber-line: #f0c869;
   }
   * { box-sizing: border-box; }
@@ -117,6 +118,11 @@
   }
 
   .session-note { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .prefill-note {
+    color: var(--ink); background: var(--teal-soft);
+    border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; font-size: 14px;
+  }
+  .prefill-note > div + div { margin-top: 3px; }
 
   .student-row {
     display: flex;
@@ -126,6 +132,9 @@
     border-bottom: 1px solid var(--line);
   }
   .student-row:last-child { border-bottom: none; }
+  .student-row.from-daily {
+    background: var(--amber-soft); border-left: 3px solid var(--amber); padding-left: 9px;
+  }
   .student-info { flex: 1; min-width: 0; }
   .student-info .name { font-weight: 500; }
   .student-info .meta { color: var(--muted); font-size: 13px; }
@@ -147,7 +156,7 @@
 
   .hint { color: var(--muted); font-size: 14px; }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -168,7 +177,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -238,6 +247,7 @@
     <!-- ครั้งที่เช็คไปแล้วของวันนั้น (เช้า/บ่าย ฯลฯ) — กดสลับไปแก้ครั้งเดิม หรือเพิ่มครั้งใหม่ -->
     <div id="day-sessions" style="display:none; margin-bottom:10px"></div>
     <div class="session-note" id="session-note"></div>
+    <div class="prefill-note" id="prefill-note" style="display:none"></div>
     <div id="student-list"></div>
     <button class="save" id="btn-save">บันทึกการเช็คชื่อ</button>
   </div>
@@ -280,7 +290,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor } from "../supabase-client.js?v=20260816-2";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill } from "../supabase-client.js?v=20260820-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -358,6 +368,7 @@ const elStudentsCard  = document.getElementById("students-card");
 const elDaySessions   = document.getElementById("day-sessions");
 const elStudentList   = document.getElementById("student-list");
 const elSessionNote   = document.getElementById("session-note");
+const elPrefillNote   = document.getElementById("prefill-note");
 const elEmptyHint     = document.getElementById("empty-hint");
 const elToast         = document.getElementById("toast");
 const btnSave         = document.getElementById("btn-save");
@@ -383,6 +394,7 @@ let blockRounds = [];        // ครั้งที่เช็คของว
                              // จับคู่ session ข้ามวิชาตามลำดับ (created_at) เป็น "ครั้งที่" เดียวกัน
 let blockEditRound = null;   // index ของครั้งที่กำลังแก้อยู่ (null = กำลังเพิ่มครั้งใหม่)
 let missedMap = {};          // student_id -> จำนวนคาบขาดสะสม (รวมวิชาย่อยที่ติ๊กถ้าเป็นบูรณาการ)
+let dailyPrefill = null;     // ค่าตั้งต้นจากเช็คชื่อรายวัน — ใช้เฉพาะครั้งใหม่ ไม่ auto-save
 let makeupSubjectId = null;  // วิชาพื้นฐานที่การ์ดชดเชยกำลังจัดการอยู่ (โหมดบล็อกเลือกจาก dropdown)
 
 // ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
@@ -676,6 +688,10 @@ btnLoad.addEventListener("click", async () => {
   if (!pickedSubject) { showToast("เลือกวิชาก่อน", false); return; }
   if (!elDate.value) { showToast("เลือกวันที่ก่อน", false); return; }
 
+  // ล้างทันทีก่อนเริ่มโหลด กันค่าของวัน/วิชาก่อนค้างมาถ้า query รอบใหม่ล้มเหลว
+  dailyPrefill = null;
+  elPrefillNote.style.display = "none";
+  elPrefillNote.innerHTML = "";
   btnLoad.disabled = true;
   try {
     if (pickedSubject.subject_type === "บูรณาการ") {
@@ -818,7 +834,11 @@ async function loadPlainSubjectDay() {
   if (!isValidPeriods(periods)) { showToast(PERIODS_HINT, false); return; }
 
   students = await getRosterForSubject(currentSubjectId);
-  await computeMissedMap([currentSubjectId]); // ข้อ 4: คาบขาดสะสมของวิชานี้
+  const [, prefill] = await Promise.all([
+    computeMissedMap([currentSubjectId]), // ข้อ 4: คาบขาดสะสมของวิชานี้
+    loadDailyPrefill(elDate.value, students)
+  ]);
+  dailyPrefill = prefill;
   await refreshMakeup();
 
   const ok = await refreshDaySessions();
@@ -847,7 +867,11 @@ async function loadBlockRoster() {
   if (students.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
 
   // ข้อ 4: คาบขาดสะสม "รวม" ทุกวิชาย่อยที่ติ๊ก
-  await computeMissedMap(blockMembers.map(m => m.id));
+  const [, prefill] = await Promise.all([
+    computeMissedMap(blockMembers.map(m => m.id)),
+    loadDailyPrefill(elDate.value, students)
+  ]);
+  dailyPrefill = prefill;
   await refreshMakeup();
 
   currentSession = null;
@@ -1004,7 +1028,7 @@ function selectBlockRound(r) {
     }
   }
   elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (r + 1) + ") ของวันนี้ — บันทึกแล้วจะอัปเดตทุกวิชาในครั้งนี้";
-  renderStudents(scoreMap);
+  renderStudents(scoreMap, { usePrefill: false });
   renderBlockRoundChips();
 }
 
@@ -1018,7 +1042,7 @@ function startNewBlockRound() {
   elSessionNote.textContent = blockRounds.length > 0
     ? "กำลังเพิ่มครั้งใหม่ของวันนี้ (วันนี้เช็คไปแล้ว " + blockRounds.length + " ครั้ง) — ตั้งจำนวนคาบแต่ละวิชาก่อนบันทึก"
     : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่ให้ทุกวิชาที่ติ๊ก";
-  renderStudents({});
+  renderStudents({}, { usePrefill: true });
   renderBlockRoundChips();
 }
 
@@ -1137,7 +1161,7 @@ async function selectDaySession(s) {
   const scoreMap = {};
   for (const r of (records || [])) scoreMap[r.student_id] = r.status;
   elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (daySessions.indexOf(s) + 1) + ") ของวันนี้";
-  renderStudents(scoreMap);
+  renderStudents(scoreMap, { usePrefill: false });
   renderDaySessionChips();
 }
 
@@ -1147,12 +1171,61 @@ function startNewSession() {
   elSessionNote.textContent = daySessions.length > 0
     ? "กำลังเพิ่มครั้งใหม่ของวันนี้ (วันนี้เช็คไปแล้ว " + daySessions.length + " ครั้ง) — ตั้งจำนวนคาบข้างบนก่อนบันทึก"
     : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
-  renderStudents({});
+  renderStudents({}, { usePrefill: true });
   renderDaySessionChips();
 }
 
+function shortNameList(items) {
+  const list = (items || []).slice(0, 6).map(item => escapeHtml(item.name));
+  const extra = (items || []).length - list.length;
+  return list.join(" · ") + (extra > 0 ? " และอีก " + extra + " คน" : "");
+}
+
+// บอกที่มาของค่าบนหน้าจอเสมอ เพื่อให้ครูรู้ว่าต้องตรวจอะไรก่อนบันทึก
+function renderDailyPrefillNote(usePrefill) {
+  if (!dailyPrefill) {
+    elPrefillNote.style.display = "none";
+    elPrefillNote.innerHTML = "";
+    return;
+  }
+
+  const editingText = "— กำลังแก้ครั้งเดิม ค่าที่บันทึกไว้ไม่ถูกทับ";
+  const lines = [];
+  if (dailyPrefill.failed) {
+    lines.push("🔵 อ่านผลเช็ครายวันไม่สำเร็จ " + (usePrefill ? "— ตั้งต้นเป็น มา ทุกคน" : editingText));
+  } else if (!dailyPrefill.anyChecked) {
+    lines.push("🔵 ครูประจำชั้นยังไม่เช็คชื่อวันนี้ " + (usePrefill ? "— ตั้งต้นเป็น “มา” ทุกคนตามเดิม" : editingText));
+  } else {
+    const checkedRoom = dailyPrefill.rooms.find(room => room.checked);
+    let lead = "🔵 ครูประจำชั้นเช็คไว้";
+    if (checkedRoom?.checkedAt && checkedRoom.checkedAt !== "—") lead += "เมื่อ " + escapeHtml(checkedRoom.checkedAt);
+    if (checkedRoom?.by) lead += " โดย " + escapeHtml(checkedRoom.by);
+    if (dailyPrefill.absent.length === 0) {
+      lead += usePrefill ? " — มาครบทุกคน" : " — มาครบทุกคน · กำลังแก้ครั้งเดิม ค่าที่บันทึกไว้ไม่ถูกทับ";
+    } else {
+      lead += usePrefill ? " — ตั้งต้นให้แล้ว ตรวจก่อนบันทึก" : " " + editingText;
+    }
+    lines.push(lead);
+
+    for (const status of ["ขาด", "ลาป่วย", "ลากิจ"]) {
+      const group = dailyPrefill.absent.filter(item => item.status === status);
+      if (group.length > 0) lines.push(escapeHtml(status) + ": " + shortNameList(group));
+    }
+    if (dailyPrefill.late.length > 0) {
+      lines.push("มาสายตอนเช้า " + dailyPrefill.late.length + " คน " + (usePrefill ? "ตั้งเป็น “มา” ให้แล้ว" : "ค่าที่บันทึกไว้ไม่ถูกทับ"));
+    }
+    const missingCount = Math.max(0, students.length - dailyPrefill.byStudent.size);
+    if (missingCount > 0) {
+      lines.push("ยังไม่มีผลเช็ครายวันของ " + missingCount + " คน " + (usePrefill ? "— ตั้งต้นเป็น “มา”" : editingText));
+    }
+  }
+
+  elPrefillNote.innerHTML = lines.map(line => "<div>" + line + "</div>").join("");
+  elPrefillNote.style.display = "block";
+}
+
 // วาดรายชื่อนักเรียน + ช่องเลือกสถานะ (+ คาบขาดสะสมรายคน — ข้อ 4)
-function renderStudents(scoreMap) {
+function renderStudents(scoreMap, { usePrefill = false } = {}) {
   elStudentList.innerHTML = "";
   for (const stu of students) {
     const row = document.createElement("div");
@@ -1182,16 +1255,29 @@ function renderStudents(scoreMap) {
       o.textContent = status;
       sel.appendChild(o);
     }
-    sel.value = scoreMap[stu.id] || "มา"; // ค่าเริ่มต้น = มา ถ้าไม่มีข้อมูลเดิม
+    const hasSavedValue = Object.prototype.hasOwnProperty.call(scoreMap, stu.id);
+    const hasDailyValue = usePrefill && !hasSavedValue && dailyPrefill?.byStudent?.has(stu.id);
+    sel.value = hasSavedValue
+      ? scoreMap[stu.id]
+      : hasDailyValue ? dailyPrefill.byStudent.get(stu.id) : "มา";
+    if (hasDailyValue && sel.value !== "มา") row.classList.add("from-daily");
 
     row.appendChild(info);
     row.appendChild(sel);
     elStudentList.appendChild(row);
   }
 
+  renderDailyPrefillNote(usePrefill);
   elStudentsCard.style.display = "block";
   elEmptyHint.style.display = "none";
 }
+
+// เมื่อครูตรวจและเปลี่ยนค่าเอง เอาไฮไลต์ "ค่าจากรายวัน" ออกทันที
+elStudentList.addEventListener("change", event => {
+  if (event.target.matches("select[data-student-id]")) {
+    event.target.closest(".student-row")?.classList.remove("from-daily");
+  }
+});
 
 // อ่านสถานะที่ติ๊กไว้ทั้งหมด — คืน [{student_id, status}, ...]
 function readTickedStatuses() {

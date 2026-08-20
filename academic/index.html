@@ -174,7 +174,7 @@
   }
   .btn:disabled { opacity: 0.6; cursor: default; }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -190,7 +190,7 @@
       <a href="retention.html">เรียนซ้ำชั้น</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
   </header>
 
   <main class="academic-content">
@@ -269,7 +269,7 @@ import {
   getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
   getSetting, setSetting,
   loadAcademicOverviewData, buildAcademicOverview
-} from "../supabase-client.js?v=20260816-2";
+} from "../supabase-client.js?v=20260820-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -516,6 +516,23 @@ function renderRemarks(overview) {
 
 function renderReadiness(overview) {
   const r = overview.readiness;
+  const readinessNotes = [];
+  if ((r.gradesWithoutSubjects || []).length > 0) {
+    readinessNotes.push(
+      "<div class='warn-note' style='margin-top:0;margin-bottom:12px'>" +
+        "ชั้นที่ยังไม่มีวิชาในปีนี้: " + r.gradesWithoutSubjects.map(esc).join(" · ") +
+      "</div>"
+    );
+  }
+  for (const item of (r.gradesWithManyRooms || [])) {
+    readinessNotes.push(
+      "<div class='warn-note' style='margin-top:0;margin-bottom:12px'>" +
+        "⚠️ ชั้น " + esc(item.grade) + " มี " + item.roomCount + " ห้องแล้ว — " +
+        "หน้าเช็คชื่อรายวิชายังแยกห้องไม่ได้ " +
+        "(เช็คครั้งเดียวจะบันทึกทุกห้องพร้อมกัน) ให้แจ้งฝ่ายวิชาการก่อนสร้างวิชาของชั้นนี้" +
+      "</div>"
+    );
+  }
   const blocks = [
     {
       title: "วิชาที่ยังไม่ตั้งจำนวนคาบ",
@@ -563,10 +580,12 @@ function renderReadiness(overview) {
     .map(b => ({ ...b, count: (b.subjects || b.lines).length }))
     .filter(b => b.count > 0);
   if (problems.length === 0) {
-    elReady.innerHTML = "<div class='hint'>ข้อมูลตั้งต้นครบทุกข้อ — รายงานทุกหน้าใช้ได้เต็มที่</div>";
+    elReady.innerHTML = readinessNotes.length > 0
+      ? readinessNotes.join("")
+      : "<div class='hint'>ข้อมูลตั้งต้นครบทุกข้อ — รายงานทุกหน้าใช้ได้เต็มที่</div>";
     return;
   }
-  elReady.innerHTML = problems.map(b =>
+  elReady.innerHTML = readinessNotes.join("") + problems.map(b =>
     "<div class='issue-row'>" +
       "<div class='issue-name'>" + esc(b.title) +
         "<span class='issue-why'>" + esc(b.why) + " · " + esc(b.fix) + "</span></div>" +

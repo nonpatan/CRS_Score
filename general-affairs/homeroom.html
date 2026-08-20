@@ -84,7 +84,7 @@
     .assign-row button { width:100%; }
   }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -92,7 +92,7 @@
     <h1>กำหนดครูประจำชั้น</h1>
     <p>หนึ่งห้องมีครูได้หลายคน แต่ต้องมีอย่างน้อยหนึ่งคนที่ผูกบัญชีจึงจะเช็คชื่อได้</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
   </header>
 
   <main class="academic-content">
@@ -120,10 +120,10 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, listStaffPicker, roomsFromPlacements,
   bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260816-2";
+} from "../supabase-client.js?v=20260820-2";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -290,7 +290,11 @@ el("year-select").addEventListener("change", async () => {
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
-  const canManage = await checkDepartment("บริหารทั่วไป");
+  const [canManage, canAuditAsPersonnel] = await Promise.all([
+    checkDepartment("บริหารทั่วไป"),
+    checkDepartment("บุคลากร")
+  ]);
+  applyRestrictedMenuAccess(canManage || canAuditAsPersonnel);
   if (!canManage) {
     el("gate").hidden = false;
     el("gate").innerHTML = '<div class="banner warn" style="margin:0"><b>หน้านี้สำหรับฝ่ายบริหารทั่วไป</b><br>' +

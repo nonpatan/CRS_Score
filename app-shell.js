@@ -370,6 +370,9 @@
       kicker: "บริหารทั่วไป",
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมบริหารทั่วไป"],
+      // รายงานนี้มีข้อมูลการทำงานรายครู — ซ่อนไว้ก่อน แล้วให้หน้าเว็บเปิดเฉพาะ
+      // admin / ฝ่ายบริหารทั่วไป / ฝ่ายบุคลากรผ่าน applyRestrictedMenuAccess()
+      reportOnly: ["homeroom-audit.html"],
       groups: [
         {
           label: "บันทึก",
@@ -381,6 +384,12 @@
           label: "กำหนดค่า",
           items: [
             ["homeroom.html", "ครูประจำชั้น"]
+          ]
+        },
+        {
+          label: "รายงาน",
+          items: [
+            ["homeroom-audit.html", "รายงานการเช็คชื่อประจำชั้น"]
           ]
         }
       ],
@@ -394,6 +403,11 @@
           title: "กำหนดครูประจำชั้น",
           description: "เลือกปี ตรวจทุกห้อง และผูกครูที่มีบัญชีพร้อมเช็คชื่อ",
           steps: ["เลือกปี", "ตรวจบัญชี", "กำหนดครู"]
+        },
+        "homeroom-audit.html": {
+          title: "รายงานการเช็คชื่อประจำชั้น",
+          description: "เลือกช่วงวัน แล้วตรวจข้อเท็จจริงรายห้อง รายครู และคนแทน",
+          steps: ["เลือกช่วง", "เลือกมุมมอง", "ตรวจรายการ"]
         }
       }
     },
@@ -517,7 +531,7 @@
     // ไม่ดึง document รุ่นเก่าจาก browser/GitHub Pages cache
     if (shellVersion) target.searchParams.set("v", shellVersion);
     const classes = [extraClass, href === current ? "active" : ""].filter(Boolean).join(" ");
-    const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || [])].includes(href)
+    const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || []), ...(mod.reportOnly || [])].includes(href)
       ? ' data-restricted="1" hidden'
       : "";
     return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${restricted}>${label}</a>`;

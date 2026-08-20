@@ -65,7 +65,12 @@
   .donut-center span { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
   .today-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .legend-item { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px;
-                 background: #fbfdfd; min-width: 0; }
+                 background: #fbfdfd; min-width: 0; min-height: 44px; width: 100%;
+                 color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+  .legend-item:hover:not(:disabled) { background: var(--teal-soft); }
+  .legend-item:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .legend-item[aria-expanded="true"] { border-color: var(--teal); background: var(--teal-soft); }
+  .legend-item:disabled { cursor: default; opacity: .55; }
   .legend-value { display: flex; align-items: center; gap: 7px; line-height: 1.2; }
   .legend-value b { font-size: 21px; }
   .legend-item span:last-child { display: block; color: var(--muted); font-size: 12.5px;
@@ -77,6 +82,13 @@
   .dot.offsite { background: #7b61a8; }
   .dot.absent { background: #d65353; }
   .dot.pending { background: var(--slate); }
+  .today-people { margin-top: 14px; padding: 12px 13px; border: 1px solid var(--line);
+                  border-radius: 10px; background: #fbfdfd; }
+  .today-people-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .today-person { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                  min-height: 44px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .today-person-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+  .today-person-detail { flex: 0 1 auto; color: var(--muted); font-size: 13px; text-align: right; }
   .today-note { margin-top: 13px; padding: 9px 11px; border-radius: 9px;
                 background: var(--teal-soft); color: var(--teal); font-size: 13px; }
   .today-note.holiday { background: var(--slate-soft); color: var(--muted); }
@@ -87,9 +99,11 @@
     .detail-link { display: inline-block; margin-top: 4px; }
     .today-layout { grid-template-columns: 1fr; justify-items: center; gap: 14px; }
     .today-legend { width: 100%; }
+    .today-person { display: block; }
+    .today-person-detail { margin: 2px 0 0; text-align: left; }
   }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -105,7 +119,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
   </header>
 
   <div class="card">
@@ -134,32 +148,39 @@
         <div class="donut-center"><b id="today-total">—</b><span id="today-center-label">บุคลากร</span></div>
       </div>
       <div class="today-legend">
-        <div class="legend-item">
+        <button type="button" class="legend-item" data-status="present"
+                aria-expanded="false" aria-controls="today-people" disabled>
           <div class="legend-value"><span class="dot present"></span><b id="today-present">—</b></div>
           <span>มา</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button type="button" class="legend-item" data-status="late"
+                aria-expanded="false" aria-controls="today-people" disabled>
           <div class="legend-value"><span class="dot late"></span><b id="today-late">—</b></div>
           <span>มาสาย</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button type="button" class="legend-item" data-status="leave"
+                aria-expanded="false" aria-controls="today-people" disabled>
           <div class="legend-value"><span class="dot leave"></span><b id="today-leave">—</b></div>
           <span>ลา</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button type="button" class="legend-item" data-status="offsite"
+                aria-expanded="false" aria-controls="today-people" disabled>
           <div class="legend-value"><span class="dot offsite"></span><b id="today-offsite">—</b></div>
           <span>ออกปฏิบัติหน้าที่</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button type="button" class="legend-item" data-status="absent"
+                aria-expanded="false" aria-controls="today-people" disabled>
           <div class="legend-value"><span class="dot absent"></span><b id="today-absent">—</b></div>
           <span>ขาด</span>
-        </div>
-        <div class="legend-item">
+        </button>
+        <button type="button" class="legend-item" data-status="pending"
+                aria-expanded="false" aria-controls="today-people" disabled>
           <div class="legend-value"><span class="dot pending"></span><b id="today-pending">—</b></div>
           <span>รอครบวัน</span>
-        </div>
+        </button>
       </div>
     </div>
+    <div id="today-people" class="today-people" hidden></div>
     <div class="today-note" id="today-status">กำลังเตรียมข้อมูล…</div>
   </div>
 </div>
@@ -167,7 +188,7 @@
 <script type="module">
 import { sb, requireAuth, signOut, getLastSyncLog, checkDepartment, syncJibble,
          applyPersonnelMenuAccess,
-         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260816-2";
+         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260820-2";
 
 const session = await requireAuth();
 if (session) {
@@ -177,6 +198,9 @@ if (session) {
   applyPersonnelMenuAccess(canManageHr);
   if (!canManageHr) location.replace("my-work.html");
   const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[ch]);
   document.getElementById("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
   const COLORS = {
@@ -187,10 +211,63 @@ if (session) {
     present: "มา", late: "มาสาย", leave: "ลา",
     offsite: "ปฏิบัติหน้าที่นอกสถานที่", absent: "ขาด", pending: "รอครบวัน"
   };
+  const todayLegendButtons = [...document.querySelectorAll(".legend-item[data-status]")];
+  let todayRows = [];
+  let openTodayStatus = "";
+
+  function todayPersonDetail(row) {
+    const details = [];
+    if (row.firstIn) details.push(`มาถึง ${String(row.firstIn).slice(0, 5)}`);
+    if (row.exempt) details.push("ยกเว้นลงเวลา");
+    if (row.leaveType) details.push(String(row.leaveType));
+    if (row.kind) details.push(String(row.kind));
+    if (row.title) details.push(String(row.title));
+    if (row.latePermissionUsed) details.push("ใช้ใบอนุญาตเข้าสาย");
+    if (row.onDuty) details.push("มีเวรวันนี้");
+    return details.join(" · ");
+  }
+
+  function closeTodayPeople() {
+    openTodayStatus = "";
+    el("today-people").hidden = true;
+    el("today-people").innerHTML = "";
+    todayLegendButtons.forEach(button => button.setAttribute("aria-expanded", "false"));
+  }
+
+  function renderTodayPeople(status) {
+    const people = todayRows
+      .filter(row => row.status === status)
+      .sort((a, b) => String(a.staff.full_name || "").localeCompare(
+        String(b.staff.full_name || ""), "th"
+      ));
+    const box = el("today-people");
+    box.innerHTML = `<div class="today-people-head"><span class="dot" style="background:${COLORS[status]}"></span>` +
+      `<b>${esc(LABELS[status])} · ${people.length} คน</b></div>` +
+      people.map(row => {
+        const detail = todayPersonDetail(row);
+        return `<div class="today-person"><div class="today-person-name">${esc(row.staff.full_name || "ไม่ระบุชื่อ")}</div>` +
+          (detail ? `<div class="today-person-detail">${esc(detail)}</div>` : "") + "</div>";
+      }).join("");
+    box.hidden = false;
+  }
+
+  function toggleTodayPeople(status) {
+    if (openTodayStatus === status) return closeTodayPeople();
+    openTodayStatus = status;
+    todayLegendButtons.forEach(button => button.setAttribute(
+      "aria-expanded", button.dataset.status === status ? "true" : "false"
+    ));
+    renderTodayPeople(status);
+  }
+
+  todayLegendButtons.forEach(button => button.addEventListener("click", () => {
+    toggleTodayPeople(button.dataset.status);
+  }));
 
   function renderToday(ctx, today, holidayName = "", syncWarning = "") {
     const active = ctx.staff.filter(s => s.is_active);
-    const rows = active.map(staff => computeDayStatus(staff, today, ctx));
+    const rows = active.map(staff => ({ staff, ...computeDayStatus(staff, today, ctx) }));
+    todayRows = rows;
     const counts = { present: 0, late: 0, leave: 0, offsite: 0, absent: 0, pending: 0 };
     rows.forEach(r => { if (Object.hasOwn(counts, r.status)) counts[r.status]++; });
 
@@ -199,6 +276,11 @@ if (session) {
     });
 
     const isHoliday = rows.length > 0 && rows.every(r => r.status === "holiday");
+    todayLegendButtons.forEach(button => {
+      button.disabled = isHoliday || counts[button.dataset.status] === 0;
+    });
+    if (isHoliday || (openTodayStatus && counts[openTodayStatus] === 0)) closeTodayPeople();
+    else if (openTodayStatus) renderTodayPeople(openTodayStatus);
     const chartTotal = Object.values(counts).reduce((sum, n) => sum + n, 0);
     el("today-total").textContent = isHoliday ? "—" : active.length;
     el("today-center-label").textContent = isHoliday ? "วันหยุด" : "บุคลากร";

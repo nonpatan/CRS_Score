@@ -295,18 +295,23 @@ export function distinctYears(subjects) {
 // ค่าตั้งค่าส่วนกลาง (app_settings) + ตรรกะลำดับชั้น/เลื่อนชั้น — ใช้ที่หน้า rollover (ขึ้นปีใหม่)
 // ============================================================
 
-// ลำดับชั้นเรียนมาตรฐาน ป.1 → ม.6 (ใช้หา "ชั้นถัดไป" ตอนเลื่อนชั้น)
-export const GRADE_ORDER = ["ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
+// ลำดับชั้นเรียน อ.1 → ม.6 (ใช้หา "ชั้นถัดไป" ตอนเลื่อนชั้น และใช้เรียงลำดับชั้นทุกหน้า)
+// 🪤 ลำดับนี้ห้ามมีใครเอา index ไปแปลงความหมาย (เช่นช่วงชั้น) — ดู STAGE_BY_GRADE
+export const GRADE_ORDER = ["อ.1","อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
 
 // ช่วงชั้นของนักเรียน ใช้เลือกองค์ประกอบสมรรถนะหลักมาตรฐาน
 // รองรับถึง ม.6 แต่ช่วงชั้น 4 จะยังไม่มีองค์ประกอบจนกว่าจะได้เอกสาร สพฐ. ตัวจริง
+// ผูกกับ "ชื่อชั้น" ตรง ๆ ห้ามกลับไปใช้ index ของ GRADE_ORDER อีก
+// เหตุผล: GRADE_ORDER ขยายหัวแถวได้ (เพิ่ม อ.1–อ.3 เมื่อ 2026-08-20) การอิง index
+// ทำให้ช่วงชั้นของทั้งโรงเรียนเลื่อนตามแบบเงียบ ๆ — พลาดแล้วคะแนนสมรรถนะผิดชั้นทั้งระบบ
+const STAGE_BY_GRADE = {
+  "ป.1":"ช่วงชั้น 1", "ป.2":"ช่วงชั้น 1", "ป.3":"ช่วงชั้น 1",
+  "ป.4":"ช่วงชั้น 2", "ป.5":"ช่วงชั้น 2", "ป.6":"ช่วงชั้น 2",
+  "ม.1":"ช่วงชั้น 3", "ม.2":"ช่วงชั้น 3", "ม.3":"ช่วงชั้น 3",
+  "ม.4":"ช่วงชั้น 4", "ม.5":"ช่วงชั้น 4", "ม.6":"ช่วงชั้น 4"
+};
 export function competencyStageForGrade(grade) {
-  const i = GRADE_ORDER.indexOf(grade);
-  if (i >= 0 && i <= 2) return "ช่วงชั้น 1";
-  if (i >= 3 && i <= 5) return "ช่วงชั้น 2";
-  if (i >= 6 && i <= 8) return "ช่วงชั้น 3";
-  if (i >= 9) return "ช่วงชั้น 4";
-  return "";
+  return STAGE_BY_GRADE[grade] || "";
 }
 
 // ช่วงชั้นที่โรงเรียนเปิดสอนจริง — คำนวณจาก highest_grade ไม่ใช้รายการตายตัวในแต่ละหน้า
@@ -1399,6 +1404,10 @@ export function buildAcademicOverview(raw, options = {}) {
   const data = raw || {};
   const subjects = data.subjects || [];
   const subjectById = new Map(subjects.map(s => [s.id, s]));
+  const gradeOrderIndex = grade => {
+    const idx = GRADE_ORDER.indexOf(grade);
+    return idx === -1 ? GRADE_ORDER.length : idx;
+  };
 
   // ---------- วิชาบูรณาการกับสมาชิก (นับที่วิชาบูรณาการตัวเดียว กันนับซ้ำ เหมือน retention/summary) ----------
   const membersOf = new Map();
@@ -1435,17 +1444,34 @@ export function buildAcademicOverview(raw, options = {}) {
   const placements = data.placements || [];
   const activeStudents = data.activeStudents || [];
   const placementFallback = placements.length === 0;
-  const roster = [];
+  const allRoster = [];
   if (!placementFallback) {
     for (const p of placements) {
       const stu = p.student || { id: p.student_id };
-      roster.push({ student: stu, grade: p.grade_level, classroom: p.classroom });
+      allRoster.push({ student: stu, grade: p.grade_level, classroom: p.classroom });
     }
   } else {
     for (const stu of activeStudents) {
-      roster.push({ student: stu, grade: stu.grade_level, classroom: stu.classroom });
+      allRoster.push({ student: stu, grade: stu.grade_level, classroom: stu.classroom });
     }
   }
+  // ภาพรวมวิชาการนับเฉพาะชั้นที่มีวิชาในปีนั้น — อนุบาลยังไม่มีวิชา/เกรด/มส.
+  // ห้ามคัดด้วย enrollment เพราะจะกลืนสัญญาณ "มีวิชาแต่ยังไม่ลงทะเบียน" หายไป
+  const subjectGrades = new Set(subjects.map(s => String(s.grade_level || "").trim()).filter(Boolean));
+  const gradesWithoutSubjects = [...new Set(
+    allRoster.map(entry => String(entry.grade || "").trim()).filter(grade => grade && !subjectGrades.has(grade))
+  )].sort((a, b) => gradeOrderIndex(a) - gradeOrderIndex(b) || a.localeCompare(b, "th", { numeric: true }));
+  const roster = allRoster.filter(entry => subjectGrades.has(String(entry.grade || "").trim()));
+
+  // ตัวจับเวลาสำหรับระบบเช็คชื่อรายวิชา: ชั้นไหนมีห้องที่ 2 เมื่อไหร่ต้องเริ่มแยกเช็คตามห้อง
+  const roomsPerGrade = new Map();
+  for (const room of roomsFromPlacements(placements, data.year)) {
+    roomsPerGrade.set(room.grade_level, (roomsPerGrade.get(room.grade_level) || 0) + 1);
+  }
+  const gradesWithManyRooms = [...roomsPerGrade.entries()]
+    .filter(([, roomCount]) => roomCount > 1)
+    .map(([grade, roomCount]) => ({ grade, roomCount }))
+    .sort((a, b) => gradeOrderIndex(a.grade) - gradeOrderIndex(b.grade) || a.grade.localeCompare(b.grade, "th", { numeric: true }));
   const placedIds = new Set(placements.map(p => p.student_id));
   const studentsWithoutPlacement = placementFallback
     ? []
@@ -1533,7 +1559,9 @@ export function buildAcademicOverview(raw, options = {}) {
     noSession: plainSubjects.filter(s => !(sessionsBySubject.get(s.id)?.length)),
     noOwner: subjects.filter(s => !s.owner_id),
     yearless: data.yearlessSubjects || [],
-    noPlacement: studentsWithoutPlacement
+    noPlacement: studentsWithoutPlacement,
+    gradesWithoutSubjects,
+    gradesWithManyRooms
   };
 
   // ---------- ความคืบหน้าการเช็คชื่อ (คาบที่เช็คไปแล้ว เทียบคาบทั้งรอบของวิชา) ----------
@@ -1577,10 +1605,6 @@ export function buildAcademicOverview(raw, options = {}) {
     const group = gradeMap.get(remark.grade || "(ไม่ระบุชั้น)");
     if (group) group.remarkCount += 1;
   }
-  const gradeOrderIndex = grade => {
-    const idx = GRADE_ORDER.indexOf(grade);
-    return idx === -1 ? GRADE_ORDER.length : idx;
-  };
   const grades = [...gradeMap.values()].sort((a, b) => gradeOrderIndex(a.grade) - gradeOrderIndex(b.grade));
 
   return {
@@ -1730,6 +1754,567 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
     roomsTotal,
     state
   };
+}
+
+// ============================================================
+// รายงานตรวจการเช็คชื่อประจำชั้น
+// ------------------------------------------------------------
+// หน้ารายงานเต็มต้องอ่านครู/คนแทนผ่าน RPC เฉพาะงานเท่านั้น ห้ามยิง staff หรือ
+// coverage_assignments ตรง เพราะ RLS จะคืนแถวไม่ครบแบบไม่มี error
+// ============================================================
+
+function homeroomAuditRoomKey(row) {
+  return String(row?.grade_level || "") + "\u0000" + String(row?.classroom || "");
+}
+
+function homeroomAuditRoomLabel(row) {
+  const grade = String(row?.grade_level || "").trim();
+  const classroom = String(row?.classroom || "").trim();
+  if (!grade) return classroom || "ไม่ระบุห้อง";
+  if (!classroom) return grade;
+  return classroom.startsWith(grade) ? classroom : grade + "/" + classroom;
+}
+
+function homeroomAuditBangkokDate(value) {
+  const text = String(value || "");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const time = Date.parse(text);
+  if (!Number.isFinite(time)) return "";
+  return new Date(time + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function collapseHomeroomAuditAttendance(rows, profileById = new Map()) {
+  const byRoomDate = new Map();
+  for (const row of rows || []) {
+    if (!row?.attend_date || !row.grade_level || !row.classroom) continue;
+    const key = row.attend_date + "\u0000" + homeroomAuditRoomKey(row);
+    if (!byRoomDate.has(key)) {
+      byRoomDate.set(key, {
+        date: row.attend_date,
+        year: row.year,
+        grade_level: row.grade_level,
+        classroom: row.classroom,
+        recordedBy: new Set(),
+        recordedAt: ""
+      });
+    }
+    const entry = byRoomDate.get(key);
+    entry.recordedBy.add(row.recorded_by || null);
+    if (String(row.recorded_at || "") > entry.recordedAt) entry.recordedAt = row.recorded_at || "";
+  }
+  return [...byRoomDate.values()].map(entry => ({
+    ...entry,
+    recordedBy: [...entry.recordedBy],
+    recorders: [...entry.recordedBy].map(userId => ({
+      user_id: userId,
+      name: userId ? (profileById.get(userId)?.name || "บัญชีผู้ใช้") : "ไม่ระบุผู้บันทึก"
+    }))
+  }));
+}
+
+// โหลดดิบสำหรับรายงานเต็ม — ครูและคนแทนต้องมาจาก RPC ที่มีด่านสิทธิ์ในตัวเท่านั้น
+export async function loadHomeroomAuditData(year, from, to) {
+  if (!year || !from || !to || from > to) {
+    return {
+      year, from, to, teachers: [], coverage: [], attendance: [], placements: [],
+      homerooms: [], holidays: [], schedule: [], profiles: []
+    };
+  }
+
+  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes] = await Promise.all([
+    sb.rpc("homeroom_audit_teachers", { p_year: year }),
+    sb.rpc("homeroom_audit_coverage", { p_from: from, p_to: to }),
+    fetchAllRows(() => sb.from("daily_attendance")
+      .select("attend_date,year,grade_level,classroom,recorded_by,recorded_at")
+      .eq("year", year).gte("attend_date", from).lte("attend_date", to),
+      ["attend_date", "student_id"]),
+    getStudentPlacements(year),
+    sb.from("homeroom_teachers")
+      .select("id,year,grade_level,classroom,created_at").eq("year", year),
+    sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to),
+    sb.from("work_schedule").select("weekday,is_working_day")
+  ]);
+
+  const failed = [
+    [teacherRes, "โหลดครูประจำชั้นจาก RPC"],
+    [coverageRes, "โหลดคนแทนจาก RPC"],
+    [attendanceRes, "โหลดผลเช็คชื่อ"],
+    [placementRes, "โหลดห้องเรียน"],
+    [homeroomRes, "ตรวจรายการครูประจำชั้น"],
+    [holidayRes, "โหลดวันหยุด"],
+    [scheduleRes, "โหลดตารางวันทำงาน"]
+  ].find(([result]) => result.error);
+  if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
+
+  const teachers = teacherRes.data || [];
+  const homerooms = homeroomRes.data || [];
+  if (teachers.length === 0 && homerooms.length > 0) {
+    const error = new Error("ไม่มีสิทธิ์อ่านข้อมูลรายงานนี้");
+    error.code = "HOMEROOM_AUDIT_DENIED";
+    throw error;
+  }
+
+  const recorderIds = [...new Set((attendanceRes.data || []).map(row => row.recorded_by).filter(Boolean))];
+  let profiles = [];
+  if (recorderIds.length) {
+    const profileRes = await sb.from("profiles").select("id,name").in("id", recorderIds);
+    if (profileRes.error) throw new Error("โหลดชื่อผู้บันทึกไม่สำเร็จ: " + profileRes.error.message);
+    profiles = profileRes.data || [];
+  }
+  const profileById = new Map(profiles.map(profile => [profile.id, profile]));
+
+  return {
+    year, from, to,
+    teachers,
+    coverage: coverageRes.data || [],
+    // ยุบรายนักเรียนทิ้งทันที เหลือเพียงห้อง × วัน เพื่อไม่ถือข้อมูลทั้งปีไว้ในหน่วยความจำ
+    attendance: collapseHomeroomAuditAttendance(attendanceRes.data || [], profileById),
+    placements: placementRes.data || [],
+    homerooms,
+    holidays: holidayRes.data || [],
+    schedule: scheduleRes.data || [],
+    profiles
+  };
+}
+
+// โหลดข้อมูลเฉพาะเจ้าตัวสำหรับ my-work.html — ใช้ RLS แถวของตัวเอง ไม่เรียก RPC รายงานเต็ม
+// ⛔ ผลที่ได้ใช้ได้เฉพาะ due / missed / missedDates และผลรวม (self + byOther) เท่านั้น
+//    **ห้ามแสดง self กับ byOther แยกกันเด็ดขาด** — ฟังก์ชันนี้เห็นครูประจำชั้นแค่แถวของเจ้าตัว
+//    เพราะ staff_select ปิด user_id ของคนอื่นไว้ พอครูคู่ชั้นเป็นคนเช็ค ระบบจะไม่รู้ว่าเป็น
+//    "ผู้รับผิดชอบ" แล้วตกไปเป็น byOther ทั้งหมด
+//    · เจอจริง 2026-08-20: ห้อง ป.3/1 (ครูประจำชั้น 2 คน) หน้ารายงานขึ้น self 12 / byOther 0
+//      แต่การ์ดของครูคนเดียวกันขึ้น self 0 / byOther 12 — ยอดรวมเท่ากันแต่สลับข้าง
+//    · อยากได้การแยกจริง ๆ ต้องใช้ loadHomeroomAuditData() ซึ่งอ่านผ่าน RPC (ครูทั่วไปเรียกไม่ได้)
+export async function loadMyHomeroomAuditData(year, from, to, staff) {
+  const staffId = staff?.id;
+  const userId = staff?.user_id;
+  if (!year || !from || !to || !staffId || !userId || from > to) {
+    return {
+      year, from, to, teachers: [], coverage: [], attendance: [], placements: [],
+      homerooms: [], holidays: [], schedule: [], profiles: []
+    };
+  }
+
+  const [ownHomeroomRes, homeroomRes, coverageRes, attendanceRes, holidayRes, scheduleRes] = await Promise.all([
+    sb.from("homeroom_teachers")
+      .select("id,year,grade_level,classroom,staff_id,created_at")
+      .eq("year", year).eq("staff_id", staffId),
+    sb.from("homeroom_teachers")
+      .select("id,year,grade_level,classroom,staff_id,created_at").eq("year", year),
+    sb.from("coverage_assignments")
+      .select("cover_date,homeroom_id,absent_staff_id,substitute_staff_id,source")
+      .gte("cover_date", from).lte("cover_date", to)
+      .or(`absent_staff_id.eq.${staffId},substitute_staff_id.eq.${staffId}`),
+    fetchAllRows(() => sb.from("daily_attendance")
+      .select("attend_date,year,grade_level,classroom,recorded_by,recorded_at")
+      .eq("year", year).gte("attend_date", from).lte("attend_date", to),
+      ["attend_date", "student_id"]),
+    sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to),
+    sb.from("work_schedule").select("weekday,is_working_day")
+  ]);
+  const failed = [
+    [ownHomeroomRes, "โหลดห้องประจำชั้นของคุณ"],
+    [homeroomRes, "โหลดข้อมูลห้องประจำชั้น"],
+    [coverageRes, "โหลดงานแทนประจำชั้นของคุณ"],
+    [attendanceRes, "โหลดผลเช็คชื่อ"],
+    [holidayRes, "โหลดวันหยุด"],
+    [scheduleRes, "โหลดตารางวันทำงาน"]
+  ].find(([result]) => result.error);
+  if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
+
+  const homeroomById = new Map((homeroomRes.data || []).map(row => [row.id, row]));
+  const ownByHomeroomId = new Map((ownHomeroomRes.data || []).map(row => [row.id, row]));
+  const coverage = (coverageRes.data || []).map(row => {
+    const homeroom = homeroomById.get(row.homeroom_id) || {};
+    return {
+      ...row,
+      year: homeroom.year || year,
+      grade_level: homeroom.grade_level || "",
+      classroom: homeroom.classroom || "",
+      absent_name: row.absent_staff_id === staffId ? staff.full_name : "ครูประจำชั้น",
+      substitute_name: row.substitute_staff_id === staffId ? staff.full_name : "คนแทน",
+      substitute_user_id: row.substitute_staff_id === staffId ? userId : null
+    };
+  });
+
+  // งานที่เจ้าตัวไปแทนอ้าง homeroom ของคนอื่น จึงเติมแถวต้นทางเฉพาะเพื่อให้สูตรรู้วันที่เริ่มของห้อง
+  for (const row of coverage) {
+    if (ownByHomeroomId.has(row.homeroom_id)) continue;
+    const homeroom = homeroomById.get(row.homeroom_id);
+    if (homeroom) ownByHomeroomId.set(row.homeroom_id, homeroom);
+  }
+  const teachers = [...ownByHomeroomId.values()].map(row => ({
+    homeroom_id: row.id,
+    year: row.year,
+    grade_level: row.grade_level,
+    classroom: row.classroom,
+    staff_id: row.staff_id,
+    full_name: row.staff_id === staffId ? staff.full_name : "ครูประจำชั้น",
+    user_id: row.staff_id === staffId ? userId : null,
+    is_active: row.staff_id === staffId ? staff.is_active : true,
+    created_at: row.created_at
+  }));
+
+  return {
+    year, from, to, teachers, coverage,
+    attendance: collapseHomeroomAuditAttendance(attendanceRes.data || []),
+    placements: [],
+    homerooms: [...ownByHomeroomId.values()],
+    holidays: holidayRes.data || [],
+    schedule: scheduleRes.data || [],
+    profiles: []
+  };
+}
+
+// คำนวณล้วน — ไม่มี query/DOM เพื่อให้รายงานเต็มและการ์ดเจ้าตัวใช้สูตรเดียวกัน
+export function buildHomeroomAudit(raw, { startDate } = {}) {
+  const data = raw || {};
+  const from = String(data.from || "");
+  const to = String(data.to || "");
+  const effectiveStart = String(startDate || from);
+  const scheduleRows = Array.isArray(data.schedule) ? data.schedule : [];
+  const schedule = new Map(scheduleRows.map(row => [Number(row.weekday), row.is_working_day === true]));
+  const holidays = new Set((data.holidays || []).map(row => row.holiday_date));
+  // ถ้าไม่มีตารางเลย จะไม่เดาว่าวันใดเป็นวันทำงาน ตัวหารจึงว่างและหน้าเว็บต้องขึ้นคำเตือน
+  const scheduleConfigured = scheduleRows.length > 0;
+  const schoolDates = (!from || !to || from > to || !scheduleConfigured) ? [] : eachDate(from, to).filter(date =>
+    date >= effectiveStart && !holidays.has(date) && schedule.get(isoWeekday(date)) === true
+  );
+
+  const placements = Array.isArray(data.placements) ? data.placements : [];
+  const teachers = (Array.isArray(data.teachers) ? data.teachers : []).map(row => ({
+    ...row,
+    homeroom_id: row.homeroom_id || row.id,
+    createdDate: homeroomAuditBangkokDate(row.created_at)
+  }));
+  const coverage = Array.isArray(data.coverage) ? data.coverage : [];
+  const homerooms = Array.isArray(data.homerooms) ? data.homerooms : [];
+  const roomMap = new Map();
+  const addRoom = row => {
+    if (!row?.grade_level || !row?.classroom) return;
+    const key = homeroomAuditRoomKey(row);
+    if (!roomMap.has(key)) roomMap.set(key, {
+      year: data.year,
+      grade_level: row.grade_level,
+      classroom: row.classroom,
+      room: homeroomAuditRoomLabel(row)
+    });
+  };
+  roomsFromPlacements(placements, data.year).forEach(addRoom);
+  homerooms.forEach(addRoom);
+  teachers.forEach(addRoom);
+  coverage.forEach(addRoom);
+
+  const gradeRank = grade => {
+    const index = GRADE_ORDER.indexOf(grade);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  const roomCompare = (a, b) =>
+    gradeRank(a.grade_level) - gradeRank(b.grade_level) ||
+    String(a.classroom).localeCompare(String(b.classroom), "th", { numeric: true });
+  const roomList = [...roomMap.values()].sort(roomCompare);
+
+  const teachersByRoom = new Map();
+  for (const teacher of teachers) {
+    const key = homeroomAuditRoomKey(teacher);
+    if (!teachersByRoom.has(key)) teachersByRoom.set(key, []);
+    teachersByRoom.get(key).push(teacher);
+  }
+  const coverageByAssignmentDate = new Map();
+  for (const row of coverage) {
+    coverageByAssignmentDate.set(String(row.homeroom_id) + "\u0000" + row.cover_date, row);
+  }
+  const attendanceByRoomDate = new Map();
+  for (const row of (data.attendance || [])) {
+    const date = row.date || row.attend_date;
+    if (!date) continue;
+    attendanceByRoomDate.set(date + "\u0000" + homeroomAuditRoomKey(row), {
+      ...row,
+      date,
+      recordedBy: Array.isArray(row.recordedBy)
+        ? row.recordedBy
+        : [row.recorded_by].filter(value => value !== undefined)
+    });
+  }
+
+  const roomStats = new Map(roomList.map(room => [homeroomAuditRoomKey(room), {
+    ...room, checked: 0, byOther: 0, missed: 0, missedDates: [], due: 0,
+    teachers: (teachersByRoom.get(homeroomAuditRoomKey(room)) || []).map(teacher => ({
+      id: teacher.staff_id,
+      full_name: teacher.full_name,
+      user_id: teacher.user_id,
+      created_at: teacher.created_at
+    }))
+  }]));
+  const staffStats = new Map();
+  const withoutTeacher = new Map();
+  const coverRows = [];
+
+  const ensureStaff = responsibility => {
+    const id = responsibility.staff_id;
+    if (!id) return null;
+    if (!staffStats.has(id)) {
+      staffStats.set(id, {
+        staff: {
+          id,
+          full_name: responsibility.full_name || "ไม่ระบุชื่อ",
+          user_id: responsibility.user_id || null
+        },
+        rooms: [], due: 0, self: 0, byOther: 0, missed: 0, missedDates: []
+      });
+    }
+    return staffStats.get(id);
+  };
+
+  for (const room of roomList) {
+    const roomKey = homeroomAuditRoomKey(room);
+    const assignments = teachersByRoom.get(roomKey) || [];
+    const stat = roomStats.get(roomKey);
+    for (const date of schoolDates) {
+      const activeAssignments = assignments.filter(teacher => !teacher.createdDate || teacher.createdDate <= date);
+      const responsibilities = [];
+      const coversToday = [];
+      for (const teacher of activeAssignments) {
+        const cover = coverageByAssignmentDate.get(String(teacher.homeroom_id) + "\u0000" + date);
+        if (cover) {
+          coversToday.push(cover);
+          responsibilities.push({
+            staff_id: cover.substitute_staff_id,
+            full_name: cover.substitute_name,
+            user_id: cover.substitute_user_id || null,
+            kind: "คนแทน"
+          });
+        } else {
+          responsibilities.push({
+            staff_id: teacher.staff_id,
+            full_name: teacher.full_name,
+            user_id: teacher.user_id || null,
+            kind: "ครูประจำชั้น"
+          });
+        }
+      }
+
+      const attendance = attendanceByRoomDate.get(date + "\u0000" + roomKey);
+      const recorderIds = new Set((attendance?.recordedBy || []).filter(Boolean));
+      const responsibleUserIds = new Set(responsibilities.map(item => item.user_id).filter(Boolean));
+      const checkedByResponsible = [...responsibleUserIds].some(userId => recorderIds.has(userId));
+      const hasAttendance = Boolean(attendance);
+
+      if (!responsibilities.length) {
+        if (!withoutTeacher.has(roomKey)) withoutTeacher.set(roomKey, { ...room, days: 0, dates: [] });
+        const missing = withoutTeacher.get(roomKey);
+        missing.days += 1;
+        missing.dates.push(date);
+        continue;
+      }
+
+      stat.due += 1;
+      if (hasAttendance) {
+        stat.checked += 1;
+        if (!checkedByResponsible) stat.byOther += 1;
+      } else {
+        stat.missed += 1;
+        stat.missedDates.push(date);
+      }
+
+      // คนเดียวอาจเป็นทั้งครูคู่ชั้นและคนแทนของอีกแถวในห้องเดียวกัน — หนึ่งห้อง×วันนับครั้งเดียว
+      const uniqueResponsibilities = new Map();
+      for (const item of responsibilities) {
+        if (!item.staff_id) continue;
+        if (item.kind === "คนแทน" && !item.user_id) continue; // คนแทนไม่มีบัญชีขึ้นป้าย ไม่ตัดเป็นไม่เช็ค
+        if (!uniqueResponsibilities.has(item.staff_id)) uniqueResponsibilities.set(item.staff_id, item);
+      }
+      for (const item of uniqueResponsibilities.values()) {
+        const staffStat = ensureStaff(item);
+        if (!staffStat) continue;
+        if (!staffStat.rooms.includes(room.room)) staffStat.rooms.push(room.room);
+        staffStat.due += 1;
+        if (checkedByResponsible) staffStat.self += 1;
+        else if (hasAttendance) staffStat.byOther += 1;
+        else {
+          staffStat.missed += 1;
+          staffStat.missedDates.push({ date, room: room.room });
+        }
+      }
+
+      for (const cover of coversToday) {
+        const hasLogin = Boolean(cover.substitute_user_id);
+        const checked = hasLogin ? recorderIds.has(cover.substitute_user_id) : null;
+        coverRows.push({
+          date,
+          room: room.room,
+          absent: { id: cover.absent_staff_id, full_name: cover.absent_name || "ไม่ระบุชื่อ" },
+          substitute: {
+            id: cover.substitute_staff_id,
+            full_name: cover.substitute_name || "ไม่ระบุชื่อ",
+            user_id: cover.substitute_user_id || null
+          },
+          source: cover.source || "",
+          checked,
+          checkedByOther: hasAttendance && checked !== true,
+          recorders: attendance?.recorders || []
+        });
+      }
+    }
+  }
+
+  const rooms = [...roomStats.values()].filter(row => row.due > 0).sort(roomCompare);
+  const staff = [...staffStats.values()].sort((a, b) => {
+    const aRoom = roomList.findIndex(room => a.rooms.includes(room.room));
+    const bRoom = roomList.findIndex(room => b.rooms.includes(room.room));
+    return aRoom - bRoom || String(a.staff.full_name).localeCompare(String(b.staff.full_name), "th");
+  });
+  coverRows.sort((a, b) => a.date.localeCompare(b.date) ||
+    roomList.findIndex(room => room.room === a.room) - roomList.findIndex(room => room.room === b.room));
+
+  return {
+    year: data.year || "",
+    from,
+    to,
+    startDate: effectiveStart,
+    scheduleConfigured,
+    schoolDays: schoolDates.length,
+    schoolDates,
+    rooms,
+    staff,
+    covers: coverRows,
+    roomsWithoutTeacher: [...withoutTeacher.values()].sort(roomCompare)
+  };
+}
+
+// ---------- ค่าตั้งต้นของการเช็คชื่อรายวิชา จากผลเช็คของครูประจำชั้น ----------
+// ⛔ ตัวนี้ใช้ "ตั้งค่าเริ่มต้นในช่องเลือก" เท่านั้น ห้ามเอาผลไปเข้าสูตร มส./เกรด โดยตรง
+//    ตัวเลขที่เข้าสูตรต้องมาจาก attendance_records ที่ครูประจำวิชากดบันทึกเองเสมอ
+//    (เส้นแบ่งเดิมที่ผู้ใช้ผ่อนให้เท่านี้ 2026-08-20 — ดู general-affairs/PLAN.md)
+export const DAILY_TO_SUBJECT_STATUS = {
+  "มา": "มา",
+  "มาสาย": "มา",     // สายตอนเช้าไม่ใช่สายของคาบบ่าย (ผู้ใช้เคาะ 2026-08-20)
+  "ขาด": "ขาด",
+  "ลาป่วย": "ลาป่วย",
+  "ลากิจ": "ลากิจ"
+};
+
+function emptyDailyPrefill(dateStr, failed = false) {
+  return {
+    dateStr: dateStr || "",
+    anyChecked: false,
+    byStudent: new Map(),
+    absent: [],
+    late: [],
+    rooms: [],
+    ...(failed ? { failed: true } : {})
+  };
+}
+
+function dailyPrefillTime(iso) {
+  if (!iso) return "—";
+  return new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hour12: false
+  }).format(new Date(iso)) + " น.";
+}
+
+function dailyPrefillRoomLabel(grade, classroom) {
+  const g = String(grade || "").trim();
+  const c = String(classroom || "").trim();
+  if (!g && !c) return "ไม่ระบุห้อง";
+  if (!g) return c;
+  if (!c) return g;
+  return c.startsWith(g) ? c : g + "/" + c;
+}
+
+export async function loadDailyPrefill(dateStr, students) {
+  const roster = Array.isArray(students) ? students.filter(student => student && student.id) : [];
+  if (!dateStr || roster.length === 0) return emptyDailyPrefill(dateStr);
+
+  try {
+    const chunks = [];
+    for (let i = 0; i < roster.length; i += 200) chunks.push(roster.slice(i, i + 200).map(student => student.id));
+    const results = await Promise.all(chunks.map(ids => sb.from("daily_attendance")
+      .select("student_id,status,grade_level,classroom,recorded_by,recorded_at,updated_at")
+      .eq("attend_date", dateStr)
+      .in("student_id", ids)));
+    const failedResult = results.find(result => result.error);
+    if (failedResult) throw failedResult.error;
+    const rows = results.flatMap(result => result.data || []);
+    const rowByStudent = new Map(rows.map(row => [row.student_id, row]));
+
+    const recorderIds = [...new Set(rows.map(row => row.recorded_by).filter(Boolean))];
+    let profileById = new Map();
+    if (recorderIds.length > 0) {
+      const { data: profiles, error: profileError } = await sb.from("profiles")
+        .select("id,name,email")
+        .in("id", recorderIds);
+      if (profileError) throw profileError;
+      profileById = new Map((profiles || []).map(profile => [profile.id, profile]));
+    }
+
+    const byStudent = new Map();
+    const absent = [];
+    const late = [];
+    const roomMap = new Map();
+    for (const student of roster) {
+      const row = rowByStudent.get(student.id);
+      const grade = row?.grade_level || student.grade_level;
+      const classroom = row?.classroom || student.classroom;
+      const roomKey = String(grade || "") + "\u0000" + String(classroom || "");
+      if (!roomMap.has(roomKey)) {
+        roomMap.set(roomKey, {
+          room: dailyPrefillRoomLabel(grade, classroom), checked: false,
+          checkedAt: "—", by: "ไม่ระบุผู้บันทึก", inRoster: 0,
+          _latestAt: "", _recorderId: null
+        });
+      }
+      const room = roomMap.get(roomKey);
+      room.inRoster += 1;
+      if (!row) continue;
+
+      room.checked = true;
+      const effectiveAt = row.updated_at || row.recorded_at || "";
+      if (!room._latestAt || effectiveAt > room._latestAt) {
+        room._latestAt = effectiveAt;
+        room._recorderId = row.recorded_by || null;
+      }
+
+      const mappedStatus = DAILY_TO_SUBJECT_STATUS[row.status];
+      if (!mappedStatus) continue;
+      byStudent.set(student.id, mappedStatus);
+      const base = {
+        id: student.id,
+        name: student.name || "",
+        student_no: student.student_no || ""
+      };
+      if (row.status === "มาสาย") late.push(base);
+      else if (mappedStatus !== "มา") absent.push({ ...base, status: mappedStatus });
+    }
+
+    const studentCompare = (a, b) =>
+      String(a.student_no || "").localeCompare(String(b.student_no || ""), "th", { numeric: true }) ||
+      String(a.name || "").localeCompare(String(b.name || ""), "th");
+    absent.sort(studentCompare);
+    late.sort(studentCompare);
+    const rooms = [...roomMap.values()].map(room => {
+      const profile = room._recorderId ? profileById.get(room._recorderId) : null;
+      return {
+        room: room.room,
+        checked: room.checked,
+        checkedAt: room.checked ? dailyPrefillTime(room._latestAt) : "—",
+        by: room.checked ? (profile?.name || profile?.email || "ไม่ระบุผู้บันทึก") : "ไม่ระบุผู้บันทึก",
+        inRoster: room.inRoster
+      };
+    }).sort((a, b) => a.room.localeCompare(b.room, "th", { numeric: true }));
+
+    return {
+      dateStr,
+      anyChecked: rows.length > 0,
+      byStudent,
+      absent,
+      late,
+      rooms
+    };
+  } catch (error) {
+    console.warn("อ่านผลเช็ครายวันสำหรับค่าตั้งต้นรายวิชาไม่สำเร็จ", error);
+    return emptyDailyPrefill(dateStr, true);
+  }
 }
 
 export async function loadAcademicCalendar(year) {

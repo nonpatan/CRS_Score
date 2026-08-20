@@ -103,7 +103,7 @@
     .report-entry button { width:100%; }
   }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -119,7 +119,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -128,6 +128,11 @@
     <div class="card">
       <div class="section-title">งานที่ฉันต้องไปแทน</div>
       <div id="my-coverage-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card" id="homeroom-audit-card" hidden>
+      <div class="section-title">การเช็คชื่อประจำชั้นของฉัน</div>
+      <div id="homeroom-audit-body"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
     <div class="card">
@@ -184,9 +189,10 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          loadLeaveContext, countLeaveDaysByType,
          getAcademicYears, getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
+         getSetting, loadMyHomeroomAuditData, buildHomeroomAudit,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260816-2";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260820-2";
 
 const session = await requireAuth();
 if (session) {
@@ -290,6 +296,56 @@ if (session) {
           ${worksheet}${action}
         </div>`;
       }).join("") : '<div class="muted-empty">ยังไม่มีงานที่ต้องไปแทน</div>';
+    }
+
+    async function renderMyHomeroomAudit() {
+      const card = el("homeroom-audit-card");
+      const body = el("homeroom-audit-body");
+      const year = academicYearOf(today, years);
+      if (!year) return;
+      const range = academicYearRange(year, years);
+      if (!range) return;
+      const monthStart = today.slice(0, 7) + "-01";
+      const from = monthStart < range.start ? range.start : monthStart;
+      const to = today < range.end ? today : range.end;
+      try {
+        const [raw, configuredStart] = await Promise.all([
+          // loadMyHomeroomAuditData() มองไม่เห็น user_id ของครูคู่ชั้นคนอื่นตาม RLS:
+          // self/byOther ที่คืนมาจึงเชื่อถือไม่ได้เมื่อห้องมีครูหลายคน ห้ามนำสองค่านี้ไปแสดงผลอีก
+          loadMyHomeroomAuditData(year, from, to, me),
+          getSetting("daily_attendance_audit_start")
+        ]);
+        const hasHomeroom = raw.teachers.some(row => row.staff_id === me.id);
+        const hasCoverage = raw.coverage.some(row => row.substitute_staff_id === me.id);
+        if (!hasHomeroom && !hasCoverage) return;
+
+        card.hidden = false;
+        const startDate = configuredStart || range.start;
+        const report = buildHomeroomAudit(raw, { startDate });
+        if (!report.scheduleConfigured) {
+          body.innerHTML = '<div class="banner warn"><b>ยังคำนวณไม่ได้</b><br>ระบบยังไม่มีตารางวันทำงาน จึงไม่เดาว่าวันใดต้องเช็คชื่อ กรุณาแจ้งฝ่ายบุคลากรให้ซิงก์ตารางงาน</div>';
+          return;
+        }
+        const row = report.staff.find(item => item.staff.id === me.id);
+        const checked = (row?.self || 0) + (row?.byOther || 0);
+        const missed = row?.missedDates || [];
+        const startNote = configuredStart
+          ? ""
+          : `<div class="banner warn"><b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>ขณะนี้ใช้วันเริ่มปีการศึกษา ${escapeHtml(fmt(range.start))} เป็นค่าตั้งต้น</div>`;
+        if (!row || row.due === 0) {
+          body.innerHTML = `${startNote}<div class="muted-empty">เดือนนี้ยังไม่มีวันที่คุณต้องเช็คชื่อประจำชั้น</div>`;
+          return;
+        }
+        const missedHtml = missed.length ? `<div style="margin-top:12px"><b>วันที่ยังไม่มีการเช็คชื่อ</b>` +
+          missed.map(item => `<div class="my-duty-row"><b>${escapeHtml(fmt(item.date))} · ${escapeHtml(item.room)}</b>` +
+            `<div class="my-duty-meta"><a class="report-link" href="../general-affairs/daily-attendance.html">ไปหน้าเช็คชื่อรายวัน</a> · หน้านี้ยังไม่รับวันที่จากลิงก์ กรุณาเลือกวันที่อีกครั้ง</div></div>`).join("") +
+          "</div>" : '<div class="field-note" style="margin-top:8px">ไม่มีวันที่ค้างในเดือนนี้</div>';
+        body.innerHTML = `${startNote}<div class="today"><div><div class="big">เดือนนี้ เช็คแล้ว ${checked}/${row.due} วัน</div>` +
+          `<div class="sub">ไม่มีการเช็ค ${row.missed} วัน</div></div></div>${missedHtml}`;
+      } catch {
+        card.hidden = false;
+        body.innerHTML = '<div class="banner warn">โหลดข้อมูลการเช็คชื่อประจำชั้นของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+      }
     }
 
     async function renderMyDuties() {
@@ -718,6 +774,7 @@ if (session) {
 
     el("month").addEventListener("change", renderMonth);
     await renderMyCoverage();
+    await renderMyHomeroomAudit();
     await renderMyDuties();
     await renderMyFieldDuties();
     await renderMyProjects();

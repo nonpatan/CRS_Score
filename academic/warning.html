@@ -124,6 +124,10 @@
   .score-row .val { font-weight: 500; }
   .score-row .warn-text { color: var(--amber); }
   .score-row .danger-text { color: var(--danger); }
+  .kind-group { margin-top: 8px; padding-left: 12px; border-left: 3px solid var(--line); }
+  .kind-group .score-row { gap: 8px; align-items: flex-start; }
+  .kind-group .score-row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+  .kind-group .score-row > :last-child { color: var(--muted); text-align: right; }
 
   .result-line { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
   .badge {
@@ -151,8 +155,12 @@
     opacity: 0; pointer-events: none; transition: opacity 0.3s; z-index: 9999;
   }
   #toast.show { opacity: 1; }
+  @media (max-width: 520px) {
+    .kind-group .score-row { display: block; }
+    .kind-group .score-row > :last-child { margin-top: 2px; text-align: left; }
+  }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -173,7 +181,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -220,7 +228,7 @@
     sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
     getActiveStudents, loadGradeWeights, loadSubjectData, computeAttendanceRisk, isPrimaryGrade,
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY
-  } from "../supabase-client.js?v=20260816-2";
+  } from "../supabase-client.js?v=20260820-2";
 
   let allActiveStudents = [];
   const elYear = document.getElementById("filter-year");
@@ -239,6 +247,25 @@
   function escapeHtml(str) {
     if (!str) return "";
     return String(str).replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);
+  }
+
+  // วิชาย่อยเป็นเพียงคำอธิบายของยอดรวมบูรณาการ — คำนวณด้วยสูตรกลางทีละวิชา
+  // และกรองเฉพาะวิชาที่เด็กลงทะเบียนจริงเท่านั้น
+  function buildIntegratedParts(item, studentId, enrollMap, warnPercent) {
+    return item.membersData
+      .filter(mem => enrollMap[mem.subj.id] && enrollMap[mem.subj.id].has(studentId))
+      .map(mem => {
+        const risk = computeAttendanceRisk(studentId, [mem.data], { warnPercent });
+        return { name: mem.subj.code + " " + mem.subj.name, ...risk };
+      })
+      .sort((a, b) => b.percent - a.percent);
+  }
+
+  function formatRiskDetail(risk) {
+    if (risk.totalBase === 0) return "ยังไม่ได้ตั้งจำนวนคาบ";
+    const missed = risk.retake ? risk.rawMissed : risk.netMissed;
+    const percent = risk.retake ? risk.rawPercent : risk.percent;
+    return `ขาด${risk.retake ? "ดิบ" : "สุทธิ"} ${missed} / ${risk.totalBase} คาบ (${percent.toFixed(1)}%)`;
   }
 
   async function init() {
@@ -404,13 +431,14 @@
 
             const risk = computeAttendanceRisk(stu.id, item.membersData.map(mem => mem.data), { warnPercent });
             if (enrolledInAny && risk.risky) {
-                if (risk.percent > maxPct) maxPct = risk.percent;
-                riskySubjects.push({
-                  name: s.code + " " + s.name + " (บูรณาการ)",
-                  netMissed: risk.netMissed, rawMissed: risk.rawMissed, total: risk.totalBase,
-                  pct: risk.percent, rawPct: risk.rawPercent, retake: risk.retake,
-                  critical: risk.critical, level: risk.level
-                });
+              const parts = buildIntegratedParts(item, stu.id, enrollMap, warnPercent);
+              if (risk.percent > maxPct) maxPct = risk.percent;
+              riskySubjects.push({
+                name: s.code + " " + s.name + " (บูรณาการ)",
+                netMissed: risk.netMissed, rawMissed: risk.rawMissed, total: risk.totalBase,
+                pct: risk.percent, rawPct: risk.rawPercent, retake: risk.retake,
+                critical: risk.critical, level: risk.level, parts
+              });
             }
           } else {
             // วิชาพื้นฐาน (ข้ามวิชาที่เป็นสมาชิกบูรณาการ เพื่อไม่โชว์ซ้ำซ้อน)
@@ -488,6 +516,12 @@
                 <div class='val ${rowType}'>${rowLabel} · ขาด${subj.retake ? "ดิบ" : "สุทธิ"} ${shownMissed} / ${subj.total} คาบ (${shownPct.toFixed(1)}%)</div>
               </div>
             `;
+            if (subj.parts?.length) {
+              html += `<div class='kind-group'>${subj.parts.map(part => {
+                return `<div class='score-row'><div>${escapeHtml(part.name)}</div>` +
+                  `<div class='val hint'>${escapeHtml(formatRiskDetail(part))}</div></div>`;
+              }).join("")}</div>`;
+            }
           }
 
           html += `</div></div>`;

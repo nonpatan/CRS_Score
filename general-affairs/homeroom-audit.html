@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายงานการเช็คชื่อประจำชั้น — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6;
+  }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; border:1px solid var(--line);
+    border-radius:12px; background:var(--white);
+  }
+  .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .filters { display:grid; grid-template-columns:160px repeat(2,minmax(150px,1fr)); gap:12px; }
+  .field { min-width:0; margin-bottom:14px; }
+  .field:last-child { margin-bottom:0; }
+  label { display:block; margin-bottom:6px; font-size:15px; font-weight:600; }
+  input[type="date"], select {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  input:focus, select:focus, button:focus-visible, summary:focus-visible {
+    outline:2px solid var(--teal); outline-offset:2px;
+  }
+  button, .button-link {
+    min-height:44px; padding:9px 14px; border:0; border-radius:9px;
+    font:inherit; font-weight:600; cursor:pointer; text-align:center; text-decoration:none;
+  }
+  button.primary { width:100%; color:var(--white); background:var(--teal); }
+  button.ghost, .button-link { color:var(--teal); background:var(--teal-soft); }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+  .quick-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:2px; }
+  .quick-actions button { flex:1 1 130px; }
+  .section { margin:0 0 8px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+  .hint, .meta { color:var(--muted); font-size:14px; }
+  .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner a { color:inherit; font-weight:700; }
+  .report-tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .report-tab {
+    min-width:0; border:1px solid var(--line); color:var(--muted); background:var(--white);
+  }
+  .report-tab.active { color:var(--white); border-color:var(--teal); background:var(--teal); }
+  .summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+  .summary-item { padding:12px; border-radius:10px; background:var(--teal-soft); text-align:center; }
+  .summary-item b { display:block; color:var(--teal); font-size:22px; line-height:1.2; }
+  .summary-item span { color:var(--muted); font-size:13px; }
+  .audit-list { display:grid; gap:10px; }
+  .audit-row { padding:13px 14px; border:1px solid var(--line); border-radius:10px; }
+  .audit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .audit-head b { overflow-wrap:anywhere; }
+  .audit-counts { color:var(--muted); font-size:14px; text-align:right; }
+  .audit-counts strong { color:var(--ink); }
+  details { margin-top:7px; }
+  summary { min-height:44px; padding:9px 0; color:var(--teal); font-weight:600; cursor:pointer; }
+  .date-list { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 2px; }
+  .date-chip { padding:4px 8px; border-radius:99px; color:var(--amber); background:var(--amber-soft); font-size:13px; }
+  .cover-state { display:inline-block; margin-top:5px; padding:3px 9px; border-radius:99px; font-size:13px; font-weight:600; }
+  .cover-state.ok { color:var(--teal); background:var(--teal-soft); }
+  .cover-state.warn { color:var(--amber); background:var(--amber-soft); }
+  .cover-state.bad { color:var(--danger); background:var(--danger-soft); }
+  .empty { padding:24px 8px; color:var(--muted); text-align:center; }
+  .setting-row { display:grid; grid-template-columns:minmax(0,1fr) 180px; gap:10px; align-items:end; }
+  .setting-row button { width:100%; }
+  .rooms-missing { border-color:var(--amber); }
+  .rooms-missing a { color:var(--teal); font-weight:700; }
+  .toast {
+    position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
+    padding:11px 18px; border-radius:10px; color:var(--white); background:var(--ink);
+    font-weight:600; opacity:0; pointer-events:none; transform:translateX(-50%); transition:opacity .18s;
+  }
+  .toast.show { opacity:1; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:760px) {
+    .filters { grid-template-columns:1fr; }
+    .row2, .setting-row { grid-template-columns:1fr; }
+    .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width:520px) {
+    .report-tabs { grid-template-columns:1fr; }
+    .audit-head { display:block; }
+    .audit-counts { margin-top:5px; text-align:left; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>รายงานการเช็คชื่อประจำชั้น</h1>
+    <p>ตรวจข้อเท็จจริงรายห้อง รายครู และคนแทน โดยนับเฉพาะวันเปิดเรียนที่ตั้งไว้ในระบบ</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260820-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="gate" hidden></section>
+    <div id="report-content" hidden>
+      <section class="card">
+        <div class="filters">
+          <div class="field">
+            <label for="year-select">ปีการศึกษา</label>
+            <select id="year-select"><option value="">กำลังโหลด…</option></select>
+          </div>
+          <div class="field">
+            <label for="date-from">ตั้งแต่วันที่</label>
+            <input id="date-from" type="date">
+          </div>
+          <div class="field">
+            <label for="date-to">ถึงวันที่</label>
+            <input id="date-to" type="date">
+          </div>
+        </div>
+        <div class="quick-actions" aria-label="เลือกช่วงวันที่ด่วน">
+          <button type="button" class="ghost" id="quick-month">เดือนนี้</button>
+          <button type="button" class="ghost" id="quick-term" disabled title="รอยืนยันแหล่งวันเริ่มภาคเรียน">ภาคเรียนนี้</button>
+          <button type="button" class="ghost" id="quick-year">ทั้งปี</button>
+        </div>
+        <button type="button" class="primary" id="btn-load">แสดงรายงาน</button>
+      </section>
+
+      <section class="card" id="start-setting-card">
+        <div class="section">วันเริ่มกำชับการเช็คชื่อ</div>
+        <div id="start-setting-note" class="banner warn">กำลังโหลดค่าตั้ง…</div>
+        <div class="setting-row">
+          <div class="field">
+            <label for="audit-start">เริ่มนับตั้งแต่วันที่</label>
+            <input id="audit-start" type="date">
+          </div>
+          <button type="button" class="ghost" id="save-start">บันทึกวันเริ่มกำชับ</button>
+        </div>
+        <div class="hint">ครูที่ถูกกำหนดกลางปีจะเริ่มนับจากวันที่บันทึกเป็นครูประจำชั้น หากวันนั้นช้ากว่าค่านี้</div>
+      </section>
+
+      <section id="state-banner" hidden></section>
+
+      <section class="card report-tabs" aria-label="มุมมองรายงาน">
+        <button type="button" class="report-tab active" data-tab="rooms">รายห้อง</button>
+        <button type="button" class="report-tab" data-tab="staff">รายครู</button>
+        <button type="button" class="report-tab" data-tab="covers">คนแทน</button>
+      </section>
+
+      <section id="panel-rooms" class="card" data-panel="rooms">
+        <div class="section">รายห้อง</div>
+        <div id="rooms-summary" class="hint">เลือกช่วงวันที่แล้วกดแสดงรายงาน</div>
+        <div id="rooms-list" class="audit-list"></div>
+      </section>
+
+      <section id="panel-staff" class="card" data-panel="staff" hidden>
+        <div class="section">รายครู</div>
+        <div id="staff-summary" class="hint"></div>
+        <div id="staff-list" class="audit-list"></div>
+      </section>
+
+      <section id="panel-covers" class="card" data-panel="covers" hidden>
+        <div class="section">คนแทนครูประจำชั้น</div>
+        <div id="covers-summary" class="summary-grid"></div>
+        <div id="covers-list" class="audit-list"></div>
+      </section>
+
+      <section id="rooms-without-card" class="card rooms-missing" hidden>
+        <div class="section">ห้องที่ยังไม่มีผู้รับผิดชอบ</div>
+        <div id="rooms-without-list" class="audit-list"></div>
+        <div class="hint" style="margin-top:10px">กำหนดครูได้ที่หน้า <a href="homeroom.html">ครูประจำชั้น</a></div>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  requireAuth, signOut, getProfile, checkDepartment, applyRestrictedMenuAccess,
+  getAcademicYears, academicYearRange, academicYearOf, getSetting, setSetting,
+  loadHomeroomAuditData, buildHomeroomAudit, bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260820-2";
+
+const el = id => document.getElementById(id);
+const today = toDateStr(bangkokNow());
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const fmtDate = value => value ? new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+}).format(new Date(value + "T00:00:00Z")) : "—";
+
+let years = [];
+let isAdmin = false;
+let configuredStart = null;
+let currentReport = null;
+let toastTimer = null;
+
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").classList.toggle("err", isError);
+  el("toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el("toast").classList.remove("show"), 3200);
+}
+
+function selectedRange() {
+  return academicYearRange(el("year-select").value, years);
+}
+
+function clampRange(from, to) {
+  const range = selectedRange();
+  if (!range) return { from:"", to:"" };
+  const maxTo = range.end < today ? range.end : today;
+  return {
+    from: from < range.start ? range.start : (from > maxTo ? maxTo : from),
+    to: to > maxTo ? maxTo : (to < range.start ? range.start : to)
+  };
+}
+
+function setDateInputs(from, to) {
+  const clamped = clampRange(from, to);
+  el("date-from").value = clamped.from;
+  el("date-to").value = clamped.to;
+}
+
+function setMonthRange() {
+  const range = selectedRange();
+  if (!range) return;
+  const reference = academicYearOf(today, years) === el("year-select").value ? today : range.start;
+  const [year, month] = reference.split("-").map(Number);
+  const last = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  setDateInputs(reference.slice(0, 7) + "-01", last);
+}
+
+function setYearRange() {
+  const range = selectedRange();
+  if (range) setDateInputs(range.start, range.end);
+}
+
+function effectiveStartDate() {
+  return configuredStart || selectedRange()?.start || el("date-from").value;
+}
+
+function renderStartSetting() {
+  const fallback = selectedRange()?.start || "";
+  el("audit-start").value = configuredStart || fallback;
+  el("audit-start").disabled = !isAdmin;
+  el("save-start").hidden = !isAdmin;
+  el("start-setting-note").className = configuredStart ? "banner info" : "banner warn";
+  el("start-setting-note").innerHTML = configuredStart
+    ? `<b>เริ่มกำชับตั้งแต่ ${esc(fmtDate(configuredStart))}</b><br>ไม่นับวันก่อนค่านี้`
+    : `<b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>รายงานจะใช้วันเริ่มปีการศึกษา ${esc(fmtDate(fallback))} ชั่วคราวจนกว่าผู้ดูแลระบบจะบันทึกค่า`;
+}
+
+function missedDetails(rows) {
+  if (!rows.length) return "";
+  return `<details><summary>ดูวันที่ไม่มีการเช็คชื่อ ${rows.length} วัน</summary><div class="date-list">` +
+    rows.map(item => {
+      const date = typeof item === "string" ? item : item.date;
+      const room = typeof item === "string" ? "" : ` · ${item.room}`;
+      return `<span class="date-chip">${esc(fmtDate(date) + room)}</span>`;
+    }).join("") + "</div></details>";
+}
+
+function renderRooms(report) {
+  el("rooms-summary").textContent = `${report.rooms.length} ห้อง · วันเปิดเรียนในช่วงนี้ ${report.schoolDays} วัน`;
+  el("rooms-list").innerHTML = report.rooms.length ? report.rooms.map(row => {
+    const teachers = row.teachers.map(person => person.full_name).filter(Boolean).join(" · ") || "ไม่ระบุชื่อครู";
+    return `<article class="audit-row">
+      <div class="audit-head"><div><b>${esc(row.room)}</b><div class="meta">${esc(teachers)}</div></div>
+      <div class="audit-counts">เช็คแล้ว <strong>${row.checked}/${row.due} วัน</strong> · ไม่มีการเช็ค ${row.missed} วัน</div></div>
+      ${missedDetails(row.missedDates)}
+    </article>`;
+  }).join("") : '<div class="empty">ยังไม่มีห้องที่มีผู้รับผิดชอบในช่วงนี้</div>';
+}
+
+function renderStaff(report) {
+  el("staff-summary").textContent = `${report.staff.length} คน · นับหนึ่งครั้งต่อห้องต่อวัน และครูคู่ชั้นคนใดเช็คถือว่าทีมเช็คแล้ว`;
+  el("staff-list").innerHTML = report.staff.length ? report.staff.map(row => `
+    <article class="audit-row">
+      <div class="audit-head"><div><b>${esc(row.staff.full_name)}</b><div class="meta">${esc(row.rooms.join(" · "))}</div></div>
+      <div class="audit-counts">รับผิดชอบ <strong>${row.due} วัน</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}</div></div>
+      ${missedDetails(row.missedDates)}
+    </article>`).join("") : '<div class="empty">ยังไม่มีรายการผู้รับผิดชอบในช่วงนี้</div>';
+}
+
+function renderCovers(report) {
+  const checked = report.covers.filter(row => row.checked === true).length;
+  const noLogin = report.covers.filter(row => row.checked === null).length;
+  const byOther = report.covers.filter(row => row.checked === false && row.checkedByOther).length;
+  const missed = report.covers.filter(row => row.checked === false && !row.checkedByOther).length;
+  el("covers-summary").innerHTML = `
+    <div class="summary-item"><b>${report.covers.length}</b><span>จัดคนแทน</span></div>
+    <div class="summary-item"><b>${checked}</b><span>คนแทนเช็คจริง</span></div>
+    <div class="summary-item"><b>${byOther + missed}</b><span>คนแทนไม่ได้เช็คเอง</span></div>
+    <div class="summary-item"><b>${noLogin}</b><span>ยังไม่ผูกบัญชี</span></div>`;
+  el("covers-list").innerHTML = report.covers.length ? report.covers.map(row => {
+    let label = "ไม่มีการเช็คชื่อ", tone = "bad";
+    if (row.checked === true) { label = "คนแทนเช็คแล้ว"; tone = "ok"; }
+    else if (row.checked === null) { label = "ยังไม่ผูกบัญชี"; tone = "warn"; }
+    else if (row.checkedByOther) { label = "มีการเช็คโดยคนอื่น"; tone = "warn"; }
+    return `<article class="audit-row"><div class="audit-head"><div>
+      <b>${esc(fmtDate(row.date))} · ${esc(row.room)}</b>
+      <div class="meta">${esc(row.substitute.full_name)} แทน ${esc(row.absent.full_name)}${row.source ? ` · ${esc(row.source)}` : ""}</div>
+      <span class="cover-state ${tone}">${esc(label)}</span>
+    </div></div></article>`;
+  }).join("") : '<div class="empty">ไม่มีการจัดคนแทนครูประจำชั้นในช่วงนี้</div>';
+}
+
+function renderRoomsWithoutTeacher(report) {
+  const card = el("rooms-without-card");
+  card.hidden = report.roomsWithoutTeacher.length === 0;
+  el("rooms-without-list").innerHTML = report.roomsWithoutTeacher.map(row => `
+    <article class="audit-row"><div class="audit-head"><b>${esc(row.room)}</b>
+    <div class="audit-counts">ไม่มีผู้รับผิดชอบ <strong>${row.days} วัน</strong></div></div></article>`).join("");
+}
+
+function renderReport(report) {
+  currentReport = report;
+  if (!report.scheduleConfigured) {
+    el("state-banner").hidden = false;
+    el("state-banner").innerHTML = '<div class="banner warn"><b>ยังไม่มีตารางวันทำงาน</b><br>ระบบจะไม่เดาว่าวันใดเป็นวันเปิดเรียน จึงยังคำนวณตัวหารไม่ได้ กรุณาให้ฝ่ายบุคลากรซิงก์ตารางงานก่อน</div>';
+  } else {
+    el("state-banner").hidden = false;
+    el("state-banner").innerHTML = `<div class="banner info"><b>ช่วง ${esc(fmtDate(report.from))} – ${esc(fmtDate(report.to))}</b><br>` +
+      `นับวันเปิดเรียน ${report.schoolDays} วัน หลังตัดวันก่อน ${esc(fmtDate(report.startDate))} วันหยุด และวันที่ไม่ทำงานออกแล้ว</div>`;
+  }
+  renderRooms(report);
+  renderStaff(report);
+  renderCovers(report);
+  renderRoomsWithoutTeacher(report);
+}
+
+async function loadReport() {
+  const year = el("year-select").value;
+  const from = el("date-from").value;
+  const to = el("date-to").value;
+  if (!year || !from || !to) return toast("กรุณาเลือกปีและช่วงวันที่ให้ครบ", true);
+  if (from > to) return toast("วันเริ่มต้องไม่อยู่หลังวันสิ้นสุด", true);
+  const range = selectedRange();
+  if (!range || from < range.start || to > range.end || to > today) {
+    return toast("ช่วงวันที่ต้องอยู่ในปีการศึกษาที่เลือกและไม่เกินวันนี้", true);
+  }
+  const button = el("btn-load");
+  button.disabled = true;
+  button.textContent = "กำลังโหลดรายงาน…";
+  el("state-banner").hidden = false;
+  el("state-banner").innerHTML = '<div class="banner info">กำลังโหลดผลเช็คชื่อทั้งช่วง…</div>';
+  try {
+    const raw = await loadHomeroomAuditData(year, from, to);
+    renderReport(buildHomeroomAudit(raw, { startDate:effectiveStartDate() }));
+  } catch (error) {
+    currentReport = null;
+    el("state-banner").innerHTML = `<div class="banner bad"><b>โหลดรายงานไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
+    el("rooms-list").innerHTML = '<div class="empty">กรุณาตรวจสิทธิ์และลองใหม่</div>';
+    el("staff-list").innerHTML = "";
+    el("covers-list").innerHTML = "";
+    el("rooms-without-card").hidden = true;
+  } finally {
+    button.disabled = false;
+    button.textContent = "แสดงรายงาน";
+  }
+}
+
+document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => {
+  const tab = button.dataset.tab;
+  document.querySelectorAll("[data-tab]").forEach(item => item.classList.toggle("active", item === button));
+  document.querySelectorAll("[data-panel]").forEach(panel => { panel.hidden = panel.dataset.panel !== tab; });
+}));
+el("quick-month").addEventListener("click", setMonthRange);
+el("quick-year").addEventListener("click", setYearRange);
+el("btn-load").addEventListener("click", loadReport);
+el("year-select").addEventListener("change", () => {
+  setMonthRange();
+  renderStartSetting();
+});
+el("save-start").addEventListener("click", async () => {
+  const value = el("audit-start").value;
+  if (!isAdmin || !value) return toast("กรุณาเลือกวันเริ่มกำชับ", true);
+  const button = el("save-start");
+  button.disabled = true;
+  const ok = await setSetting("daily_attendance_audit_start", value);
+  button.disabled = false;
+  if (!ok) return toast("บันทึกวันเริ่มกำชับไม่สำเร็จ", true);
+  configuredStart = value;
+  renderStartSetting();
+  toast("บันทึกวันเริ่มกำชับแล้ว");
+  if (currentReport) await loadReport();
+});
+
+const session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  const [profile, canGeneral, canPersonnel] = await Promise.all([
+    getProfile(session.user.id),
+    checkDepartment("บริหารทั่วไป"),
+    checkDepartment("บุคลากร")
+  ]);
+  isAdmin = profile?.role === "admin";
+  const canAccess = isAdmin || canGeneral || canPersonnel;
+  applyRestrictedMenuAccess(canAccess);
+  if (!canAccess) {
+    el("gate").className = "card";
+    el("gate").hidden = false;
+    el("gate").innerHTML = '<div class="banner warn" style="margin:0"><b>ไม่มีสิทธิ์อ่านข้อมูลรายงานนี้</b><br>รายงานเต็มเปิดให้เฉพาะผู้ดูแลระบบ ฝ่ายบริหารทั่วไป และฝ่ายบุคลากร</div>';
+  } else {
+    el("report-content").hidden = false;
+    try {
+      [years, configuredStart] = await Promise.all([
+        getAcademicYears(),
+        getSetting("daily_attendance_audit_start")
+      ]);
+      const activeYear = academicYearOf(today, years);
+      el("year-select").innerHTML = years.length
+        ? [...years].sort((a, b) => b.start_date.localeCompare(a.start_date))
+            .map(row => `<option value="${esc(row.year)}"${row.year === activeYear ? " selected" : ""}>${esc(row.year)}</option>`).join("")
+        : '<option value="">— ยังไม่มีปีการศึกษา —</option>';
+      el("date-from").max = today;
+      el("date-to").max = today;
+      setMonthRange();
+      renderStartSetting();
+      if (years.length) await loadReport();
+    } catch (error) {
+      el("state-banner").hidden = false;
+      el("state-banner").innerHTML = `<div class="banner bad"><b>เปิดรายงานไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
+    }
+  }
+}
+</script>
+</body>
+</html>

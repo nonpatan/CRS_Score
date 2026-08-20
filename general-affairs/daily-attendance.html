@@ -100,7 +100,7 @@
     .save-bar button { width:100%; }
   }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260725-6">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body>
 <div class="wrap">
@@ -108,7 +108,7 @@
     <h1>เช็คชื่อรายวัน</h1>
     <p>ครูประจำชั้นเช็ควันละครั้ง — ทุกคนตั้งต้นเป็น “มา” เปลี่ยนเฉพาะคนที่ไม่ได้มา</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260817-1"></script>
+    <script src="../app-shell.js?v=20260820-2"></script>
   </header>
 
   <main class="academic-content">
@@ -154,11 +154,11 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, checkDepartment, getAcademicYears, academicYearOf,
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
   summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
   getMyCoverageFor
-} from "../supabase-client.js?v=20260816-2";
+} from "../supabase-client.js?v=20260820-2";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -444,10 +444,14 @@ if (session) {
   el("attend-date").max = today;
   el("attend-date").value = today;
   try {
-    [years, canManage] = await Promise.all([
+    const accessResults = await Promise.all([
       getAcademicYears(),
-      checkDepartment("บริหารทั่วไป")
+      checkDepartment("บริหารทั่วไป"),
+      checkDepartment("บุคลากร")
     ]);
+    years = accessResults[0];
+    canManage = accessResults[1];
+    applyRestrictedMenuAccess(accessResults[1] || accessResults[2]);
     await loadYearContext(today);
   } catch (error) {
     showAccess(`<b>เปิดหน้าเช็คชื่อไม่สำเร็จ</b><br>${esc(error.message)}`, "bad");
