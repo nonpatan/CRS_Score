@@ -240,6 +240,7 @@
     <button class="load" id="btn-load">โหลดรายชื่อ</button>
     <!-- แจ้งเตือนสิทธิ์ / ไม่มีนักเรียน (เห็นได้ทันทีที่เลือกวิชา ก่อนกดโหลด) -->
     <div class="access-note" id="access-note" style="display:none"></div>
+    <div class="access-note" id="placement-note" style="display:none"></div>
   </div>
 
   <!-- รายชื่อนักเรียนให้ติ๊กสถานะ -->
@@ -290,7 +291,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill } from "../supabase-client.js?v=20260820-2";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms } from "../supabase-client.js?v=20260820-3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -364,6 +365,7 @@ const elDate          = document.getElementById("inp-date");
 const elPeriods       = document.getElementById("inp-periods");
 const btnLoad         = document.getElementById("btn-load");
 const elAccessNote    = document.getElementById("access-note");
+const elPlacementNote = document.getElementById("placement-note");
 const elStudentsCard  = document.getElementById("students-card");
 const elDaySessions   = document.getElementById("day-sessions");
 const elStudentList   = document.getElementById("student-list");
@@ -389,13 +391,19 @@ let daySessions = [];        // ครั้งเช็คชื่อทั้
 let memberSubjects = [];     // วิชาย่อยของวิชาบูรณาการที่ "เจ้าของเห็นได้" (กรองตามสิทธิ์แล้ว)
 let blockMode = false;       // true = กำลังเช็คแบบบล็อก (หลายวิชาย่อยพร้อมกัน — แก้ครั้งเดิมได้แล้ว)
 let blockMembers = [];       // วิชาย่อยที่ติ๊กไว้ตอนโหลดรายชื่อในโหมดบล็อก [{id, name, periods}]
-let blockStudentSubjects = new Map(); // student_id -> Set of subject_id ที่ลงทะเบียนในโหมดบล็อก
 let blockRounds = [];        // ครั้งที่เช็คของวันนี้ในโหมดบล็อก [{ bySubject: Map<subjectId, session+records> }]
                              // จับคู่ session ข้ามวิชาตามลำดับ (created_at) เป็น "ครั้งที่" เดียวกัน
 let blockEditRound = null;   // index ของครั้งที่กำลังแก้อยู่ (null = กำลังเพิ่มครั้งใหม่)
 let missedMap = {};          // student_id -> จำนวนคาบขาดสะสม (รวมวิชาย่อยที่ติ๊กถ้าเป็นบูรณาการ)
 let dailyPrefill = null;     // ค่าตั้งต้นจากเช็คชื่อรายวัน — ใช้เฉพาะครั้งใหม่ ไม่ auto-save
 let makeupSubjectId = null;  // วิชาพื้นฐานที่การ์ดชดเชยกำลังจัดการอยู่ (โหมดบล็อกเลือกจาก dropdown)
+const ALL_ROOMS_VALUE = "__all__";
+let placementYear = "";
+let placements = [];
+let placementByStudent = new Map();
+let classroomByValue = new Map();
+let acceptedClassroomValue = "";
+let rosterDirty = false;
 
 // ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
@@ -431,6 +439,115 @@ function showToast(msg, ok) {
 // กล่องแจ้งเตือนสิทธิ์/ไม่มีนักเรียน (อำพัน) ใต้ปุ่มโหลดรายชื่อ
 function showAccessNote(msg) { elAccessNote.textContent = msg; elAccessNote.style.display = "block"; }
 function clearAccessNote() { elAccessNote.textContent = ""; elAccessNote.style.display = "none"; }
+function clearPlacementNote() { elPlacementNote.innerHTML = ""; elPlacementNote.style.display = "none"; }
+function showPlacementNote(count) {
+  if (!count) { clearPlacementNote(); return; }
+  elPlacementNote.innerHTML = "มีนักเรียน " + Number(count) +
+    " คนยังไม่ได้กำหนดห้องของปีนี้ · <a href='students.html'>ไปหน้านักเรียน</a>";
+  elPlacementNote.style.display = "block";
+}
+
+function roomValue(grade, classroom) {
+  return encodeURIComponent(String(grade || "").trim()) + "|" + encodeURIComponent(String(classroom || "").trim());
+}
+
+async function ensurePlacements(year) {
+  const wantedYear = String(year || "").trim();
+  if (!wantedYear) {
+    placementYear = "";
+    placements = [];
+    placementByStudent = new Map();
+    return;
+  }
+  if (placementYear === wantedYear) return;
+  const result = await getStudentPlacements(wantedYear);
+  if (result.error) throw new Error("โหลดข้อมูลห้องไม่สำเร็จ: " + result.error.message);
+  placementYear = wantedYear;
+  placements = result.data || [];
+  placementByStudent = new Map(placements.map(placement => [placement.student_id, placement]));
+}
+
+function selectedRoom() {
+  if (elClassroom.value === ALL_ROOMS_VALUE) return { all: true };
+  return classroomByValue.get(elClassroom.value) || null;
+}
+
+function roomsInRoster(roster) {
+  const byKey = new Map();
+  for (const student of (roster || [])) {
+    const placement = placementByStudent.get(student.id);
+    if (!placement?.grade_level || !placement?.classroom) continue;
+    const value = roomValue(placement.grade_level, placement.classroom);
+    if (!byKey.has(value)) byKey.set(value, {
+      value,
+      grade_level: placement.grade_level,
+      classroom: placement.classroom,
+      label: attendanceRoomLabel(placement.grade_level, placement.classroom)
+    });
+  }
+  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label, "th", { numeric: true }));
+}
+
+function autoSelectSingleRosterRoom(roster) {
+  const rooms = roomsInRoster(roster);
+  if (rooms.length !== 1 || !classroomByValue.has(rooms[0].value)) return;
+  elClassroom.value = rooms[0].value;
+  acceptedClassroomValue = elClassroom.value;
+}
+
+async function filterRosterBySelectedClassroom(rawRoster) {
+  const year = pickedSubject?.year || elFilterYear.value;
+  await ensurePlacements(year);
+  const source = Array.isArray(rawRoster) ? rawRoster : [];
+  const unplacedCount = source.filter(student => !placementByStudent.has(student.id)).length;
+  showPlacementNote(unplacedCount);
+
+  const placedRoster = source.flatMap(student => {
+    const placement = placementByStudent.get(student.id);
+    if (!placement) return [];
+    return [{ ...student, grade_level: placement.grade_level, classroom: placement.classroom }];
+  });
+  const rosterRooms = roomsInRoster(source);
+  if (rosterRooms.length === 1 && !selectedRoom()) autoSelectSingleRosterRoom(source);
+
+  const room = selectedRoom();
+  if (rosterRooms.length > 1 && !room) {
+    showAccessNote("วิชานี้มีนักเรียน " + rosterRooms.length + " ห้อง (" +
+      rosterRooms.map(item => item.label).join(" · ") + ") — เลือกห้องที่จะเช็คก่อน");
+    return null;
+  }
+  clearAccessNote();
+  if (!room || room.all) return placedRoster;
+  return placedRoster.filter(student =>
+    student.grade_level === room.grade_level && student.classroom === room.classroom
+  );
+}
+
+function dailyRoomLookup() {
+  const out = new Map();
+  for (const [studentId, room] of (dailyPrefill?.roomByStudent || new Map())) {
+    out.set(elDate.value + "\u0000" + studentId, room);
+  }
+  return out;
+}
+
+function sessionRooms(session) {
+  return attendanceSessionRooms(session, dailyRoomLookup(), placementByStudent);
+}
+
+function sessionRoomText(session) {
+  const rooms = sessionRooms(session);
+  if (rooms.length === 0) return "ไม่ระบุห้อง";
+  if (rooms.length === 1) return rooms[0].label;
+  return "ทุกห้อง";
+}
+
+function sessionContainsSelectedRoom(session) {
+  const room = selectedRoom();
+  if (!room || room.all) return true;
+  const value = roomValue(room.grade_level, room.classroom);
+  return sessionRooms(session).some(item => roomValue(item.grade_level, item.classroom) === value);
+}
 
 // ตั้งวันที่เริ่มต้นเป็นวันนี้ (ตามเวลาเครื่อง ไม่ใช้ toISOString เพราะจะเพี้ยนเรื่อง timezone)
 function todayStr() {
@@ -477,7 +594,7 @@ async function loadSubjects() {
 
   fillYearOptions();
   applySubjectFilter();
-  loadClassroomsByGrade(elFilterGrade.value);
+  await loadClassroomsByGrade(elFilterGrade.value, elFilterYear.value);
 }
 
 // ---------- เติมตัวเลือกปีการศึกษาจากวิชาที่มีจริง แล้วตั้งค่าเป็นปีที่เลือกไว้ (จำข้ามหน้า) ----------
@@ -509,17 +626,23 @@ function applySubjectFilter() {
   fillSelect(elSubject, filtered, subjectLabel, "— เลือกวิชา (" + filtered.length + " วิชา) —");
 }
 // เปลี่ยนปี = จำไว้ให้ทุกหน้าใช้ปีเดียวกัน (localStorage) แล้วกรองใหม่
-elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
-elFilterGrade.addEventListener("change", () => {
+elFilterYear.addEventListener("change", async () => {
+  setActiveYear(elFilterYear.value);
   applySubjectFilter();
+  await loadClassroomsByGrade(elFilterGrade.value, elFilterYear.value);
   elSubject.dispatchEvent(new Event("change"));
-  loadClassroomsByGrade(elFilterGrade.value);
+});
+elFilterGrade.addEventListener("change", async () => {
+  applySubjectFilter();
+  await loadClassroomsByGrade(elFilterGrade.value, elFilterYear.value);
+  elSubject.dispatchEvent(new Event("change"));
 });
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 
 elSubject.addEventListener("change", async () => {
   hideStudents();
   clearAccessNote();
+  clearPlacementNote();
   elMakeupCard.style.display = "none";
   btnLoad.disabled = false;
   pickedSubject = elSubject.value ? allSubjects.find(s => s.id === elSubject.value) || null : null;
@@ -531,6 +654,7 @@ elSubject.addEventListener("change", async () => {
     elFieldPeriods.style.display = "block";
     return;
   }
+  await loadClassroomsByGrade(pickedSubject.grade_level, pickedSubject.year || elFilterYear.value);
 
   if (pickedSubject.subject_type === "บูรณาการ") {
     // วิชาบูรณาการ: จำนวนคาบกรอกรายวิชาย่อย (ซ่อนช่องกลาง) — ติ๊กวิชาย่อยก่อนถึงโหลดรายชื่อได้
@@ -556,6 +680,8 @@ elSubject.addEventListener("change", async () => {
       btnLoad.disabled = true;
       return;
     }
+    await ensurePlacements(pickedSubject.year || elFilterYear.value);
+    autoSelectSingleRosterRoom(roster);
     await refreshMakeup();
   }
 });
@@ -589,6 +715,9 @@ async function loadMemberOptions(integratedId) {
     m.roster = roster;
     m.studentCount = roster.length;
   }
+  await ensurePlacements(pickedSubject?.year || elFilterYear.value);
+  const combinedRoster = [...new Map(memberSubjects.flatMap(member => member.roster || []).map(student => [student.id, student])).values()];
+  autoSelectSingleRosterRoom(combinedRoster);
 
   elMemberList.innerHTML = "";
   for (const m of memberSubjects) {
@@ -684,7 +813,7 @@ function writeCurrentPeriods(v) {
 }
 
 // ---------- กดโหลดรายชื่อ ----------
-btnLoad.addEventListener("click", async () => {
+async function loadRosterFromSelection() {
   if (!pickedSubject) { showToast("เลือกวิชาก่อน", false); return; }
   if (!elDate.value) { showToast("เลือกวันที่ก่อน", false); return; }
 
@@ -720,112 +849,76 @@ btnLoad.addEventListener("click", async () => {
   } finally {
     btnLoad.disabled = false;
   }
-});
+}
+btnLoad.addEventListener("click", loadRosterFromSelection);
 
 // ---------- อัปเดตตัวเลือกห้องตามชั้นที่เลือก ----------
-async function loadClassroomsByGrade(grade) {
+async function loadClassroomsByGrade(grade, year) {
   const currentVal = elClassroom.value;
   elClassroom.innerHTML = '<option value="">— กำลังโหลดห้อง... —</option>';
-
-  let allRooms = new Set();
-  let page = 0;
-  const pageSize = 1000;
-  let hasError = false;
-  let errMsg = "";
-  let totalDataFetched = 0;
-
-  while (true) {
-    const { data, error } = await sb.from("students")
-      .select("classroom, grade_level")
-      .range(page * pageSize, (page + 1) * pageSize - 1);
-
-    if (error) {
-      hasError = true;
-      errMsg = error.message;
-      break;
-    }
-    if (!data || data.length === 0) break;
-
-    totalDataFetched += data.length;
-    data.forEach(d => {
-      if (d.classroom && d.classroom.trim() !== "") {
-        if (!grade) {
-          allRooms.add(d.classroom);
-        } else {
-          if (d.grade_level && d.grade_level.trim() === grade) {
-            allRooms.add(d.classroom);
-          } else {
-            const normClass = d.classroom.replace(/\s+/g, "");
-            const normGrade = grade.replace(/\s+/g, "");
-            const justNumber = normGrade.replace("ม.", "").replace("ป.", "");
-            if (normClass.includes(normGrade) || normClass.includes(justNumber + "/")) {
-              allRooms.add(d.classroom);
-            }
-          }
-        }
-      }
-    });
-
-    if (data.length < pageSize) break;
-    page++;
+  classroomByValue = new Map();
+  if (!grade || !year) {
+    elClassroom.innerHTML = '<option value="">— เลือกปีและชั้นก่อน —</option>';
+    elClassroom.disabled = true;
+    acceptedClassroomValue = "";
+    return;
   }
-
-  if (hasError) {
-    elClassroom.innerHTML = `<option value="">— Error: ${errMsg} —</option>`;
+  try {
+    await ensurePlacements(year);
+  } catch (error) {
+    elClassroom.innerHTML = '<option value="">— ' + escapeHtml(error.message) + ' —</option>';
     elClassroom.disabled = true;
     return;
   }
-
-  const sortedRooms = [...allRooms].sort();
-
-  if (sortedRooms.length === 0) {
-    elClassroom.innerHTML = `<option value="">— ไม่มีห้องของ ${grade} (หาจาก ${totalDataFetched} คน) —</option>`;
+  const gradeRooms = roomsFromPlacements(placements, year).filter(room => room.grade_level === grade);
+  if (gradeRooms.length === 0) {
+    elClassroom.innerHTML = '<option value="">— ยังไม่มีห้องของ ' + escapeHtml(grade) + ' ในปีนี้ —</option>';
     elClassroom.disabled = true;
+    acceptedClassroomValue = "";
     return;
   }
 
-  elClassroom.innerHTML = '<option value="">— ทุกห้อง —</option>';
+  elClassroom.innerHTML = '<option value="">— เลือกห้องที่จะเช็ค —</option>' +
+    '<option value="' + ALL_ROOMS_VALUE + '">— ทุกห้อง —</option>';
   elClassroom.disabled = false;
-  sortedRooms.forEach(c => {
+  for (const room of gradeRooms) {
+    const value = roomValue(room.grade_level, room.classroom);
+    const item = { ...room, value, label: attendanceRoomLabel(room.grade_level, room.classroom) };
+    classroomByValue.set(value, item);
     const opt = document.createElement("option");
-    opt.value = c; opt.textContent = c;
+    opt.value = value;
+    opt.textContent = item.label;
     elClassroom.appendChild(opt);
-  });
-
-  if (sortedRooms.includes(currentVal)) {
-    elClassroom.value = currentVal;
   }
+
+  if (gradeRooms.length === 1) {
+    elClassroom.value = roomValue(gradeRooms[0].grade_level, gradeRooms[0].classroom);
+  } else if (currentVal === ALL_ROOMS_VALUE || classroomByValue.has(currentVal)) {
+    elClassroom.value = currentVal;
+  } else {
+    elClassroom.value = "";
+  }
+  acceptedClassroomValue = elClassroom.value;
 }
 
-elClassroom.addEventListener("change", () => {
-  const selected = elClassroom.value;
-  const rows = elStudentList.querySelectorAll(".student-row");
-  rows.forEach(row => {
-    if (!selected || row.dataset.classroom === selected) {
-      row.style.display = "flex"; // student-row is display:flex in CSS
-    } else {
-      row.style.display = "none";
-    }
-  });
-
-  // อัปเดตเช็คบ็อกซ์วิชาย่อยสำหรับวิชาบูรณาการ
-  if (pickedSubject && pickedSubject.subject_type === "บูรณาการ") {
-    document.querySelectorAll(".member-cb").forEach(cb => {
-      const id = cb.dataset.id;
-      const m = memberSubjects.find(x => x.id === id);
-      if (m && m.roster) {
-        const hasStudentsInRoom = m.roster.some(s => !selected || s.classroom === selected);
-        cb.disabled = !hasStudentsInRoom;
-        if (!hasStudentsInRoom) cb.checked = false;
-
-        const labelRow = cb.closest("label.student-row");
-        if (labelRow) {
-          labelRow.style.cursor = hasStudentsInRoom ? "pointer" : "not-allowed";
-          labelRow.style.opacity = hasStudentsInRoom ? "1" : "0.6";
-        }
-      }
+elClassroom.addEventListener("change", async () => {
+  const nextValue = elClassroom.value;
+  const wasLoaded = elStudentsCard.style.display !== "none";
+  if (wasLoaded && rosterDirty) {
+    const discard = await window.crsAskConfirm({
+      title: "เปลี่ยนห้องที่เช็คชื่อ",
+      message: "ค่าสถานะที่แก้ไว้ยังไม่ได้บันทึก ถ้าเปลี่ยนห้องตอนนี้ค่าเหล่านั้นจะถูกทิ้ง",
+      okLabel: "ทิ้งค่าแล้วเปลี่ยนห้อง"
     });
+    if (!discard) {
+      elClassroom.value = acceptedClassroomValue;
+      return;
+    }
   }
+  acceptedClassroomValue = nextValue;
+  if (!wasLoaded) return;
+  hideStudents();
+  await loadRosterFromSelection();
 });
 
 // ---------- โหมดวิชาเดียว: โหลดครั้งทั้งหมดของวันนั้น (รองรับหลายครั้งต่อวัน) ----------
@@ -833,10 +926,18 @@ async function loadPlainSubjectDay() {
   const periods = readCurrentPeriods();
   if (!isValidPeriods(periods)) { showToast(PERIODS_HINT, false); return; }
 
-  students = await getRosterForSubject(currentSubjectId);
+  const rawRoster = await getRosterForSubject(currentSubjectId);
+  const filteredRoster = await filterRosterBySelectedClassroom(rawRoster);
+  if (filteredRoster === null) return;
+  if (filteredRoster.length === 0) {
+    showToast("ไม่มีนักเรียนในห้องที่เลือก", false);
+    return;
+  }
+  students = filteredRoster;
   const [, prefill] = await Promise.all([
     computeMissedMap([currentSubjectId]), // ข้อ 4: คาบขาดสะสมของวิชานี้
-    loadDailyPrefill(elDate.value, students)
+    // โหลดรายวันจาก roster เต็มครั้งเดียว เพื่อใช้ติดป้าย session ทุกห้องด้วย
+    loadDailyPrefill(elDate.value, rawRoster)
   ]);
   dailyPrefill = prefill;
   await refreshMakeup();
@@ -853,23 +954,25 @@ async function loadPlainSubjectDay() {
 async function loadBlockRoster() {
   const rosters = await Promise.all(blockMembers.map(m => getRosterForSubject(m.id)));
   const seen = new Map();
-  blockStudentSubjects = new Map();
-  for (let i = 0; i < blockMembers.length; i++) {
-    const subjId = blockMembers[i].id;
-    for (const s of rosters[i]) {
+  for (const roster of rosters) {
+    for (const s of roster) {
       seen.set(s.id, s);
-      if (!blockStudentSubjects.has(s.id)) blockStudentSubjects.set(s.id, new Set());
-      blockStudentSubjects.get(s.id).add(subjId);
     }
   }
-  students = [...seen.values()].sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
-
-  if (students.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
+  const mergedRoster = [...seen.values()].sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
+  if (mergedRoster.length === 0) { showToast("วิชาย่อยที่ติ๊กยังไม่มีนักเรียนลงทะเบียนเลย", false); return; }
+  const filteredRoster = await filterRosterBySelectedClassroom(mergedRoster);
+  if (filteredRoster === null) return;
+  if (filteredRoster.length === 0) {
+    showToast("ไม่มีนักเรียนในห้องที่เลือก", false);
+    return;
+  }
+  students = filteredRoster;
 
   // ข้อ 4: คาบขาดสะสม "รวม" ทุกวิชาย่อยที่ติ๊ก
   const [, prefill] = await Promise.all([
     computeMissedMap(blockMembers.map(m => m.id)),
-    loadDailyPrefill(elDate.value, students)
+    loadDailyPrefill(elDate.value, mergedRoster)
   ]);
   dailyPrefill = prefill;
   await refreshMakeup();
@@ -913,7 +1016,11 @@ async function loadBlockDaySessions() {
       const arr = bySubjectSessions.get(m.id);
       if (arr[r]) bySubject.set(m.id, arr[r]);
     }
-    blockRounds.push({ bySubject });
+    const records = [...bySubject.values()].flatMap(session => session.attendance_records || []);
+    const roomProbe = { session_date: elDate.value, attendance_records: records };
+    if (sessionContainsSelectedRoom(roomProbe)) {
+      blockRounds.push({ bySubject, roomProbe, originalIndex: r });
+    }
   }
   return true;
 }
@@ -930,7 +1037,8 @@ function renderBlockRoundChips() {
     const parts = blockMembers
       .filter(m => round.bySubject.has(m.id))
       .map(m => m.name + " " + fmtPeriods(round.bySubject.get(m.id).periods_covered) + " คาบ");
-    b.textContent = "ครั้งที่ " + (i + 1) + " · " + parts.join(" · ");
+    b.textContent = "ครั้งที่ " + (round.originalIndex + 1) + " · " +
+      sessionRoomText(round.roomProbe) + " · " + parts.join(" · ");
     b.addEventListener("click", () => selectBlockRound(i));
     elDaySessions.appendChild(b);
   });
@@ -949,7 +1057,7 @@ function renderBlockRoundChips() {
       const del = document.createElement("button");
       del.type = "button";
       del.className = "chip chip-danger";
-      del.textContent = "🗑 ลบครั้งที่ " + (blockEditRound + 1);
+      del.textContent = "🗑 ลบครั้งที่ " + (round.originalIndex + 1);
       del.addEventListener("click", () => deleteBlockRound(blockEditRound));
       elDaySessions.appendChild(del);
     } else if (inRound.length > 0) {
@@ -983,7 +1091,7 @@ async function deleteBlockRound(r) {
     lines.push("· " + m.name + " (" + fmtPeriods(sess.periods_covered) + " คาบ · นักเรียน " + (count || 0) + " คน)");
   }
 
-  let msg = "ลบการเช็คชื่อครั้งที่ " + (r + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n\n" +
+  let msg = "ลบการเช็คชื่อครั้งที่ " + (round.originalIndex + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n\n" +
     "วิชาที่จะถูกลบ:\n" + lines.join("\n") +
     "\n\nผลเช็คชื่อของนักเรียนในครั้งนี้จะถูกลบทั้งหมด และกู้คืนไม่ได้";
   if (blocked.length > 0) {
@@ -1002,7 +1110,7 @@ async function deleteBlockRound(r) {
     if (!data || data.length === 0) { showToast("ลบของ \"" + m.name + "\" ไม่สำเร็จ — ไม่มีสิทธิ์" + suffix, false); failed = true; break; }
     deleted++;
   }
-  if (!failed) showToast("ลบครั้งที่ " + (r + 1) + " แล้ว " + deleted + " วิชา", true);
+  if (!failed) showToast("ลบครั้งที่ " + (round.originalIndex + 1) + " แล้ว " + deleted + " วิชา", true);
 
   // คำนวณคาบขาดสะสมก่อนวาดรายชื่อเสมอ ไม่งั้นตัวเลขบนจอจะเป็นของก่อนลบ
   await computeMissedMap(blockMembers.map(m => m.id));
@@ -1027,7 +1135,10 @@ function selectBlockRound(r) {
       if (!(rec.student_id in scoreMap)) scoreMap[rec.student_id] = rec.status;
     }
   }
-  elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (r + 1) + ") ของวันนี้ — บันทึกแล้วจะอัปเดตทุกวิชาในครั้งนี้";
+  const selected = selectedRoom();
+  const roomOnly = selected && !selected.all && sessionRooms(round.roomProbe).length > 1;
+  elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (round.originalIndex + 1) + ") ของวันนี้" +
+    (roomOnly ? " — กำลังแก้เฉพาะห้อง " + selected.label + " · ข้อมูลห้องอื่นไม่ถูกเปลี่ยน" : " — บันทึกแล้วจะอัปเดตทุกวิชาในครั้งนี้");
   renderStudents(scoreMap, { usePrefill: false });
   renderBlockRoundChips();
 }
@@ -1064,12 +1175,14 @@ async function computeMissedMap(subjectIds) {
 async function refreshDaySessions() {
   const { data, error } = await sb
     .from("attendance_sessions")
-    .select("*")
+    .select("*, attendance_records(student_id,status)")
     .eq("subject_id", currentSubjectId)
     .eq("session_date", elDate.value)
     .order("created_at");
   if (error) { showToast("ตรวจสอบครั้งที่เช็คชื่อไม่สำเร็จ: " + error.message, false); return false; }
-  daySessions = data || [];
+  daySessions = (data || [])
+    .map((session, originalIndex) => ({ ...session, originalIndex }))
+    .filter(sessionContainsSelectedRoom);
   renderDaySessionChips();
   return true;
 }
@@ -1083,7 +1196,7 @@ function renderDaySessionChips() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "chip" + (currentSession && currentSession.id === s.id ? " active" : "");
-    b.textContent = "ครั้งที่ " + (i + 1) + " · " + fmtPeriods(s.periods_covered) + " คาบ";
+    b.textContent = "ครั้งที่ " + (s.originalIndex + 1) + " · " + sessionRoomText(s);
     b.addEventListener("click", () => selectDaySession(s));
     elDaySessions.appendChild(b);
   });
@@ -1099,12 +1212,13 @@ function renderDaySessionChips() {
   //  และบนมือถือกดพลาดง่ายมากสำหรับงานที่ย้อนกลับไม่ได้)
   if (currentSession) {
     const idx = daySessions.findIndex(s => s.id === currentSession.id);
+    const originalIndex = currentSession.originalIndex ?? idx;
     if (canDeleteSession(currentSubject)) {
       const del = document.createElement("button");
       del.type = "button";
       del.className = "chip chip-danger";
-      del.textContent = "🗑 ลบครั้งที่ " + (idx + 1);
-      del.addEventListener("click", () => deleteCurrentSession(idx));
+      del.textContent = "🗑 ลบครั้งที่ " + (originalIndex + 1);
+      del.addEventListener("click", () => deleteCurrentSession(originalIndex));
       elDaySessions.appendChild(del);
     } else if (coveredSubjectIds.has(currentSubjectId)) {
       const note = document.createElement("div");
@@ -1153,14 +1267,12 @@ async function deleteCurrentSession(idx) {
 async function selectDaySession(s) {
   currentSession = s;
   writeCurrentPeriods(fmtPeriods(s.periods_covered));
-  const { data: records, error } = await sb
-    .from("attendance_records")
-    .select("student_id, status")
-    .eq("session_id", s.id);
-  if (error) { showToast("โหลดผลเช็คชื่อเดิมไม่สำเร็จ", false); return; }
   const scoreMap = {};
-  for (const r of (records || [])) scoreMap[r.student_id] = r.status;
-  elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (daySessions.indexOf(s) + 1) + ") ของวันนี้";
+  for (const r of (s.attendance_records || [])) scoreMap[r.student_id] = r.status;
+  const selected = selectedRoom();
+  const roomOnly = selected && !selected.all && sessionRooms(s).length > 1;
+  elSessionNote.textContent = "กำลังแก้ไขครั้งเดิม (ครั้งที่ " + (s.originalIndex + 1) + ") ของวันนี้" +
+    (roomOnly ? " — กำลังแก้เฉพาะห้อง " + selected.label + " · ข้อมูลห้องอื่นไม่ถูกเปลี่ยน" : "");
   renderStudents(scoreMap, { usePrefill: false });
   renderDaySessionChips();
 }
@@ -1191,16 +1303,23 @@ function renderDailyPrefillNote(usePrefill) {
 
   const editingText = "— กำลังแก้ครั้งเดิม ค่าที่บันทึกไว้ไม่ถูกทับ";
   const lines = [];
+  const visibleIds = new Set(students.map(student => student.id));
+  const visibleAbsent = dailyPrefill.absent.filter(item => visibleIds.has(item.id));
+  const visibleLate = dailyPrefill.late.filter(item => visibleIds.has(item.id));
+  const visibleAnyChecked = students.some(student => dailyPrefill.roomByStudent?.has(student.id));
   if (dailyPrefill.failed) {
     lines.push("🔵 อ่านผลเช็ครายวันไม่สำเร็จ " + (usePrefill ? "— ตั้งต้นเป็น มา ทุกคน" : editingText));
-  } else if (!dailyPrefill.anyChecked) {
+  } else if (!visibleAnyChecked) {
     lines.push("🔵 ครูประจำชั้นยังไม่เช็คชื่อวันนี้ " + (usePrefill ? "— ตั้งต้นเป็น “มา” ทุกคนตามเดิม" : editingText));
   } else {
-    const checkedRoom = dailyPrefill.rooms.find(room => room.checked);
+    const selected = selectedRoom();
+    const checkedRoom = dailyPrefill.rooms.find(room =>
+      room.checked && (!selected || selected.all || room.room === selected.label)
+    ) || dailyPrefill.rooms.find(room => room.checked);
     let lead = "🔵 ครูประจำชั้นเช็คไว้";
     if (checkedRoom?.checkedAt && checkedRoom.checkedAt !== "—") lead += "เมื่อ " + escapeHtml(checkedRoom.checkedAt);
     if (checkedRoom?.by) lead += " โดย " + escapeHtml(checkedRoom.by);
-    if (dailyPrefill.absent.length === 0) {
+    if (visibleAbsent.length === 0) {
       lead += usePrefill ? " — มาครบทุกคน" : " — มาครบทุกคน · กำลังแก้ครั้งเดิม ค่าที่บันทึกไว้ไม่ถูกทับ";
     } else {
       lead += usePrefill ? " — ตั้งต้นให้แล้ว ตรวจก่อนบันทึก" : " " + editingText;
@@ -1208,13 +1327,13 @@ function renderDailyPrefillNote(usePrefill) {
     lines.push(lead);
 
     for (const status of ["ขาด", "ลาป่วย", "ลากิจ"]) {
-      const group = dailyPrefill.absent.filter(item => item.status === status);
+      const group = visibleAbsent.filter(item => item.status === status);
       if (group.length > 0) lines.push(escapeHtml(status) + ": " + shortNameList(group));
     }
-    if (dailyPrefill.late.length > 0) {
-      lines.push("มาสายตอนเช้า " + dailyPrefill.late.length + " คน " + (usePrefill ? "ตั้งเป็น “มา” ให้แล้ว" : "ค่าที่บันทึกไว้ไม่ถูกทับ"));
+    if (visibleLate.length > 0) {
+      lines.push("มาสายตอนเช้า " + visibleLate.length + " คน " + (usePrefill ? "ตั้งเป็น “มา” ให้แล้ว" : "ค่าที่บันทึกไว้ไม่ถูกทับ"));
     }
-    const missingCount = Math.max(0, students.length - dailyPrefill.byStudent.size);
+    const missingCount = students.filter(student => !dailyPrefill.byStudent.has(student.id)).length;
     if (missingCount > 0) {
       lines.push("ยังไม่มีผลเช็ครายวันของ " + missingCount + " คน " + (usePrefill ? "— ตั้งต้นเป็น “มา”" : editingText));
     }
@@ -1227,13 +1346,10 @@ function renderDailyPrefillNote(usePrefill) {
 // วาดรายชื่อนักเรียน + ช่องเลือกสถานะ (+ คาบขาดสะสมรายคน — ข้อ 4)
 function renderStudents(scoreMap, { usePrefill = false } = {}) {
   elStudentList.innerHTML = "";
+  rosterDirty = false;
   for (const stu of students) {
     const row = document.createElement("div");
     row.className = "student-row";
-    row.dataset.classroom = stu.classroom || "";
-    if (elClassroom.value && stu.classroom !== elClassroom.value) {
-      row.style.display = "none";
-    }
 
     const missed = missedMap[stu.id] || 0;
     const missedText = missed > 0
@@ -1245,7 +1361,7 @@ function renderStudents(scoreMap, { usePrefill = false } = {}) {
     info.innerHTML =
       "<div class='name'>" + escapeHtml(stu.name) + "</div>" +
       "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
-      (stu.classroom ? " · " + escapeHtml(stu.classroom) : "") + missedText + "</div>";
+      (stu.classroom ? " · " + escapeHtml(attendanceRoomLabel(stu.grade_level, stu.classroom)) : "") + missedText + "</div>";
 
     const sel = document.createElement("select");
     sel.dataset.studentId = stu.id;
@@ -1275,6 +1391,7 @@ function renderStudents(scoreMap, { usePrefill = false } = {}) {
 // เมื่อครูตรวจและเปลี่ยนค่าเอง เอาไฮไลต์ "ค่าจากรายวัน" ออกทันที
 elStudentList.addEventListener("change", event => {
   if (event.target.matches("select[data-student-id]")) {
+    rosterDirty = true;
     event.target.closest(".student-row")?.classList.remove("from-daily");
   }
 });
@@ -1333,6 +1450,7 @@ async function saveSingleSubject() {
   if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
 
   showToast("บันทึกแล้ว " + rows.length + " คน", true);
+  rosterDirty = false;
   elSessionNote.textContent = "บันทึกล่าสุดแล้ว — แก้ต่อได้ถ้าจำเป็น";
   await refreshDaySessions(); // ครั้งใหม่ที่เพิ่งสร้างจะโผล่เป็นปุ่มให้สลับได้
 }
@@ -1359,11 +1477,8 @@ async function saveBlock() {
 
   let done = 0;
   for (const m of blockMembers) {
-    // กรองเฉพาะสถานะของนักเรียนที่มีรายชื่อลงทะเบียนในวิชาย่อยนี้
-    const validStatuses = statuses.filter(r =>
-      blockStudentSubjects.has(r.student_id) && blockStudentSubjects.get(r.student_id).has(m.id)
-    );
-    if (validStatuses.length === 0) continue; // วิชานี้ไม่มีนักเรียน ข้าม
+    // roster ถูกรวมและกรองห้องก่อนมาถึงจุดนี้ ทุกวิชาย่อยจึงต้องบันทึกเด็กชุดเดียวกัน
+    const validStatuses = statuses;
 
     let sessionId;
     const existing = editing ? round.bySubject.get(m.id) : null;
@@ -1405,6 +1520,7 @@ async function saveBlock() {
   }
 
   showToast((editing ? "อัปเดตแล้ว " : "บันทึกแล้ว ") + statuses.length + " คน ใน " + done + " วิชาย่อย", true);
+  rosterDirty = false;
   // อัปเดตคาบขาดสะสม + โหลดครั้งที่ใหม่ (ไม่ซ่อนรายชื่อ — เห็นครั้งที่แล้ว ไม่ต้องกันกดซ้ำ)
   await computeMissedMap(blockMembers.map(m => m.id));
   const wasEditing = editing;
@@ -1425,10 +1541,10 @@ function hideStudents() {
   elDaySessions.innerHTML = "";
   blockMode = false;
   blockMembers = [];
-  blockStudentSubjects.clear();
   blockRounds = [];
   blockEditRound = null;
   missedMap = {};
+  rosterDirty = false;
 }
 
 function escapeHtml(s) {

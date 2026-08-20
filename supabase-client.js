@@ -1336,6 +1336,14 @@ export async function fetchAllRows(makeQuery, orderColumn = "id") {
 // แต่สูตรคิด "คาบขาด" ใช้แค่ 3 สถานะนี้ — 'มา'/'มาสาย' คิดเป็นขาด 0 คาบอยู่แล้ว และ
 // computeMissedPeriods() ข้ามคนที่ "ไม่มีแถว" ด้วยผลเท่ากันเป๊ะ จึงกรองทิ้งตั้งแต่ฝั่งเซิร์ฟเวอร์ได้
 // (ปกติ 'มา' เป็นสัดส่วนมากที่สุดของตาราง — ตัดออกแล้วข้อมูลที่ต้องโหลดลดลงมาก)
+//
+// 🪤 เคยถูกถอดตัวกรองนี้ออกชั่วคราว (2026-08-20) ตอนทำเช็คชื่อแยกห้อง เพราะการ์ด
+// "ความคืบหน้าการเช็คชื่อ" จะคิดคาบเฉลี่ยต่อห้อง จึงต้องเห็น record ของทุกคน
+// วัดจริงแล้วโหลดจาก 1,959 เป็น 17,323 แถว (0.52 → 1.13 วิ) และโตตามทั้งปี
+// **ผู้ใช้เคาะให้ถอดเรื่องห้องออกจากหน้าภาพรวมทั้งหมด** — หน้านี้มีไว้ดูว่าเด็กคนไหน
+// ขาดเยอะใกล้ มส. ซึ่งเป็นตัวเลขรายคน ไม่เกี่ยวกับห้องเลย (computeMissedPeriods()
+// ไม่มีคำว่าห้องในสูตร) ส่วนการ์ดความคืบหน้าเป็นแค่เครื่องมือตามครูที่ยังไม่เริ่มเช็คชื่อ
+// → กลับมาใช้ผลรวมคาบตรง ๆ เหมือนเดิม **ห้ามกลับไปดึง record ทุกสถานะเพื่อหาห้องอีก**
 const ABSENCE_STATUSES = ["ขาด", "ลาป่วย", "ลากิจ"];
 
 async function fetchAttendanceSessions(subjectIds) {
@@ -1381,7 +1389,6 @@ export async function loadAcademicOverviewData(year) {
   for (const res of [enrollRes, memberRes, sessionRes, makeupRes, remarkRes, yearlessRes]) {
     if (res.error) throw new Error("โหลดข้อมูลภาพรวมไม่สำเร็จ: " + res.error.message);
   }
-
   return {
     year,
     subjects,
@@ -1394,6 +1401,42 @@ export async function loadAcademicOverviewData(year) {
     yearlessSubjects: yearlessRes.data || [],
     activeStudents: activeStudents || []
   };
+}
+
+function attendanceRoomKey(grade, classroom) {
+  const g = String(grade || "").trim();
+  const c = String(classroom || "").trim();
+  return g && c ? g + "\u0000" + c : "";
+}
+
+export function attendanceRoomLabel(grade, classroom) {
+  const g = String(grade || "").trim();
+  const c = String(classroom || "").trim();
+  if (!g && !c) return "ไม่ระบุห้อง";
+  if (!g) return c;
+  if (!c) return g;
+  return c.startsWith(g) ? c : g + "/" + c;
+}
+
+// ห้องของ session อ่านจากห้องรายวันของวันนั้นก่อน แล้วค่อยถอยไป placement ของปี
+// dailyRoomByDateStudent ใช้คีย์ `${session_date}\0${student_id}` · placementByStudent ใช้ student_id
+export function attendanceSessionRooms(session, dailyRoomByDateStudent, placementByStudent) {
+  const rooms = new Map();
+  const date = String(session?.session_date || "");
+  for (const record of (session?.attendance_records || [])) {
+    const daily = dailyRoomByDateStudent?.get(date + "\u0000" + record.student_id);
+    const placement = placementByStudent?.get(record.student_id);
+    const source = attendanceRoomKey(daily?.grade_level, daily?.classroom) ? daily : placement;
+    const key = attendanceRoomKey(source?.grade_level, source?.classroom);
+    if (!key || rooms.has(key)) continue;
+    rooms.set(key, {
+      key,
+      grade_level: String(source.grade_level || "").trim(),
+      classroom: String(source.classroom || "").trim(),
+      label: attendanceRoomLabel(source.grade_level, source.classroom)
+    });
+  }
+  return [...rooms.values()].sort((a, b) => a.label.localeCompare(b.label, "th", { numeric: true }));
 }
 
 // คำนวณล้วน — รับผลจาก loadAcademicOverviewData() แล้วสรุปเป็นข้อมูลพร้อมแสดงผล
@@ -1565,6 +1608,10 @@ export function buildAcademicOverview(raw, options = {}) {
   };
 
   // ---------- ความคืบหน้าการเช็คชื่อ (คาบที่เช็คไปแล้ว เทียบคาบทั้งรอบของวิชา) ----------
+  // ⛔ ห้ามเอา "ห้อง" มาเกี่ยวกับหน้านี้ (ผู้ใช้เคาะ 2026-08-20) — ดูเหตุผลเต็มที่คอมเมนต์
+  // ของ fetchAttendanceSessions() · การ์ดนี้เป็นเครื่องมือตามครูที่ยังไม่เริ่มเช็คชื่อ
+  // ไม่ใช่ตัวเลขที่ตัดสินเด็ก · วันที่วิชาไหนมีเด็ก 2 ห้องจริง ตัวเลขจะเกิน 100% ได้
+  // ซึ่งรับได้เพราะ readiness.gradesWithManyRooms เตือนอยู่แล้วว่าชั้นไหนมีห้องที่ 2
   const coverage = countableSubjects.map(subject => {
     const parts = subject.subject_type === "บูรณาการ" ? (membersOf.get(subject.id) || []) : [subject];
     let checked = 0, total = 0;
@@ -2199,6 +2246,7 @@ function emptyDailyPrefill(dateStr, failed = false) {
     dateStr: dateStr || "",
     anyChecked: false,
     byStudent: new Map(),
+    roomByStudent: new Map(),
     absent: [],
     late: [],
     rooms: [],
@@ -2249,6 +2297,7 @@ export async function loadDailyPrefill(dateStr, students) {
     }
 
     const byStudent = new Map();
+    const roomByStudent = new Map();
     const absent = [];
     const late = [];
     const roomMap = new Map();
@@ -2269,6 +2318,10 @@ export async function loadDailyPrefill(dateStr, students) {
       if (!row) continue;
 
       room.checked = true;
+      roomByStudent.set(student.id, {
+        grade_level: row.grade_level || "",
+        classroom: row.classroom || ""
+      });
       const effectiveAt = row.updated_at || row.recorded_at || "";
       if (!room._latestAt || effectiveAt > room._latestAt) {
         room._latestAt = effectiveAt;
@@ -2307,6 +2360,7 @@ export async function loadDailyPrefill(dateStr, students) {
       dateStr,
       anyChecked: rows.length > 0,
       byStudent,
+      roomByStudent,
       absent,
       late,
       rooms
