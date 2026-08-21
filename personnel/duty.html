@@ -73,6 +73,10 @@
   .roster-row .name { flex:1 1 180px; }
   .status { font-size:12px; color:var(--muted); }
   .status.good { color:var(--teal); } .status.bad { color:var(--danger); }
+  .swap-history { display:inline-flex; margin-top:4px; padding:2px 7px; border-radius:99px;
+                  background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; }
+  .swap-source { display:inline-flex; margin:4px 0 0 5px; padding:2px 7px; border-radius:99px;
+                 background:var(--amber-soft); color:var(--amber); font-size:12px; font-weight:600; }
   .add-row { display:flex; gap:8px; align-items:center; }
   .add-row select { flex:1; }
   .swap-grid { display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:end; }
@@ -109,7 +113,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260820-2"></script>
+    <script src="../app-shell.js?v=20260821-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -148,8 +152,9 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, personnelAccessDeniedHtml,
   loadWorkContext, computeDayStatus, getDutyTypes, getDutyPattern,
   saveDutyPattern, removeDutyPattern, saveDutyRosterEntry, removeDutyRosterEntry,
+  listDutySwaps, logHrDutySwap,
   generateDutyRosterFromPattern, bangkokNow, toDateStr, eachDate, isoWeekday
-} from "../supabase-client.js?v=20260820-3";
+} from "../supabase-client.js?v=20260821-2";
 
 const session = await requireAuth();
 if (session) {
@@ -175,9 +180,9 @@ if (session) {
     el("content").style.display = "";
     const today = toDateStr(bangkokNow());
     const THAI_DAY = { 1:"จันทร์", 2:"อังคาร", 3:"พุธ", 4:"พฤหัสบดี", 5:"ศุกร์" };
-    let ctx, dutyTypes = [], pattern = [], range, monthSync = null, swapState = null;
+    let ctx, dutyTypes = [], pattern = [], dutySwaps = [], range, monthSync = null, swapState = null;
     let holidayNames = new Map(), openDays = new Set();
-    let staffById = new Map(), typeByCode = new Map(), activeStaff = [];
+    let staffById = new Map(), typeByCode = new Map(), activeStaff = [], dutySwapByRosterKey = new Map();
     el("month").value = today.slice(0, 7);
 
     const monthRange = yearMonth => {
@@ -301,11 +306,16 @@ if (session) {
                 const staff = staffById.get(row.staff_id);
                 if (!staff) return "";
                 const status = dutyStatus(staff, date, type);
+                const swapHistory = dutySwapByRosterKey.get(date + "|" + type.code + "|" + staff.id);
+                const swapHistoryHtml = swapHistory
+                  ? `<span class="swap-history">สลับกับ ${esc(swapHistory.partner || "ไม่ระบุชื่อ")}</span>` +
+                    `<span class="swap-source">${swapHistory.source === "ฝ่ายบุคคล" ? "ฝ่ายบุคคลจัดให้" : "ครูสลับเอง"}</span>`
+                  : "";
                 const isSwapping = swapState?.date === date && swapState?.dutyType === type.code &&
                   swapState?.oldStaffId === staff.id;
-                return `<div class="roster-entry"><div class="roster-row"><span class="name">${esc(staff.full_name)}${row.note
+                return `<div class="roster-entry"><div class="roster-row"><span class="name">${esc(staff.full_name)}${row.note && !swapHistory
                     ? `<span class="field-note" style="display:block;overflow-wrap:anywhere">${esc(row.note)}</span>`
-                    : ""}</span>
+                    : ""}${swapHistoryHtml}</span>
                     ${status ? `<span class="status ${status.css}">${esc(status.text)}</span>` : ""}
                     <button class="ghost small" data-swap data-date="${date}" data-duty-type="${esc(type.code)}"
                       data-staff="${staff.id}">สลับ</button>
@@ -349,12 +359,28 @@ if (session) {
         if (holidayRes.error) throw new Error("โหลดชื่อวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
         monthSync = syncRes.data;
         holidayNames = new Map((holidayRes.data || []).map(row => [row.holiday_date, row.name]));
-        [ctx, pattern, dutyTypes] = await Promise.all([
-          loadWorkContext(range.from, range.to), getDutyPattern(), getDutyTypes(true)
+        let swapHistoryFailed = false;
+        [ctx, pattern, dutyTypes, dutySwaps] = await Promise.all([
+          loadWorkContext(range.from, range.to), getDutyPattern(), getDutyTypes(true),
+          // ประวัติการสลับเป็นป้ายประดับ — อ่านไม่ได้ก็ต้องจัดเวรต่อได้
+          listDutySwaps(range.from, range.to).catch(() => { swapHistoryFailed = true; return []; })
         ]);
         staffById = new Map(ctx.staff.map(staff => [staff.id, staff]));
         typeByCode = new Map(dutyTypes.map(type => [type.code, type]));
         activeStaff = ctx.staff.filter(staff => staff.is_active);
+        dutySwapByRosterKey = new Map();
+        for (const row of dutySwaps.filter(item => item.status === "ตอบรับแล้ว")) {
+          dutySwapByRosterKey.set(
+            `${row.duty_date}|${row.duty_type}|${row.to_staff_id}`,
+            { partner: row.from_staff?.full_name, source: row.source }
+          );
+          if (row.return_duty_date) {
+            dutySwapByRosterKey.set(
+              `${row.return_duty_date}|${row.return_duty_type}|${row.from_staff_id}`,
+              { partner: row.to_staff?.full_name, source: row.source }
+            );
+          }
+        }
         const attendanceType = dutyTypes.find(type => type.affects_attendance);
         el("attendance-rule").textContent = attendanceType
           ? `งานที่ผูกเกณฑ์เข้างาน: ${attendanceType.code} · ${timeLabel(attendanceType)}`
@@ -364,6 +390,9 @@ if (session) {
           : "เดือนนี้ยังไม่เคยสร้างจากรูปแบบ";
         renderPattern();
         renderDays();
+        if (swapHistoryFailed) {
+          toast("โหลดประวัติการสลับไม่สำเร็จ ป้าย “สลับกับ …” จึงไม่ขึ้นรอบนี้", true);
+        }
       } catch (error) {
         toast(error.message || "โหลดตารางเวรไม่สำเร็จ", true);
         el("days").innerHTML = '<div class="banner warn">โหลดข้อมูลไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
@@ -453,9 +482,18 @@ if (session) {
         try {
           await saveDutyRosterEntry(swapState.date, swapState.dutyType, newStaff.id, session.user.id);
           await removeDutyRosterEntry(swapState.date, swapState.dutyType, swapState.oldStaffId);
+          let historyLogged = true;
+          try {
+            await logHrDutySwap(
+              swapState.date, swapState.dutyType, swapState.oldStaffId, newStaff.id
+            );
+          } catch {
+            // เวรย้ายสำเร็จแล้ว ห้าม rollback เพียงเพราะประวัติบันทึกไม่สำเร็จ
+            historyLogged = false;
+          }
           swapState = null;
           await loadData();
-          toast("สลับเวรแล้ว");
+          toast(historyLogged ? "สลับเวรแล้ว" : "สลับเวรแล้ว แต่บันทึกประวัติไม่สำเร็จ", !historyLogged);
         } catch (error) {
           toast(error.message || "สลับเวรไม่สำเร็จ", true);
         } finally {

@@ -12,7 +12,7 @@
     --ink: #1f2a2e; --muted: #5f6b70; --line: #dfe4e3;
     --teal: #0f6e56; --teal-soft: #e1f5ee; --bg: #f7f8f7; --white: #ffffff;
     --danger: #a32d2d; --danger-soft: #fceaea;
-    --amber: #8a5a00; --amber-soft: #fff4df;
+    --amber: #93690f; --amber-soft: #faf1dd;
     --blue: #1f5aa8; --blue-soft: #e8f0fb; --slate: #718087; --slate-soft: #edf1f2;
   }
   * { box-sizing: border-box; }
@@ -93,6 +93,13 @@
                 background: var(--teal-soft); color: var(--teal); font-size: 13px; }
   .today-note.holiday { background: var(--slate-soft); color: var(--muted); }
   .today-note.warn { background: var(--amber-soft); color: var(--amber); }
+  .swap-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .swap-row:last-child { border-bottom: none; }
+  .swap-row b { display: block; overflow-wrap: anywhere; }
+  .swap-meta { color: var(--muted); font-size: 13.5px; }
+  .swap-badge { display: inline-flex; margin-top: 5px; padding: 2px 8px; border-radius: 99px;
+                background: var(--teal-soft); color: var(--teal); font-size: 12px; font-weight: 600; }
+  .muted-empty { color: var(--muted); text-align: center; padding: 18px 0; }
 
   @media (max-width: 440px) {
     .today-head { display: block; }
@@ -119,7 +126,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260820-2"></script>
+    <script src="../app-shell.js?v=20260821-1"></script>
   </header>
 
   <div class="card">
@@ -183,12 +190,19 @@
     <div id="today-people" class="today-people" hidden></div>
     <div class="today-note" id="today-status">กำลังเตรียมข้อมูล…</div>
   </div>
+
+  <div class="card">
+    <div class="section-title">การสลับเวรวันนี้</div>
+    <div id="today-duty-swaps"><div class="field-note">กำลังโหลด…</div></div>
+    <div class="field-note" id="pending-duty-swaps"></div>
+  </div>
 </div>
 
 <script type="module">
 import { sb, requireAuth, signOut, getLastSyncLog, checkDepartment, syncJibble,
          applyPersonnelMenuAccess,
-         loadWorkContext, computeDayStatus, bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260820-3";
+         loadWorkContext, computeDayStatus, listDutySwaps,
+         bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20260821-2";
 
 const session = await requireAuth();
 if (session) {
@@ -320,6 +334,48 @@ if (session) {
     }
   }
 
+  const dutyTimeLabel = type => {
+    const start = String(type?.start_time || "").slice(0, 5);
+    const end = String(type?.end_time || "").slice(0, 5);
+    if (!start) return "ยังไม่ได้กำหนดเวลา";
+    return end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
+  };
+
+  async function renderTodayDutySwaps(today, ctx) {
+    try {
+      const [todayRows, upcomingRows] = await Promise.all([
+        listDutySwaps(today, today),
+        listDutySwaps(today, null)
+      ]);
+      const typeByCode = new Map((ctx.dutyTypes || []).map(type => [type.code, type]));
+      const dateLabel = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+        day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+      });
+      const accepted = todayRows.filter(row => row.status === "ตอบรับแล้ว" &&
+        (row.duty_date === today || row.return_duty_date === today));
+      el("today-duty-swaps").innerHTML = accepted.length ? accepted.map(row => {
+        const fromName = row.from_staff?.full_name || "ไม่ระบุชื่อ";
+        const toName = row.to_staff?.full_name || "ไม่ระบุชื่อ";
+        const source = row.source === "ฝ่ายบุคคล" ? "ฝ่ายบุคคลจัดให้" : "ครูสลับเอง";
+        const hasReturn = !!row.return_duty_date;
+        const returnMeta = hasReturn
+          ? `<div class="swap-meta">${esc(toName)} ให้: ${esc(dateLabel(row.return_duty_date))} · ${esc(row.return_duty_type)} · ${
+              esc(dutyTimeLabel(typeByCode.get(row.return_duty_type)))}</div>` : "";
+        return `<div class="swap-row"><b>${esc(fromName)} ${hasReturn ? "⇄" : "→"} ${esc(toName)}</b>
+          <div class="swap-meta">${hasReturn ? `${esc(fromName)} ให้: ` : ""}${esc(dateLabel(row.duty_date))} · ${esc(row.duty_type)} · ${esc(dutyTimeLabel(typeByCode.get(row.duty_type)))}</div>
+          ${returnMeta}
+          <span class="swap-badge">${esc(source)}</span></div>`;
+      }).join("") : '<div class="muted-empty">วันนี้ไม่มีการสลับเวร</div>';
+      const pending = upcomingRows.filter(row => row.status === "รอตอบรับ").length;
+      el("pending-duty-swaps").textContent = pending
+        ? `มีคำขอที่ยังรอตอบรับตั้งแต่วันนี้ไป ${pending} รายการ · เป็นเรื่องระหว่างครู ฝ่ายบุคคลไม่ต้องทำอะไร`
+        : "ไม่มีคำขอที่ยังรอตอบรับตั้งแต่วันนี้ไป · ฝ่ายบุคคลไม่ต้องทำอะไร";
+    } catch (error) {
+      el("today-duty-swaps").innerHTML = `<div class="banner warn">${esc(error.message || "โหลดการสลับเวรไม่สำเร็จ")}</div>`;
+      el("pending-duty-swaps").textContent = "";
+    }
+  }
+
   try {
     const today = toDateStr(bangkokNow());
     const dateLabel = new Date(today + "T00:00:00Z").toLocaleDateString("th-TH", {
@@ -363,6 +419,7 @@ if (session) {
         'ระบบจึงจะรู้จักรายชื่อ วันทำงาน และวันหยุด</div>';
     }
     renderToday(ctx, today, todayHoliday?.name || "", syncWarning);
+    await renderTodayDutySwaps(today, ctx);
 
     const log = await getLastSyncLog();
     el("sync-status").textContent = log

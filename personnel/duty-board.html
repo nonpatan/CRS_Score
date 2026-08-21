@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตารางเวรของทุกคน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { font-size:20px; font-weight:600; margin:4px 0; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
+  header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
+                border-radius:99px; border:1px solid var(--line); margin:0 0 24px; align-items:center; }
+  header .nav a { color:var(--muted); text-decoration:none; font-weight:500;
+                  padding:8px 16px; border-radius:99px; font-size:14px; }
+  header .nav a.active { background:var(--teal); color:var(--white); }
+  header .nav #btn-signout { margin-left:auto; color:var(--danger); background:#fff0f0; }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px; }
+  .section { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase;
+             letter-spacing:.03em; margin:4px 0 10px; }
+  .field { margin-bottom:14px; }
+  label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
+  input[type="month"] { width:100%; min-height:44px; font-family:inherit; font-size:16px;
+    padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    background:var(--white); color:var(--ink); }
+  input:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  .hint, .empty { color:var(--muted); font-size:14px; }
+  .empty { text-align:center; padding:18px 0; }
+  details.day { border:1px solid var(--line); border-radius:10px; margin-bottom:9px; overflow:hidden; }
+  details.day[open] { border-color:#b9d9cf; }
+  details.day summary { cursor:pointer; padding:11px 13px; font-weight:600; background:#f9fbfb; }
+  details.day.today summary { background:var(--teal-soft); }
+  details.day.dim { opacity:.68; background:var(--bg); }
+  .day-note { color:var(--muted); font-weight:400; }
+  .task-group { padding:12px; border-top:1px solid var(--line); }
+  .task-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .task-name { font-weight:600; }
+  .roster { display:grid; gap:6px; margin-top:8px; }
+  .roster-row { display:flex; gap:10px; align-items:flex-start; padding:8px 10px;
+                background:#fafcfc; border-radius:8px; min-width:0; }
+  .roster-row.mine { background:var(--teal-soft); border:1px solid #b9d9cf; }
+  .roster-row .name { min-width:0; flex:1; overflow-wrap:anywhere; font-weight:500; }
+  .badge { display:inline-flex; flex:0 0 auto; padding:2px 8px; border-radius:99px;
+           background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; }
+  .note { display:block; color:var(--muted); font-size:13px; font-weight:400; overflow-wrap:anywhere; }
+  .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  @media (max-width:600px) {
+    body { padding:10px; }
+    .task-head { display:block; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ตารางเวรของทุกคน</h1>
+    <p>ดูว่าใครเวรวันไหน เพื่อไปตกลงสลับเวรกันเองก่อนส่งคำขอ</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="duty-board.html">ตารางเวรของทุกคน</a>
+      <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260821-1"></script>
+  </header>
+
+  <main class="academic-content">
+    <div class="card">
+      <div class="section">เลือกเดือน</div>
+      <div class="field">
+        <label for="month">เดือน</label>
+        <input id="month" type="month">
+      </div>
+      <div class="hint">หน้านี้อ่านอย่างเดียว หากตกลงกันแล้วให้ส่งคำขอจากหน้า “ข้อมูลการทำงานของฉัน”</div>
+    </div>
+
+    <div class="card">
+      <div class="section">ตารางเวรรายวัน</div>
+      <div id="days"><div class="empty">กำลังโหลด…</div></div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
+  getDutyRoster, getDutyTypes, listStaffPicker, bangkokNow, toDateStr, eachDate, isoWeekday
+} from "../supabase-client.js?v=20260821-2";
+
+const session = await requireAuth();
+if (session) {
+  applyPersonnelMenuAccess(await checkDepartment("บุคลากร"));
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+
+  const today = toDateStr(bangkokNow());
+  el("month").value = today.slice(0, 7);
+  let me = null;
+
+  const monthRange = value => {
+    if (!/^\d{4}-\d{2}$/.test(value)) return null;
+    const [year, month] = value.split("-").map(Number);
+    return { from:value + "-01", to:new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10) };
+  };
+  const timeLabel = type => {
+    const start = String(type?.start_time || "").slice(0, 5);
+    const end = String(type?.end_time || "").slice(0, 5);
+    if (!start) return "ยังไม่ได้กำหนดเวลา";
+    return end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
+  };
+
+  async function loadBoard() {
+    const range = monthRange(el("month").value);
+    if (!range) return;
+    el("days").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    try {
+      const [roster, dutyTypes, people, scheduleRes, holidayRes, meRes] = await Promise.all([
+        getDutyRoster(range.from, range.to),
+        getDutyTypes(true),
+        listStaffPicker(),
+        sb.from("work_schedule").select("weekday,is_working_day"),
+        sb.from("work_holidays").select("holiday_date,name")
+          .gte("holiday_date", range.from).lte("holiday_date", range.to),
+        me ? Promise.resolve({ data:[me], error:null })
+          : sb.from("staff").select("id").eq("user_id", session.user.id).limit(1)
+      ]);
+      if (scheduleRes.error) throw new Error("โหลดตารางวันทำงานไม่สำเร็จ: " + scheduleRes.error.message);
+      if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+      if (meRes.error) throw new Error("โหลดข้อมูลของคุณไม่สำเร็จ: " + meRes.error.message);
+      me = me || (meRes.data || [])[0] || null;
+
+      const staffById = new Map(people.map(person => [person.id, person]));
+      const typeByCode = new Map(dutyTypes.map(type => [type.code, type]));
+      const schedule = new Map((scheduleRes.data || []).map(row => [Number(row.weekday), !!row.is_working_day]));
+      const holidays = new Map((holidayRes.data || []).map(row => [row.holiday_date, row.name]));
+      const rosterByDate = new Map();
+      for (const row of roster) {
+        if (!rosterByDate.has(row.duty_date)) rosterByDate.set(row.duty_date, []);
+        rosterByDate.get(row.duty_date).push(row);
+      }
+
+      el("days").innerHTML = eachDate(range.from, range.to).map(date => {
+        const d = new Date(date + "T00:00:00Z");
+        const label = d.toLocaleDateString("th-TH", {
+          weekday:"long", day:"numeric", month:"long", year:"numeric", timeZone:"UTC"
+        });
+        const rows = rosterByDate.get(date) || [];
+        const holidayName = holidays.get(date);
+        const isWorkingDay = schedule.get(isoWeekday(date)) === true;
+        const dim = !!holidayName || !isWorkingDay;
+        const dayNote = holidayName ? `วันหยุด — ${holidayName}` : !isWorkingDay ? "วันไม่ทำงาน" : "";
+        const groups = dutyTypes.map(type => ({
+          type,
+          rows:rows.filter(row => row.duty_type === type.code)
+        })).filter(group => group.rows.length);
+        const unknownCodes = [...new Set(rows.map(row => row.duty_type)
+          .filter(code => !typeByCode.has(code)))];
+        unknownCodes.forEach(code => groups.push({ type:{ code }, rows:rows.filter(row => row.duty_type === code) }));
+        const body = groups.length ? groups.map(group => `<section class="task-group">
+          <div class="task-head"><div><div class="task-name">${esc(group.type.code)}</div>
+            <div class="hint">${esc(timeLabel(group.type))}</div></div>
+            <span class="hint">${group.rows.length} คน</span></div>
+          <div class="roster">${group.rows.map(row => {
+            const person = staffById.get(row.staff_id);
+            const isMine = row.staff_id === me?.id;
+            return `<div class="roster-row${isMine ? " mine" : ""}"><span class="name">${esc(person?.full_name || "ไม่พบชื่อในทะเบียนปัจจุบัน")}
+              ${row.note ? `<span class="note">${esc(row.note)}</span>` : ""}</span>
+              ${isMine ? '<span class="badge">เวรของคุณ</span>' : ""}</div>`;
+          }).join("")}</div></section>`).join("")
+          : '<div class="empty">ยังไม่มีเวร</div>';
+        return `<details class="day${date === today ? " today" : ""}${dim ? " dim" : ""}"
+          ${date === today ? "open" : ""}>
+          <summary>${esc(label)} · ${rows.length} รายการ${date === today ? " · วันนี้" : ""}
+            ${dayNote ? `<span class="day-note"> · ${esc(dayNote)}</span>` : ""}</summary>${body}</details>`;
+      }).join("");
+    } catch (error) {
+      el("days").innerHTML = `<div class="banner warn">${esc(error.message || "โหลดตารางเวรไม่สำเร็จ กรุณาลองเปิดหน้าใหม่")}</div>`;
+    }
+  }
+
+  el("month").addEventListener("change", loadBoard);
+  await loadBoard();
+}
+</script>
+</body>
+</html>

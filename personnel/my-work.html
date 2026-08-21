@@ -10,11 +10,11 @@
 <style>
   :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
           --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
-          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; }
+          --amber:#93690f; --amber-soft:#faf1dd; --blue:#1f5aa8; }
   * { box-sizing:border-box; }
   body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
          margin:0; padding:16px; font-size:16px; line-height:1.6; }
-  .wrap { max-width:620px; margin:0 auto; }
+  .wrap { max-width:760px; margin:0 auto; }
   header h1 { font-size:20px; font-weight:600; margin:4px 0; }
   header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
   header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
@@ -34,6 +34,7 @@
   button { width:100%; font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
            border:none; border-radius:8px; cursor:pointer; }
   button.primary { background:var(--teal); color:var(--white); }
+  button.ghost { background:var(--teal-soft); color:var(--teal); }
   button.danger { background:var(--danger-soft); color:var(--danger); }
   button:disabled { opacity:.5; cursor:default; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
@@ -82,6 +83,18 @@
   .my-duty-row:last-child { border-bottom:none; }
   .my-duty-row b { display:block; }
   .my-duty-meta { color:var(--muted); font-size:14px; }
+  .duty-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .duty-actions button { width:auto; min-height:44px; }
+  .inline-swap { margin:10px 0 2px 12px; padding:12px; border-left:3px solid var(--teal);
+                 border-radius:0 8px 8px 0; background:var(--teal-soft); }
+  .swap-request { padding:12px 0; border-bottom:1px solid var(--line); }
+  .swap-request:last-child { border-bottom:none; }
+  .swap-request-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .swap-badge { display:inline-flex; padding:2px 8px; border-radius:99px; background:var(--teal-soft);
+                color:var(--teal); font-size:12px; font-weight:600; white-space:nowrap; }
+  .swap-badge.warn { background:var(--amber-soft); color:var(--amber); }
+  .swap-badge.closed { background:var(--bg); color:var(--muted); }
+  .swap-group + .swap-group { margin-top:16px; }
   .field-duty-row { padding:13px 0; border-bottom:1px solid var(--line); }
   .field-duty-row:last-child { border-bottom:none; }
   .field-duty-row b { display:block; }
@@ -119,7 +132,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260820-2"></script>
+    <script src="../app-shell.js?v=20260821-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -138,6 +151,12 @@
     <div class="card">
       <div class="section-title">เวรของฉัน</div>
       <div id="my-duty-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card" id="duty-swap-card">
+      <div class="section-title">คำขอสลับเวร</div>
+      <div id="duty-swap-message"></div>
+      <div id="duty-swap-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
     <div class="card" id="field-duty-card">
@@ -189,10 +208,12 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          loadWorkContext, summarizeStaff, WORK_STATUS_LABEL,
          loadLeaveContext, countLeaveDaysByType,
          getAcademicYears, getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
+         getDutyRoster, listStaffPicker, requestDutySwap, listDutySwapReturnOptions,
+         respondDutySwap, cancelDutySwap, listMyDutySwaps,
          getSetting, loadMyHomeroomAuditData, buildHomeroomAudit,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260820-3";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260821-2";
 
 const session = await requireAuth();
 if (session) {
@@ -230,6 +251,9 @@ if (session) {
     });
     let permitBusy = false;
     const reportBusy = new Set();
+    let myDutyRows = [], swapState = null, swapRequests = [], swapActionBusy = false;
+    let swapReturnRequestSeq = 0;
+    const dutyTypeByCode = new Map(dutyTypeCatalog.map(type => [type.code, type]));
 
     const escapeHtml = value => String(value ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -348,6 +372,100 @@ if (session) {
       }
     }
 
+    function renderMyDutyRows() {
+      el("my-duty-list").innerHTML = myDutyRows.length ? myDutyRows.map(row => {
+        const type = row.duty_types || {};
+        const date = new Date(row.duty_date + "T00:00:00Z")
+          .toLocaleDateString("th-TH", {
+            weekday:"short", day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+          });
+        const start = shortTime(type.start_time);
+        const end = shortTime(type.end_time);
+        const time = !start ? "ยังไม่ได้กำหนดเวลา"
+          : end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
+        const key = row.duty_date + "|" + row.duty_type;
+        const isChoosing = swapState?.key === key;
+        const hasPendingRequest = swapRequests.some(request => request.direction === "ส่ง" &&
+          request.status === "รอตอบรับ" && !request.is_expired &&
+          request.duty_date === row.duty_date && request.duty_type === row.duty_type);
+        const canRequest = row.duty_date > today &&
+          !String(row.note || "").startsWith("มาแทน") &&
+          dutyTypeByCode.get(row.duty_type)?.active === true && !hasPendingRequest;
+        const todayNote = row.duty_date === today
+          ? '<div class="field-note">วันนี้สลับเองไม่ได้แล้ว ถ้าติดธุระกะทันหันให้แจ้งฝ่ายบุคคล</div>'
+          : "";
+        let inline = "";
+        if (isChoosing) {
+          if (swapState.loading) {
+            inline = '<div class="inline-swap"><div class="field-note">กำลังโหลดรายชื่อ…</div></div>';
+          } else if (swapState.error) {
+            inline = `<div class="inline-swap"><div class="banner warn">${escapeHtml(swapState.error)}</div>
+              <div class="duty-actions"><button type="button" class="ghost" data-cancel-duty-swap>ยกเลิก</button></div></div>`;
+          } else if (!swapState.candidates.length) {
+            inline = '<div class="inline-swap"><div class="field-note">ไม่มีบุคลากรที่มีบัญชีและว่างจากงานนี้ในวันเดียวกันให้เลือก</div>' +
+              '<div class="duty-actions"><button type="button" class="ghost" data-cancel-duty-swap>ยกเลิก</button></div></div>';
+          } else {
+            const selectedPersonId = swapState.selectedPersonId || "";
+            let returnDutyField = "";
+            if (selectedPersonId && swapState.returnLoading) {
+              returnDutyField = '<div class="field-note">กำลังโหลดเวรของอีกฝ่าย…</div>';
+            } else if (selectedPersonId && swapState.returnError) {
+              returnDutyField = `<div class="banner warn">${escapeHtml(swapState.returnError)}</div>`;
+            } else if (selectedPersonId && swapState.returnLoaded && !swapState.returnOptions.length) {
+              returnDutyField = '<div class="field-note">อีกฝ่ายไม่มีเวรล่วงหน้าที่แลกกันได้ ส่งได้เฉพาะแบบยกเวรให้</div>';
+            } else if (selectedPersonId && swapState.returnOptions.length) {
+              returnDutyField = `<div class="field">
+                <label for="duty-swap-return">เวรของเขาที่คุณจะรับมาแลก</label>
+                <select id="duty-swap-return" data-duty-swap-return>
+                  <option value="">— ไม่แลก (ยกเวรให้เฉย ๆ) —</option>
+                  ${swapState.returnOptions.map(option => {
+                    const optionKey = `${option.duty_date}|${option.duty_type}`;
+                    const selected = optionKey === swapState.selectedReturnKey ? " selected" : "";
+                    return `<option value="${escapeHtml(optionKey)}"${selected}>${escapeHtml(
+                      `${fmt(option.duty_date)} · ${option.duty_type} · ${dutySwapTime(option)}`
+                    )}</option>`;
+                  }).join("")}
+                </select>
+              </div>`;
+            }
+            inline = `<div class="inline-swap">
+              <div data-duty-swap-inline-message></div>
+              <div class="field">
+                <label for="duty-swap-person">ยกเวรให้</label>
+                <select id="duty-swap-person" data-duty-swap-person>
+                  <option value="">— เลือกบุคลากร —</option>
+                  ${swapState.candidates.map(person => `<option value="${person.id}"${
+                    person.id === selectedPersonId ? " selected" : ""
+                  }>${escapeHtml(person.full_name)}</option>`).join("")}
+                </select>
+                <div class="field-note">คนที่ยังไม่มีบัญชีในระบบจะไม่อยู่ในรายการ เพราะกดยอมรับไม่ได้</div>
+              </div>
+              ${returnDutyField}
+              <div class="field">
+                <label for="duty-swap-reason">เหตุผล (ไม่บังคับ)</label>
+                <input id="duty-swap-reason" type="text" maxlength="300" autocomplete="off"
+                  placeholder="เช่น ติดภารกิจในวันดังกล่าว" value="${escapeHtml(swapState.reason || "")}">
+              </div>
+              <div class="duty-actions">
+                <button type="button" class="primary" data-submit-duty-swap>ส่งคำขอ</button>
+                <button type="button" class="ghost" data-cancel-duty-swap>ยกเลิก</button>
+              </div>
+            </div>`;
+          }
+        }
+        return `<div class="my-duty-row" data-duty-date="${row.duty_date}" data-duty-type="${escapeHtml(row.duty_type)}">
+          <b>${escapeHtml(date)} · ${escapeHtml(row.duty_type)}</b>
+          <div class="my-duty-meta">${escapeHtml(time)}${row.note ? ` · ${escapeHtml(row.note)}` : ""}</div>
+          ${todayNote}${canRequest && !isChoosing
+            ? '<div class="duty-actions"><button type="button" class="ghost" data-open-duty-swap>ขอสลับ</button></div>'
+            : ""}${inline}</div>`;
+      // ⚠️ ห้ามเขียนว่า "ยังไม่มีตารางเวรในระบบ" — หน้านี้พิสูจน์ไม่ได้ว่าเป็นเพราะยังไม่ได้สร้าง
+      // หรือสร้างแล้วแต่ไม่มีชื่อเรา จึงต้องพูดเท่าที่รู้จริงแล้วชี้ทางไปถามฝ่ายบุคคล
+      }).join("") : `<div class="muted-empty">ยังไม่มีเวรของคุณตั้งแต่วันนี้เป็นต้นไป<br>
+          <span class="field-note">ถ้าคิดว่าควรมี ให้สอบถามฝ่ายบุคคล — อาจยังไม่ได้สร้างตารางเวรของเดือนถัดไป</span>
+        </div>`;
+    }
+
     async function renderMyDuties() {
       const { data, error } = await sb.from("duty_roster")
         .select("duty_date,duty_type,note,duty_types!inner(code,start_time,end_time,sort_order)")
@@ -360,29 +478,286 @@ if (session) {
           '<div class="banner warn">โหลดเวรของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
         return;
       }
-      const rows = [...(data || [])].sort((a, b) =>
+      myDutyRows = [...(data || [])].sort((a, b) =>
         a.duty_date.localeCompare(b.duty_date) ||
         (Number(a.duty_types?.sort_order) || 0) - (Number(b.duty_types?.sort_order) || 0) ||
         a.duty_type.localeCompare(b.duty_type, "th"));
-      el("my-duty-list").innerHTML = rows.length ? rows.map(row => {
-        const type = row.duty_types || {};
-        const date = new Date(row.duty_date + "T00:00:00Z")
-          .toLocaleDateString("th-TH", {
-            weekday:"short", day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
-          });
-        const start = shortTime(type.start_time);
-        const end = shortTime(type.end_time);
-        const time = !start ? "ยังไม่ได้กำหนดเวลา"
-          : end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
-        return `<div class="my-duty-row"><b>${escapeHtml(date)} · ${escapeHtml(row.duty_type)}</b>
-          <div class="my-duty-meta">${escapeHtml(time)}${row.note ? ` · ${escapeHtml(row.note)}` : ""}</div></div>`;
-      // ⚠️ ห้ามเขียนว่า "ยังไม่มีตารางเวรในระบบ" — หน้านี้พิสูจน์ไม่ได้ว่าเป็นเพราะยังไม่ได้สร้าง
-      // หรือสร้างแล้วแต่ไม่มีชื่อเรา (RLS ให้ครูอ่าน duty_roster เฉพาะแถวตัวเอง และอ่าน
-      // duty_month_sync ไม่ได้เลย) จึงต้องพูดเท่าที่รู้จริงแล้วชี้ทางไปถามฝ่ายบุคคล
-      }).join("") : `<div class="muted-empty">ยังไม่มีเวรของคุณตั้งแต่วันนี้เป็นต้นไป<br>
-          <span class="field-note">ถ้าคิดว่าควรมี ให้สอบถามฝ่ายบุคคล — อาจยังไม่ได้สร้างตารางเวรของเดือนถัดไป</span>
-        </div>`;
+      renderMyDutyRows();
     }
+
+    function dutySwapTime(row, prefix = "") {
+      const start = shortTime(row[prefix + "start_time"]);
+      const end = shortTime(row[prefix + "end_time"]);
+      if (!start) return "ยังไม่ได้กำหนดเวลา";
+      return end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
+    }
+
+    function dutySwapLeg(row, prefix = "") {
+      const date = row[prefix + "duty_date"];
+      const type = row[prefix + "duty_type"];
+      return `${fmt(date)} · ${type} · ${dutySwapTime(row, prefix)}`;
+    }
+
+    function renderDutySwapItem(row, actions = "") {
+      const expired = row.is_expired === true;
+      const status = expired ? "หมดอายุแล้ว เพราะวันเวรมาถึงแล้ว" : row.status;
+      const sourceText = row.source === "ฝ่ายบุคคล" ? "ฝ่ายบุคคลจัดให้" : "ครูสลับเอง";
+      const hasReturn = !!row.return_duty_date;
+      const pair = `${row.from_name || "ไม่ระบุชื่อ"} ${hasReturn ? "⇄" : "→"} ${row.to_name || "ไม่ระบุชื่อ"}`;
+      const mainLeg = dutySwapLeg(row);
+      const returnLeg = hasReturn ? dutySwapLeg(row, "return_") : "";
+      const legs = row.direction === "ส่ง"
+        ? `<div class="my-duty-meta"><b>คุณให้:</b> ${escapeHtml(mainLeg)}</div>` +
+          (hasReturn ? `<div class="my-duty-meta"><b>คุณได้:</b> ${escapeHtml(returnLeg)}</div>` : "")
+        : `<div class="my-duty-meta"><b>คุณได้:</b> ${escapeHtml(mainLeg)}</div>` +
+          (hasReturn ? `<div class="my-duty-meta"><b>คุณให้:</b> ${escapeHtml(returnLeg)}</div>` : "");
+      const oneWay = hasReturn ? "" : '<div><span class="swap-badge closed">ยกเวรให้ (ไม่ได้แลกคืน)</span></div>';
+      const reason = row.reason ? `<div class="field-note">เหตุผล: ${escapeHtml(row.reason)}</div>` : "";
+      const hrNote = row.source === "ฝ่ายบุคคล"
+        ? '<div class="field-note">ฝ่ายบุคคลเป็นคนย้ายเวรให้ รายการนี้ไม่ต้องตอบกลับ</div>' : "";
+      const tone = row.status === "รอตอบรับ" && !expired ? "warn" : "closed";
+      return `<div class="swap-request" data-duty-swap-id="${row.id}">
+        <div class="swap-request-head"><div><b>${escapeHtml(pair)}</b>
+          ${legs}${oneWay}</div>
+          <span class="swap-badge ${tone}">${escapeHtml(status)}</span></div>
+        <div class="field-note">ที่มา: ${escapeHtml(sourceText)}</div>${reason}${hrNote}${actions}
+      </div>`;
+    }
+
+    function renderDutySwapRequests() {
+      const waiting = swapRequests.filter(row => row.source !== "ฝ่ายบุคคล" &&
+        row.direction === "รับ" && row.status === "รอตอบรับ" && !row.is_expired);
+      const sent = swapRequests.filter(row => row.source !== "ฝ่ายบุคคล" &&
+        row.direction === "ส่ง" && row.status === "รอตอบรับ" && !row.is_expired);
+      const activeIds = new Set([...waiting, ...sent].map(row => row.id));
+      const closed = swapRequests.filter(row => !activeIds.has(row.id));
+      const groups = [];
+      if (waiting.length) groups.push(`<div class="swap-group"><div class="section-title">รอคุณตอบ</div>${waiting.map(row =>
+        renderDutySwapItem(row, '<div class="duty-actions"><button type="button" class="primary" data-accept-duty-swap>รับเวรนี้</button>' +
+          '<button type="button" class="danger" data-reject-duty-swap>ปฏิเสธ</button></div>')).join("")}</div>`);
+      if (sent.length) groups.push(`<div class="swap-group"><div class="section-title">คำขอที่คุณส่ง</div>${sent.map(row =>
+        renderDutySwapItem(row, '<div class="duty-actions"><button type="button" class="danger" data-cancel-swap-request>ยกเลิกคำขอ</button></div>')).join("")}</div>`);
+      if (closed.length) groups.push(`<div class="swap-group"><div class="section-title">ที่ปิดไปแล้ว</div>${closed.map(row =>
+        renderDutySwapItem(row)).join("")}</div>`);
+      el("duty-swap-list").innerHTML = groups.join("") || '<div class="muted-empty">ยังไม่มีคำขอสลับเวร</div>';
+    }
+
+    async function loadDutySwapRequests() {
+      try {
+        swapRequests = await listMyDutySwaps();
+        renderDutySwapRequests();
+        if (myDutyRows.length) renderMyDutyRows();
+      } catch (error) {
+        el("duty-swap-list").innerHTML = `<div class="banner warn">${escapeHtml(error.message || "โหลดคำขอสลับเวรไม่สำเร็จ กรุณาลองเปิดหน้าใหม่")}</div>`;
+      }
+    }
+
+    function showDutySwapMessage(message, error = false) {
+      el("duty-swap-message").innerHTML = message
+        ? `<div class="banner ${error ? "warn" : "info"}">${escapeHtml(message)}</div>` : "";
+    }
+
+    el("my-duty-list").addEventListener("click", async event => {
+      if (event.target.closest("[data-cancel-duty-swap]")) {
+        swapState = null;
+        renderMyDutyRows();
+        return;
+      }
+
+      const open = event.target.closest("[data-open-duty-swap]");
+      if (open) {
+        const dutyRow = open.closest("[data-duty-date][data-duty-type]");
+        const row = myDutyRows.find(item => item.duty_date === dutyRow?.dataset.dutyDate &&
+          item.duty_type === dutyRow?.dataset.dutyType);
+        if (!row) return;
+        const key = row.duty_date + "|" + row.duty_type;
+        swapState = { key, row, loading:true, candidates:[], error:"", selectedPersonId:"",
+          returnOptions:[], selectedReturnKey:"", returnLoading:false, returnLoaded:false,
+          returnError:"", returnRequestToken:0, reason:"" };
+        renderMyDutyRows();
+        try {
+          const [people, rosterThatDay] = await Promise.all([
+            listStaffPicker(),
+            getDutyRoster(row.duty_date, row.duty_date)
+          ]);
+          if (swapState?.key !== key) return;
+          const assigned = new Set(rosterThatDay
+            .filter(item => item.duty_type === row.duty_type)
+            .map(item => item.staff_id));
+          swapState = {
+            key, row, loading:false, error:"",
+            candidates: people.filter(person => person.id !== me.id &&
+              person.has_login === true && !assigned.has(person.id))
+              .sort((a, b) => String(a.full_name || "").localeCompare(String(b.full_name || ""), "th")),
+            selectedPersonId:"", returnOptions:[], selectedReturnKey:"", returnLoading:false,
+            returnLoaded:false, returnError:"", returnRequestToken:0, reason:""
+          };
+        } catch (error) {
+          if (swapState?.key !== key) return;
+          swapState = { key, row, loading:false, candidates:[], error:error.message || "โหลดรายชื่อไม่สำเร็จ กรุณาลองใหม่" };
+        }
+        renderMyDutyRows();
+        return;
+      }
+
+      const submit = event.target.closest("[data-submit-duty-swap]");
+      if (!submit || !swapState || swapActionBusy) return;
+      const personId = el("my-duty-list").querySelector("[data-duty-swap-person]")?.value;
+      if (!personId) {
+        const message = el("my-duty-list").querySelector("[data-duty-swap-inline-message]");
+        message.textContent = "กรุณาเลือกบุคลากรที่จะยกเวรให้";
+        message.className = "banner warn";
+        el("my-duty-list").querySelector("[data-duty-swap-person]")?.focus();
+        return;
+      }
+      if (swapState.returnLoading) {
+        const message = el("my-duty-list").querySelector("[data-duty-swap-inline-message]");
+        message.textContent = "กรุณารอโหลดเวรของอีกฝ่ายให้เสร็จก่อน";
+        message.className = "banner warn";
+        return;
+      }
+      const reason = el("my-duty-list").querySelector("#duty-swap-reason")?.value.trim() || null;
+      const returnKey = el("my-duty-list").querySelector("[data-duty-swap-return]")?.value || "";
+      const separator = returnKey.indexOf("|");
+      const returnDate = separator >= 0 ? returnKey.slice(0, separator) : null;
+      const returnType = separator >= 0 ? returnKey.slice(separator + 1) : null;
+      swapActionBusy = true;
+      submit.disabled = true;
+      showDutySwapMessage("");
+      try {
+        await requestDutySwap(swapState.row.duty_date, swapState.row.duty_type, personId, reason,
+          returnDate, returnType);
+        swapState = null;
+        await Promise.all([renderMyDuties(), loadDutySwapRequests()]);
+        showDutySwapMessage("ส่งคำขอสลับเวรแล้ว รออีกฝ่ายตอบรับ");
+      } catch (error) {
+        const message = el("my-duty-list").querySelector("[data-duty-swap-inline-message]");
+        if (message) {
+          message.textContent = error.message || "ส่งคำขอสลับเวรไม่สำเร็จ";
+          message.className = "banner warn";
+        } else {
+          showDutySwapMessage(error.message || "ส่งคำขอสลับเวรไม่สำเร็จ", true);
+        }
+        submit.disabled = false;
+      } finally {
+        swapActionBusy = false;
+      }
+    });
+
+    el("my-duty-list").addEventListener("change", async event => {
+      const returnSelect = event.target.closest("[data-duty-swap-return]");
+      if (returnSelect && swapState) {
+        swapState.selectedReturnKey = returnSelect.value;
+        return;
+      }
+
+      const personSelect = event.target.closest("[data-duty-swap-person]");
+      if (!personSelect || !swapState) return;
+      const requestKey = swapState.key;
+      const staffId = personSelect.value;
+      swapState.reason = el("my-duty-list").querySelector("#duty-swap-reason")?.value || "";
+      swapState.selectedPersonId = staffId;
+      swapState.selectedReturnKey = "";
+      swapState.returnOptions = [];
+      swapState.returnLoaded = false;
+      swapState.returnError = "";
+      swapState.returnLoading = !!staffId;
+      const requestToken = ++swapReturnRequestSeq;
+      swapState.returnRequestToken = requestToken;
+      renderMyDutyRows();
+      if (!staffId) return;
+      try {
+        const options = await listDutySwapReturnOptions(staffId);
+        if (swapState?.key !== requestKey || swapState.selectedPersonId !== staffId ||
+            swapState.returnRequestToken !== requestToken) return;
+        swapState.returnOptions = options;
+        swapState.returnLoaded = true;
+        swapState.returnLoading = false;
+      } catch (error) {
+        if (swapState?.key !== requestKey || swapState.selectedPersonId !== staffId ||
+            swapState.returnRequestToken !== requestToken) return;
+        swapState.returnError = error.message || "โหลดเวรของอีกฝ่ายไม่สำเร็จ กรุณาเลือกคนใหม่อีกครั้ง";
+        swapState.returnLoading = false;
+      }
+      renderMyDutyRows();
+    });
+
+    el("duty-swap-card").addEventListener("click", async event => {
+      if (swapActionBusy) return;
+      const item = event.target.closest("[data-duty-swap-id]");
+      const row = swapRequests.find(entry => entry.id === item?.dataset.dutySwapId);
+      if (!row) return;
+
+      let action = "";
+      const accept = event.target.closest("[data-accept-duty-swap]");
+      if (accept) {
+        const type = dutyTypeByCode.get(row.duty_type);
+        const lines = [
+          `คุณจะได้เวร: ${dutySwapLeg(row)}`
+        ];
+        if (row.return_duty_date) lines.push(`คุณจะเสียเวร: ${dutySwapLeg(row, "return_")}`);
+        lines.push("หลังจากนี้ตารางเวรของทั้งสองฝ่ายจะเปลี่ยนทันที");
+        const start = shortTime(row.start_time);
+        if (type?.affects_attendance && start) {
+          lines.push(`วันนั้นคุณต้องลงเวลาไม่เกิน ${start} น. และขออนุญาตเข้าสายไม่ได้`);
+        } else if (type?.affects_attendance) {
+          lines.push("งานนี้ผูกเกณฑ์เข้างาน แต่ยังไม่ได้กำหนดเวลา กรุณาแจ้งฝ่ายบุคคลให้ตรวจสอบ");
+        }
+        if (me.exempt) {
+          lines.push("คุณได้รับการอนุโลมไม่ต้องลงเวลา ระบบจึงตรวจการเข้าเวรของคุณไม่ได้");
+        }
+        if (me.allowed_late_time) {
+          lines.push("คุณมีการอนุโลมเวลาเข้างาน แต่วันเวรจะไม่ใช้ค่านั้น");
+        }
+        if (!await window.crsAskConfirm({
+          title: "รับเวรนี้",
+          message: lines.join("\n"),
+          okLabel: "รับเวรนี้",
+          danger: false
+        })) return;
+        action = "accept";
+      }
+
+      const reject = event.target.closest("[data-reject-duty-swap]");
+      if (reject) {
+        if (!await window.crsAskConfirm({
+          title: "ปฏิเสธคำขอสลับเวร",
+          message: `${fmt(row.duty_date)} · ${row.duty_type}\nเวรจะยังเป็นของ ${row.from_name || "ผู้ขอ"} ตามเดิม`,
+          okLabel: "ปฏิเสธ",
+          danger: true
+        })) return;
+        action = "reject";
+      }
+
+      const cancel = event.target.closest("[data-cancel-swap-request]");
+      if (cancel) {
+        if (!await window.crsAskConfirm({
+          title: "ยกเลิกคำขอสลับเวร",
+          message: `${fmt(row.duty_date)} · ${row.duty_type}\nเวรจะยังเป็นของคุณตามเดิม`,
+          okLabel: "ยกเลิกคำขอ",
+          danger: true
+        })) return;
+        action = "cancel";
+      }
+      if (!action) return;
+
+      swapActionBusy = true;
+      event.target.closest("button").disabled = true;
+      showDutySwapMessage("");
+      try {
+        if (action === "accept") await respondDutySwap(row.id, true, null);
+        if (action === "reject") await respondDutySwap(row.id, false, null);
+        if (action === "cancel") await cancelDutySwap(row.id);
+        await Promise.all([renderMyDuties(), loadDutySwapRequests()]);
+        showDutySwapMessage(action === "accept" ? "รับเวรนี้แล้ว" :
+          action === "reject" ? "ปฏิเสธคำขอแล้ว" : "ยกเลิกคำขอแล้ว");
+      } catch (error) {
+        showDutySwapMessage(error.message || "ดำเนินการไม่สำเร็จ", true);
+        event.target.closest("button").disabled = false;
+      } finally {
+        swapActionBusy = false;
+      }
+    });
 
     async function renderMyFieldDuties() {
       const box = el("my-field-duty-list");
@@ -776,6 +1151,7 @@ if (session) {
     await renderMyCoverage();
     await renderMyHomeroomAudit();
     await renderMyDuties();
+    await loadDutySwapRequests();
     await renderMyFieldDuties();
     await renderMyProjects();
     await renderPermitCard();

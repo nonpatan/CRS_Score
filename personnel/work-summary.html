@@ -10,7 +10,7 @@
 <style>
   :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
           --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
-          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; --blue-soft:#e8f0fb; }
+          --amber:#93690f; --amber-soft:#faf1dd; --blue:#1f5aa8; --blue-soft:#e8f0fb; }
   * { box-sizing:border-box; }
   body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
          margin:0; padding:16px; font-size:16px; line-height:1.6; }
@@ -89,6 +89,12 @@
            pointer-events:none; transition:opacity .18s; z-index:60; }
   #toast.show { opacity:1; } #toast.err { background:var(--danger); }
   .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
+  .swap-row { padding:10px 0; border-bottom:1px solid var(--line); }
+  .swap-row:last-child { border-bottom:none; }
+  .swap-row b { display:block; overflow-wrap:anywhere; }
+  .swap-meta { color:var(--muted); font-size:13px; }
+  .swap-badge { display:inline-flex; margin-top:5px; padding:2px 8px; border-radius:99px;
+                background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
@@ -106,7 +112,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260820-2"></script>
+    <script src="../app-shell.js?v=20260821-1"></script>
   </header>
 
   <div class="card">
@@ -165,6 +171,11 @@
     </div>
 
     <div class="card">
+      <div class="section-title">การสลับเวรในช่วงที่เลือก</div>
+      <div id="duty-swaps"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card">
       <div class="section-title">รายคน</div>
       <div class="field">
         <input id="q" type="search" placeholder="ค้นหาชื่อ" autocomplete="off">
@@ -197,8 +208,8 @@ import { sb, requireAuth, signOut, checkDepartment, syncJibble,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          loadWorkContext, loadCoverageStats, summarizeAll, WORK_STATUS_LABEL,
          loadLeaveContext, countLeaveDaysByType,
-         getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
-         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260820-3";
+         getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes, listDutySwaps,
+         bangkokNow, toDateStr, eachDate } from "../supabase-client.js?v=20260821-2";
 
 const session = await requireAuth();
 if (session) {
@@ -228,6 +239,7 @@ if (session) {
     document.querySelector(".wrap").appendChild(box);
   } else {
   let years = [], summaries = [], ctx = null, coverageStats = new Map(), loadedRange = null;
+  let dutySwaps = [];
   let attendanceDutyName = "งานที่ผูกเกณฑ์เข้างาน";
 
   [years, attendanceDutyName] = await Promise.all([
@@ -356,6 +368,39 @@ if (session) {
   }
 
   // ---------- แสดงรายงาน ----------
+  function renderDutySwaps() {
+    const accepted = dutySwaps.filter(row => row.status === "ตอบรับแล้ว")
+      .sort((a, b) => a.duty_date.localeCompare(b.duty_date) ||
+        String(a.requested_at || "").localeCompare(String(b.requested_at || "")));
+    const typeByCode = new Map((ctx?.dutyTypes || []).map(type => [type.code, type]));
+    const timeLabel = code => {
+      const type = typeByCode.get(code);
+      const start = String(type?.start_time || "").slice(0, 5);
+      const end = String(type?.end_time || "").slice(0, 5);
+      if (!start) return "ยังไม่ได้กำหนดเวลา";
+      return end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
+    };
+    el("duty-swaps").innerHTML = accepted.length ? accepted.map(row => {
+      const date = new Date(row.duty_date + "T00:00:00Z").toLocaleDateString("th-TH", {
+        day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+      });
+      const fromName = row.from_staff?.full_name || "ไม่ระบุชื่อ";
+      const toName = row.to_staff?.full_name || "ไม่ระบุชื่อ";
+      const source = row.source === "ฝ่ายบุคคล" ? "ฝ่ายบุคคลจัดให้" : "ครูสลับเอง";
+      const hasReturn = !!row.return_duty_date;
+      const returnDetail = hasReturn ? (() => {
+        const returnDate = new Date(row.return_duty_date + "T00:00:00Z").toLocaleDateString("th-TH", {
+          day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+        });
+        return `<div class="swap-meta">${esc(toName)} ให้: ${esc(returnDate)} · ${esc(row.return_duty_type)} · ${esc(timeLabel(row.return_duty_type))}</div>`;
+      })() : "";
+      return `<div class="swap-row"><b>${esc(fromName)} ${hasReturn ? "⇄" : "→"} ${esc(toName)}</b>
+        <div class="swap-meta">${hasReturn ? `${esc(fromName)} ให้: ` : ""}${esc(date)} · ${esc(row.duty_type)} · ${esc(timeLabel(row.duty_type))}</div>
+        ${returnDetail}
+        <span class="swap-badge">${esc(source)}</span></div>`;
+    }).join("") : '<div class="muted-empty">ไม่มีการสลับเวรในช่วงที่เลือก</div>';
+  }
+
   async function loadReport(force) {
     const range = currentRange();
     if (!range) {
@@ -372,9 +417,10 @@ if (session) {
     try {
       await ensureSynced(range, force);
       el("status").textContent = "กำลังคำนวณ…";
-      [ctx, coverageStats] = await Promise.all([
+      [ctx, coverageStats, dutySwaps] = await Promise.all([
         loadWorkContext(range.from, range.to),
-        loadCoverageStats(range.from, range.to)
+        loadCoverageStats(range.from, range.to),
+        listDutySwaps(range.from, range.to)
       ]);
       loadedRange = range;
       summaries = summarizeAll(range.from, range.to, ctx);
@@ -401,6 +447,7 @@ if (session) {
       el("s-duty-missed").textContent = summaries.reduce((a, s) => a + s.dutyMissed, 0);
 
       renderAlerts(range);
+      renderDutySwaps();
       renderTable();
       el("report").style.display = "";
       el("detail-card").style.display = "none";

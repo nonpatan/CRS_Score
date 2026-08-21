@@ -3359,6 +3359,91 @@ export async function removeDutyRosterEntry(dutyDate, dutyType, staffId) {
   if (error) throw new Error("ถอดเวรไม่สำเร็จ: " + error.message);
 }
 
+// ============================================================
+// การสลับเวร (duty_swaps)
+// ------------------------------------------------------------
+// ⭐ ตารางเวรจริงยังมีใบเดียวคือ duty_roster — ตารางนี้คือใบคำขอ + ประวัติ
+// ครูเปลี่ยนเวรได้ทางเดียวคือผ่าน rpc ด้านล่าง (RLS ไม่ให้ครูเขียน duty_roster ตรง)
+// ข้อความ error จาก rpc เป็นภาษาไทยพร้อมแสดงให้ผู้ใช้อยู่แล้ว ห้ามกลืนทิ้ง
+// ============================================================
+export async function requestDutySwap(dutyDate, dutyType, toStaffId, reason = null,
+                                      returnDutyDate = null, returnDutyType = null) {
+  const { data, error } = await sb.rpc("request_duty_swap", {
+    p_duty_date: dutyDate,
+    p_duty_type: dutyType,
+    p_to_staff_id: toStaffId,
+    p_reason: reason || null,
+    p_return_duty_date: returnDutyDate || null,
+    p_return_duty_type: returnDutyType || null
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function listDutySwapReturnOptions(toStaffId) {
+  const { data, error } = await sb.rpc("duty_swap_return_options", {
+    p_to_staff_id: toStaffId
+  });
+  if (error) throw new Error("โหลดเวรของอีกฝ่ายไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function respondDutySwap(id, accept, note = null) {
+  const { data, error } = await sb.rpc("respond_duty_swap", {
+    p_id: id,
+    p_accept: !!accept,
+    p_note: note || null
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function cancelDutySwap(id) {
+  const { data, error } = await sb.rpc("cancel_duty_swap", { p_id: id });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function listMyDutySwaps() {
+  const { data, error } = await sb.rpc("my_duty_swaps");
+  if (error) throw new Error("โหลดคำขอสลับเวรไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+// ⛔ ครูทั่วไปเรียกตัวนี้ไม่ได้ (join staff) — หน้าครูต้องใช้ listMyDutySwaps() เท่านั้น
+export async function listDutySwaps(from, to) {
+  const select = "*,from_staff:staff!duty_swaps_from_staff_id_fkey(full_name)," +
+                 "to_staff:staff!duty_swaps_to_staff_id_fkey(full_name)";
+  const page = column => fetchAllRows(() => {
+    let query = sb.from("duty_swaps").select(select);
+    if (from) query = query.gte(column, from);
+    if (to) query = query.lte(column, to);
+    return query;
+  }, ["duty_date", "requested_at", "id"]);
+
+  const [main, ret] = await Promise.all([page("duty_date"), page("return_duty_date")]);
+  if (main.error) throw new Error("โหลดประวัติการสลับเวรไม่สำเร็จ: " + main.error.message);
+  if (ret.error) throw new Error("โหลดประวัติการสลับเวรไม่สำเร็จ: " + ret.error.message);
+  const byId = new Map([...(main.data || []), ...(ret.data || [])]
+    .map(row => [row.id, row]));
+  return [...byId.values()].sort((a, b) =>
+    a.duty_date.localeCompare(b.duty_date) ||
+    String(a.requested_at).localeCompare(String(b.requested_at)));
+}
+
+export async function logHrDutySwap(dutyDate, dutyType, fromStaffId, toStaffId) {
+  // trigger เติม responded_at / responded_by / requested_by ให้เอง ไม่ต้องส่ง
+  const { error } = await sb.from("duty_swaps").insert({
+    duty_date: dutyDate,
+    duty_type: dutyType,
+    from_staff_id: fromStaffId,
+    to_staff_id: toStaffId,
+    source: "ฝ่ายบุคคล",
+    status: "ตอบรับแล้ว"
+  });
+  if (error) throw new Error("บันทึกประวัติการสลับไม่สำเร็จ: " + error.message);
+}
+
 export async function generateDutyRosterFromPattern(from, to, createdBy) {
   const [pattern, existing, activeDutyTypes, scheduleRes, holidayRes] = await Promise.all([
     getDutyPattern(),
