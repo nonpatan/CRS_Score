@@ -28,11 +28,12 @@
   }
   .field { min-width:0; }
   label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
-  select {
+  select,
+  input[type="date"] {
     width:100%; min-width:0; padding:10px 12px; border:1px solid var(--line);
     border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
   }
-  select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  select:focus, input:focus { outline:2px solid var(--teal); outline-offset:1px; }
   button {
     min-height:40px; padding:8px 13px; border:0; border-radius:9px;
     font:inherit; font-weight:600; cursor:pointer;
@@ -105,6 +106,22 @@
         </div>
         <div class="summary-line" id="scope-note">กำลังโหลดข้อมูลห้อง…</div>
       </div>
+      <!-- ค่าตั้งของฝ่าย: อยู่ในเมนู "กำหนดค่า" เพราะเป็นการตั้งกติกา ไม่ใช่การอ่านรายงาน
+           (ผู้ใช้เคาะ 2026-08-20) · หน้ารายงานแสดงค่านี้อย่างเดียวแล้วลิงก์กลับมาที่นี่ -->
+      <section class="card" id="audit-start-card">
+        <div class="section-title">วันเริ่มกำชับการเช็คชื่อ</div>
+        <div id="audit-start-note" class="banner warn">กำลังโหลดค่าตั้ง…</div>
+        <div class="field">
+          <label for="audit-start">เริ่มนับตั้งแต่วันที่</label>
+          <input id="audit-start" type="date">
+        </div>
+        <button type="button" class="ghost" id="save-audit-start">บันทึกวันเริ่มกำชับ</button>
+        <div class="hint" style="margin-top:8px">
+          รายงานการเช็คชื่อจะไม่นับวันก่อนค่านี้ — ตั้งเป็นวันที่โรงเรียนเริ่มกำชับให้เช็คจริง
+          ไม่งั้นครูจะถูกนับว่าไม่เช็คในช่วงที่ยังไม่มีใครสั่ง
+        </div>
+      </section>
+
       <section id="placement-warning" class="card" hidden></section>
       <section class="card">
         <div class="banner info">
@@ -122,7 +139,7 @@
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, listStaffPicker, roomsFromPlacements,
-  bangkokNow, toDateStr
+  getProfile, getSetting, setSetting, bangkokNow, toDateStr
 } from "../supabase-client.js?v=20260820-3";
 
 const el = id => document.getElementById(id);
@@ -287,6 +304,53 @@ el("year-select").addEventListener("change", async () => {
   }
 });
 
+// ---------- วันเริ่มกำชับการเช็คชื่อ (ค่ากลางของฝ่าย — รายงานอ่านค่านี้ไปคิดตัวหาร) ----------
+// แก้ได้เฉพาะ admin เหมือนค่าตั้งอื่นในระบบ · คนอื่นเห็นค่าแต่แก้ไม่ได้
+const AUDIT_START_KEY = "daily_attendance_audit_start";
+
+function renderAuditStart(value, canEdit) {
+  const note = el("audit-start-note");
+  note.className = value ? "banner info" : "banner warn";
+  note.innerHTML = value
+    ? `<b>เริ่มกำชับตั้งแต่ ${esc(fmtThaiDate(value))}</b><br>รายงานจะไม่นับวันก่อนค่านี้`
+    : "<b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>รายงานจะใช้วันเริ่มปีการศึกษาชั่วคราว " +
+      "ซึ่งจะนับรวมช่วงที่ยังไม่ได้เริ่มใช้ระบบเข้าไปด้วย" +
+      (canEdit ? "" : " — ให้ผู้ดูแลระบบเป็นคนตั้ง");
+  el("audit-start").disabled = !canEdit;
+  el("save-audit-start").hidden = !canEdit;
+}
+
+function fmtThaiDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = String(iso).split("-").map(Number);
+  const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+  return `${d} ${months[m - 1]} ${y + 543}`;
+}
+
+async function setupAuditStart(userId) {
+  let canEdit = false;
+  try {
+    const profile = await getProfile(userId);
+    canEdit = profile?.role === "admin";
+  } catch { canEdit = false; }
+  let value = "";
+  try { value = (await getSetting(AUDIT_START_KEY)) || ""; } catch { value = ""; }
+  el("audit-start").value = value;
+  renderAuditStart(value, canEdit);
+
+  el("save-audit-start").addEventListener("click", async () => {
+    const next = el("audit-start").value;
+    if (!canEdit || !next) return toast("กรุณาเลือกวันเริ่มกำชับ", true);
+    const button = el("save-audit-start");
+    button.disabled = true;
+    const ok = await setSetting(AUDIT_START_KEY, next);
+    button.disabled = false;
+    if (!ok) return toast("บันทึกวันเริ่มกำชับไม่สำเร็จ", true);
+    renderAuditStart(next, canEdit);
+    toast("บันทึกวันเริ่มกำชับแล้ว");
+  });
+}
+
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
@@ -301,6 +365,7 @@ if (session) {
       'การกำหนดหรือถอดครูประจำชั้นต้องเป็นผู้ดูแลระบบ หรือผู้ที่ได้รับสิทธิ์ฝ่ายบริหารทั่วไป</div>';
   } else {
     el("manager-content").hidden = false;
+    await setupAuditStart(session.user.id);
     try {
       [years, staff] = await Promise.all([getAcademicYears(), listStaffPicker()]);
       const todayYear = academicYearOf(toDateStr(bangkokNow()), years);

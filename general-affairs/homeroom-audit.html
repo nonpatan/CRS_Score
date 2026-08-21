@@ -138,16 +138,11 @@
         <button type="button" class="primary" id="btn-load">แสดงรายงาน</button>
       </section>
 
+      <!-- แก้ค่าที่หน้า "ครูประจำชั้น" (เมนูกำหนดค่า) — ที่นี่แสดงอย่างเดียว
+           เพื่อให้คนอ่านรายงานรู้เสมอว่าตัวเลขนับตั้งแต่วันไหน -->
       <section class="card" id="start-setting-card">
         <div class="section">วันเริ่มกำชับการเช็คชื่อ</div>
         <div id="start-setting-note" class="banner warn">กำลังโหลดค่าตั้ง…</div>
-        <div class="setting-row">
-          <div class="field">
-            <label for="audit-start">เริ่มนับตั้งแต่วันที่</label>
-            <input id="audit-start" type="date">
-          </div>
-          <button type="button" class="ghost" id="save-start">บันทึกวันเริ่มกำชับ</button>
-        </div>
         <div class="hint">ครูที่ถูกกำหนดกลางปีจะเริ่มนับจากวันที่บันทึกเป็นครูประจำชั้น หากวันนั้นช้ากว่าค่านี้</div>
       </section>
 
@@ -257,13 +252,12 @@ function effectiveStartDate() {
 
 function renderStartSetting() {
   const fallback = selectedRange()?.start || "";
-  el("audit-start").value = configuredStart || fallback;
-  el("audit-start").disabled = !isAdmin;
-  el("save-start").hidden = !isAdmin;
+  const editLink = `<a href="homeroom.html">หน้าครูประจำชั้น</a>`;
   el("start-setting-note").className = configuredStart ? "banner info" : "banner warn";
   el("start-setting-note").innerHTML = configuredStart
-    ? `<b>เริ่มกำชับตั้งแต่ ${esc(fmtDate(configuredStart))}</b><br>ไม่นับวันก่อนค่านี้`
-    : `<b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>รายงานจะใช้วันเริ่มปีการศึกษา ${esc(fmtDate(fallback))} ชั่วคราวจนกว่าผู้ดูแลระบบจะบันทึกค่า`;
+    ? `<b>เริ่มกำชับตั้งแต่ ${esc(fmtDate(configuredStart))}</b><br>ไม่นับวันก่อนค่านี้ · แก้ค่าได้ที่${editLink}`
+    : `<b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>รายงานจะใช้วันเริ่มปีการศึกษา ${esc(fmtDate(fallback))} ชั่วคราว` +
+      ` — ผู้ดูแลระบบตั้งค่าได้ที่${editLink}`;
 }
 
 function missedDetails(rows) {
@@ -388,20 +382,6 @@ el("year-select").addEventListener("change", () => {
   setMonthRange();
   renderStartSetting();
 });
-el("save-start").addEventListener("click", async () => {
-  const value = el("audit-start").value;
-  if (!isAdmin || !value) return toast("กรุณาเลือกวันเริ่มกำชับ", true);
-  const button = el("save-start");
-  button.disabled = true;
-  const ok = await setSetting("daily_attendance_audit_start", value);
-  button.disabled = false;
-  if (!ok) return toast("บันทึกวันเริ่มกำชับไม่สำเร็จ", true);
-  configuredStart = value;
-  renderStartSetting();
-  toast("บันทึกวันเริ่มกำชับแล้ว");
-  if (currentReport) await loadReport();
-});
-
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
