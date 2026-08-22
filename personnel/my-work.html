@@ -560,6 +560,68 @@ if (session) {
         ? `<div class="banner ${error ? "warn" : "info"}">${escapeHtml(message)}</div>` : "";
     }
 
+    // ============================================================
+    // 🔔 รู้ทันทีเมื่ออีกฝ่ายตอบคำขอ (Realtime)
+    // ------------------------------------------------------------
+    // ที่มา: ผู้ใช้ทดสอบแล้วพบว่าคนที่ 2 กดรับไปแล้ว แต่จอของคนที่ 1 ยังขึ้น "รอตอบรับ"
+    // เพราะหน้านี้โหลดคำขอครั้งเดียวตอนเปิดหน้า
+    // 🔑 ไม่เชื่อ payload ที่ส่งมากับ event — ใช้แค่เป็น "สัญญาณว่ามีอะไรเปลี่ยน"
+    //    แล้วดึงของจริงผ่าน listMyDutySwaps() ซึ่งผ่าน RLS + ให้ชื่อคนมาครบเหมือนเดิม
+    // 🪤 ต้องดัก 2 ฝั่ง (from_staff_id และ to_staff_id) เพราะ postgres_changes
+    //    ใส่ filter ได้ครั้งละเงื่อนไขเดียว · ผู้ขออยู่ฝั่ง from ผู้รับอยู่ฝั่ง to
+    function describeSwapChange(before, after) {
+      const was = new Map(before.map(row => [row.id, row.status]));
+      for (const row of after) {
+        const old = was.get(row.id);
+        if (!old || old === row.status || old !== "รอตอบรับ") continue;
+        const partner = row.direction === "ส่ง" ? row.to_name : row.from_name;
+        const who = partner || "อีกฝ่าย";
+        if (row.status === "ตอบรับแล้ว") return `${who} รับเวรของคุณแล้ว — ตารางเวรเปลี่ยนแล้ว`;
+        if (row.status === "ปฏิเสธ") return `${who} ปฏิเสธคำขอสลับเวรของคุณ`;
+        if (row.status === "ยกเลิก") return `${who} ยกเลิกคำขอสลับเวร`;
+      }
+      return "";
+    }
+
+    let swapSyncPending = false;
+    async function syncDutySwapsFromRemote() {
+      // ⛔ ห้ามดึงทับตอนผู้ใช้กำลังกดรับ/ปฏิเสธอยู่ ไม่งั้นจอกระพริบแล้วสถานะสลับไปมา
+      if (swapActionBusy || swapSyncPending) return;
+      swapSyncPending = true;
+      try {
+        const before = swapRequests;
+        await loadDutySwapRequests();
+        await renderMyDuties();
+        const note = describeSwapChange(before, swapRequests);
+        if (note) showDutySwapMessage(note);
+      } finally {
+        swapSyncPending = false;
+      }
+    }
+
+    let swapSyncTimer = null;
+    const scheduleDutySwapSync = () => {
+      // การตอบรับ 1 ครั้งยิงหลาย event (ใบคำขอ + แถวเวร 2 ขา) จึงรวบเป็นครั้งเดียว
+      clearTimeout(swapSyncTimer);
+      swapSyncTimer = setTimeout(syncDutySwapsFromRemote, 400);
+    };
+
+    const dutySwapChannel = sb.channel("duty-swaps-of-" + me.id);
+    for (const column of ["from_staff_id", "to_staff_id"]) {
+      dutySwapChannel.on("postgres_changes", {
+        event: "*", schema: "public", table: "duty_swaps",
+        filter: `${column}=eq.${me.id}`
+      }, scheduleDutySwapSync);
+    }
+    dutySwapChannel.subscribe();
+
+    // 🛟 กันเหนียวสำหรับเคสที่ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket)
+    //    หรือเครื่องหลับไปแล้วตื่นมา — กลับมาที่แท็บเมื่อไหร่ก็ดึงของล่าสุดอยู่ดี
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleDutySwapSync();
+    });
+    window.addEventListener("pagehide", () => { sb.removeChannel(dutySwapChannel); });
+
     el("my-duty-list").addEventListener("click", async event => {
       if (event.target.closest("[data-cancel-duty-swap]")) {
         swapState = null;
