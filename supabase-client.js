@@ -6,7 +6,37 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = "https://cbfblvsasamxuwgcpmtj.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_EEGLPPMa3fIX1aRR6GA3Xw_mF4mh5X0";
 
-export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// ============================================================
+// 🕐 กัน "JWT issued at future" — นาฬิกาภายในของ Supabase คลาดกันเอง
+// ------------------------------------------------------------
+// อาการ: ล็อกอินหรือ token ต่ออายุเสร็จแล้วยิงคำขอทันที · GoTrue (ตัวออก token)
+// นาฬิกาเร็วกว่า PostgREST (ตัวตรวจ) เสี้ยววินาที ⟶ PostgREST เห็น iat เป็นอนาคต
+// แล้วตอบ 401 · ครูเจอเป็นข้อความ "โหลด...ไม่สำเร็จ: JWT issued at future"
+// (ยืนยันแล้ว 2026-08-22 ว่านาฬิกาเครื่องกับ Supabase ตรงกันเป๊ะ ไม่ใช่ฝั่งเรา)
+//
+// 🔑 ทำไม retry อัตโนมัติถึงปลอดภัยแม้กับคำสั่งเขียน:
+//    คำขอถูกปัดตั้งแต่**ด่านตรวจ token ยังไม่ถึงฐานข้อมูล** จึงไม่มีทางเกิดผลซ้ำ
+//    ⛔ ห้ามขยายเงื่อนไขนี้ไปจับ error อื่น — 401 ตัวอื่นหรือ 5xx อาจถึงฐานแล้ว
+//    การ retry จะกลายเป็นเขียนซ้ำเงียบ ๆ (เช่นรับเวรซ้อน จ่ายเงินซ้ำ)
+const CLOCK_SKEW_RETRY_DELAYS = [800, 2000];
+
+async function fetchRetryingClockSkew(input, init = {}) {
+  // body ที่เป็น stream ส่งซ้ำไม่ได้ · supabase-js ส่ง string เสมอ แต่กันไว้ก่อน
+  const bodyIsReplayable = !init.body || typeof init.body === "string";
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(input, init);
+    if (response.status !== 401 || !bodyIsReplayable ||
+        attempt >= CLOCK_SKEW_RETRY_DELAYS.length) return response;
+    let body = "";
+    try { body = await response.clone().text(); } catch { return response; }
+    if (!/issued at future/i.test(body)) return response;
+    await new Promise(resolve => setTimeout(resolve, CLOCK_SKEW_RETRY_DELAYS[attempt]));
+  }
+}
+
+export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { fetch: fetchRetryingClockSkew }
+});
 
 // ไฟล์กลางนี้อยู่รากเว็บเสมอ ใช้เป็นฐาน URL เพื่อให้หน้าที่อยู่ในโฟลเดอร์ย่อย
 // เด้งกลับ login ที่รากเว็บได้ถูกต้องทั้งบน GitHub Pages และ local server
@@ -3431,17 +3461,18 @@ export async function listDutySwaps(from, to) {
     String(a.requested_at).localeCompare(String(b.requested_at)));
 }
 
-export async function logHrDutySwap(dutyDate, dutyType, fromStaffId, toStaffId) {
-  // trigger เติม responded_at / responded_by / requested_by ให้เอง ไม่ต้องส่ง
-  const { error } = await sb.from("duty_swaps").insert({
-    duty_date: dutyDate,
-    duty_type: dutyType,
-    from_staff_id: fromStaffId,
-    to_staff_id: toStaffId,
-    source: "ฝ่ายบุคคล",
-    status: "ตอบรับแล้ว"
+export async function hrSwapDuty(dutyDate, dutyType, fromStaffId, toStaffId,
+                                 returnDate = null, returnType = null) {
+  const { data, error } = await sb.rpc("hr_swap_duty", {
+    p_duty_date: dutyDate,
+    p_duty_type: dutyType,
+    p_from_staff_id: fromStaffId,
+    p_to_staff_id: toStaffId,
+    p_return_duty_date: returnDate || null,
+    p_return_duty_type: returnType || null
   });
-  if (error) throw new Error("บันทึกประวัติการสลับไม่สำเร็จ: " + error.message);
+  if (error) throw new Error("สลับเวรไม่สำเร็จ: " + error.message);
+  return data;
 }
 
 export async function generateDutyRosterFromPattern(from, to, createdBy) {
