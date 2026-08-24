@@ -90,6 +90,9 @@
   .check-row label { margin: 0; font-weight: 500; }
   .link-row { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) auto; gap: 8px; align-items: end; margin-bottom: 8px; }
   .link-row.project-link-row { grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) minmax(190px, .8fr) auto; }
+  .link-row.project-link-row.existing-link-row { grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) minmax(190px, .8fr); }
+  .link-readonly { min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow-wrap: anywhere; }
+  .project-result-summary { display: -webkit-box; margin-top: 8px; overflow: hidden; white-space: pre-line; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   fieldset.plan-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
   fieldset.plan-fields:disabled { opacity: .72; }
   .action-reason { max-width: 260px; color: var(--amber); font-size: 13px; text-align: right; }
@@ -172,14 +175,19 @@
           <div class="field wide"><label>KR ที่สนับสนุน</label><div id="project-okr-pick"></div></div>
           <div class="field wide"><label for="p-standard">มาตรฐาน/กลยุทธ์ที่สนอง</label><textarea id="p-standard" maxlength="4000"></textarea></div>
           <div class="field wide"><label for="p-detail">รายละเอียด</label><textarea id="p-detail" maxlength="6000" required></textarea></div>
-          <div class="field wide"><label>ไฟล์แนบ</label><div class="banner warn">ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้</div><div id="project-link-list"></div><button class="ghost" id="add-project-link" type="button">เพิ่มไฟล์แนบ</button><div class="hint">URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ</div></div>
         </div>
         </fieldset>
+        <div class="field wide" id="project-links-field"><label>ไฟล์แนบ</label><div class="banner warn" id="project-link-note">ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้</div><div id="project-link-list"></div><button class="ghost" id="add-project-link" type="button">เพิ่มไฟล์แนบ</button><div class="hint" id="project-link-hint">URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ</div></div>
         <div class="subform" id="project-progress-fields" hidden>
           <h3>รายงานผล</h3>
           <div class="row2">
             <div class="field"><label for="p-report-status">สถานะการดำเนินงาน</label><select id="p-report-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
             <div class="field"><label for="p-report-budget-actual">งบที่ใช้จริง (บาท)</label><input id="p-report-budget-actual" type="number" min="0" step="0.01" inputmode="decimal"><div class="hint">เว้นว่าง = ไม่เปลี่ยนงบที่บันทึกไว้ · ถ้าใช้จริง 0 บาท ให้กรอกเลข 0</div></div>
+          </div>
+          <div class="form-grid">
+            <div class="field wide"><label for="p-report-summary">ผลการดำเนินงาน</label><textarea id="p-report-summary" maxlength="6000"></textarea><div class="hint">เกิดอะไรขึ้นจริง ผู้เข้าร่วมกี่คน ผลที่เกิดกับนักเรียนเป็นอย่างไร</div></div>
+            <div class="field wide"><label for="p-report-obstacle">ปัญหาอุปสรรค</label><textarea id="p-report-obstacle" maxlength="4000"></textarea><div class="hint">เว้นว่างได้ถ้าไม่มี</div></div>
+            <div class="field wide"><label for="p-report-suggestion">ข้อเสนอแนะ</label><textarea id="p-report-suggestion" maxlength="4000"></textarea><div class="hint">สิ่งที่ควรปรับถ้าจัดอีกครั้งในปีหน้า</div></div>
           </div>
         </div>
         <div class="toolbar"><button class="primary" id="save-project" type="submit">บันทึก</button><button class="ghost" id="cancel-project" type="button">ยกเลิก</button></div>
@@ -258,12 +266,12 @@ import {
   getActiveYear, setActiveYear, getAcademicYears, academicYearRange,
   loadAcademicProjects, listStaffPicker, projectResponsibleName,
   projectApprovalBadge, submitProjectForApproval, withdrawProjectApproval,
-  requestProjectRevision, reportProjectProgress,
+  requestProjectRevision, reportProjectProgress, appendProjectLinks,
   loadSchoolOkrs, loadOkrCheckins, loadOkrLineage, loadOkrThresholds,
   buildOkrTree, buildProjectTree, projectBudgetOf, summarizeProjectBudget,
   okrChipLabel, okrProgress, okrScore, okrObjectiveScore,
   indexCheckinsByOkr, okrCoverage, buildOkrTrend, suggestOkrValue, setSetting
-} from "../supabase-client.js?v=20260822-1";
+} from "../supabase-client.js?v=20260824-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -521,6 +529,10 @@ if (!session) {
     const links = (project.links || []).map(link =>
       `<span class="chip">${esc(link.kind || "อื่น ๆ")}</span> <a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`
     ).join(" · ");
+    const resultLinkCount = (project.links || []).filter(link => link.kind === "สรุปโครงการ").length;
+    const resultSummary = project.status === "เสร็จสิ้น" && project.result_summary
+      ? `<div class="project-result-summary"><b>ผลการดำเนินงาน</b><br>${esc(project.result_summary)}</div><div class="chips"><span class="chip">สรุปโครงการ ${resultLinkCount} ไฟล์</span></div>`
+      : "";
     const decisionNote = ["ส่งกลับให้แก้", "ไม่อนุมัติ"].includes(project.approval_status);
     const approvalNote = approvalBadge.note
       ? decisionNote
@@ -535,6 +547,7 @@ if (!session) {
         <div class="meta">${esc(budgetLine)}</div>
         ${project.standard_note ? `<div class="meta">มาตรฐาน/กลยุทธ์: ${esc(project.standard_note)}</div>` : ""}
         ${project.detail ? `<div class="meta">${esc(project.detail)}</div>` : ""}
+        ${resultSummary}
         ${links ? `<div class="meta">หลักฐาน: ${links}</div>` : ""}
       </div><div class="actions">
         ${projectWorkflowActions(project, context)}
@@ -669,12 +682,23 @@ if (!session) {
     el("responsible-note").textContent = option?.value && option.dataset.login === "false" ? "บุคลากรรายนี้ยังไม่ผูกบัญชี แต่เลือกเป็นผู้รับผิดชอบได้" : "";
   }
 
-  function addLinkRow(containerId, prefix, link = {}) {
+  function addLinkRow(containerId, prefix, link = {}, options = {}) {
     const isProjectLink = prefix === "project-link";
     const isFirstProjectLink = isProjectLink && !el(containerId).querySelector(".link-row");
-    const kind = link.kind || (isFirstProjectLink ? "เอกสารนำเสนอเพื่ออนุมัติ" : "อื่น ๆ");
+    const kind = link.kind || options.defaultKind || (isFirstProjectLink ? "เอกสารนำเสนอเพื่ออนุมัติ" : "อื่น ๆ");
     const row = document.createElement("div");
     row.className = `link-row${isProjectLink ? " project-link-row" : ""}`;
+    row.dataset.existing = options.existing ? "true" : "false";
+    if (options.readonly) {
+      row.classList.add("existing-link-row");
+      const url = String(link.url || "");
+      const urlHtml = /^https?:\/\//i.test(url)
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`
+        : esc(url || "—");
+      row.innerHTML = `<div class="field"><label>ชื่อเอกสาร</label><div class="link-readonly">${esc(link.label || "—")}</div></div><div class="field"><label>URL</label><div class="link-readonly">${urlHtml}</div></div>${isProjectLink ? `<div class="field"><label>ประเภทเอกสาร</label><div class="link-readonly">${esc(kind)}</div></div>` : ""}`;
+      el(containerId).appendChild(row);
+      return;
+    }
     const kindField = isProjectLink ? `<div class="field"><label>ประเภทเอกสาร</label><select class="${prefix}-kind">
       ${["เอกสารนำเสนอเพื่ออนุมัติ", "สรุปโครงการ", "อื่น ๆ"].map(value =>
         `<option${value === kind ? " selected" : ""}>${value}</option>`
@@ -684,9 +708,11 @@ if (!session) {
     el(containerId).appendChild(row);
   }
 
-  function readLinks(containerId, prefix) {
+  function readLinks(containerId, prefix, options = {}) {
     const isProjectLink = prefix === "project-link";
-    const links = [...el(containerId).querySelectorAll(".link-row")].map(row => ({
+    const rows = [...el(containerId).querySelectorAll(".link-row")]
+      .filter(row => !options.newOnly || row.dataset.existing !== "true");
+    const links = rows.map(row => ({
       label:row.querySelector(`.${prefix}-label`).value.trim(),
       url:row.querySelector(`.${prefix}-url`).value.trim(),
       ...(isProjectLink ? { kind:row.querySelector(`.${prefix}-kind`).value } : {})
@@ -763,15 +789,27 @@ if (!session) {
       el("responsible-own-name").textContent = myStaff.full_name;
     }
     const selectedIds = (project?.okrs || []).map(okr => okr.id);
-    el("project-link-list").innerHTML = "";
-    (project?.links || []).forEach(link => addLinkRow("project-link-list", "project-link", link));
-    syncProjectKind(selectedIds);
     const progressMode = project?.approval_status === "อนุมัติ";
+    el("project-link-list").innerHTML = "";
+    (project?.links || []).forEach(link => addLinkRow("project-link-list", "project-link", link, {
+      existing:true,
+      readonly:progressMode
+    }));
+    syncProjectKind(selectedIds);
     el("project-plan-fields").disabled = progressMode;
     el("project-lock-note").hidden = !progressMode;
     el("project-progress-fields").hidden = !progressMode;
+    el("project-link-note").textContent = progressMode
+      ? "แนบเอกสารสรุปผล ภาพถ่าย หรือลิงก์แบบประเมินความพึงพอใจได้ · เอกสารที่แนบไว้แล้วแก้หรือลบไม่ได้"
+      : "ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้";
+    el("project-link-hint").textContent = progressMode
+      ? "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์ใหม่เริ่มต้นเป็นประเภทสรุปโครงการ"
+      : "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ";
     el("p-report-status").value = project?.status || "วางแผน";
     el("p-report-budget-actual").value = project?.budget_actual ?? "";
+    el("p-report-summary").value = project?.result_summary ?? "";
+    el("p-report-obstacle").value = project?.result_obstacle ?? "";
+    el("p-report-suggestion").value = project?.result_suggestion ?? "";
     el("save-project").textContent = progressMode ? "บันทึกรายงานผล" : "บันทึก";
     el("project-form-card").hidden = false;
     el("project-form-card").scrollIntoView({ behavior:"smooth", block:"start" });
@@ -1056,7 +1094,10 @@ if (!session) {
   el("cancel-okr").addEventListener("click", closeOkrForm);
   el("cancel-checkin").addEventListener("click", closeCheckinForm);
   el("clear-carried").addEventListener("click", () => { carriedFromId = null; el("o-carried-field").hidden = true; });
-  el("add-project-link").addEventListener("click", () => addLinkRow("project-link-list", "project-link"));
+  el("add-project-link").addEventListener("click", () => addLinkRow(
+    "project-link-list", "project-link", {},
+    { defaultKind: editingProjectMode === "progress" ? "สรุปโครงการ" : null }
+  ));
   el("add-evidence-link").addEventListener("click", () => addLinkRow("evidence-link-list", "evidence-link"));
   for (const id of ["project-link-list","evidence-link-list"]) el(id).addEventListener("click", event => event.target.closest(".remove-link")?.closest(".link-row")?.remove());
   el("use-suggestion").addEventListener("click", () => { if (currentSuggestion?.value != null) el("c-actual").value = currentSuggestion.value; });
@@ -1113,10 +1154,27 @@ if (!session) {
       if (budgetActual !== null && (!Number.isFinite(budgetActual) || budgetActual < 0)) {
         return toast("กรุณากรอกงบที่ใช้จริงเป็นตัวเลขตั้งแต่ 0 ขึ้นไป แล้วกดบันทึกรายงานผลอีกครั้ง", true);
       }
+      let newLinksOnly;
+      try {
+        newLinksOnly = readLinks("project-link-list", "project-link", { newOnly:true });
+      } catch (error) {
+        return toast(error.message, true);
+      }
       const button = el("save-project");
       button.disabled = true;
       try {
-        await reportProjectProgress(project.id, el("p-report-status").value, budgetActual);
+        await reportProjectProgress(project.id, el("p-report-status").value, budgetActual, {
+          summary:el("p-report-summary").value.trim(),
+          obstacle:el("p-report-obstacle").value.trim(),
+          suggestion:el("p-report-suggestion").value.trim()
+        });
+        try {
+          await appendProjectLinks(project.id, newLinksOnly, (project.links || []).length);
+        } catch (error) {
+          await loadData();
+          toast("บันทึกผลแล้ว แต่แนบเอกสารไม่สำเร็จ: " + error.message, true);
+          return;
+        }
         toast("บันทึกรายงานผลแล้ว");
         closeProjectForm();
         await loadData();

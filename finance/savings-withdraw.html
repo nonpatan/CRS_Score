@@ -166,10 +166,11 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, isHomeroomTeacherNow,
+  getAcademicYears, academicYearOf,
   getStudentPlacements, roomsFromPlacements, activePlacements, bangkokNow, toDateStr,
   getMyCoverageFor, fetchAllRows, computeSavingsBalance, computeAvailableToWithdraw, formatMoney
-} from "../supabase-client.js?v=20260822-1";
+} from "../supabase-client.js?v=20260824-2";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -495,7 +496,9 @@ if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     canFinance = await checkDepartment("การเงิน");
-    applyRestrictedMenuAccess(canFinance);
+    // ครูประจำชั้นเห็นลิงก์ "ตั้งค่าค่ารถ" ลิงก์เดียว งานการเงินอื่นยังปิดตามเดิม
+    applyRestrictedMenuAccess(canFinance,
+      canFinance ? [] : (await isHomeroomTeacherNow(session.user.id)) ? ["transport-settings.html"] : []);
     await loadContext();
   } catch (error) {
     el("access-warning").hidden = false;

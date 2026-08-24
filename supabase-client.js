@@ -109,10 +109,14 @@ export async function canUseDepartment(userId, department, profile = null) {
 // ⚠ นี่คือชั้น "ซ่อนปุ่ม" เท่านั้น ตัวจริงที่กันข้อมูลคือ RLS (staff/work_attendance/staff_leaves
 //   อ่านได้เฉพาะฝ่ายบุคคลหรือแถวของตัวเอง)
 // ------------------------------------------------------------
-export function applyRestrictedMenuAccess(allowed) {
+// keepHrefs = ลิงก์ที่ยังให้เห็นแม้ไม่ได้สิทธิ์เต็มของฝ่าย (เช่น ครูประจำชั้นเห็น "ตั้งค่าค่ารถ"
+// ลิงก์เดียว) · ⚠ ต้องส่งตอนเรียก เพราะฟังก์ชันนี้ "ลบ" ทิ้งจาก DOM ไม่ใช่แค่ซ่อน
+// จึงเอากลับมาทีหลังไม่ได้ · ครอบทั้งลิงก์ในเมนูและการ์ดในหน้า (คิวรีทั้งเอกสาร)
+export function applyRestrictedMenuAccess(allowed, keepHrefs = []) {
   const links = document.querySelectorAll('a[data-restricted]');
   links.forEach(a => {
-    if (allowed) a.removeAttribute("hidden");
+    const href = a.getAttribute("href") || "";
+    if (allowed || keepHrefs.some(keep => href.includes(keep))) a.removeAttribute("hidden");
     else a.remove();
   });
   if (allowed) return;
@@ -120,6 +124,22 @@ export function applyRestrictedMenuAccess(allowed) {
   document.querySelectorAll("header .nav .nav-group").forEach(group => {
     if (!group.querySelector(".nav-group-links a")) group.remove();
   });
+}
+
+// เป็นครูประจำชั้นของ "ปีปัจจุบัน" ไหม — ใช้ตัดสินว่าจะโชว์ลิงก์ตั้งค่าค่ารถให้หรือไม่
+// ยึดเงื่อนไขเดียวกับที่ RLS ใช้ (student_transport_*_homeroom + is_my_own_homeroom)
+// จึงไม่มีทางโชว์ปุ่มที่กดแล้วฐานข้อมูลปฏิเสธ
+export async function isHomeroomTeacherNow(userId) {
+  if (!userId) return false;
+  const me = await sb.from("staff").select("id").eq("user_id", userId).maybeSingle();
+  if (me.error || !me.data) return false;
+  const years = await getAcademicYears();
+  const year = academicYearOf(toDateStr(bangkokNow()), years);
+  if (!year) return false;
+  const result = await sb.from("homeroom_teachers")
+    .select("staff_id").eq("year", year).eq("staff_id", me.data.id).limit(1);
+  if (result.error) return false;
+  return (result.data || []).length > 0;
 }
 
 export function applyPersonnelMenuAccess(canManageHr) {
@@ -2668,16 +2688,31 @@ export async function reopenRejectedProject(id, reason) {
   );
 }
 
-export async function reportProjectProgress(id, status, budgetActual) {
+export async function reportProjectProgress(id, status, budgetActual, result = {}) {
   return callProjectApprovalRpc(
     "report_project_progress",
     {
       p_project_id: id,
       p_status: status,
-      p_budget_actual: budgetActual === "" || budgetActual == null ? null : budgetActual
+      p_budget_actual: budgetActual === "" || budgetActual == null ? null : budgetActual,
+      // ห้ามแปลง "" เป็น null — ฝั่ง SQL ใช้ "" แปลว่า "ล้างข้อความทิ้ง"
+      p_result_summary: result.summary ?? null,
+      p_result_obstacle: result.obstacle ?? null,
+      p_result_suggestion: result.suggestion ?? null
     },
     "รายงานผลโครงการไม่สำเร็จ"
   );
+}
+
+// แนบเพิ่มอย่างเดียว ไม่แตะของเดิม — ใช้ตอนรายงานผลหลังอนุมัติ
+// RLS เปิดให้ insert ตอนสถานะ 'อนุมัติ' ไว้แล้ว (แต่ห้ามแก้/ลบของเดิม ซึ่งถูกต้อง)
+export async function appendProjectLinks(projectId, links, startSortOrder = 0) {
+  if (!links?.length) return;
+  const { error } = await sb.from("academic_project_links")
+    .insert(links.map((link, index) => ({
+      project_id: projectId, ...link, sort_order: startSortOrder + index
+    })));
+  if (error) throw new Error("แนบเอกสารเพิ่มไม่สำเร็จ: " + error.message);
 }
 
 export async function loadAcademicProjects(year) {
