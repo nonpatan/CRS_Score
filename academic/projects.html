@@ -161,7 +161,7 @@
         <div class="form-grid">
           <div class="field wide"><label for="p-name">ชื่อ</label><input id="p-name" type="text" maxlength="300" required></div>
           <div class="field"><label for="p-kind">ประเภท</label><select id="p-kind"><option>โครงการ</option><option>กิจกรรม</option></select></div>
-          <div class="field"><label for="p-status">สถานะ</label><select id="p-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
+          <div class="field"><label for="p-status">สถานะ</label><select id="p-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select><div class="hint" id="p-status-hint" hidden>ตอนนี้เลือกได้เฉพาะช่วงวางแผน · สถานะจะเปลี่ยนเป็น “กำลังดำเนินการ” หรือ “เสร็จสิ้น” ได้หลังผ่านการอนุมัติ แล้วกดปุ่ม “รายงานผล”</div></div>
           <div class="field wide" id="parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent"><option value="">— เลือกโครงการแม่ —</option></select><div class="hint">ถ้ายังไม่มีโครงการที่ใช่ ให้สร้างโครงการก่อน</div></div>
           <div class="field"><label for="p-start">วันเริ่ม</label><input id="p-start" type="date" required></div>
           <div class="field"><label for="p-end">วันสิ้นสุด</label><input id="p-end" type="date"><div class="hint">เว้นว่างได้ถ้าเป็นงานวันเดียว</div></div>
@@ -279,6 +279,27 @@ if (!session) {
   const fmtMoney = value => Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits:2 }) + " บาท";
   const fmtMoneyOrMissing = value => value == null ? "ยังไม่ได้กรอก" : fmtMoney(value);
   const numberOrNull = id => el(id).value.trim() === "" ? null : Number(el(id).value);
+  // RLS บังคับว่าแถวใหม่ต้องเป็น "วางแผน"/"ยกเลิก" เท่านั้น (schema.sql:4806-4822)
+  // และแถวที่ยังไม่เคยอนุมัติ ครูเจ้าของก็ถูกล็อกแค่ 2 ตัวนั้นเหมือนกัน
+  // ⛔ เช็ก approvedAt ไม่ใช่ approval_status — แถวที่ถูกส่งกลับให้แก้ approved_at ยังค้างอยู่
+  function statusOptionsFor({ isNew, canEditAll, approvedAt }) {
+    const planningOnly = ["วางแผน", "ยกเลิก"];
+    const everything = ["วางแผน", "กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"];
+    if (isNew) return planningOnly;
+    if (approvedAt) return everything;
+    return canEditAll ? everything : planningOnly;
+  }
+
+  // Postgres ส่ง "new row violates row-level security policy" มาดิบ ๆ ครูอ่านไม่ออก
+  // เคสที่เกิดจริงเกือบทั้งหมดคือสถานะ เพราะ canEditProject() กันเรื่องสิทธิ์ไว้ตั้งแต่ฝั่งจอแล้ว
+  function friendlyProjectError(message) {
+    const text = String(message || "");
+    if (text.includes("row-level security")) {
+      return "บันทึกไม่สำเร็จ — สร้างหรือแก้รายการที่ยังไม่ผ่านการอนุมัติได้เฉพาะสถานะ “วางแผน” หรือ “ยกเลิก” เท่านั้น · ถ้าสถานะถูกแล้วยังไม่ผ่าน แปลว่าคุณไม่มีสิทธิ์แก้รายการนี้ กรุณาโหลดหน้าใหม่";
+    }
+    return "บันทึกไม่สำเร็จ: " + text;
+  }
+
   function reportBudgetActualValue(rawValue) {
     const value = String(rawValue ?? "").trim();
     return value === "" ? null : Number(value);
@@ -714,7 +735,16 @@ if (!session) {
     el("p-name").value = project?.name || "";
     el("p-kind").value = project?.kind || "โครงการ";
     el("p-kind").disabled = false;
-    el("p-status").value = project?.status || "วางแผน";
+    const allowedStatuses = statusOptionsFor({
+      isNew: !project,
+      canEditAll,
+      approvedAt: project?.approved_at || null
+    });
+    el("p-status").innerHTML = allowedStatuses
+      .map(value => `<option>${esc(value)}</option>`).join("");
+    el("p-status").value = allowedStatuses.includes(project?.status)
+      ? project.status : "วางแผน";
+    el("p-status-hint").hidden = allowedStatuses.length > 2;
     el("p-start").value = project?.start_date || "";
     el("p-end").value = project?.end_date || "";
     el("p-budget-planned").value = project?.budget_planned ?? "";
@@ -1176,7 +1206,7 @@ if (!session) {
       await replaceProjectDetails(projectId, selected, links);
       toast(editingProjectId ? "แก้โครงการ/กิจกรรมแล้ว" : "เพิ่มโครงการ/กิจกรรมแล้ว");
       closeProjectForm(); await loadData();
-    } catch (error) { toast("บันทึกไม่สำเร็จ: " + error.message, true); }
+    } catch (error) { toast(friendlyProjectError(error.message), true); }
     finally { button.disabled = false; }
   });
 
