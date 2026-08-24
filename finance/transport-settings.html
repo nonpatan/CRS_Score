@@ -172,7 +172,7 @@
           <div class="actions"><button id="cancel-assignment" class="ghost" type="button">ยกเลิก</button><button id="save-assignment" class="primary" type="button">บันทึก</button></div>
         </section>
         <section id="students-card" class="card" hidden>
-          <div class="section-head"><div><h2 id="room-title">รายชื่อนักเรียน</h2><p>เปลี่ยนโซนหรือเรตด้วยการปิดแถวเดิมแล้วเปิดแถวใหม่เท่านั้น</p></div></div>
+          <div class="section-head"><div><h2 id="room-title">รายชื่อนักเรียน</h2><p>รายการที่เริ่มในเดือนนี้แก้ในที่เดิมได้ · เดือนที่ผ่านมาแล้วต้องปิดแถวเดิมแล้วเปิดแถวใหม่</p></div></div>
           <div id="room-summary" class="summary-grid"></div>
           <div id="student-list" class="student-list"></div>
         </section>
@@ -232,6 +232,9 @@ const studentCompare = (a, b) =>
   String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
 
 let session = null;
+let canFinance = false;
+// ห้องที่ผู้ใช้คนนี้เป็นครูประจำชั้นในปีปัจจุบัน — ว่างเสมอสำหรับฝ่ายการเงิน (เห็นทุกห้องอยู่แล้ว)
+let myHomerooms = [];
 let years = [];
 let currentYear = "";
 let zones = [];
@@ -265,6 +268,32 @@ function friendlyError(error) {
 function setTab(panelId) {
   document.querySelectorAll("[data-tab]").forEach(button => button.setAttribute("aria-selected", String(button.dataset.tab === panelId)));
   document.querySelectorAll(".tab-panel").forEach(panel => { panel.hidden = panel.id !== panelId; });
+}
+
+async function loadMyHomerooms(year) {
+  const me = await sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle();
+  if (me.error || !me.data) return [];
+  const result = await sb.from("homeroom_teachers")
+    .select("year,grade_level,classroom")
+    .eq("year", year).eq("staff_id", me.data.id);
+  if (result.error) throw new Error("โหลดห้องที่คุณเป็นครูประจำชั้นไม่สำเร็จ: " + result.error.message);
+  return result.data || [];
+}
+
+// โหมดครูประจำชั้น: เหลือเฉพาะงาน "ผูกนักเรียน" — โซนกับการประกาศยอดเป็นของฝ่ายการเงินล้วน
+function applyHomeroomMode() {
+  if (canFinance) return;
+  // ⛔ ซ่อน "ปุ่มแท็บ" เท่านั้น ห้ามลบ panel ทิ้ง เพราะ renderZones()/loadMonth()
+  //    ยังเขียนลงกล่องข้างในอยู่ (โซนถูกใช้ในช่องเลือกโซนของฟอร์มผูกนักเรียนด้วย)
+  for (const panelId of ["zones-panel", "months-panel"]) {
+    const tabButton = document.querySelector(`[data-tab="${panelId}"]`);
+    if (tabButton) tabButton.hidden = true;
+  }
+  const studentsTab = document.querySelector('[data-tab="students-panel"]');
+  if (studentsTab) studentsTab.textContent = "ผูกนักเรียน";
+  setTab("students-panel");
+  const subtitle = document.querySelector("header > p");
+  if (subtitle) subtitle.textContent = "ผูกนักเรียนในห้องที่คุณเป็นครูประจำชั้นกับโซนรถรับส่ง";
 }
 
 function currentRange() {
@@ -377,6 +406,23 @@ function currentAssignment(studentId) {
   return assignments.find(row => row.student_id === studentId && row.end_date == null) || null;
 }
 
+// ---------- สูตรล้วนของสิทธิ์ครูประจำชั้น (เทสต์ตัดสองตัวนี้ออกไปรัน) ----------
+// ฝ่ายการเงินเห็นทุกห้อง · ครูประจำชั้นเห็นเฉพาะห้องตัวเอง
+// เทียบทั้งชั้นและห้องคู่กัน ถ้าเทียบแต่ชั้นจะหลุดไปเห็นห้องข้าง ๆ ของชั้นเดียวกัน
+function visibleRoomsFor(allRooms, isFinance, homerooms) {
+  if (isFinance) return allRooms || [];
+  const mine = new Set((homerooms || []).map(row => `${row.grade_level}/${row.classroom}`));
+  return (allRooms || []).filter(room => mine.has(`${room.grade_level}/${room.classroom}`));
+}
+
+// แก้ในที่เดิมได้เฉพาะรายการที่ยังไม่ถูกคิดเงิน = วันเริ่มอยู่ในเดือนปัจจุบันหรืออนาคต
+// ⛔ ต้องตรงกับเงื่อนไขใน trigger transport_money_guard() เป๊ะ ๆ ไม่งั้นครูกดแล้วเจอกล่องแดง
+// โดยไม่รู้ว่าทำไม (ฐานข้อมูลเทียบกับวันที่ 1 ของเดือนตามเวลาไทย)
+function canEditInPlace(assignment, todayIso) {
+  if (!assignment || assignment.end_date) return false;
+  return assignment.start_date >= String(todayIso).slice(0, 7) + "-01";
+}
+
 function selectedRoster() {
   const room = rooms[Number(el("room-select").value)];
   if (!room) return [];
@@ -404,7 +450,7 @@ function renderStudents() {
         ? `<b>${esc(zone?.name || "ไม่พบโซน")}</b><span class="meta">${esc(assignment.billing_mode)} · ${esc(assignment.trip_mode)} · แช่เรต ${formatMoney(assignment.rate_amount)}</span><span class="meta">เริ่ม ${thaiDate(assignment.start_date)}${zone && !zone.active ? " · โซนปิดใช้งานแล้ว" : ""}</span>`
         : '<span class="status pending">ยังไม่ตั้งค่ารถ</span>'}</div>
       <div class="student-actions">${assignment
-        ? `<button class="ghost" type="button" data-assignment="replace" data-student-id="${placement.student_id}">เปลี่ยน (ปิดของเดิม เปิดใหม่)</button><button class="danger" type="button" data-assignment="stop" data-student-id="${placement.student_id}">เลิกใช้รถ</button>`
+        ? `${canEditInPlace(assignment, today) ? `<button class="ghost" type="button" data-assignment="edit" data-student-id="${placement.student_id}">แก้รายการนี้</button>` : ""}<button class="ghost" type="button" data-assignment="replace" data-student-id="${placement.student_id}">เปลี่ยน (ปิดของเดิม เปิดใหม่)</button><button class="danger" type="button" data-assignment="stop" data-student-id="${placement.student_id}">เลิกใช้รถ</button>`
         : `<button class="primary" type="button" data-assignment="new" data-student-id="${placement.student_id}">ตั้งค่ารถ</button>`}</div>
     </div>`;
   }).join("") : '<div class="empty">ห้องนี้ยังไม่มีรายชื่อนักเรียนที่ใช้งานอยู่</div>';
@@ -420,24 +466,36 @@ function syncRatePreview() {
 function openAssignmentEditor(action, studentId) {
   const placement = placements.find(row => row.student_id === studentId);
   const existing = currentAssignment(studentId);
+  if (action !== "new" && !existing) return toast("ไม่พบรายการค่ารถที่ใช้อยู่ กรุณาโหลดหน้าใหม่", true);
+  // เผื่อหน้าถูกเปิดค้างข้ามเดือน — ปุ่มยังอยู่บนจอแต่ฐานข้อมูลไม่รับแล้ว
+  if (action === "edit" && !canEditInPlace(existing, today)) {
+    return toast("รายการของเดือนที่ผ่านมาแก้ในที่เดิมไม่ได้ เพราะประกาศยอดไปแล้ว · ให้ใช้ “เปลี่ยน (ปิดของเดิม เปิดใหม่)” แทน", true);
+  }
   assignmentAction = action;
   assignmentStudentId = studentId;
-  el("assignment-title").textContent = `${action === "stop" ? "เลิกใช้รถ" : action === "replace" ? "เปลี่ยนค่ารถ" : "ตั้งค่ารถ"} · ${placement?.student?.name || "นักเรียน"}`;
+  const titles = { stop:"เลิกใช้รถ", replace:"เปลี่ยนค่ารถ", edit:"แก้รายการค่ารถ", new:"ตั้งค่ารถ" };
+  el("assignment-title").textContent = `${titles[action] || "ตั้งค่ารถ"} · ${placement?.student?.name || "นักเรียน"}`;
   el("assignment-stop-note").hidden = action !== "stop";
   el("assignment-fields").hidden = action === "stop";
   el("assignment-stop-note").innerHTML = action === "stop" ? `รายการเดิมเริ่ม ${thaiDate(existing.start_date)} · เลือกวันสิ้นสุดด้านล่าง<div class="field" style="margin-top:10px"><label for="stop-date">วันสิ้นสุด</label><input id="stop-date" type="date" min="${existing.start_date}" value="${defaultDate() < existing.start_date ? existing.start_date : defaultDate()}"></div>` : "";
   const activeZones = zones.filter(zone => zone.active);
   el("assignment-zone").innerHTML = '<option value="">— เลือกโซน —</option>' + activeZones.map(zone => `<option value="${zone.id}">${esc(zone.name)}</option>`).join("");
   const earliestReplacement = action === "replace" ? isoDayAfter(existing.start_date) : "";
-  el("assignment-date").value = action === "replace" && defaultDate() < earliestReplacement ? earliestReplacement : defaultDate();
+  // โหมดแก้ = แก้แถวเดิม จึงเริ่มจากวันเดิม และไม่ใช้กติกา "ต้องหลังวันเริ่มเดิม" ของ replace
+  el("assignment-date").value = action === "edit"
+    ? existing.start_date
+    : (action === "replace" && defaultDate() < earliestReplacement ? earliestReplacement : defaultDate());
   el("assignment-date").min = earliestReplacement || currentRange()?.start || "";
   el("assignment-date").max = currentRange()?.end || "";
   el("billing-mode").value = existing?.billing_mode || "รายวัน";
   el("trip-mode").value = existing?.trip_mode || "ไป-กลับ";
-  el("assignment-note").value = "";
+  // โหมดแก้ต้องเห็นหมายเหตุเดิม ไม่งั้นกดบันทึกแล้วโน้ตเดิมหายไปเงียบ ๆ
+  el("assignment-note").value = action === "edit" ? (existing.note || "") : "";
   if (existing && activeZones.some(zone => zone.id === existing.zone_id)) el("assignment-zone").value = existing.zone_id;
   syncRatePreview();
-  el("save-assignment").textContent = action === "stop" ? "บันทึกวันสิ้นสุด" : action === "replace" ? "ปิดของเดิมและเปิดใหม่" : "บันทึกค่ารถ";
+  el("save-assignment").textContent = action === "stop" ? "บันทึกวันสิ้นสุด"
+    : action === "replace" ? "ปิดของเดิมและเปิดใหม่"
+    : action === "edit" ? "บันทึกการแก้ไข" : "บันทึกค่ารถ";
   el("assignment-editor").hidden = false;
   el("assignment-editor").scrollIntoView({ behavior:"smooth", block:"start" });
 }
@@ -470,9 +528,21 @@ async function saveAssignment() {
     };
     const message = assignmentAction === "replace"
       ? `ปิดรายการเดิมวันที่ ${thaiDate(isoDayBefore(startDate))} แล้วเปิด ${zone.name} ตั้งแต่ ${thaiDate(startDate)}\nเรตใหม่ ${formatMoney(rate)}`
+      : assignmentAction === "edit"
+      ? `แก้รายการของ ${placement.student.name} เป็น ${zone.name} · ${billingMode} · ${tripMode}\nเริ่ม ${thaiDate(startDate)} · เรต ${formatMoney(rate)} (เดิม ${formatMoney(existing.rate_amount)})\nแก้แถวเดิม ไม่สร้างรายการใหม่`
       : `ผูก ${placement.student.name} กับ ${zone.name} ตั้งแต่ ${thaiDate(startDate)}\nแช่เรต ${formatMoney(rate)}`;
-    if (!await window.crsAskConfirm({ title:assignmentAction === "replace" ? "เปลี่ยนค่ารถ" : "บันทึกค่ารถ", message, okLabel:assignmentAction === "replace" ? "ปิดเดิมและเปิดใหม่" : "บันทึกค่ารถ", danger:false })) return;
-    if (assignmentAction === "replace") {
+    const confirmTitle = assignmentAction === "replace" ? "เปลี่ยนค่ารถ" : assignmentAction === "edit" ? "แก้รายการค่ารถ" : "บันทึกค่ารถ";
+    const confirmLabel = assignmentAction === "replace" ? "ปิดเดิมและเปิดใหม่" : assignmentAction === "edit" ? "บันทึกการแก้ไข" : "บันทึกค่ารถ";
+    if (!await window.crsAskConfirm({ title:confirmTitle, message, okLabel:confirmLabel, danger:false })) return;
+    if (assignmentAction === "edit") {
+      // ⛔ ตัด student_id / year / created_by ออก — trigger transport_money_guard() ปฏิเสธ
+      //    ถ้านักเรียนหรือปีต่างจากเดิม และส่งค่าเดิมไปก็ไม่ได้อะไรนอกจากความเสี่ยง
+      const { student_id, year, created_by, ...editable } = payload;
+      const { error } = await sb.from("student_transport")
+        .update({ ...editable, updated_at:new Date().toISOString() }).eq("id", existing.id);
+      if (error) return toast(friendlyError(error), true);
+      toast("แก้รายการค่ารถแล้ว");
+    } else if (assignmentAction === "replace") {
       const oldEnd = isoDayBefore(startDate);
       const closeResult = await sb.from("student_transport").update({ end_date:oldEnd, updated_at:new Date().toISOString() }).eq("id", existing.id);
       if (closeResult.error) return toast(friendlyError(closeResult.error), true);
@@ -503,7 +573,8 @@ async function loadStudentsAndAssignments() {
   if (assignmentRes.error) throw new Error("โหลดข้อมูลค่ารถนักเรียนไม่สำเร็จ: " + assignmentRes.error.message);
   placements = placementRes.data || [];
   assignments = assignmentRes.data || [];
-  rooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  // กรองที่ระดับ rooms เท่านั้น — placements ถูกใช้คำนวณอย่างอื่นด้วย ห้ามกรองทิ้ง
+  rooms = visibleRoomsFor(roomsFromPlacements(activePlacements(placements), currentYear), canFinance, myHomerooms);
   const grades = [...new Set(rooms.map(room => room.grade_level))];
   el("grade-select").innerHTML = '<option value="">— เลือกชั้น —</option>' + grades.map(grade => `<option value="${esc(grade)}">${esc(grade)}</option>`).join("");
   el("grade-select").disabled = grades.length === 0;
@@ -667,18 +738,33 @@ session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
-    const canFinance = await checkDepartment("การเงิน");
+    canFinance = await checkDepartment("การเงิน");
+    // ต้องรู้ปีการศึกษาก่อน ถึงจะถามได้ว่าใครเป็นครูประจำชั้น "ของปีไหน"
+    years = await getAcademicYears();
+    if (!years.length) throw new Error("ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน");
+    const activeYear = academicYearOf(today, years) || years[years.length - 1].year;
+    myHomerooms = canFinance ? [] : await loadMyHomerooms(activeYear);
+    const canUse = canFinance || myHomerooms.length > 0;
+
+    // ครูประจำชั้นต้องกลับมาหน้านี้จากเมนูได้ แต่ห้ามเปิดลิงก์การเงินอันอื่นให้
+    // (ส่งค่า true ให้ applyRestrictedMenuAccess จะเปิดทั้งชุด ซึ่ง RLS ปฏิเสธหมด = เมนูหลอกตา)
+    if (!canFinance && canUse) {
+      const link = [...document.querySelectorAll("a[data-restricted]")]
+        .find(anchor => (anchor.getAttribute("href") || "").includes("transport-settings.html"));
+      if (link) { link.removeAttribute("data-restricted"); link.removeAttribute("hidden"); }
+    }
     applyRestrictedMenuAccess(canFinance);
-    if (!canFinance) {
+
+    if (!canUse) {
       el("access-card").hidden = false;
-      el("access-card").innerHTML = '<div class="readonly"><b>หน้านี้สำหรับฝ่ายการเงินเท่านั้น</b><br>การตั้งโซน ผูกนักเรียน และประกาศยอดค่ารถทำได้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายการเงิน กรุณาติดต่อผู้ดูแลระบบหากคุณควรมีสิทธิ์</div>';
+      el("access-card").innerHTML = '<div class="readonly"><b>เปิดหน้าตั้งค่าค่ารถไม่ได้</b><br>หน้านี้เปิดให้ฝ่ายการเงิน และครูประจำชั้นที่มีห้องรับผิดชอบในปีการศึกษาปัจจุบัน<br>ถ้าคุณเป็นครูประจำชั้นแต่เข้าไม่ได้ กรุณาให้ผู้ดูแลตรวจว่าผูกห้องให้คุณในปีนี้แล้วหรือยัง</div>';
     } else {
-      years = await getAcademicYears();
-      if (!years.length) throw new Error("ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน");
-      const activeYear = academicYearOf(today, years) || years[years.length - 1].year;
       el("year-select").innerHTML = years.map(row => `<option value="${esc(row.year)}">${esc(row.year)}</option>`).join("");
       el("year-select").value = activeYear;
-      el("year-select").disabled = false;
+      // 🪤 ครูทำได้เฉพาะปีปัจจุบัน (RLS: year = current_academic_year()) — ถ้าปล่อยให้เลือกปีเก่า
+      //    ทุกการกดบันทึกจะโดนปฏิเสธโดยครูไม่มีทางรู้ว่าเพราะอะไร
+      el("year-select").disabled = !canFinance;
+      applyHomeroomMode();
       el("settings-app").hidden = false;
       await loadYear();
     }
