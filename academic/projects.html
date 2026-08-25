@@ -75,6 +75,22 @@
   .chip { display: inline-flex; max-width: 100%; padding: 3px 9px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 13px; font-weight: 700; }
   .chip.warn { color: var(--amber); background: var(--amber-soft); }
   .chip.fail, .chip.cancel { color: var(--danger); background: var(--danger-soft); }
+  .fact-list { display: grid; grid-template-columns: minmax(104px, max-content) minmax(0, 1fr); gap: 2px 12px; margin: 10px 0 0; }
+  .fact-list dt { padding: 3px 0; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .fact-list dd { margin: 0; padding: 3px 0; font-size: 15px; overflow-wrap: anywhere; }
+  .fact-warn { color: var(--amber); font-weight: 700; }
+  .long-box { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--bg); }
+  .long-box > summary { display: block; cursor: pointer; list-style: none; }
+  .long-box > summary::-webkit-details-marker { display: none; }
+  .long-box > summary::marker { content: ""; }
+  .long-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+  .long-preview { display: -webkit-box; overflow: hidden; font-size: 15px; white-space: pre-line; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+  .long-toggle { display: inline-block; min-height: 44px; margin-top: 8px; padding: 10px 12px; border-radius: 8px; color: var(--teal); background: var(--teal-soft); font-size: 14px; font-weight: 700; }
+  .long-text { font-size: 15px; white-space: pre-line; overflow-wrap: anywhere; }
+  .long-sub { margin-top: 10px; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .long-box .toggle-close { display: none; }
+  .long-box[open] .long-preview, .long-box[open] .toggle-open { display: none; }
+  .long-box[open] .toggle-close { display: inline-block; }
   .okr-group { margin-bottom: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; }
   .okr-group-title { margin-bottom: 7px; font-weight: 700; }
   .check-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; min-height: 44px; padding: 8px; }
@@ -84,7 +100,6 @@
   .link-row.project-link-row { grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) minmax(190px, .8fr) auto; }
   .link-row.project-link-row.existing-link-row { grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) minmax(190px, .8fr); }
   .link-readonly { min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow-wrap: anywhere; }
-  .project-result-summary { display: -webkit-box; margin-top: 8px; overflow: hidden; white-space: pre-line; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
   fieldset.plan-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
   fieldset.plan-fields:disabled { opacity: .72; }
   .action-reason { max-width: 260px; color: var(--amber); font-size: 13px; text-align: right; }
@@ -104,6 +119,8 @@
     .item-grid { grid-template-columns: 1fr; }
     .actions { justify-content: flex-start; }
     .project-child { margin-left: 4px; padding-left: 10px; }
+    .fact-list { grid-template-columns: 1fr; gap: 0; }
+    .fact-list dt { padding-top: 8px; }
   }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -431,6 +448,13 @@ if (!session) {
     return "";
   }
 
+  function longBox(label, previewText, fullHtml) {
+    if (!String(previewText ?? "").trim()) return "";
+    return `<details class="long-box">
+      <summary><span class="long-label">${esc(label)}</span><span class="long-preview">${esc(previewText)}</span><span class="long-toggle toggle-open">ดูทั้งหมด</span><span class="long-toggle toggle-close">ย่อ</span></summary>
+      ${fullHtml}</details>`;
+  }
+
   function projectArticle(project, child = false, context = false) {
     const end = project.end_date || project.start_date;
     const range = end === project.start_date ? fmtDate(project.start_date) : `${fmtDate(project.start_date)} – ${fmtDate(end)}`;
@@ -448,6 +472,7 @@ if (!session) {
           ? `โครงการยังไม่ได้ตั้งงบ · กิจกรรมยังไม่ได้จัดสรรงบ · ใช้จริง ${hasActual ? fmtMoney(budget.actual) : "ยังไม่ได้กรอก"}`
           : `งบตั้งไว้ ${fmtMoney(budget.ownPlanned)} · จัดสรรให้กิจกรรมแล้ว ${fmtMoney(budget.childPlanned)} · เหลือ ${fmtMoney(budget.unallocated)} · ใช้จริง ${hasActual ? fmtMoney(budget.actual) : "ยังไม่ได้กรอก"}`
       : `งบตั้งไว้ ${fmtMoneyOrMissing(project.budget_planned)} · ใช้จริง ${fmtMoneyOrMissing(project.budget_actual)}`;
+    const budgetHtml = esc(budgetLine).replace("ยังไม่ได้กรอก", '<span class="fact-warn">ยังไม่ได้กรอก</span>');
     const budgetWarnings = budget
       ? `${budget.unallocated > 0 ? '<span class="chip warn">ยังจัดสรรไม่หมด</span>' : ""}${budget.overAllocated ? '<span class="chip fail">จัดสรรเกินงบ</span>' : ""}${budget.ownPlanned != null && budget.actual > budget.ownPlanned ? '<span class="chip fail">ใช้เกินงบ</span>' : ""}`
       : "";
@@ -457,25 +482,43 @@ if (!session) {
       `<span class="chip">${esc(link.kind || "อื่น ๆ")}</span> <a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)}</a>`
     ).join(" · ");
     const resultLinkCount = (project.links || []).filter(link => link.kind === "สรุปโครงการ").length;
-    const resultSummary = project.status === "เสร็จสิ้น" && project.result_summary
-      ? `<div class="project-result-summary"><b>ผลการดำเนินงาน</b><br>${esc(project.result_summary)}</div><div class="chips"><span class="chip">สรุปโครงการ ${resultLinkCount} ไฟล์</span></div>`
-      : "";
     const decisionNote = ["ส่งกลับให้แก้", "ไม่อนุมัติ"].includes(project.approval_status);
-    const approvalNote = approvalBadge.note
-      ? decisionNote
-        ? `<div class="banner ${project.approval_status === "ไม่อนุมัติ" ? "fail" : "warn"}"><b>${esc(approvalBadge.label)}</b><br>${esc(approvalBadge.note)}</div>`
-        : `<div class="meta">${esc(approvalBadge.note)}</div>`
+    const approvalBanner = approvalBadge.note && decisionNote
+      ? `<div class="banner ${project.approval_status === "ไม่อนุมัติ" ? "fail" : "warn"}"><b>${esc(approvalBadge.label)}</b><br>${esc(approvalBadge.note)}</div>`
+      : "";
+    const approvalMeta = approvalBadge.note && !decisionNote
+      ? `<div class="meta">${esc(approvalBadge.note)}</div>`
+      : "";
+    const factRows = [
+      ["ช่วงวันที่", esc(range)],
+      ["ผู้รับผิดชอบ", esc(responsible)],
+      ["งบประมาณ", budgetHtml],
+      project.standard_note ? ["มาตรฐาน/กลยุทธ์", esc(project.standard_note)] : null,
+      links ? ["หลักฐาน", links] : null
+    ].filter(Boolean);
+    const factList = `<dl class="fact-list">${factRows
+      .map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("")}</dl>`;
+    const detailBox = longBox("รายละเอียด", project.detail, `<div class="long-text">${esc(project.detail || "")}</div>`);
+    const resultParts = project.status === "เสร็จสิ้น"
+      ? [["", project.result_summary], ["ปัญหา/อุปสรรค", project.result_obstacle], ["ข้อเสนอแนะ", project.result_suggestion]]
+        .filter(([, text]) => String(text ?? "").trim())
+      : [];
+    const resultBox = resultParts.length
+      ? longBox("ผลการดำเนินงาน", resultParts[0][1], resultParts
+          .map(([sub, text]) => `${sub ? `<div class="long-sub">${esc(sub)}</div>` : ""}<div class="long-text">${esc(text)}</div>`).join(""))
+      : "";
+    const resultLinks = resultBox
+      ? `<div class="chips"><span class="chip">สรุปโครงการ ${resultLinkCount} ไฟล์</span></div>`
       : "";
     return `<article class="${context ? "project-root context" : child ? "project-child" : "project-root"}">
       <div class="item-grid"><div><div class="item-title">${context ? "โครงการแม่: " : ""}${esc(project.name)}</div>
         <div class="chips"><span class="chip">${esc(project.kind)}</span><span class="${statusClass}">${esc(project.status)}</span><span class="${approvalClass}">${esc(approvalBadge.label)}</span>${projectChips(project)}${budgetWarnings}${krOutside}</div>
-        ${approvalNote}
-        <div class="meta">${esc(range)} · ผู้รับผิดชอบ: ${esc(responsible)}</div>
-        <div class="meta">${esc(budgetLine)}</div>
-        ${project.standard_note ? `<div class="meta">มาตรฐาน/กลยุทธ์: ${esc(project.standard_note)}</div>` : ""}
-        ${project.detail ? `<div class="meta">${esc(project.detail)}</div>` : ""}
-        ${resultSummary}
-        ${links ? `<div class="meta">หลักฐาน: ${links}</div>` : ""}
+        ${approvalBanner}
+        ${factList}
+        ${detailBox}
+        ${resultBox}
+        ${resultLinks}
+        ${approvalMeta}
       </div><div class="actions">
         ${projectWorkflowActions(project, context)}
         ${!context && isAdmin ? `<button class="danger" data-delete-project="${project.id}">ลบ</button>` : ""}
