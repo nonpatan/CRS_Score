@@ -171,7 +171,7 @@
         <div class="subform" id="project-progress-fields" hidden>
           <h3>รายงานผล</h3>
           <div class="row2">
-            <div class="field"><label for="p-report-status">สถานะการดำเนินงาน</label><select id="p-report-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
+            <div class="field"><label for="p-report-status">สถานะการดำเนินงาน</label><select id="p-report-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select><div class="hint">กำลังดำเนินการ = เริ่มแล้วแต่ยังไม่จบ · เสร็จสิ้น = ต้องแนบเอกสารสรุปโครงการด้วย</div></div>
             <div class="field"><label for="p-report-budget-actual">งบที่ใช้จริง (บาท)</label><input id="p-report-budget-actual" type="number" min="0" step="0.01" inputmode="decimal"><div class="hint">เว้นว่าง = ไม่เปลี่ยนงบที่บันทึกไว้ · ถ้าใช้จริง 0 บาท ให้กรอกเลข 0</div></div>
           </div>
           <div class="form-grid">
@@ -233,6 +233,12 @@ if (!session) {
     if (isNew) return planningOnly;
     if (approvedAt) return everything;
     return canEditAll ? everything : planningOnly;
+  }
+
+  // อนุมัติล่วงหน้าได้ รายการที่ยังไม่ถึงวันเริ่มจึงต้องคง "วางแผน" ไว้ให้เลือก
+  function reportStatusOptions(currentStatus) {
+    const moved = ["กำลังดำเนินการ", "เสร็จสิ้น", "ยกเลิก"];
+    return currentStatus === "วางแผน" ? ["วางแผน", ...moved] : moved;
   }
 
   // Postgres ส่ง "new row violates row-level security policy" มาดิบ ๆ ครูอ่านไม่ออก
@@ -566,6 +572,8 @@ if (!session) {
     const row = document.createElement("div");
     row.className = `link-row${isProjectLink ? " project-link-row" : ""}`;
     row.dataset.existing = options.existing ? "true" : "false";
+    if (link.id) row.dataset.id = link.id;
+    if (isProjectLink) row.dataset.kind = kind;
     if (options.readonly) {
       row.classList.add("existing-link-row");
       const url = String(link.url || "");
@@ -576,11 +584,15 @@ if (!session) {
       el(containerId).appendChild(row);
       return;
     }
-    const kindField = isProjectLink ? `<div class="field"><label>ประเภทเอกสาร</label><select class="${prefix}-kind">
-      ${["เอกสารนำเสนอเพื่ออนุมัติ", "สรุปโครงการ", "อื่น ๆ"].map(value =>
-        `<option${value === kind ? " selected" : ""}>${value}</option>`
-      ).join("")}
-    </select></div>` : "";
+    const kindField = isProjectLink
+      ? options.fixedKind
+        ? `<div class="field"><label>ประเภทเอกสาร</label><div class="link-readonly">${esc(kind)}</div></div>`
+        : `<div class="field"><label>ประเภทเอกสาร</label><select class="${prefix}-kind">
+          ${["เอกสารนำเสนอเพื่ออนุมัติ", "สรุปโครงการ", "อื่น ๆ"].map(value =>
+            `<option${value === kind ? " selected" : ""}>${value}</option>`
+          ).join("")}
+        </select></div>`
+      : "";
     row.innerHTML = `<div class="field"><label>ชื่อเอกสาร</label><input class="${prefix}-label" type="text" maxlength="300" value="${esc(link.label || "")}"></div><div class="field"><label>URL</label><input class="${prefix}-url" type="url" inputmode="url" value="${esc(link.url || "")}" placeholder="https://…"></div>${kindField}<button class="danger remove-link" type="button">เอาออก</button>`;
     el(containerId).appendChild(row);
   }
@@ -598,6 +610,42 @@ if (!session) {
       if (!link.label || !/^https?:\/\//i.test(link.url)) throw new Error("ลิงก์ทุกแถวต้องมีชื่อและ URL ที่ขึ้นต้นด้วย http:// หรือ https://");
     }
     return links;
+  }
+
+  function readExistingSummaryLinks() {
+    const links = [...el("project-link-list").querySelectorAll('.link-row[data-existing="true"][data-kind="สรุปโครงการ"]')]
+      .map(row => ({
+        id:row.dataset.id,
+        label:row.querySelector(".project-link-label").value.trim(),
+        url:row.querySelector(".project-link-url").value.trim(),
+        kind:"สรุปโครงการ"
+      }));
+    for (const link of links) {
+      if (!link.id || !link.label || !/^https?:\/\//i.test(link.url)) {
+        throw new Error("ลิงก์ทุกแถวต้องมีชื่อและ URL ที่ขึ้นต้นด้วย http:// หรือ https://");
+      }
+    }
+    return links;
+  }
+
+  async function saveProgressLinks(project, existingSummaryLinks, newLinksOnly) {
+    const originalSummaries = (project.links || []).filter(link => link.kind === "สรุปโครงการ");
+    const originalById = new Map(originalSummaries.map(link => [link.id, link]));
+    const keptIds = new Set(existingSummaryLinks.map(link => link.id));
+    for (const link of existingSummaryLinks) {
+      const original = originalById.get(link.id);
+      if (!original || (original.label === link.label && original.url === link.url)) continue;
+      const { error } = await sb.from("academic_project_links")
+        .update({ label:link.label, url:link.url })
+        .eq("id", link.id);
+      if (error) throw error;
+    }
+    for (const link of originalSummaries) {
+      if (keptIds.has(link.id)) continue;
+      const { error } = await sb.from("academic_project_links").delete().eq("id", link.id);
+      if (error) throw error;
+    }
+    await appendProjectLinks(project.id, newLinksOnly, (project.links || []).length);
   }
 
   function syncProjectKind(selectedIds = selectedProjectOkrIds(), notifyRemoved = false) {
@@ -670,19 +718,22 @@ if (!session) {
     el("project-link-list").innerHTML = "";
     (project?.links || []).forEach(link => addLinkRow("project-link-list", "project-link", link, {
       existing:true,
-      readonly:progressMode
+      fixedKind:progressMode,
+      readonly:progressMode && link.kind !== "สรุปโครงการ"
     }));
     syncProjectKind(selectedIds);
     el("project-plan-fields").disabled = progressMode;
     el("project-lock-note").hidden = !progressMode;
     el("project-progress-fields").hidden = !progressMode;
     el("project-link-note").textContent = progressMode
-      ? "แนบเอกสารสรุปผล ภาพถ่าย หรือลิงก์แบบประเมินความพึงพอใจได้ · เอกสารที่แนบไว้แล้วแก้หรือลบไม่ได้"
+      ? "เอกสารนำเสนอเพื่ออนุมัติและเอกสารอื่นที่แนบไว้แล้วถูกล็อก · เอกสารสรุปโครงการแก้ไขหรือลบได้"
       : "ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้";
     el("project-link-hint").textContent = progressMode
       ? "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์ใหม่เริ่มต้นเป็นประเภทสรุปโครงการ"
       : "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ";
-    el("p-report-status").value = project?.status || "วางแผน";
+    const reportStatuses = reportStatusOptions(project?.status || "วางแผน");
+    el("p-report-status").innerHTML = reportStatuses.map(value => `<option>${esc(value)}</option>`).join("");
+    el("p-report-status").value = reportStatuses.includes(project?.status) ? project.status : reportStatuses[0];
     el("p-report-budget-actual").value = project?.budget_actual ?? "";
     el("p-report-summary").value = project?.result_summary ?? "";
     el("p-report-obstacle").value = project?.result_obstacle ?? "";
@@ -850,24 +901,41 @@ if (!session) {
         return toast("กรุณากรอกงบที่ใช้จริงเป็นตัวเลขตั้งแต่ 0 ขึ้นไป แล้วกดบันทึกรายงานผลอีกครั้ง", true);
       }
       let newLinksOnly;
+      let existingSummaryLinks;
       try {
         newLinksOnly = readLinks("project-link-list", "project-link", { newOnly:true });
+        existingSummaryLinks = readExistingSummaryLinks();
       } catch (error) {
         return toast(error.message, true);
       }
+      const reportStatus = el("p-report-status").value;
+      const hasSummaryDocument = existingSummaryLinks.length > 0 ||
+        newLinksOnly.some(link => link.kind === "สรุปโครงการ");
+      if (reportStatus === "เสร็จสิ้น" && !hasSummaryDocument) {
+        return toast('ตั้งสถานะเป็น "เสร็จสิ้น" ต้องแนบเอกสารสรุปโครงการอย่างน้อย 1 รายการ · กด "เพิ่มไฟล์แนบ" แล้วใส่ลิงก์เอกสารสรุป หรือเลือกสถานะ "กำลังดำเนินการ" ไว้ก่อน', true);
+      }
+      const result = {
+        summary:el("p-report-summary").value.trim(),
+        obstacle:el("p-report-obstacle").value.trim(),
+        suggestion:el("p-report-suggestion").value.trim()
+      };
       const button = el("save-project");
       button.disabled = true;
       try {
-        await reportProjectProgress(project.id, el("p-report-status").value, budgetActual, {
-          summary:el("p-report-summary").value.trim(),
-          obstacle:el("p-report-obstacle").value.trim(),
-          suggestion:el("p-report-suggestion").value.trim()
-        });
         try {
-          await appendProjectLinks(project.id, newLinksOnly, (project.links || []).length);
+          await saveProgressLinks(project, existingSummaryLinks, newLinksOnly);
         } catch (error) {
+          closeProjectForm();
           await loadData();
-          toast("บันทึกผลแล้ว แต่แนบเอกสารไม่สำเร็จ: " + error.message, true);
+          toast("บันทึกเอกสารไม่สำเร็จ: " + error.message, true);
+          return;
+        }
+        try {
+          await reportProjectProgress(project.id, reportStatus, budgetActual, result);
+        } catch (error) {
+          closeProjectForm();
+          await loadData();
+          toast("บันทึกเอกสารแล้ว แต่บันทึกผลไม่สำเร็จ: " + error.message, true);
           return;
         }
         toast("บันทึกรายงานผลแล้ว");
