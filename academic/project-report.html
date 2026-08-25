@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายงานโครงการ/กิจกรรม — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:         #1f2a2e;
+    --muted:       #5f6b70;
+    --line:        #dfe4e3;
+    --teal:        #0f6e56;
+    --teal-soft:   #e1f5ee;
+    --bg:          #f7f8f7;
+    --white:       #ffffff;
+    --danger:      #a32d2d;
+    --danger-soft: #fceaea;
+    --amber:       #93690f;
+    --amber-soft:  #faf1dd;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; color: var(--ink); background: var(--bg);
+    font-family: "Sarabun", sans-serif; font-size: 16px; line-height: 1.6;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header h1 { margin: 4px 0; font-size: 23px; }
+  header p { margin: 0 0 8px; color: var(--muted); }
+  header .nav { min-height: 54px; }
+  .card { margin-bottom: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
+  .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .section-head h2 { margin: 0; font-size: 19px; }
+  .section-head p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+  .field { min-width: 0; margin-bottom: 14px; }
+  label { display: block; margin-bottom: 5px; font-weight: 600; }
+  select {
+    width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; color: var(--ink); background: var(--white); font: inherit; font-size: 16px;
+  }
+  select:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  button { min-height: 44px; padding: 9px 14px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary { color: var(--white); background: var(--teal); }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  .readonly, .banner { margin-bottom: 14px; padding: 11px 13px; border-radius: 10px; font-size: 14px; }
+  .readonly { color: var(--danger); background: var(--danger-soft); }
+  .banner.warn { color: var(--amber); background: var(--amber-soft); }
+  .banner.info { color: var(--teal); background: var(--teal-soft); }
+  .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .metric { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+  .metric .label { color: var(--muted); font-size: 13px; }
+  .metric .value { font-size: 21px; font-weight: 700; overflow-wrap: anywhere; }
+  .follow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .follow-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+  .follow-card h3 { margin: 0; font-size: 17px; }
+  .follow-count { color: var(--amber); font-size: 14px; font-weight: 700; }
+  .follow-list { margin: 10px 0 0; padding-left: 20px; }
+  .follow-list li { margin-top: 8px; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 14px; }
+  .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .table-wrap { width: 100%; overflow-x: auto; }
+  table { width: 100%; min-width: 1120px; border-collapse: collapse; }
+  th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--muted); background: var(--bg); font-size: 13px; white-space: nowrap; }
+  td { overflow-wrap: anywhere; }
+  .project-name.child { padding-left: 26px; }
+  .project-name.child::before { content: "↳ "; color: var(--teal); }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { display: inline-flex; max-width: 100%; padding: 3px 9px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 13px; font-weight: 700; }
+  .chip.warn { color: var(--amber); background: var(--amber-soft); }
+  .chip.fail { color: var(--danger); background: var(--danger-soft); }
+  .documents { display: grid; gap: 4px; min-width: 180px; }
+  .documents a { color: var(--teal); font-weight: 600; overflow-wrap: anywhere; }
+  .empty { padding: 26px 10px; color: var(--muted); text-align: center; }
+  .print-header { display: none; }
+  .toast { position: sticky; z-index: 80; bottom: 14px; margin: 12px auto 0; max-width: 680px; padding: 11px 16px; border-radius: 10px; color: var(--white); background: var(--ink); font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s; }
+  .toast.show { opacity: 1; }
+  .toast.err { background: var(--danger); }
+  [hidden] { display: none !important; }
+  @media (max-width: 900px) {
+    .metrics, .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 620px) {
+    body { padding: 12px; }
+    .card { padding: 14px; }
+    .section-head { display: block; }
+    .metrics, .filters, .follow-grid { grid-template-columns: 1fr; }
+  }
+  @page { size: A4 landscape; margin: 10mm; }
+  @media print {
+    html body { display: block !important; padding: 0; color: #000; background: #fff !important; font-size: 11px; }
+    html body::before, html body::after { display: none !important; }
+    .wrap { display: block !important; width: 100%; max-width: none !important; }
+    header, header .nav, #year-card, #filter-card, button, #toast, .workspace-card-heading { display: none !important; }
+    .academic-content { display: block !important; width: 100%; }
+    .print-header { display: block !important; margin-bottom: 10mm; border-bottom: 2px solid #000; padding-bottom: 4mm; }
+    .print-header h1 { margin: 0; font-size: 18px; }
+    .print-header p { margin: 2px 0 0; }
+    .academic-content .card { margin-bottom: 5mm; padding: 0; overflow: visible !important; border: 0 !important; background: #fff !important; box-shadow: none !important; }
+    .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3mm; }
+    .metric, .follow-card, tbody tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+    .follow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3mm; }
+    .table-wrap { overflow: visible; }
+    table { min-width: 0; table-layout: fixed; font-size: 9px; }
+    th, td { padding: 4px; }
+    th:nth-child(1) { width: 16%; }
+    th:nth-child(2) { width: 7%; }
+    th:nth-child(3) { width: 12%; }
+    th:nth-child(4) { width: 9%; }
+    th:nth-child(5) { width: 10%; }
+    th:nth-child(6) { width: 12%; }
+    th:nth-child(7), th:nth-child(8) { width: 8%; }
+    th:nth-child(9) { width: 18%; }
+    .chip { display: inline; padding: 0; color: #000 !important; background: transparent !important; }
+    .chips, .documents { display: block; min-width: 0; }
+    .project-name.child { padding-left: 10px; }
+    thead { display: table-header-group; }
+    a { color: #000; text-decoration: none; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>รายงานโครงการ/กิจกรรม</h1>
+    <p>สรุปทั้งปีว่าทำอะไรไปบ้าง ใช้งบเท่าไหร่ และมีอะไรค้างต้องตาม</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260825-1"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card" id="gate" hidden></section>
+
+    <div id="content" hidden>
+      <div class="print-header" id="print-header">
+        <h1 id="print-title">รายงานสรุปโครงการ/กิจกรรม</h1>
+        <p id="print-date"></p>
+      </div>
+
+      <section class="card" id="year-card">
+        <div class="section-head">
+          <div><h2>เลือกปีการศึกษา</h2><p>ตัวเลขและรายการทั้งหมดแสดงปีเดียวกัน</p></div>
+          <button class="primary" id="print-report" type="button">พิมพ์รายงาน</button>
+        </div>
+        <div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"><option value="">กำลังโหลด…</option></select></div>
+      </section>
+
+      <section class="card" id="summary-card">
+        <div class="section-head"><div><h2>ภาพรวมทั้งปี</h2><p id="project-count">—</p></div></div>
+        <div class="metrics">
+          <div class="metric"><div class="label">ทั้งหมด</div><div class="value" id="count-all">—</div></div>
+          <div class="metric"><div class="label">วางแผน</div><div class="value" id="count-planned">—</div></div>
+          <div class="metric"><div class="label">กำลังดำเนินการ</div><div class="value" id="count-active">—</div></div>
+          <div class="metric"><div class="label">เสร็จสิ้น</div><div class="value" id="count-finished">—</div></div>
+          <div class="metric"><div class="label">ยกเลิก</div><div class="value" id="count-cancelled">—</div></div>
+          <div class="metric"><div class="label">งบตั้งไว้</div><div class="value" id="budget-planned">—</div></div>
+          <div class="metric"><div class="label">ใช้จริง</div><div class="value" id="budget-actual">—</div></div>
+          <div class="metric"><div class="label">คงเหลือ</div><div class="value" id="budget-left">—</div></div>
+        </div>
+      </section>
+
+      <section class="card" id="follow-section">
+        <div class="section-head"><div><h2>ต้องตามงาน</h2><p>แสดงเฉพาะเรื่องที่ยังต้องดำเนินการต่อ</p></div></div>
+        <div class="follow-grid" id="follow-grid"></div>
+        <div class="empty" id="follow-empty" hidden>ไม่มีรายการที่ต้องตามในขณะนี้</div>
+      </section>
+
+      <section class="card" id="filter-card">
+        <div class="section-head"><div><h2>ตัวกรองรายการทั้งหมด</h2><p id="filtered-count">—</p></div></div>
+        <div class="filters">
+          <div class="field"><label for="filter-owner">ผู้รับผิดชอบ</label><select id="filter-owner"><option value="">ทั้งหมด</option></select></div>
+          <div class="field"><label for="filter-objective">Objective</label><select id="filter-objective"><option value="">ทั้งหมด</option></select></div>
+          <div class="field"><label for="filter-status">สถานะ</label><select id="filter-status"><option value="">ทั้งหมด</option><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
+          <div class="field"><label for="filter-kind">ประเภท</label><select id="filter-kind"><option value="">ทั้งหมด</option><option>โครงการ</option><option>กิจกรรม</option></select></div>
+        </div>
+      </section>
+
+      <section class="card" id="all-projects-card">
+        <div class="section-head"><div><h2>รายการทั้งหมด</h2><p>กิจกรรมแสดงเยื้องใต้โครงการแม่</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ชื่อ</th><th>ประเภท</th><th>ผู้รับผิดชอบ</th><th>KR ที่สนับสนุน</th><th>สถานะ</th><th>สถานะอนุมัติ</th><th>งบตั้งไว้</th><th>งบใช้จริง</th><th>เอกสาร</th></tr></thead>
+            <tbody id="project-rows"><tr><td colspan="9" class="empty">กำลังโหลด…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, getActiveYear, setActiveYear, getAcademicYears,
+  isProjectApprover, checkDepartment, loadAcademicProjects, loadSchoolOkrs,
+  buildProjectTree, summarizeProjectBudget, buildOkrTree, okrCoverage,
+  projectResponsibleName, projectApprovalBadge, okrChipLabel,
+  bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260824-2";
+
+const PENDING_DAYS = 7; // เปลี่ยนจุดเดียวถ้าผู้ใช้ขอปรับเกณฑ์รออนุมัติ
+const RETURNED_DAYS = 14; // เปลี่ยนจุดเดียวถ้าผู้ใช้ขอปรับเกณฑ์ส่งกลับให้แก้
+const DAY_MS = 86_400_000;
+const TH_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function bangkokDayNumber(value) {
+  if (!value) return null;
+  const text = String(value);
+  const parsed = Date.parse(text.includes("T") ? text : `${text}T00:00:00+07:00`);
+  return Number.isFinite(parsed) ? Math.floor((parsed + TH_OFFSET_MS) / DAY_MS) : null;
+}
+
+function daysSince(value, todayIso) {
+  const start = bangkokDayNumber(value);
+  const today = bangkokDayNumber(todayIso);
+  return start == null || today == null ? null : today - start;
+}
+
+function activeFollowUps(projects) {
+  return (projects || []).filter(project => project?.status !== "ยกเลิก");
+}
+
+function latestReturnedApproval(project) {
+  const rows = project?.approvals || project?.approval_history || [];
+  return (Array.isArray(rows) ? rows : []).filter(row => row?.action === "ส่งกลับให้แก้")
+    .slice().sort((a, b) => String(b?.created_at || "").localeCompare(String(a?.created_at || "")))[0] || null;
+}
+
+function pendingTooLong(projects, todayIso, days) {
+  return activeFollowUps(projects).filter(project =>
+    project.approval_status === "รออนุมัติ" &&
+    daysSince(project.submitted_at, todayIso) > days
+  );
+}
+
+function returnedTooLong(projects, todayIso, days) {
+  return activeFollowUps(projects).filter(project => {
+    if (project.approval_status !== "ส่งกลับให้แก้") return false;
+    return daysSince(latestReturnedApproval(project)?.created_at, todayIso) > days;
+  });
+}
+
+function pastDueNotClosed(projects, todayIso) {
+  return activeFollowUps(projects).filter(project => {
+    const endDate = project.end_date ?? project.start_date;
+    return Boolean(project.approved_at && endDate && endDate < todayIso &&
+      !["เสร็จสิ้น", "ยกเลิก"].includes(project.status));
+  });
+}
+
+function finishedWithoutSummary(projects, todayIso) {
+  return activeFollowUps(projects).filter(project =>
+    project.status === "เสร็จสิ้น" && !String(project.result_summary ?? "").trim()
+  );
+}
+
+function finishedWithoutActualBudget(projects, todayIso) {
+  return activeFollowUps(projects).filter(project =>
+    project.status === "เสร็จสิ้น" && project.budget_actual == null
+  );
+}
+
+function countByStatus(projects, todayIso) {
+  const counts = { "วางแผน":0, "กำลังดำเนินการ":0, "เสร็จสิ้น":0, "ยกเลิก":0 };
+  for (const project of (projects || [])) {
+    if (Object.prototype.hasOwnProperty.call(counts, project?.status)) counts[project.status] += 1;
+  }
+  return counts;
+}
+
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login
+} else {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[char]);
+  const fmtMoney = value => Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits:2 }) + " บาท";
+  const fmtMoneyOrMissing = value => value == null ? "ยังไม่ได้กรอก" : fmtMoney(value);
+  const toast = (message, error = false) => {
+    const box = el("toast");
+    box.textContent = message;
+    box.classList.toggle("err", error);
+    box.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => box.classList.remove("show"), 3800);
+  };
+
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+
+  let years = [];
+  let projects = [];
+  let okrs = [];
+  let okrTree = { objectives:[], orphans:[] };
+  let coverageByKr = new Map();
+  let okrById = new Map();
+
+  const [approver, academic] = await Promise.all([
+    isProjectApprover(),
+    checkDepartment("วิชาการ")
+  ]);
+  const canSee = approver || academic;
+
+  if (!canSee) {
+    el("gate").hidden = false;
+    el("gate").innerHTML = '<div class="readonly"><b>หน้านี้สำหรับผู้บริหารและฝ่ายวิชาการ</b><br>รายงานสรุปโครงการ/กิจกรรมทั้งโรงเรียนเปิดให้ผู้มีสิทธิ์อนุมัติและฝ่ายวิชาการ<br>ดูโครงการของคุณเองได้ที่หน้า <a href="projects.html">โครงการ/กิจกรรม</a></div>';
+  } else {
+    el("content").hidden = false;
+    await loadYears();
+    if (el("filter-year").value) await loadData();
+  }
+
+  function responsibleName(project) {
+    return projectResponsibleName(project) || "ยังไม่ระบุ";
+  }
+
+  function projectObjectiveIds(project) {
+    return [...new Set((project.okrs || []).map(kr => kr.parent_id).filter(Boolean))];
+  }
+
+  function followProjectList(rows, todayIso, dateOf) {
+    return `<ul class="follow-list">${rows.map(project => {
+      const days = daysSince(dateOf(project), todayIso);
+      return `<li><b>${esc(project.name)}</b><div class="meta">ผู้รับผิดชอบ: ${esc(responsibleName(project))}${days == null ? "" : ` · ค้าง ${days} วัน`}</div></li>`;
+    }).join("")}</ul>`;
+  }
+
+  function followCard(id, title, rows, content) {
+    if (!rows.length) return "";
+    return `<article class="follow-card" id="${id}"><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div>${content}</article>`;
+  }
+
+  function renderFollowUps(todayIso) {
+    const pending = pendingTooLong(projects, todayIso, PENDING_DAYS);
+    const returned = returnedTooLong(projects, todayIso, RETURNED_DAYS);
+    const overdue = pastDueNotClosed(projects, todayIso);
+    const noSummary = finishedWithoutSummary(projects, todayIso);
+    const noBudget = finishedWithoutActualBudget(projects, todayIso);
+    const uncovered = okrTree.objectives.flatMap(objective => objective.keyResults)
+      .filter(kr => coverageByKr.get(kr.id)?.isUncovered);
+    const cards = [
+      followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
+      followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => latestReturnedApproval(project)?.created_at)),
+      followCard("follow-overdue", "📌 เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
+      followCard("follow-summary", "📝 เสร็จแล้วแต่ไม่มีผลสรุป", noSummary, followProjectList(noSummary, todayIso, project => project.end_date ?? project.start_date)),
+      followCard("follow-budget", "💸 เสร็จแล้วแต่ไม่กรอกงบใช้จริง", noBudget, followProjectList(noBudget, todayIso, project => project.end_date ?? project.start_date)),
+      followCard("follow-okr", "⚠️ KR ที่ไม่มีโครงการรองรับ", uncovered,
+        `<ul class="follow-list">${uncovered.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}</li>`).join("")}</ul>`)
+    ].filter(Boolean);
+    el("follow-grid").innerHTML = cards.join("");
+    el("follow-empty").hidden = cards.length > 0;
+  }
+
+  function renderSummary(todayIso) {
+    const counts = countByStatus(projects, todayIso);
+    const budget = summarizeProjectBudget(buildProjectTree(projects));
+    el("count-all").textContent = projects.length.toLocaleString("th-TH");
+    el("count-planned").textContent = counts["วางแผน"].toLocaleString("th-TH");
+    el("count-active").textContent = counts["กำลังดำเนินการ"].toLocaleString("th-TH");
+    el("count-finished").textContent = counts["เสร็จสิ้น"].toLocaleString("th-TH");
+    el("count-cancelled").textContent = counts["ยกเลิก"].toLocaleString("th-TH");
+    el("budget-planned").textContent = fmtMoney(budget.planned);
+    el("budget-actual").textContent = fmtMoney(budget.actual);
+    el("budget-left").textContent = fmtMoney(budget.planned - budget.actual);
+    el("project-count").textContent = `${projects.length.toLocaleString("th-TH")} รายการ`;
+  }
+
+  function ownerOptions() {
+    const owners = new Map();
+    for (const project of projects) {
+      const key = project.responsible_staff_id || "__unassigned";
+      if (!owners.has(key)) owners.set(key, responsibleName(project));
+    }
+    el("filter-owner").innerHTML = '<option value="">ทั้งหมด</option>' + [...owners]
+      .sort((a, b) => a[1].localeCompare(b[1], "th"))
+      .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+  }
+
+  function objectiveOptions() {
+    el("filter-objective").innerHTML = '<option value="">ทั้งหมด</option>' + okrTree.objectives
+      .map(objective => `<option value="${objective.id}">${esc(objective.code || "O")} · ${esc(objective.objective)}</option>`).join("");
+  }
+
+  function matchedProjects() {
+    const owner = el("filter-owner").value;
+    const objective = el("filter-objective").value;
+    const status = el("filter-status").value;
+    const kind = el("filter-kind").value;
+    return projects.filter(project =>
+      (!owner || (project.responsible_staff_id || "__unassigned") === owner) &&
+      (!objective || projectObjectiveIds(project).includes(objective)) &&
+      (!status || project.status === status) &&
+      (!kind || project.kind === kind)
+    );
+  }
+
+  function krHtml(project) {
+    const rows = (project.okrs || []).filter(kr => kr.parent_id);
+    return rows.length ? `<div class="chips">${rows.map(kr => `<span class="chip">${esc(okrChipLabel(kr, okrById) || kr.code || "KR")}</span>`).join("")}</div>` : "—";
+  }
+
+  function documentHtml(project) {
+    const rows = (project.links || []).filter(link => ["เอกสารนำเสนอเพื่ออนุมัติ", "สรุปโครงการ"].includes(link.kind));
+    return rows.length ? `<div class="documents">${rows.map(link => `<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.kind)}: ${esc(link.label)}</a>`).join("")}</div>` : "—";
+  }
+
+  function projectRow(project, child = false) {
+    const badge = projectApprovalBadge(project);
+    const tone = badge.tone ? ` ${badge.tone}` : "";
+    return `<tr><td class="project-name${child ? " child" : ""}"><b>${esc(project.name)}</b></td><td>${esc(project.kind)}</td><td>${esc(responsibleName(project))}</td><td>${krHtml(project)}</td><td>${esc(project.status)}</td><td><span class="chip${tone}">${esc(badge.label)}</span></td><td>${esc(fmtMoneyOrMissing(project.budget_planned))}</td><td>${esc(fmtMoneyOrMissing(project.budget_actual))}</td><td>${documentHtml(project)}</td></tr>`;
+  }
+
+  function renderTable() {
+    const matched = matchedProjects();
+    const selected = new Set(matched.map(project => project.id));
+    const tree = buildProjectTree(projects);
+    const rows = [];
+    for (const root of tree) {
+      if (selected.has(root.id)) rows.push(projectRow(root));
+      for (const child of (root.children || [])) if (selected.has(child.id)) rows.push(projectRow(child, true));
+    }
+    el("filtered-count").textContent = `${matched.length.toLocaleString("th-TH")} รายการ`;
+    el("project-rows").innerHTML = rows.length ? rows.join("") : '<tr><td colspan="9" class="empty">ไม่พบรายการตามตัวกรอง</td></tr>';
+  }
+
+  async function loadApprovalRows(rows) {
+    const ids = rows.map(project => project.id);
+    if (!ids.length) return rows;
+    const { data, error } = await sb.from("academic_project_approvals")
+      .select("project_id,action,note,acted_by,acted_by_name,created_at")
+      .in("project_id", ids)
+      .order("created_at", { ascending:false });
+    if (error) throw new Error("โหลดประวัติการพิจารณาไม่สำเร็จ: " + error.message);
+    const byProject = new Map();
+    for (const approval of (data || [])) {
+      if (!byProject.has(approval.project_id)) byProject.set(approval.project_id, []);
+      byProject.get(approval.project_id).push(approval);
+    }
+    return rows.map(project => ({ ...project, approvals:byProject.get(project.id) || [] }));
+  }
+
+  function syncPrintHeader() {
+    const year = el("filter-year").value;
+    const printed = bangkokNow().toLocaleDateString("th-TH", {
+      day:"numeric", month:"long", year:"numeric", timeZone:"UTC"
+    });
+    el("print-title").textContent = `รายงานสรุปโครงการ/กิจกรรม ปีการศึกษา ${year} · โรงเรียนเจริญศึกษา`;
+    el("print-date").textContent = `วันที่พิมพ์ ${printed}`;
+  }
+
+  async function loadData() {
+    const year = el("filter-year").value;
+    if (!year) return;
+    el("project-rows").innerHTML = '<tr><td colspan="9" class="empty">กำลังโหลด…</td></tr>';
+    try {
+      const [projectRows, okrRows] = await Promise.all([
+        loadAcademicProjects(year), loadSchoolOkrs(year)
+      ]);
+      projects = await loadApprovalRows(projectRows);
+      okrs = okrRows;
+      okrTree = buildOkrTree(okrs);
+      okrById = new Map(okrs.map(okr => [okr.id, okr]));
+      coverageByKr = okrCoverage(okrTree, projects);
+      const todayIso = toDateStr(bangkokNow());
+      ownerOptions(); objectiveOptions();
+      renderSummary(todayIso); renderFollowUps(todayIso); renderTable(); syncPrintHeader();
+    } catch (error) {
+      el("project-rows").innerHTML = `<tr><td colspan="9" class="empty">${esc(error.message)}</td></tr>`;
+      toast(error.message, true);
+    }
+  }
+
+  async function loadYears() {
+    years = await getAcademicYears();
+    if (!years.length) {
+      el("filter-year").innerHTML = '<option value="">— ยังไม่ได้กำหนดปีการศึกษา —</option>';
+      return;
+    }
+    const values = years.map(row => row.year).sort((a, b) => b.localeCompare(a, "th", { numeric:true }));
+    const saved = getActiveYear();
+    const selected = values.includes(saved) ? saved : values[0];
+    el("filter-year").innerHTML = values.map(year => `<option value="${esc(year)}">ปีการศึกษา ${esc(year)}</option>`).join("");
+    el("filter-year").value = selected;
+    setActiveYear(selected);
+  }
+
+  el("filter-year")?.addEventListener("change", async () => {
+    setActiveYear(el("filter-year").value);
+    await loadData();
+  });
+  for (const id of ["filter-owner", "filter-objective", "filter-status", "filter-kind"]) {
+    el(id)?.addEventListener("change", renderTable);
+  }
+  el("print-report")?.addEventListener("click", () => {
+    syncPrintHeader();
+    window.print();
+  });
+}
+</script>
+</body>
+</html>
