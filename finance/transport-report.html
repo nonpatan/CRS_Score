@@ -45,6 +45,7 @@
   .readonly, .banner { margin-bottom:16px; padding:12px 14px; border-radius:10px; }
   .readonly, .banner.bad { color:var(--danger); background:var(--danger-soft); }
   .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .warn-text { color:var(--amber); font-weight:700; }
   .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:#fff; background:var(--danger); }
   .toast.err { display:block; }
   [hidden] { display:none !important; }
@@ -75,6 +76,9 @@
       <section class="card"><div class="section-head"><div><h2 id="room-summary-title">สรุปรายห้อง</h2><p id="room-summary-note">กดหัวคอลัมน์เพื่อเรียง · กดแถวเพื่อดูรายคน</p></div></div><div class="table-wrap"><table><thead><tr>
         <th><button data-sort="room">ห้อง</button></th><th class="money"><button data-sort="studentCount">ผู้ใช้รถ</button></th><th class="money"><button data-sort="collectedInRange">ยอดที่เก็บได้ (ในช่วง)</button></th><th class="money"><button data-sort="outstandingLifetime">ยอดค้างชำระ (สะสมทั้งหมด)</button></th><th class="money"><button data-sort="unremitted">ค้างส่ง (ปัจจุบัน)</button></th>
       </tr></thead><tbody id="room-body"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
+      <section class="card"><div class="section-head"><div><h2>นักเรียนที่ยังค้างชำระ</h2><p id="outstanding-note">ยอดสะสมถึงวันนี้ ไม่ขึ้นกับช่วงวันที่เลือก</p></div></div><div class="table-wrap"><table><thead><tr>
+        <th>ห้อง</th><th>เลขที่</th><th>ชื่อ</th><th>แบบเก็บเงิน</th><th class="money">ยอดค้างชำระ</th>
+      </tr></thead><tbody id="outstanding-body"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
       <section id="student-card" class="card" hidden><div class="section-head"><div><h2 id="student-title">รายชื่อนักเรียน</h2><p>ยอดเก็บตามช่วงที่เลือก · ยอดค้างสะสมถึงวันนี้</p></div></div><div class="student-grid"><div id="student-list" class="student-list"></div><div id="ledger" class="ledger"><div class="empty">เลือกนักเรียนเพื่อดูรายละเอียด</div></div></div></section>
     </div>
     <div id="toast" class="toast"></div>
@@ -119,6 +123,14 @@ function carryoverRooms(rows, currentYear) {
     .sort((a, b) => a.year.localeCompare(b.year, "th") ||
       `${a.grade_level}${a.classroom}`.localeCompare(`${b.grade_level}${b.classroom}`, "th"));
 }
+// คนที่ยังค้างชำระ = ยอดค้าง > 0 หรือยอดยังคำนวณไม่ได้ (เดือนที่ยังไม่ประกาศยอดอาจทำให้ค้างเพิ่ม)
+function outstandingStudents(rows) {
+  return (rows || [])
+    .filter(row => row && (!row.outstandingKnown || row.outstandingLifetime > 0))
+    .sort((a, b) =>
+      `${a.grade_level}${a.classroom}`.localeCompare(`${b.grade_level}${b.classroom}`, "th", { numeric:true }) ||
+      String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }));
+}
 function selectedRange() { return { from:el("from-date").value, to:el("to-date").value }; }
 function buildStudents() {
   const periodsByStudent = groupByStudent(periods);
@@ -138,6 +150,8 @@ function buildStudents() {
     const inRange = studentPayments.filter(row => row.pay_date >= range.from && row.pay_date <= range.to);
     return {
       ...placement, charges, payments:studentPayments, inRange,
+      billingModes:[...new Set((periodsByStudent.get(placement.student_id) || [])
+        .map(row => row.billing_mode).filter(Boolean))],
       collectedInRange:inRange.reduce((sum, row) => sum + Number(row.amount || 0), 0),
       unremitted:computeTransportUnremitted(studentPayments),
       outstandingLifetime:computeTransportOutstanding(charges, studentPayments),
@@ -187,6 +201,12 @@ function renderSchool() {
 function renderRooms() {
   el("room-body").innerHTML = sortedRooms().map(room => `<tr class="room-row${selectedRoom?.key === room.key ? " active" : ""}" data-room-key="${esc(room.key)}"><td><b>${esc(room.room)}</b></td><td class="money">${room.studentCount} คน</td><td class="money">${formatMoney(room.collectedInRange)}</td><td class="money">${room.outstandingKnown ? formatMoney(room.outstandingLifetime) : "ยังคำนวณไม่ได้"}</td><td class="money">${formatMoney(room.unremitted)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">ยังไม่มีนักเรียนใช้รถในปีการศึกษานี้</td></tr>';
 }
+function renderOutstanding() {
+  const rows = outstandingStudents(students);
+  el("outstanding-note").textContent = `${rows.length.toLocaleString("th-TH")} คน · ยอดสะสมถึงวันนี้ ไม่ขึ้นกับช่วงวันที่เลือก`;
+  el("outstanding-body").innerHTML = rows.map(row => `<tr><td>${esc(row.grade_level)}/${esc(row.classroom)}</td><td>${esc(row.student?.student_no || "—")}</td><td>${esc(row.student?.name || "ไม่พบชื่อนักเรียน")}</td><td>${esc(row.billingModes.join(" · ") || "—")}</td><td class="money">${row.outstandingKnown ? formatMoney(row.outstandingLifetime) : '<span class="warn-text">ยังคำนวณไม่ได้</span>'}</td></tr>`).join("")
+    || '<tr><td colspan="5" class="empty">ไม่มีนักเรียนค้างชำระ</td></tr>';
+}
 function renderStudents() {
   if (!selectedRoom) { el("student-card").hidden = true; return; }
   el("student-card").hidden = false;
@@ -206,7 +226,7 @@ function renderReport() {
   buildStudents(); buildRooms(); renderSchool();
   selectedRoom = selectedRoom ? roomSummaries.find(row => row.key === selectedRoom.key) || null : null;
   if (selectedRoom && !selectedRoom.students.some(row => row.student_id === selectedStudentId)) selectedStudentId = null;
-  renderRooms(); renderStudents();
+  renderRooms(); renderOutstanding(); renderStudents();
 }
 el("apply-range").addEventListener("click", () => {
   const { from, to } = selectedRange();
