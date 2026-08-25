@@ -138,8 +138,8 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getStaffNamesByUser, checkDepartment, applyRestrictedMenuAccess, fetchAllRows, computeUnremitted, formatMoney }
-  from "../supabase-client.js?v=20260825-1";
+import { sb, requireAuth, signOut, getProfile, getStaffNamesByUser, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows, computeUnremitted, formatMoney }
+  from "../supabase-client.js?v=20260825-2";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
@@ -432,7 +432,7 @@ if (session) {
     const [financeAllowed, profile] = await Promise.all([checkDepartment("การเงิน"), getProfile(session.user.id)]);
     canFinance = financeAllowed;
     canAdmin = profile?.role === "admin";
-    applyRestrictedMenuAccess(canFinance);
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
     if (!canFinance) { el("access-card").hidden = false; el("access-card").innerHTML = '<div class="readonly"><b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>การยืนยันรับเงินใช้ได้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายการเงิน</div>'; }
     await loadData();
   } catch (error) { el("access-card").hidden = false; el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินส่งจากครูไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; el("room-grid").innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>'; }

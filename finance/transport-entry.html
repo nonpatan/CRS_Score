@@ -102,12 +102,12 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, isHomeroomTeacherNow,
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
   getAcademicYears, academicYearOf, academicYearRange, getStudentPlacements,
   roomsFromPlacements, activePlacements, bangkokNow, toDateStr, getMyCoverageFor,
   fetchAllRows, summarizeSavingsByStudent, computeTransportCharges,
   computeTransportOutstanding, TRANSPORT_CHARGE_STATUSES, formatMoney
-} from "../supabase-client.js?v=20260825-1";
+} from "../supabase-client.js?v=20260825-2";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
@@ -555,9 +555,7 @@ if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     canFinance = await checkDepartment("การเงิน");
-    // ครูประจำชั้นเห็นลิงก์ "ตั้งค่าค่ารถ" ลิงก์เดียว งานการเงินอื่นยังปิดตามเดิม
-    applyRestrictedMenuAccess(canFinance,
-      canFinance ? [] : (await isHomeroomTeacherNow(session.user.id)) ? ["transport-settings.html"] : []);
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
     await loadContext();
   }
   catch (error) { el("access-warning").hidden = false; el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินค่ารถไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; }

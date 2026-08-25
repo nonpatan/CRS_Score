@@ -41,7 +41,7 @@
   .ledger-row { display:grid; grid-template-columns:120px 100px 1fr 130px; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); }
   .ledger-row .positive { color:var(--teal); } .ledger-row .negative { color:var(--danger); }
   .empty { padding:28px 8px; color:var(--muted); text-align:center; }
-  .banner.bad { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
+  .readonly, .banner.bad { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
   .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:#fff; background:var(--danger); }
   .toast.err { display:block; }
   [hidden] { display:none !important; }
@@ -73,8 +73,8 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, fetchAllRows, academicYearOf, academicYearRange, bangkokNow, toDateStr, summarizeSavingsReport, computeSavingsBalance, formatMoney }
-  from "../supabase-client.js?v=20260825-1";
+import { sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows, academicYearOf, academicYearRange, bangkokNow, toDateStr, summarizeSavingsReport, computeSavingsBalance, formatMoney }
+  from "../supabase-client.js?v=20260825-2";
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 const today = toDateStr(bangkokNow());
@@ -181,6 +181,10 @@ async function loadReport() {
       return data === true ? key : null;
     }));
     const allowedRooms = new Set(accessChecks.filter(Boolean));
+    if (allowedRooms.size === 0) {
+      el("error-card").hidden = false;
+      el("error-card").innerHTML = '<div class="readonly"><b>หน้านี้แสดงเฉพาะห้องที่คุณเป็นครูประจำชั้น</b><br>ตอนนี้ยังไม่พบห้องที่คุณรับผิดชอบในปีการศึกษานี้ ถ้าคิดว่าไม่ถูกต้อง กรุณาให้ผู้ดูแลตรวจว่าผูกห้องให้คุณแล้วหรือยัง</div>';
+    }
     placements = placements.filter(placement => allowedRooms.has(roomKey(placement)));
   }
   renderReport();
@@ -190,7 +194,7 @@ if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     canFinance = await checkDepartment("การเงิน");
-    applyRestrictedMenuAccess(canFinance);
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
     if (!canFinance) {
       el("school-overview").hidden = true;
       el("room-summary-title").textContent = "ห้องของคุณ";

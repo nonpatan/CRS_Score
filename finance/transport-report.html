@@ -64,15 +64,17 @@
         <button id="apply-range" class="primary" type="button">ดูรายงาน</button>
       </div></section>
       <div id="unannounced-warning" class="banner warn" hidden></div>
-      <section class="card"><div class="section-head"><div><h2>ภาพรวมโรงเรียน</h2><p>ยอดที่เก็บได้อิงช่วงวันที่เลือก · ยอดค้างชำระคำนวณสะสมตั้งแต่ต้นปีการศึกษาถึงวันนี้</p></div></div><div class="metric-grid">
+      <div id="carryover-warning" class="banner warn" hidden></div>
+      <section id="school-overview" class="card"><div class="section-head"><div><h2>ภาพรวมโรงเรียน</h2><p>ยอดที่เก็บได้อิงช่วงวันที่เลือก · ยอดค้างชำระคำนวณสะสมตั้งแต่ต้นปีการศึกษาถึงวันนี้</p></div></div><div class="metric-grid">
         <div class="metric"><span>ยอดที่เก็บได้ (ในช่วง)</span><b id="school-collected">0.00 บาท</b></div>
         <div class="metric"><span>รายการรับเงิน (ในช่วง)</span><b id="school-payment-count">0 รายการ</b></div>
         <div class="metric"><span>ยอดค้างชำระ (สะสมทั้งหมด)</span><b id="school-outstanding">0.00 บาท</b></div>
         <div class="metric"><span>นักเรียนที่ยังค้าง</span><b id="school-outstanding-count">0 คน</b></div>
+        <div class="metric"><span>ยอดค้างส่งถึงฝ่ายการเงิน</span><b id="school-unremitted">0.00 บาท</b></div>
       </div></section>
-      <section class="card"><div class="section-head"><div><h2>สรุปรายห้อง</h2><p>กดหัวคอลัมน์เพื่อเรียง · กดแถวเพื่อดูรายคน</p></div></div><div class="table-wrap"><table><thead><tr>
-        <th><button data-sort="room">ห้อง</button></th><th class="money"><button data-sort="studentCount">ผู้ใช้รถ</button></th><th class="money"><button data-sort="collectedInRange">ยอดที่เก็บได้ (ในช่วง)</button></th><th class="money"><button data-sort="outstandingLifetime">ยอดค้างชำระ (สะสมทั้งหมด)</button></th>
-      </tr></thead><tbody id="room-body"><tr><td colspan="4" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
+      <section class="card"><div class="section-head"><div><h2 id="room-summary-title">สรุปรายห้อง</h2><p id="room-summary-note">กดหัวคอลัมน์เพื่อเรียง · กดแถวเพื่อดูรายคน</p></div></div><div class="table-wrap"><table><thead><tr>
+        <th><button data-sort="room">ห้อง</button></th><th class="money"><button data-sort="studentCount">ผู้ใช้รถ</button></th><th class="money"><button data-sort="collectedInRange">ยอดที่เก็บได้ (ในช่วง)</button></th><th class="money"><button data-sort="outstandingLifetime">ยอดค้างชำระ (สะสมทั้งหมด)</button></th><th class="money"><button data-sort="unremitted">ค้างส่ง (ปัจจุบัน)</button></th>
+      </tr></thead><tbody id="room-body"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
       <section id="student-card" class="card" hidden><div class="section-head"><div><h2 id="student-title">รายชื่อนักเรียน</h2><p>ยอดเก็บตามช่วงที่เลือก · ยอดค้างสะสมถึงวันนี้</p></div></div><div class="student-grid"><div id="student-list" class="student-list"></div><div id="ledger" class="ledger"><div class="empty">เลือกนักเรียนเพื่อดูรายละเอียด</div></div></div></section>
     </div>
     <div id="toast" class="toast"></div>
@@ -80,18 +82,18 @@
 </div>
 <script type="module">
 import {
-  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, fetchAllRows,
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows,
   academicYearOf, academicYearRange, bangkokNow, toDateStr, computeTransportCharges,
-  computeTransportOutstanding, formatMoney
-} from "../supabase-client.js?v=20260825-1";
+  computeTransportOutstanding, computeTransportUnremitted, formatMoney
+} from "../supabase-client.js?v=20260825-2";
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 const today = toDateStr(bangkokNow());
 const roomKey = row => [row.grade_level, row.classroom].join("\u0000");
 const thaiDate = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
 const thaiMonth = value => new Intl.DateTimeFormat("th-TH", { month:"long", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
-let currentYear = "", yearRange = null, placements = [], periods = [], attendance = [], overrides = [], monthRates = [], payments = [];
-let students = [], roomSummaries = [], selectedRoom = null, selectedStudentId = null, sortKey = "room", sortDirection = 1, toastTimer;
+let currentYear = "", yearRange = null, placements = [], periods = [], attendance = [], overrides = [], monthRates = [], payments = [], unremittedAll = [];
+let students = [], roomSummaries = [], selectedRoom = null, selectedStudentId = null, sortKey = "room", sortDirection = 1, canFinance = false, toastTimer;
 
 function toast(message) { el("toast").textContent = message; el("toast").className = "toast err"; clearTimeout(toastTimer); toastTimer = setTimeout(() => el("toast").className = "toast", 6000); }
 function groupByStudent(rows) {
@@ -101,6 +103,21 @@ function groupByStudent(rows) {
     grouped.get(row.student_id).push(row);
   }
   return grouped;
+}
+// ยอดค้างส่งของ "ปีอื่น" แยกรายปี+ห้อง — ไม่ยุบรวมกับปีปัจจุบัน เพราะครูประจำชั้นอาจคนละคน
+function carryoverRooms(rows, currentYear) {
+  const groups = new Map();
+  for (const row of rows || []) {
+    if (!row || row.year === currentYear) continue;
+    const key = [row.year, row.grade_level, row.classroom].join(" ");
+    if (!groups.has(key)) groups.set(key, { year:row.year, grade_level:row.grade_level, classroom:row.classroom, rows:[] });
+    groups.get(key).rows.push(row);
+  }
+  return [...groups.values()]
+    .map(group => ({ ...group, amount:computeTransportUnremitted(group.rows) }))
+    .filter(group => group.amount > 0)
+    .sort((a, b) => a.year.localeCompare(b.year, "th") ||
+      `${a.grade_level}${a.classroom}`.localeCompare(`${b.grade_level}${b.classroom}`, "th"));
 }
 function selectedRange() { return { from:el("from-date").value, to:el("to-date").value }; }
 function buildStudents() {
@@ -122,6 +139,7 @@ function buildStudents() {
     return {
       ...placement, charges, payments:studentPayments, inRange,
       collectedInRange:inRange.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      unremitted:computeTransportUnremitted(studentPayments),
       outstandingLifetime:computeTransportOutstanding(charges, studentPayments),
       outstandingKnown:charges.unannouncedMonths.length === 0
     };
@@ -137,6 +155,7 @@ function buildRooms() {
   roomSummaries = [...byRoom.values()].map(room => ({
     ...room, studentCount:room.students.length,
     collectedInRange:room.students.reduce((sum, row) => sum + row.collectedInRange, 0),
+    unremitted:room.students.reduce((sum, row) => sum + row.unremitted, 0),
     outstandingLifetime:room.students.reduce((sum, row) => sum + row.outstandingLifetime, 0),
     outstandingKnown:room.students.every(row => row.outstandingKnown)
   }));
@@ -155,11 +174,18 @@ function renderSchool() {
   el("school-payment-count").textContent = `${students.reduce((sum, row) => sum + row.inRange.length, 0)} รายการ`;
   el("school-outstanding").textContent = outstandingKnown ? formatMoney(students.reduce((sum, row) => sum + row.outstandingLifetime, 0)) : "ยังคำนวณไม่ได้";
   el("school-outstanding-count").textContent = outstandingKnown ? `${students.filter(row => row.outstandingLifetime > 0).length} คน` : "—";
+  el("school-unremitted").textContent = formatMoney(computeTransportUnremitted(payments));
   el("unannounced-warning").hidden = outstandingKnown;
   el("unannounced-warning").innerHTML = outstandingKnown ? "" : `<b>ยังคำนวณยอดค้างไม่ได้</b><br>ฝ่ายการเงินยังไม่ประกาศยอด ${unknownMonths.map(thaiMonth).join(", ")} · ยอดดังกล่าวไม่ใช่ 0 บาท`;
+  const carryover = carryoverRooms(unremittedAll, currentYear);
+  el("carryover-warning").hidden = carryover.length === 0;
+  el("carryover-warning").innerHTML = carryover.length
+    ? `<b>มีเงินสดค่ารถค้างส่งจากปีการศึกษาก่อน</b><br>${carryover
+        .map(row => `ปีการศึกษา ${esc(row.year)} · ${esc(row.grade_level)}/${esc(row.classroom)} — ${formatMoney(row.amount)}`).join("<br>")}<br>ยอดนี้ไม่รวมอยู่ในคอลัมน์ "ค้างส่ง (ปัจจุบัน)" ด้านล่าง`
+    : "";
 }
 function renderRooms() {
-  el("room-body").innerHTML = sortedRooms().map(room => `<tr class="room-row${selectedRoom?.key === room.key ? " active" : ""}" data-room-key="${esc(room.key)}"><td><b>${esc(room.room)}</b></td><td class="money">${room.studentCount} คน</td><td class="money">${formatMoney(room.collectedInRange)}</td><td class="money">${room.outstandingKnown ? formatMoney(room.outstandingLifetime) : "ยังคำนวณไม่ได้"}</td></tr>`).join("") || '<tr><td colspan="4" class="empty">ยังไม่มีนักเรียนใช้รถในปีการศึกษานี้</td></tr>';
+  el("room-body").innerHTML = sortedRooms().map(room => `<tr class="room-row${selectedRoom?.key === room.key ? " active" : ""}" data-room-key="${esc(room.key)}"><td><b>${esc(room.room)}</b></td><td class="money">${room.studentCount} คน</td><td class="money">${formatMoney(room.collectedInRange)}</td><td class="money">${room.outstandingKnown ? formatMoney(room.outstandingLifetime) : "ยังคำนวณไม่ได้"}</td><td class="money">${formatMoney(room.unremitted)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">ยังไม่มีนักเรียนใช้รถในปีการศึกษานี้</td></tr>';
 }
 function renderStudents() {
   if (!selectedRoom) { el("student-card").hidden = true; return; }
@@ -209,34 +235,54 @@ async function loadReport() {
   if (!currentYear || !yearRange) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
   el("from-date").value = yearRange.start; el("to-date").value = today;
   el("year-note").textContent = `ปีการศึกษา ${currentYear} · ค่าเริ่มต้นตั้งแต่ต้นปีการศึกษาถึงวันนี้`;
-  const [placementRes, periodRes, attendanceRes, overrideRes, rateRes, paymentRes] = await Promise.all([
+  const [placementRes, periodRes, attendanceRes, overrideRes, rateRes, paymentRes, unremittedRes] = await Promise.all([
     fetchAllRows(() => sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school)").eq("year", currentYear), ["grade_level","classroom","id"]),
     fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date").eq("year", currentYear), ["student_id","start_date","id"]),
     fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status").eq("year", currentYear).gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
     fetchAllRows(() => sb.from("transport_day_overrides").select("id,student_id,charge_date,amount").eq("year", currentYear).gte("charge_date", yearRange.start).lte("charge_date", today), ["charge_date","student_id","id"]),
     fetchAllRows(() => sb.from("transport_month_rates").select("year,ym,zone_id,trip_mode,amount").eq("year", currentYear), ["year","ym","zone_id","trip_mode"]),
-    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,year,grade_level,classroom,pay_date,amount,method,note,remittance_id").eq("year", currentYear), ["pay_date","student_id","id"])
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,year,grade_level,classroom,pay_date,amount,method,note,remittance_id").eq("year", currentYear), ["pay_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_payments")
+      .select("id,student_id,year,grade_level,classroom,amount,method,remittance_id")
+      .eq("method", "เงินสด").is("remittance_id", null), ["year","grade_level","classroom","id"])
   ]);
-  for (const [label, result] of [["รายชื่อห้อง",placementRes],["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["อัตรารายเดือน",rateRes],["รายการรับเงิน",paymentRes]]) {
+  for (const [label, result] of [["รายชื่อห้อง",placementRes],["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["อัตรารายเดือน",rateRes],["รายการรับเงิน",paymentRes],["ยอดค้างส่งทุกปี",unremittedRes]]) {
     if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
   }
   placements = placementRes.data || []; periods = periodRes.data || []; attendance = attendanceRes.data || [];
-  overrides = overrideRes.data || []; monthRates = rateRes.data || []; payments = paymentRes.data || [];
+  overrides = overrideRes.data || []; monthRates = rateRes.data || []; payments = paymentRes.data || []; unremittedAll = unremittedRes.data || [];
+  if (!canFinance) {
+    const roomMap = new Map();
+    for (const placement of placements) roomMap.set(roomKey(placement), placement);
+    const accessChecks = await Promise.all([...roomMap.entries()].map(async ([key, room]) => {
+      const { data, error } = await sb.rpc("can_read_room_money", {
+        p_year:currentYear, p_grade:room.grade_level, p_classroom:room.classroom
+      });
+      if (error) throw new Error("ตรวจสิทธิ์รายห้องไม่สำเร็จ: " + error.message);
+      return data === true ? key : null;
+    }));
+    const allowedRooms = new Set(accessChecks.filter(Boolean));
+    if (allowedRooms.size === 0) {
+      el("access-card").hidden = false;
+      el("access-card").innerHTML = '<div class="readonly"><b>หน้านี้แสดงเฉพาะห้องที่คุณเป็นครูประจำชั้น</b><br>ตอนนี้ยังไม่พบห้องที่คุณรับผิดชอบในปีการศึกษานี้ ถ้าคิดว่าไม่ถูกต้อง กรุณาให้ผู้ดูแลตรวจว่าผูกห้องให้คุณแล้วหรือยัง</div>';
+    }
+    placements = placements.filter(placement => allowedRooms.has(roomKey(placement)));
+  }
   renderReport();
 }
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
-    const canFinance = await checkDepartment("การเงิน");
-    applyRestrictedMenuAccess(canFinance);
+    canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
     if (!canFinance) {
-      el("access-card").hidden = false;
-      el("access-card").innerHTML = '<div class="readonly"><b>คุณไม่มีสิทธิ์ดูรายงานค่ารถ</b><br>หน้านี้ใช้สำหรับผู้ที่ได้รับสิทธิ์ฝ่ายการเงินเท่านั้น</div>';
-    } else {
-      el("report-content").hidden = false;
-      await loadReport();
+      el("school-overview").hidden = true;
+      el("room-summary-title").textContent = "ห้องของคุณ";
+      el("room-summary-note").textContent = "แสดงเฉพาะห้องที่คุณรับผิดชอบ · กดแถวเพื่อดูรายคน";
     }
+    el("report-content").hidden = false;
+    await loadReport();
   } catch (error) {
     el("access-card").hidden = false;
     el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารายงานค่ารถไม่สำเร็จ</b><br>${esc(error.message)}</div>`;

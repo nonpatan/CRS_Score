@@ -142,6 +142,18 @@ export async function isHomeroomTeacherNow(userId) {
   return (result.data || []).length > 0;
 }
 
+// ลิงก์ฝ่ายการเงินที่ครูประจำชั้นเห็นได้ — ต้องตรงกับสิ่งที่ RLS ยอมให้อ่านจริงเท่านั้น
+// ⛔ ห้ามใส่หน้าที่ถือเงินสด/ภาพรวมทั้งโรงเรียน (savings-payout · savings-remit ·
+//    savings-opening · transport-remit) เด็ดขาด
+export const HOMEROOM_FINANCE_LINKS = [
+  "transport-settings.html", "savings-report.html", "transport-report.html"
+];
+
+export async function financeMenuKeepHrefs(canFinance, userId) {
+  if (canFinance) return [];
+  return (await isHomeroomTeacherNow(userId)) ? HOMEROOM_FINANCE_LINKS : [];
+}
+
 export function applyPersonnelMenuAccess(canManageHr) {
   applyRestrictedMenuAccess(canManageHr);
 }
@@ -760,6 +772,15 @@ export function computeUnremitted(txns) {
   return (Array.isArray(txns) ? txns : []).reduce((total, txn) => {
     if (txn?.kind !== "ฝาก" || txn.remittance_id != null) return total;
     const amount = Number(txn.amount);
+    return Number.isFinite(amount) ? total + amount : total;
+  }, 0);
+}
+
+// ค่ารถที่ครูรับเงินสดไว้แล้วแต่ยังไม่ได้ส่งฝ่ายการเงิน — เกณฑ์เดียวกับ transport-remit.html
+export function computeTransportUnremitted(payments) {
+  return (Array.isArray(payments) ? payments : []).reduce((total, row) => {
+    if (row?.method !== "เงินสด" || row.remittance_id != null) return total;
+    const amount = Number(row.amount);
     return Number.isFinite(amount) ? total + amount : total;
   }, 0);
 }
