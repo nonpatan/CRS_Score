@@ -2560,7 +2560,7 @@ async function enrichApprovalProjects(projects) {
   const projectIds = rows.map(row => row.id);
   const parentIds = [...new Set(rows.map(row => row.parent_id).filter(Boolean))];
   const staffIds = [...new Set(rows.map(row => row.responsible_staff_id).filter(Boolean))];
-  const [parentsRes, staffRes, historyRes, linksRes] = await Promise.all([
+  const [parentsRes, staffRes, historyRes, linksRes, okrLinksRes] = await Promise.all([
     parentIds.length
       ? sb.from("academic_projects").select("id,name").in("id", parentIds)
       : Promise.resolve({ data: [], error: null }),
@@ -2574,11 +2574,22 @@ async function enrichApprovalProjects(projects) {
     sb.from("academic_project_links")
       .select("*")
       .in("project_id", projectIds)
-      .order("sort_order")
+      .order("sort_order"),
+    sb.from("academic_project_okrs")
+      .select("project_id,okr_id")
+      .in("project_id", projectIds)
   ]);
 
-  for (const res of [parentsRes, staffRes, historyRes, linksRes]) {
+  for (const res of [parentsRes, staffRes, historyRes, linksRes, okrLinksRes]) {
     if (res.error) throw new Error("โหลดรายละเอียดการอนุมัติโครงการไม่สำเร็จ: " + res.error.message);
+  }
+
+  const okrIds = [...new Set((okrLinksRes.data || []).map(row => row.okr_id).filter(Boolean))];
+  const okrsRes = okrIds.length
+    ? await sb.from("school_okrs").select("*").in("id", okrIds).order("sort_order")
+    : { data: [], error: null };
+  if (okrsRes.error) {
+    throw new Error("โหลดรายละเอียดการอนุมัติโครงการไม่สำเร็จ: " + okrsRes.error.message);
   }
 
   const parentById = new Map((parentsRes.data || []).map(row => [row.id, row]));
@@ -2592,6 +2603,14 @@ async function enrichApprovalProjects(projects) {
   for (const link of (linksRes.data || [])) {
     if (!linksByProject.has(link.project_id)) linksByProject.set(link.project_id, []);
     linksByProject.get(link.project_id).push(link);
+  }
+  const okrById = new Map((okrsRes.data || []).map(okr => [okr.id, okr]));
+  const okrsByProject = new Map();
+  for (const link of (okrLinksRes.data || [])) {
+    const okr = okrById.get(link.okr_id);
+    if (!okr) continue;
+    if (!okrsByProject.has(link.project_id)) okrsByProject.set(link.project_id, []);
+    okrsByProject.get(link.project_id).push(okr);
   }
 
   return rows.map(project => {
@@ -2607,7 +2626,8 @@ async function enrichApprovalProjects(projects) {
       parent,
       parent_name: parent?.name || "",
       approval_history: historyByProject.get(project.id) || [],
-      links: linksByProject.get(project.id) || []
+      links: linksByProject.get(project.id) || [],
+      okrs: okrsByProject.get(project.id) || []
     };
   });
 }
