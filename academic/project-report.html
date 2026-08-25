@@ -67,12 +67,25 @@
   td { overflow-wrap: anywhere; }
   .project-name.child { padding-left: 26px; }
   .project-name.child::before { content: "↳ "; color: var(--teal); }
+  .name-btn { display: inline-block; min-height: 44px; padding: 4px 0; border: 0; border-radius: 0; color: var(--teal); background: transparent; font: inherit; font-weight: 700; text-align: left; text-decoration: underline; cursor: pointer; }
+  .name-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip { display: inline-flex; max-width: 100%; padding: 3px 9px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 13px; font-weight: 700; }
   .chip.warn { color: var(--amber); background: var(--amber-soft); }
   .chip.fail { color: var(--danger); background: var(--danger-soft); }
   .documents { display: grid; gap: 4px; min-width: 180px; }
   .documents a { color: var(--teal); font-weight: 600; overflow-wrap: anywhere; }
+  .overlay { position: fixed; z-index: 120; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--ink) 48%, transparent); }
+  .modal { width: min(640px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 18px; border-radius: 12px; background: var(--white); box-shadow: 0 18px 55px color-mix(in srgb, var(--ink) 24%, transparent); }
+  .modal h2 { margin: 0 0 10px; font-size: 20px; }
+  .fact-list { display: grid; grid-template-columns: minmax(104px, max-content) minmax(0, 1fr); gap: 2px 12px; margin: 10px 0 0; }
+  .fact-list dt { padding: 3px 0; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .fact-list dd { margin: 0; padding: 3px 0; font-size: 15px; overflow-wrap: anywhere; }
+  .long-box { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--bg); }
+  .long-label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+  .long-text { font-size: 15px; white-space: pre-line; overflow-wrap: anywhere; }
+  .long-sub { margin-top: 10px; color: var(--muted); font-size: 13px; font-weight: 600; }
+  .detail-link { color: var(--teal); font-weight: 600; }
   .empty { padding: 26px 10px; color: var(--muted); text-align: center; }
   .print-header { display: none; }
   .toast { position: sticky; z-index: 80; bottom: 14px; margin: 12px auto 0; max-width: 680px; padding: 11px 16px; border-radius: 10px; color: var(--white); background: var(--ink); font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s; }
@@ -87,13 +100,15 @@
     .card { padding: 14px; }
     .section-head { display: block; }
     .metrics, .filters, .follow-grid { grid-template-columns: 1fr; }
+    .fact-list { grid-template-columns: 1fr; gap: 0; }
+    .fact-list dt { padding-top: 8px; }
   }
   @page { size: A4 landscape; margin: 10mm; }
   @media print {
     html body { display: block !important; padding: 0; color: #000; background: #fff !important; font-size: 11px; }
     html body::before, html body::after { display: none !important; }
     .wrap { display: block !important; width: 100%; max-width: none !important; }
-    header, header .nav, #year-card, #filter-card, button, #toast, .workspace-card-heading { display: none !important; }
+    header, header .nav, #year-card, #filter-card, button, #toast, #detail-overlay, .workspace-card-heading { display: none !important; }
     .academic-content { display: block !important; width: 100%; }
     .print-header { display: block !important; margin-bottom: 10mm; border-bottom: 2px solid #000; padding-bottom: 4mm; }
     .print-header h1 { margin: 0; font-size: 18px; }
@@ -116,6 +131,7 @@
     .chip { display: inline; padding: 0; color: #000 !important; background: transparent !important; }
     .chips, .documents { display: block; min-width: 0; }
     .project-name.child { padding-left: 10px; }
+    .name-btn { display: inline !important; min-height: 0; padding: 0 !important; color: #000 !important; text-decoration: none !important; }
     thead { display: table-header-group; }
     a { color: #000; text-decoration: none; }
   }
@@ -187,6 +203,14 @@
           </table>
         </div>
       </section>
+    </div>
+
+    <div id="detail-overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="detail-title" hidden>
+      <div class="modal">
+        <h2 id="detail-title">รายละเอียด</h2>
+        <div id="detail-body"></div>
+        <div class="toolbar"><button class="primary" id="detail-close" type="button">ปิด</button><a class="detail-link" id="detail-open-page" href="projects.html">เปิดหน้าโครงการ/กิจกรรม</a></div>
+      </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -280,6 +304,12 @@ if (!session) {
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
   })[char]);
+  const fmtDate = value => value ? new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+  }) : "—";
+  const fmtDateTime = value => value ? new Date(value).toLocaleString("th-TH", {
+    dateStyle:"medium", timeStyle:"short", timeZone:"Asia/Bangkok"
+  }) : "—";
   const fmtMoney = value => Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits:2 }) + " บาท";
   const fmtMoneyOrMissing = value => value == null ? "ยังไม่ได้กรอก" : fmtMoney(value);
   const toast = (message, error = false) => {
@@ -299,6 +329,7 @@ if (!session) {
   let okrTree = { objectives:[], orphans:[] };
   let coverageByKr = new Map();
   let okrById = new Map();
+  let detailTrigger = null;
 
   const [approver, academic] = await Promise.all([
     isProjectApprover(),
@@ -409,10 +440,54 @@ if (!session) {
     return rows.length ? `<div class="documents">${rows.map(link => `<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.kind)}: ${esc(link.label)}</a>`).join("")}</div>` : "—";
   }
 
+  function detailHtml(project) {
+    const badge = projectApprovalBadge(project);
+    const tone = badge.tone ? ` ${badge.tone}` : "";
+    const endDate = project.end_date ?? project.start_date;
+    const range = endDate === project.start_date
+      ? fmtDate(project.start_date)
+      : `${fmtDate(project.start_date)} – ${fmtDate(endDate)}`;
+    const parent = project.kind === "กิจกรรม" && project.parent_id
+      ? projects.find(row => row.id === project.parent_id) : null;
+    const factRows = [
+      ["ช่วงวันที่", esc(range)],
+      ["ผู้รับผิดชอบ", esc(responsibleName(project))],
+      ["งบตั้งไว้", esc(fmtMoneyOrMissing(project.budget_planned))],
+      ["งบใช้จริง", esc(fmtMoneyOrMissing(project.budget_actual))],
+      ["KR ที่สนับสนุน", krHtml(project)],
+      String(project.standard_note ?? "").trim()
+        ? ["มาตรฐาน/กลยุทธ์", esc(project.standard_note)] : null
+    ].filter(Boolean);
+    const facts = `<dl class="fact-list">${factRows
+      .map(([label, value]) => `<dt>${label}</dt><dd>${value}</dd>`).join("")}</dl>`;
+    const detail = String(project.detail ?? "").trim()
+      ? `<div class="long-box"><span class="long-label">รายละเอียด</span><div class="long-text">${esc(project.detail)}</div></div>`
+      : "";
+    const resultParts = project.status === "เสร็จสิ้น"
+      ? [["", project.result_summary], ["ปัญหา/อุปสรรค", project.result_obstacle], ["ข้อเสนอแนะ", project.result_suggestion]]
+        .filter(([, text]) => String(text ?? "").trim())
+      : [];
+    const result = resultParts.length
+      ? `<div class="long-box"><span class="long-label">ผลการดำเนินงาน</span>${resultParts
+          .map(([sub, text]) => `${sub ? `<div class="long-sub">${esc(sub)}</div>` : ""}<div class="long-text">${esc(text)}</div>`).join("")}</div>`
+      : "";
+    const documents = (project.links || []).length
+      ? `<div class="long-box"><span class="long-label">เอกสาร</span><div class="documents">${project.links
+          .map(link => `<div class="detail-document"><span class="chip">${esc(link.kind || "อื่น ๆ")}</span> <a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label || "เอกสาร")}</a></div>`).join("")}</div></div>`
+      : "";
+    const latest = project.approvals?.[0] || null;
+    const approval = latest
+      ? `<div class="long-box"><span class="long-label">ผลการพิจารณาล่าสุด</span><dl class="fact-list"><dt>ผล</dt><dd>${esc(latest.action || "—")}</dd><dt>ผู้พิจารณา</dt><dd>${esc(latest.acted_by_name || latest.acted_by || "ไม่ระบุ")}</dd><dt>เมื่อ</dt><dd>${esc(fmtDateTime(latest.created_at))}</dd>${String(latest.note ?? "").trim() ? `<dt>หมายเหตุ</dt><dd>${esc(latest.note)}</dd>` : ""}</dl></div>`
+      : "";
+    return `<div class="chips"><span class="chip">${esc(project.kind)}</span><span class="chip">${esc(project.status)}</span><span class="chip${tone}">${esc(badge.label)}</span></div>
+      ${parent ? `<div class="meta"><b>โครงการแม่:</b> ${esc(parent.name)}</div>` : ""}
+      ${facts}${detail}${result}${documents}${approval}`;
+  }
+
   function projectRow(project, child = false) {
     const badge = projectApprovalBadge(project);
     const tone = badge.tone ? ` ${badge.tone}` : "";
-    return `<tr><td class="project-name${child ? " child" : ""}"><b>${esc(project.name)}</b></td><td>${esc(project.kind)}</td><td>${esc(responsibleName(project))}</td><td>${krHtml(project)}</td><td>${esc(project.status)}</td><td><span class="chip${tone}">${esc(badge.label)}</span></td><td>${esc(fmtMoneyOrMissing(project.budget_planned))}</td><td>${esc(fmtMoneyOrMissing(project.budget_actual))}</td><td>${documentHtml(project)}</td></tr>`;
+    return `<tr><td class="project-name${child ? " child" : ""}"><button type="button" class="name-btn" data-detail="${esc(project.id)}">${esc(project.name)}</button></td><td>${esc(project.kind)}</td><td>${esc(responsibleName(project))}</td><td>${krHtml(project)}</td><td>${esc(project.status)}</td><td><span class="chip${tone}">${esc(badge.label)}</span></td><td>${esc(fmtMoneyOrMissing(project.budget_planned))}</td><td>${esc(fmtMoneyOrMissing(project.budget_actual))}</td><td>${documentHtml(project)}</td></tr>`;
   }
 
   function renderTable() {
@@ -496,6 +571,32 @@ if (!session) {
   for (const id of ["filter-owner", "filter-objective", "filter-status", "filter-kind"]) {
     el(id)?.addEventListener("change", renderTable);
   }
+  el("project-rows")?.addEventListener("click", event => {
+    const trigger = event.target.closest("[data-detail]");
+    if (!trigger) return;
+    const project = projects.find(row => String(row.id) === trigger.dataset.detail);
+    if (!project) return;
+    detailTrigger = trigger;
+    el("detail-title").textContent = project.name || "รายละเอียด";
+    el("detail-body").innerHTML = detailHtml(project);
+    el("detail-overlay").hidden = false;
+    el("detail-close").focus();
+  });
+  const closeDetail = () => {
+    const overlay = el("detail-overlay");
+    if (overlay.hidden) return;
+    overlay.hidden = true;
+    const trigger = detailTrigger;
+    detailTrigger = null;
+    if (trigger?.isConnected) trigger.focus();
+  };
+  el("detail-close")?.addEventListener("click", closeDetail);
+  el("detail-overlay")?.addEventListener("click", event => {
+    if (event.target === el("detail-overlay")) closeDetail();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !el("detail-overlay").hidden) closeDetail();
+  });
   el("print-report")?.addEventListener("click", () => {
     syncPrintHeader();
     window.print();
