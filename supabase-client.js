@@ -3934,7 +3934,7 @@ export function summarizeStaff(staff, from, to, ctx) {
   const sum = {
     staff, workDays: 0, present: 0, late: 0, lateMinutes: 0, absent: 0,
     leaveDays: 0, leaveByType: {}, offsiteDays: 0, pendingDays: 0,
-    dutyDays: 0, dutySubstituteDays: 0, dutyLate: 0, dutyMissed: 0,
+    dutyDays: 0, dutySubstituteDays: 0, dutyLate: 0, dutyAbsent: 0, dutyExcused: 0,
     permitRequested: (ctx.latePermissions || []).filter(p =>
       p.staff_id === staff.id && from <= p.permit_date && p.permit_date <= to).length,
     permitUsed: 0, rows: []
@@ -3949,7 +3949,12 @@ export function summarizeStaff(staff, from, to, ctx) {
       sum.dutyDays++;
       if (ctx.dutySubstituteOnlyKeys?.has(staff.id + "|" + d)) sum.dutySubstituteDays++;
       if (r.status === "late") sum.dutyLate++;
-      if (r.status === "leave" || r.status === "offsite" || r.status === "absent") sum.dutyMissed++;
+      // ⭐ แยก 2 ตัวโดยตั้งใจ (มติ 2026-08-26) — "ขาดเวร" คือไม่มาโดยไม่มีใบ
+      //   ส่วน "ติดภารกิจ" คือลา/ไปราชการ ซึ่งโรงเรียนอนุมัติเอง ไม่ใช่ความผิดของครู
+      //   ⛔ ห้ามรวมกลับเป็นตัวเดียว และห้ามหักออกเมื่อมีคนแทน —
+      //      แถวเวรของคนเดิมยังอยู่ตามเจตนาของ coverage.html
+      if (r.status === "absent") sum.dutyAbsent++;
+      else if (r.status === "leave" || r.status === "offsite") sum.dutyExcused++;
     }
     if (r.status === "holiday") continue;
     if (r.status === "pending") { sum.pendingDays++; continue; }

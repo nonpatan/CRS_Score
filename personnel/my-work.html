@@ -194,6 +194,7 @@
     <div class="card">
       <div class="section-title" id="year-title">สะสมทั้งรอบปีทำงาน</div>
       <div class="stats" id="year-stats"></div>
+      <div class="field-note">ขาดเวร = มีเวรแต่ไม่มีเวลาเข้าเลย · ติดภารกิจ = วันเวรที่ลาหรือไปราชการ ไม่ถือเป็นความผิด — ยังขึ้นให้เห็นเพราะวันนั้นต้องมีคนไปแทน</div>
       <div style="margin-top:14px">
         <div class="section-title">สิทธิ์วันลา</div>
         <div class="field-note">นับทั้งรอบปี รวมใบที่ลงล่วงหน้า</div>
@@ -219,7 +220,7 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getSetting, loadMyHomeroomAuditData, buildHomeroomAudit,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260825-2";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260826-1";
 
 const session = await requireAuth();
 if (session) {
@@ -1136,12 +1137,13 @@ if (session) {
       el("year-stats").innerHTML = `
         <div class="stat"><b>${s.workDays}</b><span>วันทำงาน</span></div>
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-        <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
+        <div class="stat warn"><b>${s.late} ครั้ง</b><span>มาสาย · รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
         <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
         <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
         <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-        <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
+        <div class="stat bad"><b>${s.dutyAbsent}</b><span>ขาดเวร</span></div>
+        <div class="stat"><b>${s.dutyExcused}</b><span>ติดภารกิจ (ลา/ไปราชการ)</span></div>`;
 
       const codes = new Set([...Object.keys(quotas), ...Object.keys(usedByType)]);
       el("quota-list").innerHTML = codes.size
@@ -1177,13 +1179,14 @@ if (session) {
       const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
       el("month-stats").innerHTML = `
         <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-        <div class="stat warn"><b>${s.late} ครั้ง</b><span>รวม ${s.lateMinutes} นาที</span></div>
+        <div class="stat warn"><b>${s.late} ครั้ง</b><span>มาสาย · รวม ${s.lateMinutes} นาที</span></div>
         <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
         <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
         <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
         <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
         <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-        <div class="stat bad"><b>${s.dutyMissed}</b><span>พลาดเวร</span></div>`;
+        <div class="stat bad"><b>${s.dutyAbsent}</b><span>ขาดเวร</span></div>
+        <div class="stat"><b>${s.dutyExcused}</b><span>ติดภารกิจ (ลา/ไปราชการ)</span></div>`;
 
       el("month-days").innerHTML = s.rows.length ? s.rows.map(r => {
         const d = new Date(r.date + "T00:00:00Z");
