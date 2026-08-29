@@ -44,22 +44,18 @@
   input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
   .actions .action-note { grid-column:1/-1; }
   .room-actions { position:sticky; bottom:0; z-index:3; margin-top:14px; padding:12px 0; border-top:1px solid var(--line); background:var(--white); text-align:right; }
-  .actions .override-button { grid-column:1/-1; }
   .status-bad { color:var(--danger); }
   .status-ok { color:var(--teal); }
   .status-warn { color:var(--amber); }
   .stopped-group { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
   .stopped-group > summary { color:var(--amber); }
   .empty { padding:24px; border:1px dashed var(--line); border-radius:12px; color:var(--muted); text-align:center; }
-  .editor-grid { display:grid; grid-template-columns:minmax(170px,.8fr) minmax(170px,.8fr) minmax(240px,1.4fr); gap:12px; }
-  .preset-row { display:flex; flex-wrap:wrap; gap:7px; margin:12px 0; }
-  .editor-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
   .toast { position:sticky; bottom:10px; display:none; z-index:4; margin-top:12px; padding:12px 15px; border-radius:10px; color:var(--white); background:var(--teal); }
   .toast.ok, .toast.err { display:block; }
   .toast.err { background:var(--danger); }
   [hidden] { display:none !important; }
-  @media (max-width:980px) { .student-row { grid-template-columns:minmax(180px,1.4fr) repeat(2,minmax(120px,.8fr)); } .actions { grid-column:1/-1; grid-template-columns:minmax(150px,.7fr) 1fr 1fr; } .actions .override-button { grid-column:auto; } }
-  @media (max-width:680px) { .selector, .editor-grid, .student-row { grid-template-columns:1fr; } .actions { grid-template-columns:1fr 1fr; } .actions .override-button { grid-column:1/-1; } .room-actions button { width:100%; } .date-list { columns:2 130px; } }
+  @media (max-width:980px) { .student-row { grid-template-columns:minmax(180px,1.4fr) repeat(2,minmax(120px,.8fr)); } .actions { grid-column:1/-1; grid-template-columns:minmax(150px,.7fr) 1fr; } }
+  @media (max-width:680px) { .selector, .student-row { grid-template-columns:1fr; } .actions { grid-template-columns:1fr 1fr; } .room-actions button { width:100%; } .date-list { columns:2 130px; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
@@ -90,16 +86,6 @@
       <div id="room-actions" class="room-actions"><button id="save-room" class="primary" type="button" disabled>บันทึกทั้งห้อง</button></div>
     </section>
 
-    <section id="override-card" class="card" hidden>
-      <div class="section-head"><div><h2 id="override-title">แก้ยอดค่ารถ</h2><p id="override-note">ยอดนี้จะแช่ไว้และไม่ขยับตามอัตราที่แก้ภายหลัง</p></div></div>
-      <div class="editor-grid">
-        <div><label for="override-date">วันที่ที่ต้องการแก้</label><input id="override-date" type="date"></div>
-        <div><label for="override-amount">ยอดที่ต้องเก็บ (บาท)</label><input id="override-amount" type="number" min="0" step="0.01" inputmode="decimal"></div>
-        <div><label for="override-reason">เหตุผลที่แก้</label><input id="override-reason" maxlength="500" placeholder="เช่น ผู้ปกครองมารับเอง"></div>
-      </div>
-      <div id="preset-row" class="preset-row"></div>
-      <div class="editor-actions"><button id="override-cancel" type="button">ยกเลิก</button><button id="override-save" class="primary" type="button">บันทึกยอดที่แก้</button></div>
-    </section>
     <div id="toast" class="toast"></div>
   </main>
 </div>
@@ -142,7 +128,6 @@ function friendlyError(error, { batch = false } = {}) {
   let reason = "";
   if (message.includes("row-level security")) reason = "คุณไม่มีสิทธิ์ทำรายการเงินของห้องนี้";
   else if (message.includes("transport_payments_amount_positive")) reason = "ยอดรับต้องมากกว่า 0 บาท";
-  else if (message.includes("transport_day_overrides_reason")) reason = "กรุณาระบุเหตุผลที่แก้ยอด";
   if (reason) translated = studentMatch ? `${translated.split("บันทึกไม่ผ่าน:")[0]}บันทึกไม่ผ่าน: ${reason}` : reason;
   return translated + (batch ? " · ยังไม่มีรายการใดถูกบันทึก" : "");
 }
@@ -169,7 +154,6 @@ let balanceByStudent = new Map();
 let stateByStudent = new Map();
 let writableRoomKeys = new Set();
 let canFinance = false;
-let editingStudentId = null;
 let savingRoom = false;
 let roomNeedsReload = false;
 
@@ -184,10 +168,6 @@ function groupByStudent(rows) {
 
 function currentPeriod(studentId) {
   return periods.find(row => row.student_id === studentId && row.start_date <= today && (!row.end_date || row.end_date >= today)) || null;
-}
-
-function periodForDate(studentId, date) {
-  return periods.find(row => row.student_id === studentId && row.start_date <= date && (!row.end_date || row.end_date >= date)) || null;
 }
 
 function isWeekday(date) {
@@ -304,7 +284,7 @@ function suggestedAmount(state, period) {
   return Math.min(Math.round(Number(charge.amount) * 100) / 100, state.outstanding);
 }
 
-function renderStudentRows(rows, { showOverride }) {
+function renderStudentRows(rows) {
   return rows.map(placement => {
     const student = placement.student || {};
     const state = stateByStudent.get(placement.student_id);
@@ -337,7 +317,6 @@ function renderStudentRows(rows, { showOverride }) {
           <option value="เงินสด"${state.todayPayment?.method === "เงินสด" ? " selected" : ""}>เงินสด</option>
           <option value="หักออมทรัพย์"${state.todayPayment?.method === "หักออมทรัพย์" ? " selected" : ""}>หักออมทรัพย์</option>
         </select>
-        ${showOverride ? '<button class="override-button" type="button">แก้ยอดของวัน</button>' : ""}
         <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `ค้าง ${formatMoney(state.outstanding)} · ออมเหลือ ${formatMoney(state.balance)}`}</span>
       </div>
     </div>`;
@@ -346,11 +325,11 @@ function renderStudentRows(rows, { showOverride }) {
 
 function renderRoster() {
   el("student-list").innerHTML = activeTransportRoster.length
-    ? renderStudentRows(activeTransportRoster, { showOverride:true })
+    ? renderStudentRows(activeTransportRoster)
     : '<div class="empty">ห้องนี้ไม่มีนักเรียนที่กำลังใช้รถรับส่งอยู่</div>';
   el("stopped-group").hidden = stoppedTransportRoster.length === 0;
   el("stopped-summary").textContent = `เลิกใช้รถแล้ว · ค้างหรือมีรายการวันนี้ ${stoppedTransportRoster.length} คน`;
-  el("stopped-list").innerHTML = renderStudentRows(stoppedTransportRoster, { showOverride:false });
+  el("stopped-list").innerHTML = renderStudentRows(stoppedTransportRoster);
   roomNeedsReload = false;
   document.querySelectorAll("#student-list .student-row, #stopped-list .student-row").forEach(updateActionRow);
   updateSaveRoom();
@@ -413,7 +392,6 @@ async function loadRoom(index) {
   el("save-room").disabled = true;
   selectedRoom = index === "" ? null : availableRooms[Number(index)] || null;
   el("roster-card").hidden = true;
-  el("override-card").hidden = true;
   el("warnings").hidden = true;
   if (!selectedRoom) return;
 
@@ -472,6 +450,8 @@ async function loadRoom(index) {
   overrides = overrideRes.data || [];
   monthRates = rateRes.data || [];
   payments = paymentRes.data || [];
+  // 🪤 zones ไม่มีใครอ่านแล้วหลังถอดตัวแก้ยอดรายวันออก (2026-08-29) แต่คงคิวรี่ transport_zones ไว้ตามเดิม
+  //    เพราะเทสต์ล็อกลำดับ query 7 ตัวไว้กันคนเผลอลบคิวรี่ transport_day_overrides ทิ้ง — จะเอาออกต้องแก้เทสต์นั้นพร้อมกัน
   zones = zoneRes.data || [];
   balanceByStudent = summarizeSavingsByStudent(savingsRes.data || []);
   buildState();
@@ -480,52 +460,6 @@ async function loadRoom(index) {
   el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${activeTransportRoster.length} คนกำลังใช้รถ)`;
   el("room-note").textContent = "ยอดค้างสะสมตั้งแต่ต้นปีการศึกษาถึงวันนี้ · ผู้ที่เลิกใช้รถแต่ยังค้างอยู่ในกลุ่มพับได้ท้ายรายการ";
   el("roster-card").hidden = false;
-}
-
-function overrideContext(studentId, selectedDate) {
-  const period = periodForDate(studentId, selectedDate);
-  if (!period) return null;
-  const chargeDate = period.billing_mode === "รายเดือน" && period.start_date > monthStart(selectedDate) ? period.start_date : (period.billing_mode === "รายเดือน" ? monthStart(selectedDate) : selectedDate);
-  const zone = zones.find(row => row.id === period.zone_id) || null;
-  const preset = tripMode => {
-    if (period.billing_mode === "รายวัน") return Number(zone?.[tripMode === "ไป-กลับ" ? "daily_round" : "daily_one_way"]);
-    const rate = monthRates.find(row => row.year === period.year && row.ym === monthStart(selectedDate) && row.zone_id === period.zone_id && row.trip_mode === tripMode);
-    return rate ? Number(rate.amount) : NaN;
-  };
-  return { period, chargeDate, zone, round:preset("ไป-กลับ"), oneWay:preset("ขาเดียว") };
-}
-
-function refreshOverrideEditor() {
-  const context = overrideContext(editingStudentId, el("override-date").value);
-  if (!context) {
-    el("preset-row").innerHTML = '<span class="meta status-bad">วันที่นี้ไม่มีช่วงใช้รถของนักเรียน จึงแก้ยอดไม่ได้</span>';
-    el("override-save").disabled = true;
-    return;
-  }
-  const existing = overrides.find(row => row.student_id === editingStudentId && row.charge_date === context.chargeDate);
-  if (existing) {
-    el("override-amount").value = Number(existing.amount).toFixed(2);
-    el("override-reason").value = existing.reason || "";
-  } else {
-    el("override-amount").value = "";
-    el("override-reason").value = "";
-  }
-  const presetButton = (label, value) => `<button type="button" class="preset-button" data-amount="${Number.isFinite(value) ? value : ""}"${Number.isFinite(value) ? "" : " disabled"}>${label}${Number.isFinite(value) ? ` · ${formatMoney(value)}` : " · ยังไม่ประกาศ"}</button>`;
-  el("preset-row").innerHTML = presetButton("ไป-กลับ", context.round) + presetButton("ขาเดียว", context.oneWay) + presetButton("ไม่ใช้รถวันนี้", 0) + '<button type="button" class="preset-button" data-custom="1">กรอกเอง</button>';
-  el("override-note").textContent = `${context.period.billing_mode} · วันที่บันทึกจริง ${thaiDate(context.chargeDate)}${existing ? " · มีรายการเดิม กดบันทึกเพื่อแก้ทับ" : ""}`;
-  el("override-save").disabled = false;
-}
-
-function openOverride(studentId) {
-  editingStudentId = studentId;
-  const placement = transportRoster.find(row => row.student_id === studentId);
-  el("override-title").textContent = `แก้ยอดค่ารถ · ${placement?.student?.name || "นักเรียน"}`;
-  el("override-date").min = yearRange.start;
-  el("override-date").max = today;
-  el("override-date").value = today;
-  el("override-card").hidden = false;
-  refreshOverrideEditor();
-  el("override-card").scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
 async function saveRoom() {
@@ -547,7 +481,7 @@ async function saveRoom() {
   const button = el("save-room");
   // ล็อกตั้งแต่ถามยืนยัน: กันกดซ้ำหรือเปลี่ยนห้องระหว่างรอผล แล้วคืนสถานะเดิมเมื่อจบ
   savingRoom = true;
-  const controls = [...document.querySelectorAll("#room-select, #roster-card input, #roster-card select, #roster-card .override-button, #override-card input, #override-card button")];
+  const controls = [...document.querySelectorAll("#room-select, #roster-card input, #roster-card select")];
   const disabledBefore = controls.map(control => control.disabled);
   controls.forEach(control => { control.disabled = true; });
   updateSaveRoom();
@@ -578,7 +512,11 @@ async function saveRoom() {
     }
     const result = Array.isArray(data) ? data[0] : data;
     if (!result || ![result.paid_count, result.cash_total, result.savings_total].every(value => value != null && Number.isFinite(Number(value)))) throw new Error("ไม่พบยอดยืนยันจากฐานข้อมูล");
-    const savedMessage = `บันทึกแล้ว ${result.paid_count} คน · เงินสด ${formatMoney(result.cash_total)} · หักออมทรัพย์ ${formatMoney(result.savings_total)}`;
+    // แสดงเฉพาะวิธีที่มียอดจริง — กติกาเดียวกับกล่องยืนยัน ไม่งั้นขึ้น "เงินสด 0.00 บาท" ทั้งที่ไม่มีเงินสด
+    const savedParts = [`บันทึกแล้ว ${result.paid_count} คน`];
+    if (Number(result.cash_total) > 0) savedParts.push(`เงินสด ${formatMoney(result.cash_total)}`);
+    if (Number(result.savings_total) > 0) savedParts.push(`หักออมทรัพย์ ${formatMoney(result.savings_total)}`);
+    const savedMessage = savedParts.join(" · ");
     toast(savedMessage);
     try { await loadRoom(el("room-select").value); }
     catch (error) { toast(`${savedMessage} · แต่โหลดข้อมูลใหม่ไม่สำเร็จ กรุณาโหลดหน้าใหม่ก่อนทำรายการต่อ`, true); }
@@ -634,48 +572,11 @@ for (const listId of ["student-list", "stopped-list"]) {
       if (row && !savingRoom) updateActionRow(row);
     });
   }
-  list.addEventListener("click", event => {
-    const row = event.target.closest(".student-row");
-    if (row && !savingRoom && event.target.closest(".override-button")) openOverride(row.dataset.studentId);
-  });
 }
 el("save-room").addEventListener("click", saveRoom);
 el("stopped-group").addEventListener("toggle", () => {
   if (!el("stopped-group").open && [...el("stopped-list").querySelectorAll(".method")].some(method => method.value)) el("stopped-group").open = true;
 });
-el("override-date").addEventListener("change", refreshOverrideEditor);
-el("preset-row").addEventListener("click", event => {
-  const button = event.target.closest(".preset-button");
-  if (!button || button.disabled) return;
-  if (button.dataset.custom) { el("override-amount").focus(); el("override-amount").select(); return; }
-  el("override-amount").value = Number(button.dataset.amount).toFixed(2);
-});
-el("override-cancel").addEventListener("click", () => { editingStudentId = null; el("override-card").hidden = true; });
-el("override-save").addEventListener("click", async () => {
-  const selectedDate = el("override-date").value;
-  const context = overrideContext(editingStudentId, selectedDate);
-  const amount = Number(el("override-amount").value);
-  const reason = el("override-reason").value.trim();
-  if (!context) return toast("วันที่นี้ไม่มีช่วงใช้รถของนักเรียน", true);
-  if (!Number.isFinite(amount) || amount < 0) return toast("ยอดที่แก้ต้องเป็น 0 บาทหรือมากกว่า", true);
-  if (!reason) return toast("กรุณาระบุเหตุผลที่แก้ยอด", true);
-  const placement = transportRoster.find(row => row.student_id === editingStudentId);
-  if (!await window.crsAskConfirm({ title:"ยืนยันแก้ยอดค่ารถ", message:`${placement?.student?.name || "นักเรียน"} · ${thaiDate(context.chargeDate)}\nยอดใหม่ ${formatMoney(amount)} · เหตุผล: ${reason}`, okLabel:"บันทึกยอดที่แก้", danger:false })) return;
-  el("override-save").disabled = true;
-  const { data, error } = await sb.from("transport_day_overrides").upsert({
-    student_id:editingStudentId, year:currentYear, grade_level:selectedRoom.grade_level,
-    classroom:selectedRoom.classroom, charge_date:context.chargeDate,
-    amount:Math.round(amount * 100) / 100, reason
-  }, { onConflict:"student_id,charge_date" }).select("id");
-  el("override-save").disabled = false;
-  if (error) return toast(friendlyError(error), true);
-  if (!data?.length) return toast("ฐานข้อมูลไม่ได้แก้รายการ คุณอาจไม่มีสิทธิ์ของวันที่เลือก กรุณาโหลดหน้าใหม่หรือติดต่อฝ่ายการเงิน", true);
-  toast(`บันทึกยอดที่แก้เป็น ${formatMoney(amount)} แล้ว`);
-  editingStudentId = null;
-  el("override-card").hidden = true;
-  await loadRoom(el("room-select").value);
-});
-
 session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });

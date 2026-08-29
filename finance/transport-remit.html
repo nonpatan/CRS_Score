@@ -23,6 +23,7 @@
   .room-card { width:100%; min-height:116px; padding:14px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--white); font:inherit; text-align:left; cursor:pointer; }
   .room-card:hover, .room-card:focus-visible, .room-card.active { border-color:var(--teal); outline:none; box-shadow:0 0 0 2px var(--teal-soft); }
   .room-card b, .room-card strong { display:block; }
+  .room-card .meta { display:block; }
   .room-card strong { margin:3px 0; color:var(--teal); font-size:21px; }
   .meta { color:var(--muted); font-size:13px; }
   .detail-grid { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(280px,.75fr); gap:16px; }
@@ -44,6 +45,10 @@
   .daily-row { display:grid; grid-template-columns:140px 1fr auto; align-items:center; gap:12px; padding:8px 10px; border-bottom:1px solid var(--line); }
   .daily-row:last-child { border-bottom:0; }
   .daily-row strong { text-align:right; }
+  .savings-section { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
+  .savings-section h3 { margin:0; font-size:17px; }
+  .savings-section > p { margin:2px 0 10px; color:var(--muted); font-size:13px; }
+  .savings-total { margin:10px 0 0; color:var(--teal); font-weight:700; text-align:right; }
   .txn-edit { min-width:62px; min-height:44px; padding:7px 10px; border:0; border-radius:8px; color:var(--teal); background:var(--teal-soft); font:inherit; font-weight:700; cursor:pointer; }
   .txn-actions { display:flex; flex-wrap:wrap; gap:8px; }
   .txn-actions button { white-space:nowrap; }
@@ -97,12 +102,12 @@
   <main class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <section class="card">
-      <div class="section-head"><div><h2>ห้องที่มียอดค้างส่ง</h2><p>เรียงยอดมากไปน้อย · ยอดมาจากเงินสดค่ารถที่ยังไม่ผูกรอบส่งเงิน</p></div></div>
+      <div class="section-head"><div><h2>ห้องที่มีรายการต้องตรวจรับ</h2><p>ห้องที่มีเงินสดเรียงยอดมากไปน้อย · ห้องที่มีเฉพาะหักออมทรัพย์แสดงต่อท้าย</p></div></div>
       <div id="room-grid" class="room-grid"><div class="empty">กำลังโหลด…</div></div>
     </section>
     <section id="detail-card" class="card" hidden>
       <div class="section-head"><div><h2 id="detail-title">ตรวจรับเงิน</h2><p id="detail-note"></p></div></div>
-      <div class="detail-grid">
+      <div id="cash-detail" class="detail-grid">
         <div>
           <div class="view-head">
             <p>ตรวจเทียบรายการค่ารถตามรายคน หรือสลับดูตามวัน</p>
@@ -122,6 +127,11 @@
           <a class="edit-link" href="#txn-list">ยอดไม่ตรง? เลื่อนไปแก้รายการที่ยังไม่ส่ง</a>
         </div>
       </div>
+      <section id="savings-section" class="savings-section" hidden>
+        <h3>หักออมทรัพย์ในรอบนี้ · ไม่ใช่เงินที่ครูถือมาส่ง</h3>
+        <p id="savings-boundary"></p>
+        <div id="savings-list" class="table-wrap"></div>
+      </section>
     </section>
     <section class="card">
       <div class="section-head"><div><h2>ประวัติการรับเงิน</h2><p id="history-note">ทุกห้อง · เรียงจากใหม่ไปเก่า</p></div></div>
@@ -149,7 +159,7 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;"
 const roomKey = row => [row.year, row.grade_level, row.classroom].join("\u0000");
 const thaiDate = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
 const thaiDateTime = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", timeZone:"Asia/Bangkok" }).format(new Date(value));
-let pending = [], remittances = [], groups = [], selected = null, canFinance = false, canAdmin = false, toastTimer;
+let pending = [], savingsRows = [], remittances = [], groups = [], selected = null, canFinance = false, canAdmin = false, toastTimer;
 let detailView = "person";
 let actionMode = "", activeTxn = null, activeRemittance = null;
 let voidBusy = false;
@@ -168,6 +178,18 @@ function toast(message, isError = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 6500);
 }
+function lastRemitDate(year, grade, classroom) {
+  const rounds = remittances.filter(row => row.year === year
+    && row.grade_level === grade && row.classroom === classroom
+    && row.status !== "ปลดล็อก");
+  if (!rounds.length) return null;
+  return rounds.map(row => row.confirmed_at.slice(0, 10)).sort().at(-1);
+}
+function savingsForRoom(year, grade, classroom) {
+  const boundary = lastRemitDate(year, grade, classroom);
+  return savingsRows.filter(row => row.year === year && row.grade_level === grade
+    && row.classroom === classroom && (boundary == null || row.pay_date >= boundary));
+}
 function buildGroups() {
   const byRoom = new Map();
   for (const txn of pending) {
@@ -175,18 +197,36 @@ function buildGroups() {
     if (!byRoom.has(key)) byRoom.set(key, { key, year:txn.year, grade_level:txn.grade_level, classroom:txn.classroom, rows:[] });
     byRoom.get(key).rows.push(txn);
   }
-  groups = [...byRoom.values()].map(group => ({
+  const cashGroups = [...byRoom.values()].map(group => ({
     ...group,
+    savings:savingsForRoom(group.year, group.grade_level, group.classroom),
     total:group.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
     pendingDays:new Set(group.rows.map(row => row.pay_date)).size,
     oldest:[...group.rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date))[0]?.pay_date || ""
   })).sort((a,b) => b.total - a.total || a.key.localeCompare(b.key, "th", { numeric:true }));
+  const savingsOnly = new Map();
+  for (const txn of savingsRows) {
+    const key = roomKey(txn);
+    if (byRoom.has(key)) continue;
+    if (!savingsOnly.has(key)) savingsOnly.set(key, { key, year:txn.year, grade_level:txn.grade_level, classroom:txn.classroom });
+  }
+  const savingsGroups = [...savingsOnly.values()].map(group => ({
+    ...group, rows:[], savings:savingsForRoom(group.year, group.grade_level, group.classroom),
+    total:0, pendingDays:0, oldest:""
+  })).filter(group => group.savings.length)
+    .sort((a,b) => a.key.localeCompare(b.key, "th", { numeric:true }));
+  groups = [...cashGroups, ...savingsGroups];
 }
 function renderRooms() {
-  el("room-grid").innerHTML = groups.map((group, index) => `<button type="button" class="room-card${selected?.key === group.key ? " active" : ""}" data-room-index="${index}">
-    <b>${esc(group.grade_level)} · ${esc(group.classroom)}</b><strong>${formatMoney(group.total)}</strong>
-    <span class="meta">ค้าง ${group.pendingDays} วัน · ${group.rows.length} รายการ</span><span class="meta">เก่าสุด ${thaiDate(group.oldest)} · ปีการศึกษา ${esc(group.year)}</span>
-  </button>`).join("") || '<div class="empty">ไม่มียอดค่ารถค้างส่ง — ครูส่งเงินครบทุกห้องแล้ว</div>';
+  el("room-grid").innerHTML = groups.map((group, index) => {
+    const savingsMeta = group.savings.length ? `<span class="meta">หักออมทรัพย์ ${group.savings.length} รายการ</span>` : "";
+    const cashSummary = group.rows.length
+      ? `<strong>${formatMoney(group.total)}</strong><span class="meta">ค้าง ${group.pendingDays} วัน · ${group.rows.length} รายการ</span><span class="meta">เก่าสุด ${thaiDate(group.oldest)} · ปีการศึกษา ${esc(group.year)}</span>`
+      : `<strong>ไม่มีเงินต้องนับ</strong><span class="meta">ปีการศึกษา ${esc(group.year)}</span>`;
+    return `<button type="button" class="room-card${selected?.key === group.key ? " active" : ""}" data-room-index="${index}">
+      <b>${esc(group.grade_level)} · ${esc(group.classroom)}</b>${cashSummary}${savingsMeta}
+    </button>`;
+  }).join("") || '<div class="empty">ยังไม่มีรายการค่ารถที่ต้องตรวจรับ</div>';
 }
 function renderHistory() {
   el("history-note").textContent = `ทุกห้อง · ${remittances.length} รอบ · เรียงจากใหม่ไปเก่า`;
@@ -254,14 +294,36 @@ function renderTxnList() {
     return `<tr><td><button type="button" class="person-toggle" data-student-id="${esc(group.student_id)}" aria-expanded="${expanded}"><span class="expand-icon" aria-hidden="true">${expanded ? "−" : "+"}</span><span><b>${esc(group.student?.name || "ไม่พบชื่อนักเรียน")}</b><span class="meta">รหัส ${esc(group.student?.student_no || "—")} · กดเพื่อดูรายวัน</span></span></button></td><td class="money">${group.rows.length} ครั้ง</td><td class="money"><b>${formatMoney(group.total)}</b></td></tr><tr class="person-days"${expanded ? "" : " hidden"}><td colspan="3">${dailyRows.map(txn => `<div class="daily-row"><span>${thaiDate(txn.pay_date)}</span><strong>${formatMoney(txn.amount)}</strong><div class="txn-actions">${canFinance ? `<button type="button" class="txn-edit" data-edit-txn="${esc(txn.id)}">แก้ยอด</button>` : ""}${canAdmin && txn.remittance_id == null ? `<button type="button" class="txn-void danger" data-void-txn="${esc(txn.id)}">ลบรายการ</button>` : ""}</div></div>`).join("")}</td></tr>`;
   }).join("")}</tbody></table>`;
 }
+function renderSavingsList() {
+  const rows = selected?.savings || [];
+  el("savings-section").hidden = !rows.length;
+  if (!rows.length) {
+    el("savings-boundary").textContent = "";
+    el("savings-list").innerHTML = "";
+    return;
+  }
+  const boundary = lastRemitDate(selected.year, selected.grade_level, selected.classroom);
+  el("savings-boundary").textContent = boundary
+    ? `แสดงตั้งแต่รอบนำส่งล่าสุด ${thaiDate(boundary)}`
+    : "ยังไม่เคยมีรอบนำส่ง — แสดงทั้งหมด";
+  const sortedRows = [...rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date)
+    || String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }));
+  const actionHead = canAdmin ? "<th>ลบ</th>" : "";
+  const total = sortedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  el("savings-list").innerHTML = `<table><thead><tr><th>วันที่</th><th>นักเรียน</th><th class="money">ยอด</th>${actionHead}</tr></thead><tbody>${sortedRows.map(txn => `<tr><td>${thaiDate(txn.pay_date)}</td><td>${esc(txn.student?.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(txn.student?.student_no || "—")}</span></td><td class="money">${formatMoney(txn.amount)}</td>${canAdmin ? `<td><button type="button" class="txn-void danger" data-void-txn="${esc(txn.id)}">ลบรายการ</button></td>` : ""}</tr>`).join("")}</tbody></table><p class="savings-total">รวม ${sortedRows.length} รายการ · ${formatMoney(total)}</p>`;
+}
 function renderDetail() {
   if (!selected) { el("detail-card").hidden = true; renderHistory(); return; }
   el("detail-card").hidden = false;
   el("detail-title").textContent = `ตรวจรับ ${selected.grade_level} · ${selected.classroom}`;
-  el("detail-note").textContent = `ปีการศึกษา ${selected.year} · ตรวจทีละรายการก่อนนับเงินสด`;
+  el("detail-note").textContent = selected.rows.length
+    ? `ปีการศึกษา ${selected.year} · ตรวจทีละรายการก่อนนับเงินสด`
+    : `ปีการศึกษา ${selected.year} · ไม่มีเงินต้องนับ`;
+  el("cash-detail").hidden = !selected.rows.length;
   el("expected-total").textContent = formatMoney(selected.total);
   el("expected-count").textContent = `${selected.rows.length} รายการ`;
   renderTxnList();
+  renderSavingsList();
   el("counted-total").value = "";
   el("remit-note").value = "";
   el("counted-total").disabled = !canFinance;
@@ -271,18 +333,23 @@ function renderDetail() {
 }
 async function loadData(preferred = selected?.key) {
   const [txnRes, remitRes, staffNames] = await Promise.all([
-    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,year,grade_level,classroom,pay_date,method,amount,backdate_reason,remittance_id,student:student_id(id,student_no,name)").eq("method", "เงินสด").is("remittance_id", null), ["year","grade_level","classroom","pay_date","id"]),
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,year,grade_level,classroom,pay_date,method,amount,backdate_reason,remittance_id,student:student_id(id,student_no,name)").is("remittance_id", null), ["year","grade_level","classroom","pay_date","id"]),
+    // เดิมคิวรี่ใช้ .eq("method", "เงินสด").is("remittance_id", null) แต่ตอนนี้ต้องโหลดทั้งสองวิธีแล้วแยกทันทีด้านล่าง
     fetchAllRows(() => sb.from("fee_remittances").select("id,kind,year,grade_level,classroom,txn_count,expected_total,counted_total,note,confirmed_at,status,unlocked_by,unlocked_at,unlock_reason").eq("kind", "ค่ารถ"), ["confirmed_at","id"]),
     getStaffNamesByUser()
   ]);
   if (txnRes.error) throw new Error("โหลดยอดค้างส่งไม่สำเร็จ: " + txnRes.error.message);
   if (remitRes.error) throw new Error("โหลดประวัติส่งเงินไม่สำเร็จ: " + remitRes.error.message);
-  pending = txnRes.data || [];
+  const rows = txnRes.data || [];
+  pending = rows.filter(row => row.method === "เงินสด");
+  savingsRows = rows.filter(row => row.method === "หักออมทรัพย์");
   remittances = [...(remitRes.data || [])].sort((a,b) => b.confirmed_at.localeCompare(a.confirmed_at));
   profileNames.clear();
   for (const [userId, name] of staffNames) profileNames.set(userId, name);
   buildGroups();
-  selected = groups.find(group => group.key === preferred) || (preferred && selected?.key === preferred ? { ...selected, rows:[], total:0, pendingDays:0 } : groups[0] || null);
+  selected = groups.find(group => group.key === preferred) || (preferred && selected?.key === preferred
+    ? { ...selected, rows:[], savings:savingsForRoom(selected.year, selected.grade_level, selected.classroom), total:0, pendingDays:0 }
+    : groups[0] || null);
   renderRooms();
   renderDetail();
 }
@@ -358,11 +425,12 @@ el("room-grid").addEventListener("click", event => {
 });
 el("view-person").addEventListener("click", () => { detailView = "person"; renderTxnList(); });
 el("view-day").addEventListener("click", () => { detailView = "day"; renderTxnList(); });
-el("txn-list").addEventListener("click", event => {
+function handleTxnClick(event) {
   if (voidBusy) return;
   const voidButton = event.target.closest("[data-void-txn]");
   if (voidButton) {
-    openVoidModal(pending.find(row => row.id === voidButton.dataset.voidTxn));
+    openVoidModal(pending.find(row => row.id === voidButton.dataset.voidTxn)
+      || savingsRows.find(row => row.id === voidButton.dataset.voidTxn));
     return;
   }
   const editButton = event.target.closest("[data-edit-txn]");
@@ -376,7 +444,9 @@ el("txn-list").addEventListener("click", event => {
   if (expandedStudents.has(studentId)) expandedStudents.delete(studentId);
   else expandedStudents.add(studentId);
   renderTxnList();
-});
+}
+el("txn-list").addEventListener("click", handleTxnClick);
+el("savings-list").addEventListener("click", handleTxnClick);
 el("history-list").addEventListener("click", event => {
   if (voidBusy) return;
   const button = event.target.closest("[data-unlock-remittance]");
