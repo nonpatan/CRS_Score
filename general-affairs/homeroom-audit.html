@@ -270,26 +270,51 @@ function missedDetails(rows) {
     }).join("") + "</div></details>";
 }
 
+function roomDueNote(row, report) {
+  if (row.due >= report.schoolDays) return "";
+  const fallback = `<div class="meta">นับเฉพาะวันที่มีครูประจำชั้น ${row.due} จาก ${report.schoolDays} วันเปิดเรียน</div>`;
+  const missing = report.roomsWithoutTeacher.find(item => item.room === row.room);
+  if (!missing?.dates?.length) return fallback;
+  const missingDates = new Set(missing.dates);
+  const firstCountedIndex = report.schoolDates.findIndex(date => !missingDates.has(date));
+  if (firstCountedIndex < 0) return fallback;
+  const missingPrefix = report.schoolDates.slice(0, firstCountedIndex);
+  const missingOnlyAtStart = missingDates.size === missingPrefix.length
+    && missingPrefix.every(date => missingDates.has(date));
+  if (!missingOnlyAtStart) return fallback;
+  return `<div class="meta">นับเฉพาะวันที่มีครูประจำชั้น · เริ่มนับ ${esc(fmtDate(report.schoolDates[firstCountedIndex]))} (จาก ${report.schoolDays} วันเปิดเรียน)</div>`;
+}
+
 function renderRooms(report) {
   el("rooms-summary").textContent = `${report.rooms.length} ห้อง · วันเปิดเรียนในช่วงนี้ ${report.schoolDays} วัน`;
   el("rooms-list").innerHTML = report.rooms.length ? report.rooms.map(row => {
     const teachers = row.teachers.map(person => person.full_name).filter(Boolean).join(" · ") || "ไม่ระบุชื่อครู";
     return `<article class="audit-row">
       <div class="audit-head"><div><b>${esc(row.room)}</b><div class="meta">${esc(teachers)}</div></div>
-      <div class="audit-counts">เช็คแล้ว <strong>${row.checked}/${row.due} วัน</strong> · ไม่มีการเช็ค ${row.missed} วัน</div></div>
+      <div class="audit-counts">เช็คแล้ว <strong>${row.checked}/${row.due} วัน</strong> · ไม่มีการเช็ค ${row.missed} วัน${roomDueNote(row, report)}</div></div>
       ${missedDetails(row.missedDates)}
     </article>`;
   }).join("") : '<div class="empty">ยังไม่มีห้องที่มีผู้รับผิดชอบในช่วงนี้</div>';
 }
 
 function renderStaff(report) {
-  el("staff-summary").textContent = `${report.staff.length} คน · นับหนึ่งครั้งต่อห้องต่อวัน และครูคู่ชั้นคนใดเช็คถือว่าทีมเช็คแล้ว`;
-  el("staff-list").innerHTML = report.staff.length ? report.staff.map(row => `
-    <article class="audit-row">
+  el("staff-summary").textContent = `${report.staff.length} คน · 1 ครั้ง = 1 ห้องใน 1 วัน · ครูคู่ชั้นคนใดเช็คถือว่าทีมเช็คแล้ว`;
+  const coveredCounts = new Map();
+  for (const cover of report.covers) {
+    const absentId = cover.absent?.id;
+    if (absentId) coveredCounts.set(absentId, (coveredCounts.get(absentId) || 0) + 1);
+  }
+  el("staff-list").innerHTML = report.staff.length ? report.staff.map(row => {
+    const coveredCount = coveredCounts.get(row.staff.id) || 0;
+    const coveredNote = coveredCount
+      ? `<div class="meta">มีคนแทนรับไป ${coveredCount} ครั้ง · ดูรายละเอียดที่แท็บคนแทน</div>`
+      : "";
+    return `<article class="audit-row">
       <div class="audit-head"><div><b>${esc(row.staff.full_name)}</b><div class="meta">${esc(row.rooms.join(" · "))}</div></div>
-      <div class="audit-counts">รับผิดชอบ <strong>${row.due} วัน</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}</div></div>
+      <div class="audit-counts">รับผิดชอบ <strong>${row.due} ครั้ง</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}${coveredNote}</div></div>
       ${missedDetails(row.missedDates)}
-    </article>`).join("") : '<div class="empty">ยังไม่มีรายการผู้รับผิดชอบในช่วงนี้</div>';
+    </article>`;
+  }).join("") : '<div class="empty">ยังไม่มีรายการผู้รับผิดชอบในช่วงนี้</div>';
 }
 
 function renderCovers(report) {
