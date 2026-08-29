@@ -2854,14 +2854,13 @@ export function filterProjectsInMonth(rows, yearMonth) {
   );
 }
 
-export function countPendingProjectsInMonth(rows, yearMonth) {
-  const range = projectMonthRange(yearMonth);
-  if (!range) return 0;
-  return (rows || []).filter(project =>
-    project?.approval_status === "รออนุมัติ" &&
-    project?.status !== "ยกเลิก" &&
-    projectOverlapsMonth(project, range)
-  ).length;
+// นับคิวที่ผู้อนุมัติต้องพิจารณาทั้งปีการศึกษา
+// 🔑 กติกาต้อง "ตรงเป๊ะ" กับ loadPendingApprovals() — ไม่งั้นเลขบนหน้าแรกกับเลขในหน้าอนุมัติ
+//    จะไม่ตรงกัน แล้ว ผอ. จะไม่เชื่อทั้งสองเลข (นี่คือเหตุผลที่เลิกใช้ตัวนับรายเดือน)
+// 🪤 จงใจ "ไม่" กรอง status === 'ยกเลิก' ออก เพราะ loadPendingApprovals ก็ไม่กรอง —
+//    รายการที่ครูกดยกเลิกทั้งที่ยังค้างคิวจะโผล่ในคิวจริง จึงต้องถูกนับด้วย
+export function countPendingProjects(rows) {
+  return (rows || []).filter(project => project?.approval_status === "รออนุมัติ").length;
 }
 
 // ---------- OKR: สูตรล้วน (ห้ามยิง sb ในบล็อกนี้) ----------

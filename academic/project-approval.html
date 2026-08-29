@@ -104,7 +104,7 @@
     <h1>อนุมัติโครงการ/กิจกรรม</h1>
     <p>อ่านรายละเอียดและเอกสาร ก่อนอนุมัติ ส่งกลับให้แก้ หรือไม่อนุมัติ</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260825-1"></script>
+    <script src="../app-shell.js?v=20260829-1"></script>
   </header>
 
   <main class="academic-content">
@@ -165,7 +165,7 @@ import {
   getStaffPositions, isProjectApprover, loadPendingApprovals, loadAcademicProjects,
   loadProjectApprovalHistory, projectApprovalBadge, projectResponsibleName,
   projectBudgetOf, decideProjectApproval, reopenRejectedProject
-} from "../supabase-client.js?v=20260826-1";
+} from "../supabase-client.js?v=20260829-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -200,6 +200,7 @@ if (!session) {
   let allProjects = [];
   let myStaffId = null;
   let reasonAction = null;
+  let actionBusy = false;
 
   const approver = await isProjectApprover();
   let positions = null;
@@ -328,11 +329,13 @@ if (!session) {
       : '<div class="empty">ยังไม่มีประวัติการพิจารณาในปีการศึกษานี้</div>';
   }
 
-  async function loadData() {
+  async function loadData({ silent = false } = {}) {
     const year = el("filter-year").value;
     if (!year) return;
-    el("pending-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
-    el("history-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    if (!silent) {
+      el("pending-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+      el("history-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    }
     try {
       [pendingProjects, allProjects] = await Promise.all([
         loadPendingApprovals(year),
@@ -340,6 +343,7 @@ if (!session) {
       ]);
       renderLists();
     } catch (error) {
+      if (silent) return;             // เงียบไว้ ของเดิมบนจอยังถูกอยู่
       el("pending-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
       el("history-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
     }
@@ -396,6 +400,7 @@ if (!session) {
       danger:false
     })) return;
     button.disabled = true;
+    actionBusy = true;
     try {
       await decideProjectApproval(project.id, "อนุมัติ", null);
       toast("อนุมัติโครงการ/กิจกรรมแล้ว");
@@ -403,6 +408,8 @@ if (!session) {
     } catch (error) {
       button.disabled = false;
       toast("อนุมัติไม่สำเร็จ: " + error.message, true);
+    } finally {
+      actionBusy = false;
     }
   }
 
@@ -494,6 +501,7 @@ if (!session) {
 
     const button = el("reason-submit");
     button.disabled = true;
+    actionBusy = true;
     try {
       if (action.type === "return") await decideProjectApproval(project.id, "ส่งกลับให้แก้", reason);
       if (action.type === "reject") await decideProjectApproval(project.id, "ไม่อนุมัติ", reason);
@@ -505,8 +513,53 @@ if (!session) {
       toast("บันทึกไม่สำเร็จ: " + error.message, true);
     } finally {
       button.disabled = false;
+      actionBusy = false;
     }
   });
+
+  // ⛔ ต่อ channel เฉพาะผู้อนุมัติ — คนที่ไม่ผ่านประตูไม่ต้องเปิด WebSocket ทิ้งไว้
+  if (approver) {
+    // ============================================================
+    // 🔔 คิวขยับเองเมื่อมีของใหม่เข้ามาระหว่าง ผอ. เปิดหน้าค้างไว้ (Realtime)
+    // ------------------------------------------------------------
+    // 🔑 ไม่เชื่อ payload — ใช้เป็นแค่สัญญาณ แล้วดึงของจริงผ่าน loadData() ที่ผ่าน RLS
+    // 🪤 ไม่ใส่ filter approval_status เพราะการอนุมัติคือการ "ออก" จากสถานะนั้น
+    //    ถ้ากรองไว้ คิวจะยาวขึ้นได้แต่ไม่ยอมสั้นลงตอนพิจารณาเสร็จ
+    let queueSyncPending = false;
+    async function syncQueueFromRemote() {
+      // ⛔ ห้ามดึงทับตอนกล่องเหตุผลเปิดอยู่หรือกำลังยิง RPC — ไม่งั้นรายการที่ ผอ.
+      //    กำลังอ่าน/กำลังตัดสินหายไปกลางคัน
+      if (actionBusy || queueSyncPending || !el("reason-overlay").hidden) return;
+      queueSyncPending = true;
+      try {
+        const before = pendingProjects.length;
+        await loadData({ silent: true });
+        // 🪤 เด้งเฉพาะตอนคิว "ยาวขึ้น" — ตอน ผอ. เพิ่งกดอนุมัติเองคิวสั้นลง
+        //    ถ้าเด้งทุกครั้งจะซ้อนกับ toast "บันทึกผลการพิจารณาแล้ว" กลายเป็นเสียงรบกวน
+        if (pendingProjects.length > before) toast("มีรายการใหม่เข้าคิวรออนุมัติ");
+      } finally {
+        queueSyncPending = false;
+      }
+    }
+
+    let queueSyncTimer = null;
+    const scheduleQueueSync = () => {
+      clearTimeout(queueSyncTimer);
+      queueSyncTimer = setTimeout(syncQueueFromRemote, 400);
+    };
+
+    const queueChannel = sb.channel("project-approvals-queue");
+    queueChannel.on("postgres_changes", {
+      event: "*", schema: "public", table: "academic_projects"
+    }, scheduleQueueSync);
+    queueChannel.subscribe();
+
+    // 🛟 กันเหนียวเมื่อ Realtime ต่อไม่ติด หรือเครื่องหลับแล้วตื่น
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleQueueSync();
+    });
+    window.addEventListener("pagehide", () => { sb.removeChannel(queueChannel); });
+  }
 }
 </script>
 </body>
