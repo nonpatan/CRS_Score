@@ -207,7 +207,7 @@ function splitTransportRoster(rows, states) {
   for (const placement of rows || []) {
     const state = states.get(placement.student_id);
     if (state?.period) active.push(placement);
-    else if (state && state.outstanding > 0) stoppedOutstanding.push(placement);
+    else if (state && (state.outstanding > 0 || state.todayPayment)) stoppedOutstanding.push(placement);
   }
   return { active, stoppedOutstanding };
 }
@@ -232,6 +232,10 @@ function buildState() {
     stateByStudent.set(studentId, {
       charges,
       outstanding:computeTransportOutstanding(charges, paymentsByStudent.get(studentId) || []),
+      // แก้ทับได้เฉพาะรายการวันนี้ที่ยังไม่นำส่ง ส่วนที่ปิดรอบแล้วแสดงแยกไว้
+      todayPayment:(paymentsByStudent.get(studentId) || []).find(row => row.pay_date === today && row.remittance_id == null) || null,
+      todayRemitted:(paymentsByStudent.get(studentId) || []).filter(row => row.pay_date === today && row.remittance_id != null)
+        .reduce((total, row) => total + Number(row.amount || 0), 0),
       balance:balanceByStudent.get(studentId) || 0,
       period:currentPeriod(studentId),
       lastPeriod:[...studentPeriods].sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)))[0] || null,
@@ -273,11 +277,17 @@ function renderWarnings() {
 function actionAvailability(studentId, amount) {
   const state = stateByStudent.get(studentId);
   const unknown = Boolean(state?.charges.unannouncedMonths.length);
-  const valid = Number.isFinite(amount) && amount > 0 && !unknown && amount <= state.outstanding;
+  // ยอดเดิมถูกหักจากหนี้/สมุดไปแล้ว: คืนเฉพาะแถวที่กำลังจะแก้ ก่อนตรวจยอดใหม่
+  const previousAmount = Number(state?.todayPayment?.amount || 0);
+  const max = Math.round((Number(state?.outstanding || 0) + previousAmount) * 100) / 100;
+  const savingsAvailable = Math.round((Number(state?.balance || 0) + (state?.todayPayment?.method === "หักออมทรัพย์" ? previousAmount : 0)) * 100) / 100;
+  const valid = Number.isFinite(amount) && amount > 0 && !unknown && amount <= max;
   const cashStatus = state?.attendance?.status || null;
   return {
     cash:valid && TRANSPORT_CHARGE_STATUSES.includes(cashStatus),
-    savings:valid && state.balance >= amount,
+    savings:valid && savingsAvailable >= amount,
+    max,
+    savingsAvailable,
     unknown,
     cashStatus
   };
@@ -285,6 +295,7 @@ function actionAvailability(studentId, amount) {
 
 // เติมครั้งเดียวตอน render: ตัดด้วยยอดค้างเพื่อไม่เก็บซ้ำหลังจ่ายไปแล้ว
 function suggestedAmount(state, period) {
+  if (state.todayPayment) return Number(state.todayPayment.amount);
   if (state.charges.unannouncedMonths.length || !state.period || state.outstanding <= 0) return 0;
   const todayDay = state.charges.days.find(row => row.date === today);
   const thisMonth = state.charges.months.find(row => row.ym === currentYm);
@@ -310,8 +321,12 @@ function renderStudentRows(rows, { showOverride }) {
     const historyWarning = state.missingStudentRoomDates.length
       ? `<span class="meta status-warn">มี ${state.missingStudentRoomDates.length} วันที่ไม่มีข้อมูลของนักเรียนคนนี้ (อาจย้ายห้องระหว่างปีหรือเข้าเรียนภายหลัง) ยอดค้างที่แสดงอาจไม่ครบ — ให้ฝ่ายการเงินตรวจ</span>`
       : "";
+    const paymentStatus = (state.todayPayment
+      ? `<span class="meta status-warn">วันนี้บันทึกแล้ว ${formatMoney(state.todayPayment.amount)} · ${esc(state.todayPayment.method)} — แก้ยอดแล้วกดบันทึกทั้งห้องเพื่อทับของเดิม</span>` : "")
+      + (state.todayRemitted > 0
+        ? `<span class="meta">นำส่งแล้ว ${formatMoney(state.todayRemitted)} วันนี้ · แก้ไม่ได้ ${state.todayPayment ? "แก้ได้เฉพาะยอดที่ยังไม่นำส่ง" : "ยอดที่กรอกใหม่จะเป็นการรับเพิ่ม"}</span>` : "");
     return `<div class="student-row" data-student-id="${esc(placement.student_id)}">
-      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(period?.billing_mode || "—")} / ${esc(period?.trip_mode || "—")}${stopped && period?.end_date ? ` · สิ้นสุด ${thaiDate(period.end_date)}` : ""}</span><span class="meta ${cashAllowed ? "status-ok" : "status-bad"}">${esc(cashReason)}</span>${historyWarning}</div>
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(period?.billing_mode || "—")} / ${esc(period?.trip_mode || "—")}${stopped && period?.end_date ? ` · สิ้นสุด ${thaiDate(period.end_date)}` : ""}</span><span class="meta ${cashAllowed ? "status-ok" : "status-bad"}">${esc(cashReason)}</span>${paymentStatus}${historyWarning}</div>
       <div class="money-cell ${unknown ? "unknown" : ""}"><span>ยอดค้างสะสม</span><b>${unknown ? "ยังคำนวณไม่ได้" : formatMoney(state.outstanding)}</b></div>
       <div class="money-cell ${currentCharge?.announced === false ? "unknown" : ""}"><span>${!stopped && period?.billing_mode === "รายเดือน" ? "ยอดเดือนนี้" : "ยอดของวันนี้"}</span><b>${currentText}</b></div>
       <div class="money-cell"><span>ออมทรัพย์คงเหลือ</span><b>${formatMoney(state.balance)}</b></div>
@@ -319,8 +334,8 @@ function renderStudentRows(rows, { showOverride }) {
         <input class="amount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(suggested || '')}" placeholder="ยอดรับ/ยอดหัก (บาท)" aria-label="ยอดที่รับของ ${esc(student.name || "นักเรียน")}">
         <select class="method" aria-label="วิธีรับเงินของ ${esc(student.name || "นักเรียน")}">
           <option value=""></option>
-          <option value="เงินสด">เงินสด</option>
-          <option value="หักออมทรัพย์">หักออมทรัพย์</option>
+          <option value="เงินสด"${state.todayPayment?.method === "เงินสด" ? " selected" : ""}>เงินสด</option>
+          <option value="หักออมทรัพย์"${state.todayPayment?.method === "หักออมทรัพย์" ? " selected" : ""}>หักออมทรัพย์</option>
         </select>
         ${showOverride ? '<button class="override-button" type="button">แก้ยอดของวัน</button>' : ""}
         <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `ค้าง ${formatMoney(state.outstanding)} · ออมเหลือ ${formatMoney(state.balance)}`}</span>
@@ -334,7 +349,7 @@ function renderRoster() {
     ? renderStudentRows(activeTransportRoster, { showOverride:true })
     : '<div class="empty">ห้องนี้ไม่มีนักเรียนที่กำลังใช้รถรับส่งอยู่</div>';
   el("stopped-group").hidden = stoppedTransportRoster.length === 0;
-  el("stopped-summary").textContent = `เลิกใช้รถแล้ว · ยังค้าง ${stoppedTransportRoster.length} คน`;
+  el("stopped-summary").textContent = `เลิกใช้รถแล้ว · ค้างหรือมีรายการวันนี้ ${stoppedTransportRoster.length} คน`;
   el("stopped-list").innerHTML = renderStudentRows(stoppedTransportRoster, { showOverride:false });
   roomNeedsReload = false;
   document.querySelectorAll("#student-list .student-row, #stopped-list .student-row").forEach(updateActionRow);
@@ -351,19 +366,27 @@ function updateActionRow(row) {
   const cashOption = method.querySelector('[value="เงินสด"]');
   const savingsOption = method.querySelector('[value="หักออมทรัพย์"]');
   cashOption.disabled = !TRANSPORT_CHARGE_STATUSES.includes(state.attendance?.status);
-  savingsOption.disabled = state.balance < amount;
+  savingsOption.disabled = available.savingsAvailable < amount;
   input.disabled = available.unknown || savingRoom;
   method.disabled = available.unknown || savingRoom;
   let resetReason = "";
-  if (method.value && (available.unknown || (method.value === "เงินสด" ? cashOption.disabled : savingsOption.disabled))) {
+  const isExistingMethod = state.todayPayment?.method === method.value;
+  if (method.value && !isExistingMethod && (available.unknown || (method.value === "เงินสด" ? cashOption.disabled : savingsOption.disabled))) {
     resetReason = available.unknown ? "ยังไม่ประกาศยอด" : method.value === "เงินสด" ? "สถานะเช็คชื่อรับเงินสดไม่ได้" : "ยอดออมทรัพย์ไม่พอ";
     method.value = "";
   }
   let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `ค้าง ${formatMoney(state.outstanding)} · ออมเหลือ ${formatMoney(state.balance)}`;
-  if (Number.isFinite(amount) && amount > state.outstanding) note = `รับเกินยอดค้างไม่ได้ · ค้าง ${formatMoney(state.outstanding)}`;
-  if (Number.isFinite(amount) && amount > state.balance) note += ` · ออมทรัพย์เหลือ ${formatMoney(state.balance)} · ตัวเลือกหักออมทรัพย์ถูกปิด`;
+  if (Number.isFinite(amount) && amount > available.max) note = `รับเกินยอดค้างไม่ได้ · ${state.todayPayment ? "แก้ทับได้ไม่เกิน" : "ค้าง"} ${formatMoney(available.max)}`;
+  if (Number.isFinite(amount) && amount > available.savingsAvailable) note += ` · ออมทรัพย์เหลือ ${formatMoney(state.balance)}${state.todayPayment?.method === "หักออมทรัพย์" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.savingsAvailable)}` : ""} · ตัวเลือกหักออมทรัพย์ถูกปิด`;
   if (!TRANSPORT_CHARGE_STATUSES.includes(available.cashStatus)) note += ` · เงินสดปิดเพราะสถานะ ${available.cashStatus || "ยังไม่เช็คชื่อ"}`;
   if (resetReason) note += ` · ยกเลิกวิธีที่เลือกไว้เพราะ${resetReason} กรุณาเลือกวิธีใหม่`;
+  if (state.todayPayment && (input.value === "" || amount === 0)) {
+    note += " · ล้างช่องไม่ได้ยกเลิกรายการที่บันทึกแล้ว · ต้องแจ้งฝ่ายการเงินให้ลบ";
+  } else if (state.todayPayment && method.value && method.value !== state.todayPayment.method && amount > 0) {
+    note += state.todayPayment.method === "หักออมทรัพย์"
+      ? ` · จะยกเลิกการหักออมทรัพย์ ${formatMoney(state.todayPayment.amount)} และคืนเงินเข้าสมุดให้ก่อน แล้วลงเป็นเงินสดแทน`
+      : ` · จะยกเลิกรายการเงินสด ${formatMoney(state.todayPayment.amount)} แล้วหักจากสมุดออมทรัพย์แทน`;
+  }
   row.querySelector(".action-note").textContent = note;
   if (row.closest("#stopped-list") && method.value) el("stopped-group").open = true;
   // ช่องยอดเป็นของครูแล้ว: อัปเดตได้เฉพาะด่าน วิธี และข้อความ ห้ามเขียน input.value
@@ -435,7 +458,7 @@ async function loadRoom(index) {
       .gte("charge_date", yearRange.start).lte("charge_date", today), ["charge_date","student_id","id"]),
     fetchAllRows(() => sb.from("transport_month_rates").select("year,ym,zone_id,trip_mode,amount")
       .eq("year", currentYear).gte("ym", monthStart(yearRange.start)).lte("ym", currentYm), ["year","ym","zone_id","trip_mode"]),
-    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,pay_date,amount,method")
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,pay_date,amount,method,remittance_id")
       .eq("year", currentYear).in("student_id", studentIds)
       .gte("pay_date", yearRange.start).lte("pay_date", today), ["pay_date","student_id","id"]),
     fetchAllRows(() => sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").in("student_id", studentIds), ["student_id","txn_date","id"]),
@@ -517,6 +540,9 @@ async function saveRoom() {
 
   const cash = items.filter(item => item.method === "เงินสด");
   const savings = items.filter(item => item.method === "หักออมทรัพย์");
+  const newItems = items.filter(item => !stateByStudent.get(item.student_id)?.todayPayment);
+  const overwrites = items.filter(item => stateByStudent.get(item.student_id)?.todayPayment);
+  const methodChanges = overwrites.filter(item => stateByStudent.get(item.student_id).todayPayment.method !== item.method);
   const sum = list => list.reduce((total, item) => total + Math.round(item.amount * 100), 0) / 100;
   const button = el("save-room");
   // ล็อกตั้งแต่ถามยืนยัน: กันกดซ้ำหรือเปลี่ยนห้องระหว่างรอผล แล้วคืนสถานะเดิมเมื่อจบ
@@ -529,8 +555,11 @@ async function saveRoom() {
     if (!await window.crsAskConfirm({
       title:"ยืนยันบันทึกรับเงินค่ารถทั้งห้อง",
       message:`${selectedRoom.grade_level} · ${selectedRoom.classroom} · ${thaiDate(today)}\n`
-        + `เงินสด ${formatMoney(sum(cash))} (${cash.length} คน)\n`
-        + `หักออมทรัพย์ ${formatMoney(sum(savings))} (${savings.length} คน)\n`
+        + (newItems.length ? `ลงใหม่ ${formatMoney(sum(newItems))} (${newItems.length} คน)\n` : "")
+        + (overwrites.length ? `แก้ทับของเดิม ${formatMoney(sum(overwrites))} (${overwrites.length} คน)\n` : "")
+        + (methodChanges.length ? `เปลี่ยนวิธีรับเงิน ${methodChanges.length} คน\n` : "")
+        + (cash.length ? `เงินสด ${formatMoney(sum(cash))} (${cash.length} คน)\n` : "")
+        + (savings.length ? `หักออมทรัพย์ ${formatMoney(sum(savings))} (${savings.length} คน)\n` : "")
         + `รวม ${formatMoney(sum(items))} จาก ${items.length} คน`,
       okLabel:"บันทึกทั้งห้อง", danger:false
     })) return;
