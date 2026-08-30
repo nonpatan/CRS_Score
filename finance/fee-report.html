@@ -153,11 +153,64 @@ th{
   font-size:13px;
   white-space:nowrap
 }
-tr[data-room],tr[data-student]{
+tr[data-room]{
   cursor:pointer
 }
-tr[data-room]:hover,tr[data-student]:hover{
+tr[data-room]:hover,tr[data-room].active{
   background:var(--teal-soft)
+}
+.student-grid{
+  display:grid;
+  grid-template-columns:minmax(260px,.8fr) minmax(0,1.2fr);
+  gap:16px
+}
+.student-list{
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:10px
+}
+.student-button{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  width:100%;
+  min-height:54px;
+  padding:10px 12px;
+  border:0;
+  border-bottom:1px solid var(--line);
+  border-radius:0;
+  color:var(--ink);
+  background:#fff;
+  text-align:left
+}
+.student-button:last-child{
+  border-bottom:0
+}
+.student-button:hover,.student-button.active{
+  background:var(--teal-soft)
+}
+.student-button .meta{
+  display:block
+}
+.student-summary{
+  display:grid;
+  gap:2px;
+  justify-items:end;
+  color:var(--muted);
+  font-size:13px;
+  white-space:nowrap
+}
+.student-summary strong.due{
+  color:var(--danger)
+}
+.student-summary strong.zero{
+  color:var(--muted)
+}
+.student-detail{
+  min-width:0;
+  min-height:160px;
+  padding:12px;
+  border-radius:10px;
+  background:var(--bg)
 }
 .money{
   text-align:right;
@@ -184,13 +237,6 @@ button{
   font-weight:600;
   cursor:pointer
 }
-.breadcrumb{
-  display:flex;
-  gap:8px;
-  align-items:center;
-  flex-wrap:wrap;
-  margin-bottom:12px
-}
 .banner,.readonly{
   margin-bottom:14px;
   padding:12px 14px;
@@ -209,6 +255,11 @@ button{
 }
 [hidden]{
   display:none!important
+}
+@media(max-width:820px){
+  .student-grid{
+    grid-template-columns:1fr
+  }
 }
 @media(max-width:760px){
   .stats{
@@ -267,16 +318,28 @@ button{
               </div>
             </section>
             <section class="card">
-              <div class="breadcrumb">
-                <button id="back-rooms" hidden>← ทุกห้อง</button>
-                <button id="back-students" hidden>← รายชื่อนักเรียน</button>
-                <b id="level-title">รายห้อง</b>
+              <div class="section-head">
+                <div>
+                  <h2>สรุปรายห้อง</h2>
+                  <p>กดแถวห้องเพื่อดูรายชื่อนักเรียน</p>
+                </div>
               </div>
               <div id="room-view">
               </div>
-              <div id="student-view" hidden>
+            </section>
+            <section id="student-card" class="card" hidden>
+              <div class="section-head">
+                <div>
+                  <h2 id="student-title">รายชื่อนักเรียน</h2>
+                  <p>กดชื่อนักเรียนเพื่อดูรายการค่าใช้จ่าย</p>
+                </div>
               </div>
-              <div id="line-view" hidden>
+              <div class="student-grid">
+                <div id="student-list" class="student-list">
+                </div>
+                <div id="student-detail" class="student-detail">
+                  <div class="empty">เลือกนักเรียนเพื่อดูรายการค่าใช้จ่าย</div>
+                </div>
               </div>
             </section>
             <section id="departed-card" class="card" hidden>
@@ -330,7 +393,7 @@ function roomLabel(room){
   return classroom.startsWith(`${grade}/`)?classroom:`${grade}/${classroom}`
 }
 
-let currentYear="",placements=[],charges=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudent=null,canFinance=false;
+let currentYear="",placements=[],charges=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudentId=null,canFinance=false;
 
 function filterCharges(rows,year,onlyCurrent){
   return(rows||[]).filter(row=>!row.voided_at&&(!onlyCurrent||row.year===year))
@@ -342,7 +405,7 @@ function renderRoomReport(roomRows){
       <table>
         <thead><tr><th>ห้อง</th><th class="money">เรียกเก็บ</th><th class="money">ลด/อุดหนุน</th><th class="money">ชำระแล้ว</th><th class="money">ค้างชำระ</th></tr></thead>
         <tbody>${roomRows.map((r,i)=>`
-          <tr data-room="${i}"><td><b>${esc(roomLabel(r))} · ${r.students.length} คน</b><span class="meta">ปี ${esc(r.year)}</span></td><td class="money">${money(r.charged)}</td><td class="money negative">−${money(r.credited)}</td><td class="money">${money(r.paid)}</td><td class="money ${r.outstanding>0?"due":"zero"}">${money(r.outstanding)}</td></tr>
+          <tr class="room-row${selectedRoom&&roomKey(selectedRoom)===roomKey(r)?" active":""}" data-room="${i}"><td><b>${esc(roomLabel(r))} · ${r.students.length} คน</b><span class="meta">ปี ${esc(r.year)}</span></td><td class="money">${money(r.charged)}</td><td class="money negative">−${money(r.credited)}</td><td class="money">${money(r.paid)}</td><td class="money ${r.outstanding>0?"due":"zero"}">${money(r.outstanding)}</td></tr>
         `).join("")}</tbody>
       </table>
     </div>`
@@ -355,14 +418,7 @@ function studentName(student){
 
 function renderStudents(room){
   return room.students.length
-    ?`<div class="table-wrap">
-      <table>
-        <thead><tr><th>นักเรียน</th><th class="money">เรียกเก็บ</th><th class="money">ลด/อุดหนุน</th><th class="money">ค้างชำระ</th></tr></thead>
-        <tbody>${room.students.map((s,i)=>`
-          <tr data-student="${i}"><td><b>${esc(studentName(s))}</b><span class="meta">เลขที่ ${esc(s.placement.student?.student_no||"—")}</span></td><td class="money">${money(s.charged)}</td><td class="money negative">−${money(s.credited)}</td><td class="money ${s.outstanding>0?"due":"zero"}">${money(s.outstanding)}</td></tr>
-        `).join("")}</tbody>
-      </table>
-    </div>`
+    ?room.students.map(s=>`<button type="button" class="student-button${selectedStudentId===s.placement.student_id?" active":""}" data-student-id="${esc(s.placement.student_id)}"><span><b>${esc(studentName(s))}</b><span class="meta">เลขที่ ${esc(s.placement.student?.student_no||"—")}</span></span><span class="student-summary"><span>เรียกเก็บ ${money(s.charged)}</span><span>ลด/อุดหนุน −${money(s.credited)}</span><strong class="${s.outstanding>0?"due":"zero"}">ค้าง ${money(s.outstanding)}</strong></span></button>`).join("")
     :'<div class="empty">ไม่มีนักเรียนในห้องนี้</div>'
 }
 
@@ -381,13 +437,16 @@ function renderLines(student){
   `:'<div class="empty">นักเรียนคนนี้ยังไม่มีรายการ</div>'}`
 }
 
-function syncViews(level="rooms"){
-  el("room-view").hidden=level!=="rooms";
-  el("student-view").hidden=level!=="students";
-  el("line-view").hidden=level!=="lines";
-  el("back-rooms").hidden=level==="rooms";
-  el("back-students").hidden=level!=="lines";
-  el("level-title").textContent=level==="rooms"?"รายห้อง":level==="students"?roomLabel(selectedRoom):studentName(selectedStudent)
+function renderStudentCard(){
+  if(!selectedRoom){
+    el("student-card").hidden=true;
+    return
+  }
+  el("student-card").hidden=false;
+  el("student-title").textContent=`รายชื่อนักเรียน ${roomLabel(selectedRoom)}`;
+  el("student-list").innerHTML=renderStudents(selectedRoom);
+  const selectedStudent=selectedRoom.students.find(student=>student.placement.student_id===selectedStudentId);
+  el("student-detail").innerHTML=selectedStudent?renderLines(selectedStudent):'<div class="empty">เลือกนักเรียนเพื่อดูรายการค่าใช้จ่าย</div>'
 }
 
 // เหตุผล: เด็กจบหรือย้ายออกไม่มี active placement แล้ว จึงต้องสรุปจากรายการหนี้โดยตรงเพื่อไม่ให้ยอดค้างหาย
@@ -425,10 +484,10 @@ function render(){
   const total=computeFeeOutstanding(visibleCharges.filter(c=>placements.some(p=>p.student_id===c.student_id)),[]);
   // เหตุผล: amount ของส่วนลดและเงินอุดหนุนติดลบจาก generated column แล้ว จึงรวมตรง ๆ โดยไม่กลับเครื่องหมาย
   el("stats").innerHTML=`<div class="stat"><span>เรียกเก็บ</span><b>${money(total.charged)}</b></div><div class="stat"><span>ลด/อุดหนุน</span><b>${money(total.credited)}</b></div><div class="stat"><span>ชำระแล้ว</span><b>${money(total.paid)}</b></div><div class="stat"><span>ค้างชำระ</span><b>${money(total.outstanding)}</b></div>`;
-  el("room-view").innerHTML=renderRoomReport(rooms);
   selectedRoom=null;
-  selectedStudent=null;
-  syncViews();
+  selectedStudentId=null;
+  el("room-view").innerHTML=renderRoomReport(rooms);
+  renderStudentCard();
   renderDeparted()
 }
 
@@ -456,20 +515,18 @@ el("room-view").onclick=e=>{
   const tr=e.target.closest("[data-room]");
   if(!tr)return;
   selectedRoom=rooms[Number(tr.dataset.room)];
-  el("student-view").innerHTML=renderStudents(selectedRoom);
-  syncViews("students")
+  selectedStudentId=null;
+  el("room-view").innerHTML=renderRoomReport(rooms);
+  renderStudentCard()
 };
 
-el("student-view").onclick=e=>{
-  const tr=e.target.closest("[data-student]");
-  if(!tr)return;
-  selectedStudent=selectedRoom.students[Number(tr.dataset.student)];
-  el("line-view").innerHTML=renderLines(selectedStudent);
-  syncViews("lines")
+el("student-list").onclick=e=>{
+  const button=e.target.closest(".student-button");
+  if(!button)return;
+  selectedStudentId=button.dataset.studentId;
+  renderStudentCard()
 };
 
-el("back-rooms").onclick=()=>syncViews("rooms");
-el("back-students").onclick=()=>syncViews("students");
 el("current-only").onchange=render;
 
 const session=await requireAuth();
