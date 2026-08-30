@@ -237,6 +237,23 @@ button{
   font-weight:600;
   cursor:pointer
 }
+.actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px
+}
+.button-link{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px;
+  padding:9px 14px;
+  border-radius:9px;
+  color:var(--teal);
+  background:var(--teal-soft);
+  font-weight:600;
+  text-decoration:none
+}
 .banner,.readonly{
   margin-bottom:14px;
   padding:12px 14px;
@@ -287,7 +304,7 @@ button{
         <p>ดูยอดตั้งหนี้ ส่วนลด และยอดค้างจากระดับห้องถึงรายการของนักเรียน</p>
         <div class="nav">
         </div>
-        <script src="../app-shell.js?v=20260830-2">
+        <script src="../app-shell.js?v=20260830-3">
         </script>
       </header>
       <main class="academic-content">
@@ -374,7 +391,7 @@ import {
   chargeLineRemaining,
   formatMoney,
   fetchAllRows
-} from "../supabase-client.js?v=20260830-2";
+} from "../supabase-client.js?v=20260830-3";
 
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({
@@ -393,7 +410,7 @@ function roomLabel(room){
   return classroom.startsWith(`${grade}/`)?classroom:`${grade}/${classroom}`
 }
 
-let currentYear="",placements=[],charges=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudentId=null,canFinance=false;
+let currentYear="",placements=[],charges=[],payments=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudentId=null,canFinance=false;
 
 function filterCharges(rows,year,onlyCurrent){
   return(rows||[]).filter(row=>!row.voided_at&&(!onlyCurrent||row.year===year))
@@ -424,13 +441,17 @@ function renderStudents(room){
 
 function renderLines(student){
   const rows=student.charges.filter(c=>!c.voided_at);
-  const total=computeFeeOutstanding(rows,[]);
-  return`<div class="section-head"><div><h2>${esc(studentName(student))}</h2><p>${esc(roomLabel(student.placement))} · รวมรายการด้านล่างต้องเท่ากับยอดค้าง</p></div><b class="${total.outstanding>0?"due":"zero"}">${money(total.outstanding)}</b></div>${rows.length?`
+  const rowIds=new Set(rows.map(c=>c.id)),studentPayments=payments.filter(payment=>rowIds.has(payment.charge_id));
+  const total=computeFeeOutstanding(rows,studentPayments);
+  const periods=[...new Map(rows.filter(c=>c.year&&c.term).map(c=>[`${c.year}\u0000${c.term}`,{year:c.year,term:c.term}])).values()]
+    .sort((a,b)=>String(b.year).localeCompare(String(a.year),"th",{numeric:true})||Number(b.term)-Number(a.term));
+  const printLinks=canFinance&&periods.length?`<div class="actions">${periods.map(period=>`<a class="button-link" href="fee-receipt.html?student=${encodeURIComponent(student.placement.student_id)}&year=${encodeURIComponent(period.year)}&term=${encodeURIComponent(period.term)}">พิมพ์ใบแจ้งหนี้ ${esc(period.term)}/${esc(period.year)}</a>`).join("")}</div>`:"";
+  return`<div class="section-head"><div><h2>${esc(studentName(student))}</h2><p>${esc(roomLabel(student.placement))} · รวมรายการด้านล่างต้องเท่ากับยอดค้าง</p></div><div><b class="${total.outstanding>0?"due":"zero"}">${money(total.outstanding)}</b>${printLinks}</div></div>${rows.length?`
     <div class="table-wrap">
       <table>
         <thead><tr><th>วันที่ / รายการ</th><th>ปี / ภาคเรียน</th><th>ชนิด</th><th class="money">ยอดคงเหลือรายการ</th></tr></thead>
         <tbody>${rows.map(c=>`
-          <tr><td><b>${esc(c.description)}</b><span class="meta">${esc(c.charge_date||"")}${c.note?` · ${esc(c.note)}`:""}</span></td><td>${esc(c.year)}${c.term?` / ${esc(c.term)}`:""}</td><td>${esc(c.kind)}</td><td class="money ${Number(c.amount)<0?"negative":""}">${money(chargeLineRemaining(c,[]))}</td></tr>
+          <tr><td><b>${esc(c.description)}</b><span class="meta">${esc(c.charge_date||"")}${c.note?` · ${esc(c.note)}`:""}</span></td><td>${esc(c.year)}${c.term?` / ${esc(c.term)}`:""}</td><td>${esc(c.kind)}</td><td class="money ${Number(c.amount)<0?"negative":""}">${money(chargeLineRemaining(c,studentPayments))}</td></tr>
         `).join("")}</tbody>
       </table>
     </div>
@@ -463,7 +484,10 @@ function renderDeparted(){
     byStudent.get(c.student_id).charges.push(c)
   }
   const rows=[...byStudent.values()]
-    .map(x=>({...x,...computeFeeOutstanding(x.charges,[])}))
+    .map(x=>{
+      const ids=new Set(x.charges.map(c=>c.id));
+      return{...x,...computeFeeOutstanding(x.charges,payments.filter(payment=>ids.has(payment.charge_id)))}
+    })
     .filter(x=>x.outstanding!==0);
   el("departed-card").hidden=!rows.length;
   el("departed-list").innerHTML=rows.length
@@ -480,8 +504,11 @@ function renderDeparted(){
 
 function render(){
   visibleCharges=filterCharges(charges,currentYear,el("current-only").checked);
-  rooms=summarizeFeeByRoom(visibleCharges,placements,[]);
-  const total=computeFeeOutstanding(visibleCharges.filter(c=>placements.some(p=>p.student_id===c.student_id)),[]);
+  const visibleChargeIds=new Set(visibleCharges.map(c=>c.id)),visiblePayments=payments.filter(payment=>visibleChargeIds.has(payment.charge_id));
+  rooms=summarizeFeeByRoom(visibleCharges,placements,visiblePayments);
+  const visiblePlacementIds=new Set(placements.map(p=>p.student_id));
+  const visibleRows=visibleCharges.filter(c=>visiblePlacementIds.has(c.student_id)),visibleIds=new Set(visibleRows.map(c=>c.id));
+  const total=computeFeeOutstanding(visibleRows,payments.filter(payment=>visibleIds.has(payment.charge_id)));
   // เหตุผล: amount ของส่วนลดและเงินอุดหนุนติดลบจาก generated column แล้ว จึงรวมตรง ๆ โดยไม่กลับเครื่องหมาย
   el("stats").innerHTML=`<div class="stat"><span>เรียกเก็บ</span><b>${money(total.charged)}</b></div><div class="stat"><span>ลด/อุดหนุน</span><b>${money(total.credited)}</b></div><div class="stat"><span>ชำระแล้ว</span><b>${money(total.paid)}</b></div><div class="stat"><span>ค้างชำระ</span><b>${money(total.outstanding)}</b></div>`;
   selectedRoom=null;
@@ -493,17 +520,23 @@ function render(){
 
 async function load(){
   const started=performance.now();
-  const [placementRes,chargeRes]=await Promise.all([
+  const [placementRes,chargeRes,paymentRes]=await Promise.all([
     getStudentPlacements(currentYear),
-    fetchAllRows(()=>sb.from("student_charges").select("*,student:student_id(id,student_no,name,graduated,left_school)"),["student_id","charge_date","id"])
+    fetchAllRows(()=>sb.from("student_charges").select("*,student:student_id(id,student_no,name,graduated,left_school)"),["student_id","charge_date","id"]),
+    fetchAllRows(()=>sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,receipt:receipt_id(student_id,voided_at)"),["receipt_id","paid_at","id"])
   ]);
   if(placementRes.error)throw new Error("โหลดทะเบียนไม่สำเร็จ: "+placementRes.error.message);
   if(chargeRes.error)throw new Error("โหลดค่าใช้จ่ายไม่สำเร็จ: "+chargeRes.error.message);
+  if(paymentRes.error)throw new Error("โหลดรายการรับเงินไม่สำเร็จ: "+paymentRes.error.message);
   const returned=chargeRes.data||[],readableIds=new Set(returned.map(c=>c.student_id));
   // เหตุผล: RLS คืน student_charges เฉพาะเด็กที่ครูอ่านได้ จึงใช้ readableIds จำกัดทะเบียนให้ตรงกับสิทธิ์นั้น
   placements=activePlacements(placementRes.data||[]).filter(p=>canFinance||readableIds.has(p.student_id));
   const ids=new Set(placements.map(p=>p.student_id));
   charges=returned.filter(c=>ids.has(c.student_id)||canFinance&&(c.student?.graduated||c.student?.left_school));
+  payments=(paymentRes.data||[]).map(row=>{
+    const linked=Array.isArray(row.receipt)?row.receipt[0]:row.receipt;
+    return{...row,student_id:linked?.student_id,voided_at:linked?.voided_at}
+  }).filter(row=>row.student_id&&!row.voided_at);
   render();
   const elapsed=performance.now()-started;
   el("load-time").textContent=`โหลดรายงาน ${Math.round(elapsed)} มิลลิวินาที`;

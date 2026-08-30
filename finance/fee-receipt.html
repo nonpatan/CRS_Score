@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ใบแจ้งหนี้และใบเสร็จรับเงิน — CRS MIS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd; }
+    * { box-sizing:border-box; }
+    html, body { max-width:100%; overflow-x:hidden; }
+    body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.55; }
+    .wrap { max-width:900px; margin:auto; }
+    header h1 { margin:4px 0; font-size:22px; }
+    header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+    header .nav { min-height:54px; }
+    .card { margin-bottom:16px; padding:20px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+    .toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    button, .button-link { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:9px 14px; border:0; border-radius:9px; color:var(--teal); background:var(--teal-soft); font:inherit; font-weight:600; text-decoration:none; cursor:pointer; }
+    button.primary { color:var(--white); background:var(--teal); }
+    button:disabled { cursor:not-allowed; opacity:.55; }
+    .document { position:relative; min-height:248mm; padding:14mm 12mm; color:#111; }
+    .document-head { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:start; padding-bottom:14px; border-bottom:2px solid #111; }
+    .school h2 { margin:0; font-size:23px; }
+    .school p { margin:3px 0 0; white-space:pre-line; }
+    .document-title { margin:18px 0 12px; text-align:center; font-size:24px; }
+    .receipt-meta { min-width:190px; text-align:right; }
+    .copy-mark { display:inline-block; margin-bottom:6px; padding:2px 10px; border:2px solid #111; font-size:18px; font-weight:700; }
+    .student-meta { display:grid; grid-template-columns:1.5fr .7fr .8fr; gap:10px 18px; margin-bottom:14px; }
+    .student-meta span { border-bottom:1px dotted #777; }
+    .table-wrap { max-width:100%; overflow-x:auto; border:1px solid #333; }
+    table { width:100%; min-width:680px; border-collapse:collapse; }
+    th, td { padding:8px 10px; border-right:1px solid #555; border-bottom:1px solid #555; text-align:left; vertical-align:top; }
+    th:last-child, td:last-child { border-right:0; }
+    tbody tr:last-child td { border-bottom:1px solid #333; }
+    th { background:#f0f0f0; font-size:14px; text-align:center; }
+    tfoot td { border-bottom:0; font-weight:700; }
+    .money { text-align:right; white-space:nowrap; }
+    .negative { font-weight:600; }
+    .meta, .hint { color:var(--muted); font-size:14px; }
+    .words { margin-top:12px; padding:10px 12px; border:1px solid #555; }
+    .summary { display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:12px; }
+    .signature { display:flex; justify-content:flex-end; margin-top:40px; text-align:center; }
+    .signature div { width:250px; }
+    .signature-line { margin-top:38px; border-top:1px dotted #333; }
+    .banner, .readonly { margin-bottom:14px; padding:12px 14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
+    .banner.bad, .readonly { color:var(--danger); background:var(--danger-soft); }
+    .toast { position:sticky; bottom:10px; z-index:20; display:none; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+    .toast.ok, .toast.err { display:block; }
+    .toast.err { background:var(--danger); }
+    [hidden] { display:none!important; }
+    @media (max-width:620px) {
+      .toolbar, .student-meta { grid-template-columns:1fr; }
+      .toolbar { align-items:stretch; flex-direction:column; }
+      .actions { flex-direction:column; }
+      .button-link { width:100%; }
+      .document { min-height:0; padding:16px; }
+      .document-head { grid-template-columns:1fr; }
+      .receipt-meta { text-align:left; }
+      .student-meta { display:grid; }
+    }
+    @media print {
+      @page { size:A4 portrait; margin:12mm; }
+      .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print { display:none!important; }
+      body { padding:0; background:#fff; font-size:14px; }
+      .wrap { max-width:none; margin:0; }
+      .card { margin:0; padding:0; box-shadow:none; border:0; }
+      .document { min-height:0; padding:0; }
+      .table-wrap { overflow:visible; }
+      table { min-width:0; }
+      tr, .avoid-break { break-inside:avoid; }
+      a[href]::after { content:""; }
+    }
+  </style>
+  <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header class="no-print">
+    <h1>ใบแจ้งหนี้และใบเสร็จรับเงิน</h1>
+    <p>พิมพ์จากยอดที่ตั้งและรับเงินจริงของนักเรียนในภาคเรียนนี้</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260830-3"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="access-card" class="card no-print" hidden></section>
+    <div id="app" hidden>
+      <section class="card toolbar no-print">
+        <div class="actions">
+          <a id="payment-link" class="button-link" href="#">กลับไปรับเงิน</a>
+          <a class="button-link" href="fee-report.html">กลับไปรายงาน</a>
+        </div>
+        <button id="print-button" class="primary no-print" type="button">พิมพ์เอกสาร</button>
+      </section>
+
+      <article id="receipt-document" class="card document">
+        <div class="document-head avoid-break">
+          <div class="school"><h2 id="school-name"></h2><p id="school-address"></p></div>
+          <div class="receipt-meta">
+            <div id="copy-mark" class="copy-mark" hidden>สำเนา</div>
+            <div>เลขที่ <b id="receipt-no"></b></div>
+            <div>วันที่ออก <span id="issued-date"></span></div>
+          </div>
+        </div>
+        <h1 id="document-title" class="document-title"></h1>
+        <div class="student-meta avoid-break">
+          <div>ชื่อ <span id="student-name"></span></div>
+          <div>ชั้น <span id="student-grade"></span></div>
+          <div>เลขที่ <span id="student-no"></span></div>
+          <div>ปีการศึกษา <span id="receipt-year"></span></div>
+          <div>ภาคเรียน <span id="receipt-term"></span></div>
+        </div>
+        <div id="receipt-table"></div>
+        <div class="words avoid-break"><b>ตัวอักษร</b> <span id="paid-words"></span></div>
+        <div class="summary avoid-break"><span>รวมยอดค้างชำระ</span><b id="outstanding-total"></b></div>
+        <div class="signature avoid-break"><div><div class="signature-line"></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
+      </article>
+    </div>
+    <div id="toast" class="toast no-print"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
+  computeFeeOutstanding, chargeLineRemaining, formatMoney, bahtText, fetchAllRows
+} from "../supabase-client.js?v=20260830-3";
+
+const el=id=>document.getElementById(id);
+const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
+const money=value=>formatMoney(value,{minimumFractionDigits:2});
+
+function buildReceiptRows(charges,payments){
+  const active=(charges||[]).filter(charge=>!charge.voided_at).sort((a,b)=>String(a.charge_date||"").localeCompare(String(b.charge_date||""))||String(a.created_at||"").localeCompare(String(b.created_at||""))||String(a.id||"").localeCompare(String(b.id||"")));
+  const rows=active.map(charge=>{
+    const full=Number(charge.amount)||0,remaining=chargeLineRemaining(charge,payments);
+    return{...charge,full,paid:full>0?full-remaining:0,remaining}
+  });
+  return{
+    rows,
+    full:rows.reduce((sum,row)=>sum+row.full,0),
+    paid:rows.reduce((sum,row)=>sum+row.paid,0),
+    remaining:rows.reduce((sum,row)=>sum+row.remaining,0)
+  }
+}
+
+function formatThaiDate(value){
+  const date=new Date(value);
+  return Number.isNaN(date.getTime())?"—":new Intl.DateTimeFormat("th-TH",{day:"numeric",month:"long",year:"numeric"}).format(date)
+}
+
+function toast(message,isError=false){
+  el("toast").textContent=message;
+  el("toast").className=`toast ${isError?"err":"ok"}`;
+  clearTimeout(toast.timer);
+  toast.timer=setTimeout(()=>{el("toast").className="toast"},5000)
+}
+
+function friendly(error){return error?.message||String(error||"")}
+
+let receipt=null,printing=false;
+
+function renderDocument({student,charges,payments,settings}){
+  const required=["receipt_school_name","receipt_address","receipt_doc_title"];
+  for(const key of required)if(!String(settings.get(key)||"").trim())throw new Error(`ยังไม่ได้ตั้งค่าหัวเอกสาร ${key}`);
+  const table=buildReceiptRows(charges,payments),summary=computeFeeOutstanding(charges,payments);
+  if(Math.abs(table.remaining-summary.outstanding)>0.005)throw new Error("ยอดรวมคอลัมน์คงเหลือไม่ตรงกับยอดค้าง กรุณาหยุดและแจ้งผู้ดูแล");
+  el("school-name").textContent=settings.get("receipt_school_name");
+  el("school-address").textContent=settings.get("receipt_address");
+  el("document-title").textContent=settings.get("receipt_doc_title");
+  el("receipt-no").textContent=receipt.receipt_no;
+  el("issued-date").textContent=formatThaiDate(receipt.issued_at);
+  el("copy-mark").hidden=Number(receipt.printed_count||0)<1;
+  el("student-name").textContent=student.name||"ไม่พบชื่อ";
+  el("student-grade").textContent=receipt.grade_level;
+  el("student-no").textContent=student.student_no||"—";
+  el("receipt-year").textContent=receipt.year;
+  el("receipt-term").textContent=receipt.term;
+  el("receipt-table").innerHTML=table.rows.length?`<div class="table-wrap"><table>
+    <thead><tr><th>รายการ</th><th class="money">จำนวนเต็ม</th><th class="money">จำนวนเงินที่จ่าย</th><th class="money">คงเหลือ</th></tr></thead>
+    <tbody>${table.rows.map(row=>`<tr><td><b>${esc(row.description)}</b>${row.note?`<div class="meta">${esc(row.note)}</div>`:""}</td><td class="money ${row.full<0?"negative":""}">${money(row.full)}</td><td class="money">${money(row.paid)}</td><td class="money ${row.remaining<0?"negative":""}">${money(row.remaining)}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td>รวมเงิน</td><td class="money">${money(table.full)}</td><td class="money">${money(table.paid)}</td><td class="money">${money(table.remaining)}</td></tr></tfoot>
+  </table></div>`:'<div class="banner bad">ยังไม่มีรายการค่าใช้จ่ายในเอกสารนี้</div>';
+  el("paid-words").textContent=bahtText(table.paid);
+  el("outstanding-total").textContent=money(table.remaining)
+}
+
+async function loadDocument(studentId,year,term){
+  const receiptRes=await sb.rpc("get_or_create_fee_receipt",{p_student_id:studentId,p_year:year,p_term:term});
+  if(receiptRes.error)throw receiptRes.error;
+  receipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
+  if(!receipt?.id)throw new Error("ฐานข้อมูลไม่คืนเอกสาร กรุณากลับไปรายงานแล้วลองใหม่");
+  const [studentRes,chargeRes,paymentRes,settingRes]=await Promise.all([
+    sb.from("students").select("id,student_no,name").eq("id",studentId).single(),
+    fetchAllRows(()=>sb.from("student_charges").select("*").eq("student_id",studentId).eq("year",year).eq("term",term),["charge_date","id"]),
+    fetchAllRows(()=>sb.from("fee_payments").select("*").eq("receipt_id",receipt.id),["paid_at","id"]),
+    sb.from("app_settings").select("key,value").in("key",["receipt_school_name","receipt_address","receipt_doc_title"])
+  ]);
+  for(const [label,result] of [["นักเรียน",studentRes],["รายการค่าใช้จ่าย",chargeRes],["รายการรับเงิน",paymentRes],["หัวเอกสาร",settingRes]])if(result.error)throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+  const settings=new Map((settingRes.data||[]).map(row=>[row.key,row.value]));
+  renderDocument({student:studentRes.data,charges:chargeRes.data||[],payments:paymentRes.data||[],settings});
+  el("payment-link").href=`fee-payment.html?student=${encodeURIComponent(studentId)}&year=${encodeURIComponent(year)}&term=${term}`
+}
+
+el("print-button").onclick=async()=>{
+  if(printing||!receipt)return;
+  printing=true;
+  el("print-button").disabled=true;
+  try{
+    const result=await sb.rpc("mark_fee_receipt_printed",{p_receipt_id:receipt.id});
+    if(result.error)throw result.error;
+    const count=Number(Array.isArray(result.data)?result.data[0]:result.data);
+    if(!Number.isInteger(count)||count<1)throw new Error("ฐานข้อมูลไม่คืนจำนวนครั้งที่พิมพ์");
+    receipt.printed_count=count;
+    el("copy-mark").hidden=count<=1;
+    window.print()
+  }catch(error){toast("พิมพ์เอกสารไม่สำเร็จ: "+friendly(error),true)}
+  finally{printing=false;el("print-button").disabled=false}
+};
+
+const session=await requireAuth();
+if(session){
+  el("btn-signout")?.addEventListener("click",event=>{event.preventDefault();signOut()});
+  try{
+    const canFinance=await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    if(!canFinance){
+      el("access-card").hidden=false;
+      el("access-card").innerHTML='<div class="readonly"><b>เปิดเอกสารไม่ได้</b><br>หน้านี้สำหรับฝ่ายการเงินและผู้ดูแลระบบเท่านั้น</div>'
+    }else{
+      const params=new URLSearchParams(location.search),studentId=params.get("student"),year=params.get("year"),term=Number(params.get("term"));
+      if(!studentId||!year||![1,2].includes(term))throw new Error("ลิงก์เอกสารไม่ครบ กรุณาเปิดจากหน้ารับเงินหรือหน้ารายงาน");
+      await loadDocument(studentId,year,term);
+      el("app").hidden=false
+    }
+  }catch(error){
+    el("access-card").hidden=false;
+    el("access-card").innerHTML=`<div class="banner bad"><b>เปิดเอกสารไม่สำเร็จ</b><br>${esc(friendly(error))}</div>`
+  }
+}
+</script>
+</body>
+</html>

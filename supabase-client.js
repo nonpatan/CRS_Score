@@ -629,15 +629,56 @@ export function formatMoney(value, {
   }).format(Number.isFinite(amount) ? amount : 0) + " บาท";
 }
 
+const THAI_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
+const THAI_PLACES = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"];
+
+function thaiNumberUnderMillion(value) {
+  const digits = String(Math.trunc(value));
+  let text = "";
+  for (let index = 0; index < digits.length; index++) {
+    const digit = Number(digits[index]);
+    if (!digit) continue;
+    const place = digits.length - index - 1;
+    if (place === 1 && digit === 1) text += "สิบ";
+    else if (place === 1 && digit === 2) text += "ยี่สิบ";
+    else if (place === 0 && digit === 1 && digits.length > 1) text += "เอ็ด";
+    else text += THAI_DIGITS[digit] + THAI_PLACES[place];
+  }
+  return text;
+}
+
+function thaiIntegerText(value) {
+  const integer = Math.trunc(value);
+  if (integer < 1000000) return thaiNumberUnderMillion(integer);
+  const millions = Math.floor(integer / 1000000);
+  const remainder = integer % 1000000;
+  return thaiIntegerText(millions) + "ล้าน" + (remainder ? thaiNumberUnderMillion(remainder) : "");
+}
+
+export function bahtText(value) {
+  const parsed = Number(String(value ?? "").replaceAll(",", ""));
+  if (!Number.isFinite(parsed)) return "ศูนย์บาทถ้วน";
+  const negative = parsed < 0;
+  const totalSatang = Math.round(Math.abs(parsed) * 100);
+  const baht = Math.floor(totalSatang / 100);
+  const satang = totalSatang % 100;
+  if (!baht && !satang) return "ศูนย์บาทถ้วน";
+  let text = negative ? "ลบ" : "";
+  if (baht) text += thaiIntegerText(baht) + "บาท";
+  if (satang) text += thaiIntegerText(satang) + "สตางค์";
+  else text += "ถ้วน";
+  return text;
+}
+
 // ---------- ออมทรัพย์นักเรียน ----------
-// ยอดคงเหลือ = ยอดยกมา + ฝาก − ถอน − หักค่ารถ
+// ยอดคงเหลือ = ยอดยกมา + ฝาก − ถอน − หักค่ารถ − หักค่าใช้จ่าย
 // รับ txns ทั้งก้อนของนักเรียนคนหนึ่ง (หรือทั้งห้องแล้วกรองเอง)
 export function computeSavingsBalance(txns) {
   return (Array.isArray(txns) ? txns : []).reduce((balance, txn) => {
     const amount = Number(txn?.amount);
     if (!Number.isFinite(amount)) return balance;
     if (txn.kind === "ยอดยกมา" || txn.kind === "ฝาก") return balance + amount;
-    if (txn.kind === "ถอน" || txn.kind === "หักค่ารถ") return balance - amount;
+    if (txn.kind === "ถอน" || txn.kind === "หักค่ารถ" || txn.kind === "หักค่าใช้จ่าย") return balance - amount;
     return balance;
   }, 0);
 }

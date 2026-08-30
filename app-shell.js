@@ -436,7 +436,7 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-settings.html", "fee-stock.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html"],
       groups: [
         {
           label: "บันทึก",
@@ -452,7 +452,8 @@
             ["savings-payout.html", "จ่ายเงินออมทรัพย์"],
             ["savings-remit.html", "รับเงินส่งจากครู"],
             ["transport-remit.html", "รับเงินค่ารถจากครู"],
-            ["fee-assign.html", "ตั้งหนี้นักเรียน"]
+            ["fee-assign.html", "ตั้งหนี้นักเรียน"],
+            ["fee-payment.html", "รับเงินค่าใช้จ่ายนักเรียน"]
           ]
         },
         {
@@ -538,6 +539,16 @@
           title: "ตั้งหนี้นักเรียน",
           description: "เลือกห้องและชนิดรายการ ตรวจรายชื่อ อัตรา และยอดรวมก่อนตั้งหนี้",
           steps: ["เลือกห้อง", "เลือกรายการ", "ตรวจและบันทึก"]
+        },
+        "fee-payment.html": {
+          title: "รับเงินค่าใช้จ่ายนักเรียน",
+          description: "เลือกนักเรียน ตรวจรายการค้าง แล้วผูกเงินที่รับเข้ากับแต่ละบรรทัด",
+          steps: ["เลือกนักเรียน", "จัดยอดที่รับ", "ยืนยันและเปิดเอกสาร"]
+        },
+        "fee-receipt.html": {
+          title: "ใบแจ้งหนี้และใบเสร็จรับเงิน",
+          description: "ตรวจรายการ snapshot ยอดที่จ่าย และยอดคงเหลือก่อนพิมพ์เอกสาร A4",
+          steps: ["ตรวจเอกสาร", "นับการพิมพ์", "พิมพ์"]
         },
         "fee-report.html": {
           title: "รายงานค่าใช้จ่ายนักเรียน",

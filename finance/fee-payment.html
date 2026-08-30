@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>รับเงินค่าใช้จ่ายนักเรียน — CRS MIS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd; }
+    * { box-sizing:border-box; }
+    html, body { max-width:100%; overflow-x:hidden; }
+    body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+    .wrap { max-width:1040px; margin:auto; }
+    header h1 { margin:4px 0; font-size:22px; }
+    header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+    header .nav { min-height:54px; }
+    .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+    .filters { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+    .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .field { margin-bottom:14px; }
+    .field label { display:block; margin-bottom:6px; font-weight:600; }
+    select, input { width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); font:inherit; font-size:16px; }
+    input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+    input:disabled, select:disabled { color:var(--muted); background:var(--bg); opacity:1; }
+    button, .button-link { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:9px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; text-decoration:none; cursor:pointer; }
+    button:disabled { cursor:not-allowed; opacity:.55; }
+    .primary { color:var(--white); background:var(--teal); }
+    .ghost, .button-link { color:var(--teal); background:var(--teal-soft); }
+    .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    .section-head h2 { margin:0; font-size:19px; }
+    .section-head p, .hint, .meta { margin:2px 0 0; color:var(--muted); font-size:14px; }
+    .stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+    .stat { padding:12px; border-radius:10px; background:var(--teal-soft); }
+    .stat span { display:block; color:var(--muted); font-size:13px; }
+    .stat b { display:block; color:var(--teal); font-size:19px; }
+    .table-wrap { max-width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+    table { width:100%; min-width:760px; border-collapse:collapse; }
+    th, td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; }
+    th { color:var(--muted); background:var(--bg); font-size:13px; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; }
+    .pick { width:54px; text-align:center; }
+    .pick input { width:22px; height:22px; min-height:22px; accent-color:var(--teal); }
+    .money { text-align:right; white-space:nowrap; }
+    .payment-input { min-width:130px; text-align:right; }
+    .negative { color:var(--teal); }
+    .due { color:var(--danger); font-weight:700; }
+    .summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+    .summary-actions, .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .banner, .readonly { margin-bottom:14px; padding:12px 14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
+    .banner.info { color:var(--teal); background:var(--teal-soft); }
+    .banner.bad, .readonly { color:var(--danger); background:var(--danger-soft); }
+    .empty { padding:22px 8px; color:var(--muted); text-align:center; }
+    .toast { position:sticky; bottom:10px; z-index:20; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+    .toast.ok, .toast.err { display:block; }
+    .toast.err { background:var(--danger); }
+    [hidden] { display:none!important; }
+    @media (max-width:820px) { .filters { grid-template-columns:1fr 1fr; } }
+    @media (max-width:560px) {
+      .filters, .row2, .stats { grid-template-columns:1fr; }
+      .section-head, .summary { align-items:stretch; flex-direction:column; }
+      .summary-actions, .actions { flex-direction:column; }
+      .button-link { width:100%; }
+    }
+  </style>
+  <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>รับเงินค่าใช้จ่ายนักเรียน</h1>
+    <p>เลือกนักเรียนและภาคเรียน แล้วผูกยอดที่รับเข้ากับรายการค้างโดยตรง</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260830-3"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="access-card" class="card" hidden></section>
+    <div id="app" hidden>
+      <section class="card">
+        <div class="filters">
+          <div class="field"><label for="year">ปีการศึกษา</label><select id="year" disabled></select></div>
+          <div class="field"><label for="term">ภาคเรียน</label><select id="term"><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select></div>
+          <div class="field"><label for="room">ห้อง</label><select id="room" disabled></select></div>
+          <div class="field"><label for="student">นักเรียน</label><select id="student" disabled></select></div>
+        </div>
+        <div class="hint">แสดงเฉพาะนักเรียนที่ฝ่ายวิชาการจัดห้องในปีที่เลือกแล้ว</div>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <div><h2 id="payment-title">รายการค้าง</h2><p>ระบบเติมยอดให้จากรายการเก่าสุดก่อน คุณแก้รายการและจำนวนเงินได้ก่อนบันทึก</p></div>
+          <a id="receipt-link" class="button-link" href="#" hidden>เปิดใบแจ้งหนี้/ใบเสร็จ</a>
+        </div>
+        <div id="stats" class="stats"></div>
+        <div class="row2">
+          <div class="field">
+            <label for="received">เงินที่รับ</label>
+            <input id="received" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+          </div>
+          <div class="field">
+            <label for="method">ช่องทาง</label>
+            <select id="method"><option value="เงินสด">เงินสด</option><option value="โอน">โอน</option><option value="หักออมทรัพย์">หักออมทรัพย์</option></select>
+          </div>
+        </div>
+        <div class="actions"><button id="auto-fill" class="ghost" type="button">เติมยอดเก่าสุดก่อน</button></div>
+        <div id="savings-hint" class="banner info" hidden></div>
+        <div id="charge-list"></div>
+        <div class="summary">
+          <div><b id="selected-total">รวมที่เลือก 0.00 บาท</b><div id="draft-hint" class="hint">รวมที่เลือกต้องเท่ากับเงินที่รับ</div></div>
+          <div class="summary-actions"><button id="save-payment" class="primary" type="button">บันทึกรับเงิน</button></div>
+        </div>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, getStudentPlacements,
+  activePlacements, roomsFromPlacements, computeFeeOutstanding, chargeLineRemaining,
+  computeSavingsBalance, formatMoney, fetchAllRows
+} from "../supabase-client.js?v=20260830-3";
+
+const el=id=>document.getElementById(id);
+const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
+const money=value=>formatMoney(value,{minimumFractionDigits:2});
+const roundMoney=value=>Math.round((Number(value)||0)*100)/100;
+
+function allocateOldestFirst(lines,received){
+  let remaining=Math.max(0,roundMoney(received));
+  return [...(lines||[])]
+    .filter(line=>Number(line?.remaining)>0)
+    .sort((a,b)=>String(a.charge_date||"").localeCompare(String(b.charge_date||""))||String(a.created_at||"").localeCompare(String(b.created_at||""))||String(a.id||"").localeCompare(String(b.id||"")))
+    .flatMap(line=>{
+      const amount=Math.min(roundMoney(line.remaining),remaining);
+      remaining=roundMoney(remaining-amount);
+      return amount>0?[{charge_id:line.id,amount}]:[]
+    })
+}
+
+function paymentDraftError(received,allocations,outstanding){
+  const receivedAmount=Number(received);
+  if(!Number.isFinite(receivedAmount)||receivedAmount<=0)return"กรอกเงินที่รับให้มากกว่า 0 บาท";
+  if(receivedAmount>roundMoney(outstanding)+0.005)return"เงินที่รับมากกว่ายอดค้าง · ทอนส่วนเกินหน้าเคาน์เตอร์ก่อนบันทึก";
+  if(!(allocations||[]).length)return"เลือกอย่างน้อย 1 รายการที่จะรับเงิน";
+  for(const allocation of allocations){
+    const amount=Number(allocation.amount),remaining=Number(allocation.remaining);
+    if(!Number.isFinite(amount)||amount<=0)return"จำนวนเงินของรายการที่เลือกต้องมากกว่า 0 บาท";
+    if(amount>remaining+0.005)return`ยอดที่กรอกเกินยอดคงเหลือของรายการ ${allocation.description||"ที่เลือก"}`
+  }
+  const selected=roundMoney(allocations.reduce((sum,row)=>sum+Number(row.amount||0),0));
+  if(Math.abs(selected-receivedAmount)>0.005)return`รวมที่เลือก ${money(selected)} ไม่เท่ากับเงินที่รับ ${money(receivedAmount)}`;
+  return""
+}
+
+function paymentFailureState(paymentSaved,savingsWritten,requestUncertain){
+  const blocked=Boolean(paymentSaved||savingsWritten||requestUncertain);
+  const prefix=paymentSaved
+    ?"รับเงินบันทึกแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่: "
+    :blocked
+      ?"ผลการบันทึกไม่แน่ชัดหรือบางขั้นอาจสำเร็จแล้ว · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน: "
+      :"รับเงินไม่สำเร็จ: ";
+  return{blocked,prefix}
+}
+
+function roomLabel(room){
+  const grade=String(room?.grade_level||""),classroom=String(room?.classroom||"");
+  return classroom.startsWith(`${grade}/`)?classroom:`${grade}/${classroom}`
+}
+
+function friendly(error){
+  const message=error?.message||String(error||"");
+  const insufficient=message.match(/ยอดคงเหลือ\s+([0-9.,]+)\s+บาท\s+ไม่พอ/);
+  if(insufficient)return`ยอดออมทรัพย์ไม่พอ (เหลือ ${money(insufficient[1])}) · ยังไม่มีการบันทึก`;
+  if(message.includes("fee_payments_amount_positive"))return"จำนวนรับเงินต้องมากกว่า 0 บาท";
+  if(message.includes("เหลือ")&&message.includes("จ่าย")&&message.includes("ไม่ได้"))return message+" · โหลดข้อมูลใหม่แล้วตรวจยอดอีกครั้ง";
+  return message
+}
+
+let session,currentYear="",placements=[],rooms=[],charges=[],roomPlacements=[];
+let receipt=null,payments=[],savingsTxns=[],saving=false,submissionBlocked=false,loadToken=0;
+
+function selectedRoom(){return rooms[Number(el("room").value)]||null}
+function selectedPlacement(){return roomPlacements.find(row=>row.student_id===el("student").value)||null}
+function selectedCharges(){
+  const studentId=el("student").value,term=Number(el("term").value);
+  return charges.filter(row=>row.student_id===studentId&&Number(row.term)===term&&!row.voided_at)
+}
+function payableLines(){
+  return selectedCharges().filter(row=>Number(row.amount)>0).map(row=>({...row,remaining:chargeLineRemaining(row,payments)})).filter(row=>row.remaining>0)
+}
+function receiptHref(){
+  const placement=selectedPlacement();
+  return placement?`fee-receipt.html?student=${encodeURIComponent(placement.student_id)}&year=${encodeURIComponent(currentYear)}&term=${encodeURIComponent(el("term").value)}`:"#"
+}
+
+function toast(message,isError=false){
+  el("toast").textContent=message;
+  el("toast").className=`toast ${isError?"err":"ok"}`;
+  clearTimeout(toast.timer);
+  toast.timer=setTimeout(()=>{el("toast").className="toast"},5000)
+}
+
+function renderChargeList(){
+  const rows=selectedCharges().sort((a,b)=>String(a.charge_date||"").localeCompare(String(b.charge_date||""))||String(a.created_at||"").localeCompare(String(b.created_at||"")));
+  el("charge-list").innerHTML=rows.length?`<div class="table-wrap"><table>
+    <thead><tr><th class="pick">เลือก</th><th>รายการ</th><th class="money">คงเหลือ</th><th class="money">รับครั้งนี้</th></tr></thead>
+    <tbody>${rows.map(row=>{
+      const remaining=chargeLineRemaining(row,payments),credit=Number(row.amount)<0;
+      return`<tr><td class="pick">${credit||remaining<=0?"—":`<input type="checkbox" data-pay-check="${esc(row.id)}" aria-label="เลือกรับเงิน ${esc(row.description)}">`}</td><td><b>${esc(row.description)}</b><span class="meta">${esc(row.charge_date||"")} · ${esc(row.kind)}${row.note?` · ${esc(row.note)}`:""}</span></td><td class="money ${credit?"negative":""}">${money(remaining)}</td><td class="money">${credit?"—":`<input class="payment-input" type="number" min="0" max="${esc(remaining)}" step="0.01" inputmode="decimal" value="" data-pay-amount="${esc(row.id)}" aria-label="ยอดรับ ${esc(row.description)}" ${remaining<=0?"disabled":""}>`}</td></tr>`
+    }).join("")}</tbody>
+  </table></div>`:'<div class="empty">นักเรียนคนนี้ยังไม่มีรายการค่าใช้จ่ายในภาคเรียนนี้</div>'
+}
+
+function updateSavingsHint(){
+  const show=el("method").value==="หักออมทรัพย์";
+  el("savings-hint").hidden=!show;
+  if(show)el("savings-hint").innerHTML=`ยอดคงเหลือในสมุด <b>${money(computeSavingsBalance(savingsTxns))}</b> · ฐานข้อมูลจะปฏิเสธและย้อนชุดหักทั้งหมดถ้ายอดไม่พอ`
+}
+
+function collectAllocations(){
+  const lines=new Map(payableLines().map(line=>[line.id,line]));
+  return [...document.querySelectorAll("[data-pay-check]:checked")].map(check=>{
+    const line=lines.get(check.dataset.payCheck),input=document.querySelector(`[data-pay-amount="${CSS.escape(check.dataset.payCheck)}"]`);
+    return{charge_id:check.dataset.payCheck,amount:roundMoney(input?.value),remaining:Number(line?.remaining||0),description:line?.description||""}
+  })
+}
+
+function syncSelectedTotal(){
+  const total=roundMoney(collectAllocations().reduce((sum,row)=>sum+row.amount,0));
+  el("selected-total").textContent=`รวมที่เลือก ${money(total)}`;
+  const error=paymentDraftError(el("received").value,collectAllocations(),computeFeeOutstanding(selectedCharges(),payments).outstanding);
+  el("draft-hint").textContent=error||"ยอดตรงกันแล้ว · ตรวจช่องทางก่อนบันทึก";
+  el("draft-hint").className=`hint${error?" due":""}`
+}
+
+function applyOldestFirst(){
+  const outstanding=Math.max(0,computeFeeOutstanding(selectedCharges(),payments).outstanding);
+  const budget=Math.min(Number(el("received").value)||0,outstanding);
+  const allocationMap=new Map(allocateOldestFirst(payableLines(),budget).map(row=>[row.charge_id,row.amount]));
+  document.querySelectorAll("[data-pay-check]").forEach(check=>{
+    const amount=allocationMap.get(check.dataset.payCheck)||0,input=document.querySelector(`[data-pay-amount="${CSS.escape(check.dataset.payCheck)}"]`);
+    check.checked=amount>0;
+    if(input)input.value=amount>0?String(amount):""
+  });
+  syncSelectedTotal()
+}
+
+function renderPayment(){
+  const placement=selectedPlacement(),rows=selectedCharges(),summary=computeFeeOutstanding(rows,payments);
+  el("payment-title").textContent=placement?`รายการค้าง · ${placement.student?.name||"นักเรียน"}`:"รายการค้าง";
+  el("stats").innerHTML=`<div class="stat"><span>ยอดสุทธิ</span><b>${money(summary.charged-summary.credited)}</b></div><div class="stat"><span>ชำระแล้ว</span><b>${money(summary.paid)}</b></div><div class="stat"><span>ค้างชำระ</span><b class="${summary.outstanding>0?"due":""}">${money(summary.outstanding)}</b></div>`;
+  renderChargeList();
+  el("received").value="";
+  el("receipt-link").hidden=!receipt;
+  el("receipt-link").href=receiptHref();
+  el("save-payment").disabled=!placement||summary.outstanding<=0;
+  updateSavingsHint();
+  syncSelectedTotal()
+}
+
+async function loadStudent(){
+  const placement=selectedPlacement(),token=++loadToken;
+  receipt=null;payments=[];savingsTxns=[];
+  if(!placement){renderPayment();return}
+  const term=Number(el("term").value);
+  const [receiptRes,savingsRes]=await Promise.all([
+    sb.from("fee_receipts").select("*").eq("student_id",placement.student_id).eq("year",currentYear).eq("term",term).is("voided_at",null).maybeSingle(),
+    fetchAllRows(()=>sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").eq("student_id",placement.student_id),["txn_date","id"])
+  ]);
+  if(receiptRes.error)throw new Error("โหลดเอกสารไม่สำเร็จ: "+receiptRes.error.message);
+  if(savingsRes.error)throw new Error("โหลดยอดออมทรัพย์ไม่สำเร็จ: "+savingsRes.error.message);
+  if(token!==loadToken)return;
+  receipt=receiptRes.data||null;
+  savingsTxns=savingsRes.data||[];
+  if(receipt){
+    const paymentRes=await fetchAllRows(()=>sb.from("fee_payments").select("*").eq("receipt_id",receipt.id),["paid_at","id"]);
+    if(paymentRes.error)throw new Error("โหลดรายการรับเงินไม่สำเร็จ: "+paymentRes.error.message);
+    if(token!==loadToken)return;
+    payments=paymentRes.data||[]
+  }
+  submissionBlocked=false;
+  renderPayment()
+}
+
+function renderStudents(preferredStudentId=""){
+  const room=selectedRoom();
+  roomPlacements=room?placements.filter(row=>row.grade_level===room.grade_level&&row.classroom===room.classroom).sort((a,b)=>Number(a.student?.student_no||999)-Number(b.student?.student_no||999)):[];
+  el("student").innerHTML=roomPlacements.map(row=>`<option value="${esc(row.student_id)}">${esc(row.student?.student_no||"—")} · ${esc(row.student?.name||"ไม่พบชื่อ")}</option>`).join("");
+  el("student").disabled=!roomPlacements.length;
+  if(preferredStudentId&&roomPlacements.some(row=>row.student_id===preferredStudentId))el("student").value=preferredStudentId
+}
+
+async function loadYear(preferred={}){
+  const [placementRes,chargeRes]=await Promise.all([
+    getStudentPlacements(currentYear),
+    fetchAllRows(()=>sb.from("student_charges").select("*").eq("year",currentYear),["student_id","charge_date","id"])
+  ]);
+  if(placementRes.error)throw new Error("โหลดทะเบียนไม่สำเร็จ: "+placementRes.error.message);
+  if(chargeRes.error)throw new Error("โหลดรายการค่าใช้จ่ายไม่สำเร็จ: "+chargeRes.error.message);
+  placements=activePlacements(placementRes.data||[]);
+  charges=chargeRes.data||[];
+  rooms=roomsFromPlacements(placements,currentYear);
+  el("room").innerHTML=rooms.map((room,index)=>`<option value="${index}">${esc(roomLabel(room))} · ${room.studentCount} คน</option>`).join("");
+  el("room").disabled=!rooms.length;
+  const preferredPlacement=preferred.studentId?placements.find(row=>row.student_id===preferred.studentId):null;
+  const preferredRoomLabel=preferred.roomLabel||roomLabel(preferredPlacement);
+  const roomIndex=rooms.findIndex(room=>roomLabel(room)===preferredRoomLabel);
+  el("room").value=String(roomIndex>=0?roomIndex:0);
+  renderStudents(preferred.studentId);
+  await loadStudent()
+}
+
+el("room").onchange=async()=>{renderStudents();try{await loadStudent()}catch(error){toast(friendly(error),true)}};
+el("student").onchange=async()=>{try{await loadStudent()}catch(error){toast(friendly(error),true)}};
+el("term").onchange=async()=>{try{await loadStudent()}catch(error){toast(friendly(error),true)}};
+el("method").onchange=updateSavingsHint;
+el("received").onchange=applyOldestFirst;
+el("auto-fill").onclick=applyOldestFirst;
+el("charge-list").oninput=syncSelectedTotal;
+el("charge-list").onchange=syncSelectedTotal;
+
+el("save-payment").onclick=async()=>{
+  if(saving)return;
+  if(submissionBlocked)return toast("ผลการบันทึกครั้งก่อนยังไม่แน่ชัด · โหลดหน้าใหม่ก่อนทำรายการต่อเพื่อป้องกันรับเงินซ้ำ",true);
+  const placement=selectedPlacement(),received=roundMoney(el("received").value),allocations=collectAllocations();
+  const outstanding=computeFeeOutstanding(selectedCharges(),payments).outstanding;
+  const error=paymentDraftError(received,allocations,outstanding);
+  if(error)return toast(error,true);
+  const method=el("method").value;
+  if(!await window.crsAskConfirm({
+    title:"ยืนยันรับเงินค่าใช้จ่าย",
+    message:`${placement.student?.name||"นักเรียน"}\n${el("term").value}/${currentYear} · ${allocations.length} รายการ\n${method} ${money(received)}`,
+    okLabel:"บันทึกรับเงิน",
+    danger:false
+  }))return;
+  saving=true;
+  el("save-payment").disabled=true;
+  let savingsWritten=false,requestUncertain=false,paymentSaved=false;
+  try{
+    const receiptRes=await sb.rpc("get_or_create_fee_receipt",{p_student_id:placement.student_id,p_year:currentYear,p_term:Number(el("term").value)});
+    if(receiptRes.error)throw receiptRes.error;
+    const savedReceipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
+    if(!savedReceipt?.id)throw new Error("ฐานข้อมูลไม่คืนเอกสาร กรุณาโหลดใหม่ก่อนลองอีกครั้ง");
+    let savingsByCharge=new Map();
+    if(method==="หักออมทรัพย์"){
+      const today=toDateStr(bangkokNow());
+      const payloads=allocations.map((allocation,index)=>({
+        student_id:placement.student_id,year:currentYear,grade_level:placement.grade_level,classroom:placement.classroom,
+        txn_date:today,kind:"หักค่าใช้จ่าย",amount:allocation.amount,
+        note:`เอกสาร ${savedReceipt.receipt_no} · ลำดับ ${index+1}: ${allocation.description}`,
+        recorded_by:session.user.id
+      }));
+      requestUncertain=true;
+      const savingsRes=await sb.from("savings_txns").insert(payloads).select("id,note");
+      requestUncertain=false;
+      if(savingsRes.error)throw savingsRes.error;
+      savingsWritten=true;
+      const idByNote=new Map((savingsRes.data||[]).map(row=>[row.note,row.id]));
+      savingsByCharge=new Map(allocations.map((allocation,index)=>[allocation.charge_id,idByNote.get(payloads[index].note)]));
+      if([...savingsByCharge.values()].some(id=>!id))throw new Error("ฐานข้อมูลคืนรายการหักออมทรัพย์ไม่ครบ กรุณาหยุดและแจ้งผู้ดูแล")
+    }
+    const paymentRows=allocations.map(allocation=>({
+      receipt_id:savedReceipt.id,charge_id:allocation.charge_id,amount:allocation.amount,method,
+      savings_txn_id:method==="หักออมทรัพย์"?savingsByCharge.get(allocation.charge_id):null,
+      recorded_by:session.user.id
+    }));
+    requestUncertain=true;
+    const paymentRes=await sb.from("fee_payments").insert(paymentRows);
+    requestUncertain=false;
+    if(paymentRes.error)throw paymentRes.error;
+    paymentSaved=true;
+    toast(`รับเงิน ${money(received)} แล้ว · เอกสารเลขที่ ${savedReceipt.receipt_no}`);
+    await loadStudent()
+  }catch(saveError){
+    const failure=paymentFailureState(paymentSaved,savingsWritten,requestUncertain);
+    submissionBlocked=failure.blocked;
+    toast(failure.prefix+friendly(saveError),true)
+  }finally{
+    saving=false;
+    el("save-payment").disabled=submissionBlocked||computeFeeOutstanding(selectedCharges(),payments).outstanding<=0
+  }
+};
+
+session=await requireAuth();
+if(session){
+  el("btn-signout")?.addEventListener("click",event=>{event.preventDefault();signOut()});
+  try{
+    const canFinance=await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    if(!canFinance){
+      el("access-card").hidden=false;
+      el("access-card").innerHTML='<div class="readonly"><b>เปิดหน้ารับเงินไม่ได้</b><br>หน้านี้สำหรับฝ่ายการเงินและผู้ดูแลระบบเท่านั้น</div>'
+    }else{
+      const years=await getAcademicYears(),today=toDateStr(bangkokNow());
+      const params=new URLSearchParams(location.search),requestedYear=params.get("year"),requestedTerm=Number(params.get("term")),requestedStudent=params.get("student")||"";
+      currentYear=years.some(row=>String(row.year)===requestedYear)?requestedYear:academicYearOf(today,years);
+      if(!currentYear)throw new Error("ยังไม่พบปีการศึกษาปัจจุบัน");
+      el("year").innerHTML=[...years].sort((a,b)=>String(b.year).localeCompare(String(a.year),"th",{numeric:true})).map(row=>`<option>${esc(row.year)}</option>`).join("");
+      el("year").value=currentYear;
+      if([1,2].includes(requestedTerm))el("term").value=String(requestedTerm);
+      el("year").disabled=false;
+      el("app").hidden=false;
+      await loadYear({studentId:requestedStudent})
+    }
+  }catch(error){
+    el("access-card").hidden=false;
+    el("access-card").innerHTML=`<div class="banner bad"><b>เปิดหน้ารับเงินไม่สำเร็จ</b><br>${esc(friendly(error))}</div>`
+  }
+}
+
+el("year").onchange=async()=>{
+  const preferred={roomLabel:roomLabel(selectedRoom()),studentId:el("student").value};
+  currentYear=el("year").value;
+  try{await loadYear(preferred)}catch(error){toast(friendly(error),true)}
+};
+</script>
+</body>
+</html>
