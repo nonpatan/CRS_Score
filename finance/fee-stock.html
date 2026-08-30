@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คลังสินค้า — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  html, body { max-width:100%; overflow-x:hidden; }
+  body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
+  .field { margin-bottom:14px; }
+  .field label { display:block; margin-bottom:6px; font-weight:600; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  textarea { min-height:82px; resize:vertical; }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+  .primary { color:var(--white); background:var(--teal); }
+  .ghost { color:var(--teal); background:var(--teal-soft); }
+  .danger { color:var(--danger); background:var(--danger-soft); }
+  .icon-btn { min-width:44px; padding:8px; color:var(--danger); background:transparent; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .section-head h2 { margin:0; font-size:19px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:14px; }
+  .table-wrap { max-width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; min-width:700px; border-collapse:collapse; }
+  th, td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { color:var(--muted); background:var(--bg); font-size:13px; white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  .number { text-align:right; white-space:nowrap; }
+  .balance { color:var(--teal); font-size:20px; font-weight:700; }
+  .meta { display:block; color:var(--muted); font-size:13px; }
+  .hint { color:var(--muted); font-size:14px; }
+  .empty { padding:22px 8px; color:var(--muted); text-align:center; }
+  .readonly { margin-bottom:16px; padding:14px; color:var(--danger); background:var(--danger-soft); border-radius:10px; }
+  .banner { margin-bottom:16px; padding:14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner a { color:inherit; font-weight:700; }
+  .alert-links { display:flex; flex-wrap:wrap; gap:8px 14px; margin-top:8px; }
+  .status { display:inline-flex; align-items:center; min-height:28px; padding:3px 9px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:13px; font-weight:600; }
+  .status.off, .status.pending { color:var(--amber); background:var(--amber-soft); }
+  .qty.in { color:var(--teal); }
+  .qty.out { color:var(--danger); }
+  .overlay { position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(31,42,46,.52); }
+  .modal { width:100%; max-width:460px; max-height:calc(100vh - 36px); overflow-y:auto; padding:20px; border-radius:12px; background:var(--white); box-shadow:0 18px 48px rgba(31,42,46,.22); }
+  .modal h2 { margin:0 0 4px; font-size:20px; }
+  .modal-actions { display:flex; gap:10px; margin-top:16px; }
+  .modal-actions button { flex:1; }
+  .history-title { scroll-margin-top:20px; }
+  .toast { position:sticky; bottom:10px; z-index:20; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:560px) {
+    .section-head { align-items:stretch; flex-direction:column; }
+    .actions { justify-content:flex-start; }
+    .modal-actions { flex-direction:column-reverse; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>คลังสินค้า</h1>
+    <p>ตั้งยอดยกมา รับสินค้าเข้า และปรับยอดด้วยประวัติที่ตรวจย้อนกลับได้</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260830-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="access-card" class="card" hidden></section>
+    <div id="stock-app" hidden>
+      <section id="opening-alert" class="banner" hidden></section>
+      <section class="card">
+        <div class="section-head"><div><h2>สินค้าที่คุมสต๊อก</h2><p>คงเหลือคำนวณจากผลรวมรายการเคลื่อนไหวทั้งหมด ไม่มีช่องยอดคงเหลือให้แก้ตรง ๆ</p></div></div>
+        <div id="stock-list"></div>
+      </section>
+      <section id="history-card" class="card" hidden>
+        <div class="section-head history-title" id="history-title"><div><h2 id="history-name">ประวัติสินค้า</h2><p>รายการเก่าแก้ไม่ได้ กรอกผิดให้ออกแถวปรับยอดพร้อมเหตุผล</p></div><button id="close-history" class="ghost" type="button">ปิดประวัติ</button></div>
+        <div id="history-list"></div>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+
+    <div id="move-overlay" class="overlay" hidden>
+      <form id="move-form" class="modal" role="dialog" aria-modal="true" aria-labelledby="move-title">
+        <h2 id="move-title">บันทึกสินค้า</h2>
+        <div id="move-item" class="hint"></div>
+        <div class="field" style="margin-top:14px"><label id="move-qty-label" for="move-qty">จำนวน</label><input id="move-qty" type="number" step="1" inputmode="numeric" required></div>
+        <div id="move-qty-hint" class="hint"></div>
+        <div id="reason-field" class="field" hidden><label for="move-reason">เหตุผลการปรับยอด</label><textarea id="move-reason" maxlength="500" placeholder="บังคับกรอก เพื่อให้ตรวจย้อนหลังได้"></textarea></div>
+        <div class="field"><label for="move-note">หมายเหตุ</label><textarea id="move-note" maxlength="500" placeholder="ไม่บังคับ"></textarea></div>
+        <div class="modal-actions"><button id="cancel-move" class="ghost" type="button">ยกเลิก</button><button id="save-move" class="primary" type="submit">บันทึก</button></div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows,
+  computeStockBalance
+} from "../supabase-client.js?v=20260830-2";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+
+function stockAlerts(items, moves) {
+  const opened = new Set((moves || []).filter(move => move.kind === "ยอดยกมา").map(move => move.item_id));
+  return (items || []).filter(item => item.track_stock === true && !opened.has(item.id));
+}
+
+let session = null;
+let canAdmin = false;
+let items = [];
+let moves = [];
+let profiles = new Map();
+let currentItemId = null;
+let moveMode = null;
+let lastFocus = null;
+let toastTimer = null;
+
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 5000);
+}
+
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการคลังนี้";
+  if (message.includes("fee_stock_moves_opening_uniq") || message.includes("duplicate key")) return "สินค้านี้ตั้งยอดยกมาไปแล้ว กรุณาโหลดข้อมูลล่าสุด";
+  if (message.includes("fee_stock_moves_reason_required")) return "การปรับยอดต้องมีเหตุผล";
+  if (message.includes("fee_stock_moves_qty_nonzero")) return "จำนวนต้องไม่เป็น 0";
+  if (message.includes("สต๊อก") || message.includes("ยอดยกมา") || message.includes("ขาย")) return message;
+  return message;
+}
+
+function itemCompare(a, b) {
+  return Number(a.sort_order || 0) - Number(b.sort_order || 0) ||
+    String(a.display_name || "").localeCompare(String(b.display_name || ""), "th", { numeric:true });
+}
+
+function movesFor(itemId) { return moves.filter(move => move.item_id === itemId); }
+function openingFor(itemId) { return moves.find(move => move.item_id === itemId && move.kind === "ยอดยกมา") || null; }
+
+function renderOpeningAlert() {
+  const missing = stockAlerts(items, moves);
+  el("opening-alert").hidden = missing.length === 0;
+  if (!missing.length) return;
+  el("opening-alert").innerHTML = `<b>ยังไม่ได้ตั้งยอดยกมา ${missing.length} รายการ</b><br>สินค้าที่คงเหลือเป็น 0 จะตั้งหนี้ใน Slice B ไม่ได้ กรุณาตั้งยอดจริงก่อนเริ่มใช้งาน<div class="alert-links">${missing.map(item => `<a href="#stock-${item.id}" data-alert-opening="${item.id}">${esc(item.display_name)} →</a>`).join("")}</div>`;
+}
+
+function renderStock() {
+  renderOpeningAlert();
+  if (!items.length) {
+    el("stock-list").innerHTML = '<div class="empty">ยังไม่มีสินค้าที่เปิดคุมสต๊อก · ไปเพิ่มหรือแก้รายการที่หน้า “ตั้งค่าค่าใช้จ่าย” ก่อน</div>';
+    return;
+  }
+  el("stock-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>สินค้า</th><th class="number">คงเหลือ</th><th>จัดการ</th></tr></thead><tbody>${items.map(item => {
+    const balance = computeStockBalance(movesFor(item.id));
+    const opening = openingFor(item.id);
+    return `<tr id="stock-${item.id}"><td><b>${esc(item.display_name)}</b><span class="meta">หน่วย ${esc(item.unit)} · ${item.active ? "เปิดใช้งาน" : "ปิดใช้งานแล้ว"}</span>${opening ? '<span class="status">ตั้งยอดยกมาแล้ว</span>' : '<span class="status pending">ยังไม่ตั้งยอดยกมา</span>'}</td><td class="number"><span class="balance">${esc(balance)}</span> ${esc(item.unit)}</td><td><div class="actions">${opening ? "" : `<button class="ghost" type="button" data-move="opening" data-item-id="${item.id}">ตั้งยอดยกมา</button>`}<button class="primary" type="button" data-move="receive" data-item-id="${item.id}">รับเข้า</button><button class="ghost" type="button" data-move="adjust" data-item-id="${item.id}">ปรับยอด</button><button class="ghost" type="button" data-history="${item.id}">ประวัติ</button></div></td></tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+
+function cumulativeBalances(itemMoves) {
+  const ordered = [...itemMoves].sort((a, b) => String(a.recorded_at).localeCompare(String(b.recorded_at)) || String(a.id).localeCompare(String(b.id)));
+  const balances = new Map();
+  let running = 0;
+  for (const move of ordered) {
+    running += Number(move.qty || 0);
+    balances.set(move.id, running);
+  }
+  return balances;
+}
+
+function recordedBy(move) {
+  const profile = profiles.get(move.recorded_by);
+  return profile?.name || profile?.email || (move.recorded_by ? "ไม่พบชื่อผู้บันทึก" : "ไม่ระบุผู้บันทึก");
+}
+
+function thaiDateTime(value) {
+  return new Intl.DateTimeFormat("th-TH", { dateStyle:"medium", timeStyle:"short", timeZone:"Asia/Bangkok" }).format(new Date(value));
+}
+
+function renderHistory(itemId, shouldScroll = true) {
+  const item = items.find(row => row.id === itemId);
+  if (!item) return;
+  currentItemId = itemId;
+  const itemMoves = movesFor(itemId);
+  const after = cumulativeBalances(itemMoves);
+  const ordered = [...itemMoves].sort((a, b) => String(b.recorded_at).localeCompare(String(a.recorded_at)) || String(b.id).localeCompare(String(a.id)));
+  el("history-name").textContent = `ประวัติ · ${item.display_name}`;
+  el("history-list").innerHTML = ordered.length ? `<div class="table-wrap"><table><thead><tr><th>ชนิด</th><th class="number">จำนวน</th><th class="number">ยอดหลังรายการ</th><th>ผู้บันทึก / เวลา</th>${canAdmin ? "<th>ลบ</th>" : ""}</tr></thead><tbody>${ordered.map(move => `<tr><td><b>${esc(move.kind)}</b>${move.reason ? `<span class="meta">เหตุผล: ${esc(move.reason)}</span>` : ""}${move.note ? `<span class="meta">หมายเหตุ: ${esc(move.note)}</span>` : ""}</td><td class="number"><b class="qty ${Number(move.qty) > 0 ? "in" : "out"}">${Number(move.qty) > 0 ? "+" : ""}${esc(move.qty)}</b> ${esc(item.unit)}</td><td class="number">${esc(after.get(move.id))} ${esc(item.unit)}</td><td>${esc(recordedBy(move))}<span class="meta">${esc(thaiDateTime(move.recorded_at))}</span></td>${canAdmin ? `<td><button class="icon-btn" type="button" data-delete-move="${move.id}" aria-label="ลบรายการ ${esc(move.kind)}">🗑</button></td>` : ""}</tr>`).join("")}</tbody></table></div>` : '<div class="empty">ยังไม่มีประวัติของสินค้านี้</div>';
+  el("history-card").hidden = false;
+  if (shouldScroll) el("history-title").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+function openMove(mode, itemId, trigger = null) {
+  const item = items.find(row => row.id === itemId);
+  if (!item) return toast("ไม่พบสินค้านี้ กรุณาโหลดหน้าใหม่", true);
+  if (mode === "opening" && openingFor(itemId)) return toast("สินค้านี้ตั้งยอดยกมาไปแล้ว กรุณาโหลดข้อมูลล่าสุด", true);
+  moveMode = mode;
+  currentItemId = itemId;
+  lastFocus = trigger || document.activeElement;
+  const setup = {
+    opening:{ title:"ตั้งยอดยกมา", label:"ยอดคงเหลือเริ่มต้น", hint:"กรอกจำนวนเต็มมากกว่า 0 · ตั้งได้ครั้งเดียวต่อสินค้า", button:"บันทึกยอดยกมา" },
+    receive:{ title:"รับสินค้าเข้า", label:"จำนวนที่รับเข้า", hint:"กรอกจำนวนเต็มมากกว่า 0", button:"บันทึกรับเข้า" },
+    adjust:{ title:"ปรับยอดคลัง", label:"จำนวนที่ปรับ (+ เพิ่ม / − ลด)", hint:"กรอกจำนวนเต็มที่ไม่ใช่ 0 และต้องระบุเหตุผล", button:"บันทึกปรับยอด" }
+  }[mode];
+  el("move-title").textContent = setup.title;
+  el("move-item").textContent = `${item.display_name} · คงเหลือปัจจุบัน ${computeStockBalance(movesFor(itemId))} ${item.unit}`;
+  el("move-qty-label").textContent = `${setup.label} (${item.unit})`;
+  el("move-qty-hint").textContent = setup.hint;
+  el("save-move").textContent = setup.button;
+  el("move-qty").value = "";
+  el("move-reason").value = "";
+  el("move-note").value = "";
+  el("reason-field").hidden = mode !== "adjust";
+  el("move-overlay").hidden = false;
+  setTimeout(() => el("move-qty").focus(), 0);
+}
+
+function closeMove() {
+  el("move-overlay").hidden = true;
+  moveMode = null;
+  currentItemId = null;
+  lastFocus?.focus?.();
+}
+
+async function saveMove(event) {
+  event.preventDefault();
+  const item = items.find(row => row.id === currentItemId);
+  const qty = Number(el("move-qty").value);
+  const reason = el("move-reason").value.trim();
+  if (!Number.isInteger(qty) || qty === 0) return toast("จำนวนต้องเป็นจำนวนเต็มและไม่เป็น 0", true);
+  if (moveMode !== "adjust" && qty < 0) return toast("ยอดยกมาและรับเข้าต้องเป็นจำนวนมากกว่า 0", true);
+  if (moveMode === "adjust" && !reason) return toast("กรุณากรอกเหตุผลการปรับยอดก่อนบันทึก", true);
+  const nextBalance = computeStockBalance(movesFor(currentItemId)) + qty;
+  if (nextBalance < 0) return toast(`ปรับไม่ได้ เพราะยอดจะติดลบ ${nextBalance} ${item.unit}`, true);
+  const kind = { opening:"ยอดยกมา", receive:"รับเข้า", adjust:"ปรับยอด" }[moveMode];
+  const { error } = await sb.from("fee_stock_moves").insert({
+    item_id:currentItemId, kind, qty,
+    reason:moveMode === "adjust" ? reason : null,
+    note:el("move-note").value.trim() || null,
+    recorded_by:session.user.id
+  });
+  if (error) return toast(friendlyError(error), true);
+  const savedItemId = currentItemId;
+  closeMove();
+  toast(`บันทึก${kind} ${qty > 0 ? "+" : ""}${qty} ${item.unit} แล้ว`);
+  await loadStock();
+  if (!el("history-card").hidden) renderHistory(savedItemId, false);
+}
+
+async function deleteMove(move) {
+  if (!canAdmin) return;
+  const item = items.find(row => row.id === move.item_id);
+  const current = computeStockBalance(movesFor(move.item_id));
+  const afterDelete = current - Number(move.qty);
+  if (afterDelete < 0) return toast(`ลบไม่ได้ เพราะจะทำให้สต๊อกติดลบ ${afterDelete} ${item.unit} · ให้บันทึกแถวปรับยอดแทน`, true);
+  const openingImpact = move.kind === "ยอดยกมา" ? " · สินค้าจะกลับเป็นสถานะยังไม่ตั้งยอดยกมา" : "";
+  if (!await window.crsAskConfirm({
+    title:"ลบรายการคลัง",
+    message:`${item.display_name}\nลบ ${move.kind} ${Number(move.qty) > 0 ? "+" : ""}${move.qty} ${item.unit} · คงเหลือจะเปลี่ยนจาก ${current} เป็น ${afterDelete} ${item.unit}${openingImpact}\nการลบกู้คืนไม่ได้`,
+    requireText:item.display_name, okLabel:"ลบรายการคลัง", danger:true
+  })) return;
+  const { data, error } = await sb.from("fee_stock_moves").delete().eq("id", move.id).select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("ลบไม่สำเร็จ กรุณาตรวจสิทธิ์ admin");
+  toast("ลบรายการคลังแล้ว");
+  await loadStock();
+  renderHistory(move.item_id, false);
+}
+
+async function loadProfiles() {
+  const ids = [...new Set(moves.map(move => move.recorded_by).filter(Boolean))];
+  profiles = new Map();
+  if (!ids.length) return;
+  const { data, error } = await sb.from("profiles").select("id,name,email").in("id", ids);
+  if (error) return;
+  profiles = new Map((data || []).map(profile => [profile.id, profile]));
+}
+
+async function loadStock() {
+  const [itemsRes, movesRes] = await Promise.all([
+    sb.from("fee_items").select("id,display_name,unit,track_stock,active,sort_order").eq("track_stock", true).order("sort_order").order("display_name"),
+    fetchAllRows(() => sb.from("fee_stock_moves").select("id,item_id,kind,qty,charge_id,reason,note,recorded_by,recorded_at"), ["item_id", "recorded_at", "id"])
+  ]);
+  if (itemsRes.error) throw new Error("โหลดรายการสินค้าที่คุมสต๊อกไม่สำเร็จ: " + itemsRes.error.message);
+  if (movesRes.error) throw new Error("โหลดประวัติคลังไม่สำเร็จ: " + movesRes.error.message);
+  items = (itemsRes.data || []).sort(itemCompare);
+  moves = movesRes.data || [];
+  await loadProfiles();
+  renderStock();
+}
+
+el("stock-list").addEventListener("click", event => {
+  const moveButton = event.target.closest("[data-move]");
+  const historyButton = event.target.closest("[data-history]");
+  if (moveButton) openMove(moveButton.dataset.move, moveButton.dataset.itemId, moveButton);
+  if (historyButton) renderHistory(historyButton.dataset.history);
+});
+el("opening-alert").addEventListener("click", event => {
+  const link = event.target.closest("[data-alert-opening]");
+  if (!link) return;
+  event.preventDefault();
+  document.getElementById(`stock-${link.dataset.alertOpening}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+  openMove("opening", link.dataset.alertOpening, link);
+});
+el("history-list").addEventListener("click", event => {
+  const button = event.target.closest("[data-delete-move]");
+  const move = moves.find(row => row.id === button?.dataset.deleteMove);
+  if (move) deleteMove(move).catch(error => toast(friendlyError(error), true));
+});
+el("close-history").addEventListener("click", () => { el("history-card").hidden = true; currentItemId = null; });
+el("cancel-move").addEventListener("click", closeMove);
+el("move-form").addEventListener("submit", event => saveMove(event).catch(error => toast(friendlyError(error), true)));
+el("move-overlay").addEventListener("click", event => { if (event.target === el("move-overlay")) closeMove(); });
+document.addEventListener("keydown", event => { if (event.key === "Escape" && !el("move-overlay").hidden) closeMove(); });
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    const canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    if (!canFinance) {
+      el("access-card").hidden = false;
+      el("access-card").innerHTML = '<div class="readonly"><b>เปิดหน้าคลังสินค้าไม่ได้</b><br>ข้อมูลรับเข้าและยอดคงเหลือเป็นข้อมูลภายในฝ่ายการเงิน หน้านี้จึงเปิดให้ฝ่ายการเงินและผู้ดูแลระบบเท่านั้น</div>';
+    } else {
+      const profileRes = await sb.from("profiles").select("role").eq("id", session.user.id).maybeSingle();
+      canAdmin = profileRes.data?.role === "admin";
+      el("stock-app").hidden = false;
+      await loadStock();
+    }
+  } catch (error) {
+    el("access-card").hidden = false;
+    el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าคลังสินค้าไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+    toast(friendlyError(error), true);
+  }
+}
+</script>
+</body>
+</html>

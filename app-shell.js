@@ -436,7 +436,7 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-settings.html", "fee-stock.html"],
       groups: [
         {
           label: "บันทึก",
@@ -451,21 +451,25 @@
           items: [
             ["savings-payout.html", "จ่ายเงินออมทรัพย์"],
             ["savings-remit.html", "รับเงินส่งจากครู"],
-            ["transport-remit.html", "รับเงินค่ารถจากครู"]
+            ["transport-remit.html", "รับเงินค่ารถจากครู"],
+            ["fee-assign.html", "ตั้งหนี้นักเรียน"]
           ]
         },
         {
           label: "รายงาน",
           items: [
             ["savings-report.html", "รายงานออมทรัพย์"],
-            ["transport-report.html", "รายงานค่ารถ"]
+            ["transport-report.html", "รายงานค่ารถ"],
+            ["fee-report.html", "รายงานค่าใช้จ่ายนักเรียน"]
           ]
         },
         {
           label: "กำหนดค่า",
           items: [
             ["savings-opening.html", "ยอดยกมาออมทรัพย์"],
-            ["transport-settings.html", "ตั้งค่าค่ารถ"]
+            ["transport-settings.html", "ตั้งค่าค่ารถ"],
+            ["fee-settings.html", "ตั้งค่าค่าใช้จ่าย"],
+            ["fee-stock.html", "คลังสินค้า"]
           ]
         }
       ],
@@ -519,6 +523,26 @@
           title: "ตั้งค่าค่ารถ",
           description: "ตั้งโซนและอัตรา ผูกนักเรียน แล้วประกาศยอดที่จะเก็บรายเดือน",
           steps: ["ตั้งโซน", "ผูกนักเรียน", "ประกาศยอด"]
+        },
+        "fee-settings.html": {
+          title: "ตั้งค่าค่าใช้จ่าย",
+          description: "กำหนดรายการ อัตรา ราคา เงินอุดหนุน และโปรโมชั่นก่อนตั้งหนี้ให้นักเรียน",
+          steps: ["เลือกรายการ", "กำหนดอัตรา", "ตรวจและบันทึก"]
+        },
+        "fee-stock.html": {
+          title: "คลังสินค้า",
+          description: "ตรวจยอดคงเหลือ ตั้งยอดยกมา รับสินค้าเข้า และปรับยอดพร้อมเหตุผล",
+          steps: ["ตรวจยอดยกมา", "บันทึกการเคลื่อนไหว", "ดูประวัติ"]
+        },
+        "fee-assign.html": {
+          title: "ตั้งหนี้นักเรียน",
+          description: "เลือกห้องและชนิดรายการ ตรวจรายชื่อ อัตรา และยอดรวมก่อนตั้งหนี้",
+          steps: ["เลือกห้อง", "เลือกรายการ", "ตรวจและบันทึก"]
+        },
+        "fee-report.html": {
+          title: "รายงานค่าใช้จ่ายนักเรียน",
+          description: "ดูยอดเรียกเก็บ ส่วนลด และยอดค้างจากระดับห้องถึงรายการรายคน",
+          steps: ["ดูรายห้อง", "ดูรายคน", "ตรวจรายการ"]
         }
       }
     }

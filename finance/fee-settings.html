@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตั้งค่าค่าใช้จ่าย — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  html, body { max-width:100%; overflow-x:hidden; }
+  body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
+  .field { margin-bottom:14px; }
+  .field label, .field-label { display:block; margin-bottom:6px; font-weight:600; }
+  .row2, .row3 { display:grid; gap:12px; }
+  .row2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .row3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  textarea { min-height:82px; resize:vertical; }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  input:disabled, select:disabled { color:var(--muted); background:var(--bg); opacity:1; }
+  .check { display:flex; align-items:center; gap:9px; min-height:44px; }
+  .check input { width:22px; height:22px; margin:0; accent-color:var(--teal); }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+  .primary { color:var(--white); background:var(--teal); }
+  .ghost { color:var(--teal); background:var(--teal-soft); }
+  .danger { color:var(--danger); background:var(--danger-soft); }
+  .icon-btn { min-width:44px; padding:8px; color:var(--teal); background:transparent; }
+  .tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-bottom:16px; }
+  .tab { color:var(--muted); background:var(--white); border:1px solid var(--line); }
+  .tab[aria-selected="true"] { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); }
+  .tab-panel[hidden], [hidden] { display:none !important; }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .section-head h2, .editor h2 { margin:0; font-size:19px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:14px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+  .table-wrap { max-width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; min-width:700px; border-collapse:collapse; }
+  th, td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { color:var(--muted); background:var(--bg); font-size:13px; white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  .money { text-align:right; white-space:nowrap; }
+  .rate-table input { min-width:110px; text-align:right; }
+  .rate-table th:first-child, .rate-table td:first-child { position:sticky; left:0; z-index:1; min-width:90px; background:var(--white); }
+  .rate-table th:first-child { background:var(--bg); }
+  .meta { display:block; color:var(--muted); font-size:13px; }
+  .hint { color:var(--muted); font-size:14px; }
+  .empty { padding:22px 8px; color:var(--muted); text-align:center; }
+  .readonly { margin-bottom:16px; padding:14px; color:var(--danger); background:var(--danger-soft); border-radius:10px; }
+  .banner { margin-bottom:14px; padding:12px 14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .status { display:inline-flex; align-items:center; min-height:28px; padding:3px 9px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:13px; font-weight:600; }
+  .status.off { color:var(--amber); background:var(--amber-soft); }
+  .editor { border-color:var(--teal); background:var(--teal-soft); }
+  .editor h2 { margin-bottom:12px; }
+  .tool-row { display:grid; grid-template-columns:minmax(180px,1fr) minmax(150px,.7fr) auto; gap:10px; align-items:end; margin:12px 0; }
+  .tool-row .field { margin:0; }
+  .save-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+  .group-block + .group-block { margin-top:18px; }
+  .kind-group { margin-bottom:8px; padding-left:12px; border-left:3px solid var(--line); }
+  .kind-group .section-title { font-weight:700; }
+  .toast { position:sticky; bottom:10px; z-index:20; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  @media (max-width:760px) { .row3 { grid-template-columns:1fr 1fr; } .tabs { grid-template-columns:1fr 1fr; } }
+  @media (max-width:560px) {
+    .row2, .row3, .tool-row { grid-template-columns:1fr; }
+    .section-head, .save-bar { align-items:stretch; flex-direction:column; }
+    .actions { justify-content:flex-start; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ตั้งค่าค่าใช้จ่าย</h1>
+    <p>กำหนดรายการ อัตรา เงินอุดหนุน และโปรโมชั่นก่อนเริ่มตั้งหนี้ให้นักเรียน</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260830-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="access-card" class="card" hidden></section>
+    <div id="settings-app" hidden>
+      <section class="card">
+        <div class="field">
+          <label for="year-select">ปีการศึกษา</label>
+          <select id="year-select" disabled><option value="">กำลังโหลด…</option></select>
+        </div>
+        <div class="hint">ปีมีผลกับอัตรา ราคา เงินอุดหนุน และโปรโมชั่น · รายการในแคตตาล็อกใช้ร่วมกันทุกปี</div>
+      </section>
+
+      <div class="tabs" role="tablist" aria-label="หัวข้อตั้งค่าค่าใช้จ่าย">
+        <button class="tab" type="button" role="tab" aria-selected="true" aria-controls="items-panel" data-tab="items-panel">1 · รายการ</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="rates-panel" data-tab="rates-panel">2 · ค่าบริหาร</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="prices-panel" data-tab="prices-panel">3 · ราคาสินค้า</button>
+        <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="benefits-panel" data-tab="benefits-panel">4 · อุดหนุน/โปรโมชั่น</button>
+      </div>
+
+      <section id="items-panel" class="tab-panel" role="tabpanel">
+        <section class="card">
+          <div class="section-head">
+            <div><h2>รายการค่าใช้จ่าย</h2><p>เลิกขายให้ปิดใช้งาน ประวัติเดิมจะยังอ้างรายการเดิมได้ครบ</p></div>
+            <div class="actions"><button id="add-many-items" class="ghost" type="button">เพิ่มหลายตัวเลือกรวดเดียว</button><button id="add-item" class="primary" type="button">เพิ่มรายการ</button></div>
+          </div>
+          <div id="items-list"></div>
+        </section>
+
+        <form id="item-form" class="card editor" hidden>
+          <h2 id="item-form-title">เพิ่มรายการ</h2>
+          <div class="row2">
+            <div class="field"><label for="item-category">ประเภท</label><select id="item-category"><option>ค่าบริหาร</option><option>ค่าสินค้า</option></select></div>
+            <div class="field"><label for="item-group">ชื่อกลุ่ม</label><input id="item-group" type="text" maxlength="160" required placeholder="เช่น ชุดนักเรียน"></div>
+          </div>
+          <div class="row3">
+            <div class="field"><label for="item-variant">ตัวเลือก</label><input id="item-variant" type="text" maxlength="160" placeholder="เช่น หญิง เบอร์ S"></div>
+            <div class="field"><label for="item-unit">หน่วย</label><input id="item-unit" type="text" maxlength="60" value="รายการ" required></div>
+            <div class="field"><label for="item-sort">ลำดับ</label><input id="item-sort" type="number" step="1" value="0" inputmode="numeric"></div>
+          </div>
+          <label class="check"><input id="item-stock" type="checkbox"> คุมสต๊อกสินค้า</label>
+          <div id="item-stock-hint" class="hint">ค่าบริหารคุมสต๊อกไม่ได้</div>
+          <div class="actions"><button id="cancel-item" class="ghost" type="button">ยกเลิก</button><button class="primary" type="submit">บันทึกรายการ</button></div>
+        </form>
+
+        <form id="many-form" class="card editor" hidden>
+          <h2>เพิ่มหลายตัวเลือกรวดเดียว</h2>
+          <div class="row2">
+            <div class="field"><label for="many-group">ชื่อกลุ่มสินค้า</label><input id="many-group" type="text" maxlength="160" required placeholder="เช่น ชุดนักเรียน"></div>
+            <div class="field"><label for="many-unit">หน่วย</label><input id="many-unit" type="text" maxlength="60" value="ตัว" required></div>
+          </div>
+          <div class="field"><label for="many-variants">ตัวเลือก คั่นด้วยจุลภาค</label><textarea id="many-variants" required placeholder="หญิง เบอร์ S, หญิง เบอร์ M, หญิง เบอร์ L"></textarea><div class="hint">ระบบจะตัดช่องว่าง ทิ้งรายการว่าง และกันตัวเลือกซ้ำในชุดนี้</div></div>
+          <div class="row2">
+            <div class="field"><label for="many-sort">ลำดับเริ่มต้น</label><input id="many-sort" type="number" step="1" value="0" inputmode="numeric"></div>
+            <label class="check"><input id="many-stock" type="checkbox" checked> คุมสต๊อกทุกตัวเลือก</label>
+          </div>
+          <div class="actions"><button id="cancel-many" class="ghost" type="button">ยกเลิก</button><button class="primary" type="submit">เพิ่มทุกรายการ</button></div>
+        </form>
+      </section>
+
+      <section id="rates-panel" class="tab-panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="section-head">
+            <div><h2>อัตราค่าบริหาร</h2><p>แยกตามปี ภาคเรียน และระดับชั้น</p></div>
+            <div class="actions"><select id="term-select" aria-label="ภาคเรียน"><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select><button id="copy-term" class="ghost" type="button" hidden>คัดลอกจากภาคเรียน 1</button></div>
+          </div>
+          <div class="banner info"><b>ช่องว่าง ≠ 0</b><br>ช่องว่างหมายถึงชั้นนั้นไม่เก็บรายการนี้และจะไม่มีแถวในฐาน · 0 หมายถึงประกาศเก็บ 0 บาท</div>
+          <div class="tool-row">
+            <div class="field"><label for="fill-item">รายการที่จะเติมทั้งคอลัมน์</label><select id="fill-item"></select></div>
+            <div class="field"><label for="fill-amount">จำนวนเงิน</label><input id="fill-amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+            <button id="fill-column" class="ghost" type="button">เติมทั้งคอลัมน์</button>
+          </div>
+          <div id="rates-grid"></div>
+          <div class="save-bar"><span class="hint">บันทึกครั้งเดียวทั้งตาราง</span><button id="save-rates" class="primary" type="button">บันทึกอัตราทั้งตาราง</button></div>
+        </section>
+      </section>
+
+      <section id="prices-panel" class="tab-panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="section-head">
+            <div><h2>ราคาสินค้า</h2><p>ราคาผูกกับปีเท่านั้น ไม่แยกชั้นและไม่แยกภาคเรียน</p></div>
+            <button id="copy-prices" class="ghost" type="button">คัดลอกราคาจากปีก่อน</button>
+          </div>
+          <div id="prices-list"></div>
+          <div class="save-bar"><span class="hint">ช่องว่างหมายถึงยังไม่ประกาศราคา · 0 คือราคาศูนย์บาท</span><button id="save-prices" class="primary" type="button">บันทึกราคาสินค้า</button></div>
+        </section>
+      </section>
+
+      <section id="benefits-panel" class="tab-panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="section-head"><div><h2>อัตราเงินอุดหนุน</h2><p>เก็บจำนวนเป็นบวก เครื่องหมายลบจะเกิดตอนตั้งหนี้ใน Slice B</p></div></div>
+          <div class="banner"><b>ตั้งได้แค่อัตรา ส่วนใครได้บ้างเป็นการติ๊กรายคนที่หน้าตั้งหนี้</b><br>การตั้งอัตราตรงนี้ไม่ได้ให้สิทธิ์นักเรียนทุกคนโดยอัตโนมัติ</div>
+          <div id="subsidies-list"></div>
+          <div class="save-bar"><span class="hint">จำนวนต้องมากกว่า 0 · เว้นว่างเมื่อชั้นนั้นไม่มีอัตรา</span><button id="save-subsidies" class="primary" type="button">บันทึกอัตราเงินอุดหนุน</button></div>
+        </section>
+
+        <section class="card">
+          <div class="section-head"><div><h2>โปรโมชั่น</h2><p>คูปองและส่วนลดของโรงเรียนในปีที่เลือก</p></div><button id="add-promotion" class="primary" type="button">เพิ่มโปรโมชั่น</button></div>
+          <div id="promotions-list"></div>
+        </section>
+
+        <form id="promotion-form" class="card editor" hidden>
+          <h2 id="promotion-form-title">เพิ่มโปรโมชั่น</h2>
+          <div class="row2">
+            <div class="field"><label for="promotion-name">ชื่อโปรโมชั่น</label><input id="promotion-name" type="text" maxlength="160" required></div>
+            <div class="field"><label for="promotion-amount">จำนวนเงินส่วนลด (จำนวนบวก)</label><input id="promotion-amount" type="number" min="0.01" step="0.01" inputmode="decimal" required></div>
+          </div>
+          <div class="field"><label for="promotion-condition">เงื่อนไข</label><textarea id="promotion-condition" maxlength="500" placeholder="เช่น สำหรับนักเรียนเข้าใหม่ที่ได้รับคูปอง"></textarea></div>
+          <label class="check"><input id="promotion-active" type="checkbox" checked> เปิดใช้งาน</label>
+          <div class="actions"><button id="cancel-promotion" class="ghost" type="button">ยกเลิก</button><button class="primary" type="submit">บันทึกโปรโมชั่น</button></div>
+        </form>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, GRADE_ORDER, formatMoney
+} from "../supabase-client.js?v=20260830-2";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+
+// ---------- ฟังก์ชันล้วนสำหรับตารางอัตราและฟอร์มหลายตัวเลือก ----------
+function buildRateGrid(grades, items, rows) {
+  const byKey = new Map((rows || []).map(row => [`${row.grade_level}\u0000${row.item_id}`, Number(row.amount)]));
+  return (grades || []).map(grade => ({
+    grade_level:grade,
+    values:(items || []).map(item => ({
+      item_id:item.id,
+      amount:byKey.has(`${grade}\u0000${item.id}`) ? byKey.get(`${grade}\u0000${item.id}`) : null
+    }))
+  }));
+}
+
+function copyTermRates(rows, fromTerm, toTerm) {
+  const output = (rows || []).map(row => ({ ...row }));
+  const targetKeys = new Set(output.filter(row => Number(row.term) === Number(toTerm))
+    .map(row => `${row.grade_level}\u0000${row.item_id}`));
+  for (const row of output.filter(item => Number(item.term) === Number(fromTerm))) {
+    const key = `${row.grade_level}\u0000${row.item_id}`;
+    if (targetKeys.has(key)) continue;
+    const { id, ...copy } = row;
+    output.push({ ...copy, term:Number(toTerm) });
+    targetKeys.add(key);
+  }
+  return output;
+}
+
+function parseVariantList(value) {
+  const seen = new Set();
+  return String(value ?? "").split(/[,，]/).map(item => item.trim()).filter(item => {
+    if (!item || seen.has(item)) return false;
+    seen.add(item);
+    return true;
+  });
+}
+
+const today = toDateStr(bangkokNow());
+let session = null;
+let canFinance = false;
+let canAdmin = false;
+let years = [];
+let currentYear = "";
+let items = [];
+let rateRows = [];
+let priceRows = [];
+let subsidyRows = [];
+let promotions = [];
+let editingItemId = null;
+let editingPromotionId = null;
+let toastTimer = null;
+
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 5000);
+}
+
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("fee_promotions_year_name_uniq")) return "มีชื่อโปรโมชั่นนี้อยู่แล้วในปีที่เลือก กรุณาแก้รายการเดิมหรือเปลี่ยนชื่อ";
+  if (message.includes("fee_items_name_uniq")) return "มีชื่อกลุ่มและตัวเลือกนี้อยู่แล้ว กรุณาแก้รายการเดิมหรือเปลี่ยนตัวเลือก";
+  if (message.includes("fee_items_stock_goods_only")) return "ค่าบริหารเปิดคุมสต๊อกไม่ได้";
+  if (message.includes("violates foreign key constraint")) return "ลบไม่ได้เพราะมีอัตราหรือรายการคลังอ้างถึงอยู่ ให้ปิดใช้งานแทน";
+  if (message.includes("fee_subsidies_amount_positive")) return "เงินอุดหนุนต้องมากกว่า 0 บาท";
+  if (message.includes("fee_promotions_amount_positive")) return "จำนวนเงินโปรโมชั่นต้องมากกว่า 0 บาท";
+  return message;
+}
+
+function setTab(panelId) {
+  document.querySelectorAll("[data-tab]").forEach(button => button.setAttribute("aria-selected", String(button.dataset.tab === panelId)));
+  document.querySelectorAll(".tab-panel").forEach(panel => { panel.hidden = panel.id !== panelId; });
+}
+
+function itemCompare(a, b) {
+  return Number(a.sort_order || 0) - Number(b.sort_order || 0) ||
+    String(a.display_name || "").localeCompare(String(b.display_name || ""), "th", { numeric:true });
+}
+
+function syncItemStock() {
+  const isProduct = el("item-category").value === "ค่าสินค้า";
+  el("item-stock").disabled = !isProduct;
+  if (!isProduct) el("item-stock").checked = false;
+  el("item-stock-hint").textContent = isProduct ? "เปิดเมื่อสินค้านี้ต้องมีการรับเข้าและตัดยอดคลัง" : "ค่าบริหารคุมสต๊อกไม่ได้";
+}
+
+function renderItems() {
+  const groups = ["ค่าบริหาร", "ค่าสินค้า"];
+  el("items-list").innerHTML = groups.map(category => {
+    const rows = items.filter(item => item.category === category).sort(itemCompare);
+    return `<div class="group-block"><div class="kind-group"><div class="section-title">${category}</div><div class="meta">${rows.length} รายการ</div></div>${rows.length ? `<div class="table-wrap"><table>
+      <thead><tr><th>ชื่อเต็ม</th><th>หน่วย</th><th>สต๊อก</th><th>สถานะ</th><th>จัดการ</th></tr></thead>
+      <tbody>${rows.map(item => `<tr>
+        <td><b>${esc(item.display_name)}</b><span class="meta">ลำดับ ${esc(item.sort_order)}</span></td>
+        <td>${esc(item.unit)}</td><td>${item.track_stock ? "คุมสต๊อก" : "ไม่คุม"}</td>
+        <td><span class="status ${item.active ? "" : "off"}">${item.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}</span></td>
+        <td><div class="actions"><button class="ghost" type="button" data-edit-item="${item.id}">แก้</button><button class="${item.active ? "danger" : "ghost"}" type="button" data-toggle-item="${item.id}">${item.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button>${canAdmin ? `<button class="icon-btn" type="button" data-delete-item="${item.id}" aria-label="ลบ ${esc(item.display_name)}">🗑</button>` : ""}</div></td>
+      </tr>`).join("")}</tbody></table></div>` : '<div class="empty">ยังไม่มีรายการในกลุ่มนี้</div>'}</div>`;
+  }).join("");
+  renderRates();
+  renderPrices();
+}
+
+function openItemForm(item = null) {
+  editingItemId = item?.id || null;
+  el("many-form").hidden = true;
+  el("item-form-title").textContent = item ? `แก้รายการ ${item.display_name}` : "เพิ่มรายการ";
+  el("item-category").value = item?.category || "ค่าบริหาร";
+  el("item-group").value = item?.group_name || "";
+  el("item-variant").value = item?.variant_label || "";
+  el("item-unit").value = item?.unit || "รายการ";
+  el("item-sort").value = item?.sort_order ?? 0;
+  el("item-stock").checked = !!item?.track_stock;
+  syncItemStock();
+  el("item-form").hidden = false;
+  el("item-group").focus();
+}
+
+async function saveItem(event) {
+  event.preventDefault();
+  const category = el("item-category").value;
+  const groupName = el("item-group").value.trim();
+  const unit = el("item-unit").value.trim();
+  const sortOrder = Number(el("item-sort").value || 0);
+  if (!groupName) return toast("กรุณากรอกชื่อกลุ่ม", true);
+  if (!unit) return toast("กรุณากรอกหน่วย", true);
+  if (!Number.isInteger(sortOrder)) return toast("ลำดับต้องเป็นจำนวนเต็ม", true);
+  const payload = {
+    category, group_name:groupName, variant_label:el("item-variant").value.trim(), unit,
+    sort_order:sortOrder, track_stock:category === "ค่าสินค้า" && el("item-stock").checked,
+    updated_at:new Date().toISOString()
+  };
+  const request = editingItemId
+    ? sb.from("fee_items").update(payload).eq("id", editingItemId)
+    : sb.from("fee_items").insert({ ...payload, created_by:session.user.id });
+  const { error } = await request;
+  if (error) return toast(friendlyError(error), true);
+  el("item-form").hidden = true;
+  toast(editingItemId ? "แก้รายการแล้ว" : "เพิ่มรายการแล้ว");
+  editingItemId = null;
+  await loadItems();
+}
+
+async function saveManyItems(event) {
+  event.preventDefault();
+  const groupName = el("many-group").value.trim();
+  const unit = el("many-unit").value.trim();
+  const variants = parseVariantList(el("many-variants").value);
+  const start = Number(el("many-sort").value || 0);
+  if (!groupName) return toast("กรุณากรอกชื่อกลุ่มสินค้า", true);
+  if (!unit) return toast("กรุณากรอกหน่วย", true);
+  if (!variants.length) return toast("กรุณากรอกตัวเลือกอย่างน้อย 1 รายการ", true);
+  if (!Number.isInteger(start)) return toast("ลำดับเริ่มต้นต้องเป็นจำนวนเต็ม", true);
+  const payloads = variants.map((variant, index) => ({
+    category:"ค่าสินค้า", group_name:groupName, variant_label:variant, unit,
+    track_stock:el("many-stock").checked, sort_order:start + index,
+    created_by:session.user.id, updated_at:new Date().toISOString()
+  }));
+  const { error } = await sb.from("fee_items").insert(payloads);
+  if (error) return toast(friendlyError(error), true);
+  el("many-form").hidden = true;
+  toast(`เพิ่มสินค้า ${payloads.length} ตัวเลือกแล้ว`);
+  await loadItems();
+}
+
+async function toggleItem(item) {
+  const action = item.active ? "ปิดใช้งาน" : "เปิดใช้งาน";
+  if (!await window.crsAskConfirm({
+    title:`${action}รายการ`,
+    message:`${item.display_name}\n${item.active ? "รายการจะหายจากตัวเลือกใหม่ แต่ประวัติและอัตราเดิมยังอยู่ครบ" : "รายการจะกลับมาให้เลือกใช้งานได้"}`,
+    okLabel:action,
+    danger:item.active
+  })) return;
+  const { error } = await sb.from("fee_items").update({ active:!item.active, updated_at:new Date().toISOString() }).eq("id", item.id);
+  if (error) throw error;
+  toast(`${action}แล้ว`);
+  await loadItems();
+}
+
+async function deleteItem(item) {
+  if (!canAdmin) return;
+  const [adminRates, prices, moves] = await Promise.all([
+    sb.from("fee_admin_rates").select("item_id", { count:"exact", head:true }).eq("item_id", item.id),
+    sb.from("fee_product_prices").select("item_id", { count:"exact", head:true }).eq("item_id", item.id),
+    sb.from("fee_stock_moves").select("id", { count:"exact", head:true }).eq("item_id", item.id)
+  ]);
+  const refs = Number(adminRates.count || 0) + Number(prices.count || 0) + Number(moves.count || 0);
+  if (!await window.crsAskConfirm({
+    title:"ลบรายการค่าใช้จ่าย",
+    message:`${item.display_name}\nมีอัตราหรือรายการคลังอ้างถึง ${refs} แถว · ถ้ามีแถวอ้างถึง ฐานจะไม่ยอมลบ ให้ปิดใช้งานแทน\nการลบกู้คืนไม่ได้`,
+    requireText:item.display_name, okLabel:"ลบรายการ", danger:true
+  })) return;
+  const { data, error } = await sb.from("fee_items").delete().eq("id", item.id).select("id");
+  if (error) return toast(friendlyError(error), true);
+  if (!data?.length) return toast("ลบไม่ได้ กรุณาตรวจสิทธิ์ผู้ดูแลระบบ", true);
+  toast("ลบรายการแล้ว");
+  await loadItems();
+}
+
+function activeAdminItems() { return items.filter(item => item.category === "ค่าบริหาร" && item.active).sort(itemCompare); }
+function productItems() { return items.filter(item => item.category === "ค่าสินค้า").sort(itemCompare); }
+
+function renderRates(rowsOverride = null) {
+  const term = Number(el("term-select")?.value || 1);
+  const adminItems = activeAdminItems();
+  el("copy-term").hidden = term !== 2;
+  el("fill-item").innerHTML = adminItems.length ? adminItems.map(item => `<option value="${item.id}">${esc(item.display_name)}</option>`).join("") : '<option value="">ยังไม่มีรายการค่าบริหาร</option>';
+  if (!adminItems.length) {
+    el("rates-grid").innerHTML = '<div class="empty">ยังไม่มีรายการค่าบริหารที่เปิดใช้งาน กรุณาเพิ่มที่แท็บรายการก่อน</div>';
+    el("save-rates").disabled = true;
+    return;
+  }
+  el("save-rates").disabled = false;
+  const rows = rowsOverride || rateRows.filter(row => Number(row.term) === term);
+  const grid = buildRateGrid(GRADE_ORDER, adminItems, rows);
+  el("rates-grid").innerHTML = `<div class="table-wrap"><table class="rate-table"><thead><tr><th>ระดับชั้น</th>${adminItems.map(item => `<th>${esc(item.display_name)}</th>`).join("")}</tr></thead><tbody>${grid.map(row => `<tr><td><b>${esc(row.grade_level)}</b></td>${row.values.map(value => `<td><input type="number" min="0" step="0.01" inputmode="decimal" aria-label="${esc(row.grade_level)} ${esc(adminItems.find(item => item.id === value.item_id)?.display_name || "อัตรา")}" data-rate-grade="${esc(row.grade_level)}" data-rate-item="${value.item_id}" value="${value.amount == null ? "" : esc(value.amount)}" placeholder="ว่าง"></td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+
+function rateDraftRows() {
+  const term = Number(el("term-select").value);
+  return [...el("rates-grid").querySelectorAll("[data-rate-grade]")].flatMap(input => {
+    if (input.value.trim() === "") return [];
+    return [{ year:currentYear, term, grade_level:input.dataset.rateGrade, item_id:input.dataset.rateItem, amount:Number(input.value) }];
+  });
+}
+
+function fillColumn() {
+  const itemId = el("fill-item").value;
+  const raw = el("fill-amount").value.trim();
+  const amount = Number(raw);
+  if (!itemId) return toast("ยังไม่มีรายการที่จะเติม", true);
+  if (raw === "" || !Number.isFinite(amount) || amount < 0) return toast("จำนวนที่เติมต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป", true);
+  el("rates-grid").querySelectorAll(`[data-rate-item="${CSS.escape(itemId)}"]`).forEach(input => { input.value = String(amount); });
+  toast(`เติม ${formatMoney(amount)} ครบทุกชั้นในคอลัมน์แล้ว · กดบันทึกเพื่อยืนยัน`);
+}
+
+function copyTermOne() {
+  const draft = rateDraftRows();
+  const source = rateRows.filter(row => Number(row.term) === 1);
+  const copied = copyTermRates([...source, ...draft], 1, 2).filter(row => Number(row.term) === 2);
+  const before = draft.length;
+  renderRates(copied);
+  toast(`คัดลอกจากภาคเรียน 1 เพิ่ม ${Math.max(0, copied.length - before)} ช่อง · ค่าที่ภาคเรียน 2 มีอยู่แล้วไม่ถูกทับ`);
+}
+
+function parseMoneyInputs(container, selector, { positive = false } = {}) {
+  const parsed = [];
+  for (const input of container.querySelectorAll(selector)) {
+    const raw = input.value.trim();
+    if (raw === "") { parsed.push({ input, amount:null }); continue; }
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || (positive ? amount <= 0 : amount < 0)) {
+      input.focus();
+      throw new Error(positive ? "จำนวนเงินต้องมากกว่า 0 บาท" : "จำนวนเงินต้องเป็น 0 หรือมากกว่า");
+    }
+    parsed.push({ input, amount:Math.round(amount * 100) / 100 });
+  }
+  return parsed;
+}
+
+async function assertCanRemove(existingRows, blankKeys, keyOf) {
+  const removing = existingRows.filter(row => blankKeys.has(keyOf(row)));
+  if (removing.length && !canAdmin) {
+    throw new Error(`มี ${removing.length} ช่องที่เคยบันทึกแล้วถูกเว้นว่าง · การล้างแถวเดิมทำได้เฉพาะ admin ตามสิทธิ์ฐาน กรุณาใส่ค่าเดิมกลับหรือให้ admin ล้าง`);
+  }
+  return removing;
+}
+
+async function saveRates() {
+  const term = Number(el("term-select").value);
+  const parsed = parseMoneyInputs(el("rates-grid"), "[data-rate-grade]");
+  const filled = parsed.filter(entry => entry.amount != null);
+  const blanks = new Set(parsed.filter(entry => entry.amount == null).map(entry => `${entry.input.dataset.rateGrade}\u0000${entry.input.dataset.rateItem}`));
+  const existing = rateRows.filter(row => Number(row.term) === term);
+  const removing = await assertCanRemove(existing, blanks, row => `${row.grade_level}\u0000${row.item_id}`);
+  const payloads = filled.map(entry => ({
+    year:currentYear, term, grade_level:entry.input.dataset.rateGrade,
+    item_id:entry.input.dataset.rateItem, amount:entry.amount,
+    announced_by:session.user.id, announced_at:new Date().toISOString(), updated_at:new Date().toISOString()
+  }));
+  if (payloads.length) {
+    const { error } = await sb.from("fee_admin_rates").upsert(payloads, { onConflict:"year,term,grade_level,item_id" });
+    if (error) throw error;
+  }
+  for (const row of removing) {
+    const result = await sb.from("fee_admin_rates").delete().eq("year", currentYear).eq("term", term).eq("grade_level", row.grade_level).eq("item_id", row.item_id).select("item_id");
+    if (result.error) throw result.error;
+    if (!result.data?.length) throw new Error("ล้างอัตราไม่สำเร็จ กรุณาตรวจสิทธิ์ admin");
+  }
+  toast(`บันทึกอัตราภาคเรียน ${term} แล้ว · มีค่า ${payloads.length} ช่อง เว้นว่าง ${parsed.length - payloads.length} ช่อง`);
+  await loadYearData();
+}
+
+function renderPrices(valuesOverride = null) {
+  const products = productItems();
+  if (!products.length) {
+    el("prices-list").innerHTML = '<div class="empty">ยังไม่มีสินค้า กรุณาเพิ่มที่แท็บรายการก่อน</div>';
+    el("save-prices").disabled = true;
+    return;
+  }
+  el("save-prices").disabled = false;
+  const values = valuesOverride || new Map(priceRows.map(row => [row.item_id, Number(row.amount)]));
+  el("prices-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>สินค้า</th><th>สถานะ</th><th class="money">ราคา (บาท)</th></tr></thead><tbody>${products.map(item => `<tr><td><b>${esc(item.display_name)}</b><span class="meta">หน่วย ${esc(item.unit)}</span></td><td><span class="status ${item.active ? "" : "off"}">${item.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}</span></td><td><input type="number" min="0" step="0.01" inputmode="decimal" data-price-item="${item.id}" aria-label="ราคาของ ${esc(item.display_name)}" value="${values.has(item.id) ? esc(values.get(item.id)) : ""}" placeholder="ว่าง"></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+async function copyPreviousPrices() {
+  const ordered = [...years].sort((a, b) => String(a.year).localeCompare(String(b.year), "th", { numeric:true }));
+  const index = ordered.findIndex(row => String(row.year) === String(currentYear));
+  if (index <= 0) return toast("ไม่มีปีก่อนหน้าในรายการปีการศึกษา", true);
+  const previousYear = ordered[index - 1].year;
+  const { data, error } = await sb.from("fee_product_prices").select("year,item_id,amount").eq("year", previousYear);
+  if (error) throw error;
+  const values = new Map([...el("prices-list").querySelectorAll("[data-price-item]")].flatMap(input => input.value.trim() === "" ? [] : [[input.dataset.priceItem, Number(input.value)]]));
+  let copied = 0;
+  for (const row of data || []) {
+    if (values.has(row.item_id)) continue;
+    values.set(row.item_id, Number(row.amount));
+    copied++;
+  }
+  renderPrices(values);
+  toast(`คัดลอกราคาจากปี ${previousYear} เพิ่ม ${copied} รายการ · ราคาที่ปีนี้มีอยู่แล้วไม่ถูกทับ`);
+}
+
+async function savePrices() {
+  const parsed = parseMoneyInputs(el("prices-list"), "[data-price-item]");
+  const blanks = new Set(parsed.filter(entry => entry.amount == null).map(entry => entry.input.dataset.priceItem));
+  const removing = await assertCanRemove(priceRows, blanks, row => row.item_id);
+  const payloads = parsed.filter(entry => entry.amount != null).map(entry => ({
+    year:currentYear, item_id:entry.input.dataset.priceItem, amount:entry.amount,
+    updated_by:session.user.id, updated_at:new Date().toISOString()
+  }));
+  if (payloads.length) {
+    const { error } = await sb.from("fee_product_prices").upsert(payloads, { onConflict:"year,item_id" });
+    if (error) throw error;
+  }
+  for (const row of removing) {
+    const result = await sb.from("fee_product_prices").delete().eq("year", currentYear).eq("item_id", row.item_id).select("item_id");
+    if (result.error) throw result.error;
+    if (!result.data?.length) throw new Error("ล้างราคาสินค้าไม่สำเร็จ กรุณาตรวจสิทธิ์ admin");
+  }
+  toast(`บันทึกราคาสินค้า ${payloads.length} รายการแล้ว`);
+  await loadYearData();
+}
+
+function renderSubsidies() {
+  const values = new Map(subsidyRows.map(row => [row.grade_level, Number(row.amount)]));
+  el("subsidies-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>ระดับชั้น</th><th class="money">อัตราเงินอุดหนุน (บาท)</th></tr></thead><tbody>${GRADE_ORDER.map(grade => `<tr><td><b>${esc(grade)}</b></td><td><input type="number" min="0.01" step="0.01" inputmode="decimal" data-subsidy-grade="${esc(grade)}" aria-label="เงินอุดหนุน ${esc(grade)}" value="${values.has(grade) ? esc(values.get(grade)) : ""}" placeholder="ว่าง"></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+async function saveSubsidies() {
+  const parsed = parseMoneyInputs(el("subsidies-list"), "[data-subsidy-grade]", { positive:true });
+  const blanks = new Set(parsed.filter(entry => entry.amount == null).map(entry => entry.input.dataset.subsidyGrade));
+  const removing = await assertCanRemove(subsidyRows, blanks, row => row.grade_level);
+  const payloads = parsed.filter(entry => entry.amount != null).map(entry => ({
+    year:currentYear, grade_level:entry.input.dataset.subsidyGrade, amount:entry.amount,
+    announced_by:session.user.id, announced_at:new Date().toISOString(), updated_at:new Date().toISOString()
+  }));
+  if (payloads.length) {
+    const { error } = await sb.from("fee_subsidies").upsert(payloads, { onConflict:"year,grade_level" });
+    if (error) throw error;
+  }
+  for (const row of removing) {
+    const result = await sb.from("fee_subsidies").delete().eq("year", currentYear).eq("grade_level", row.grade_level).select("grade_level");
+    if (result.error) throw result.error;
+    if (!result.data?.length) throw new Error("ล้างเงินอุดหนุนไม่สำเร็จ กรุณาตรวจสิทธิ์ admin");
+  }
+  toast(`บันทึกอัตราเงินอุดหนุน ${payloads.length} ชั้นแล้ว · จำนวนที่เก็บเป็นบวก`);
+  await loadYearData();
+}
+
+function renderPromotions() {
+  if (!promotions.length) {
+    el("promotions-list").innerHTML = '<div class="empty">ยังไม่มีโปรโมชั่นในปีนี้</div>';
+    return;
+  }
+  el("promotions-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>ชื่อ</th><th class="money">จำนวน</th><th>เงื่อนไข</th><th>สถานะ</th><th>จัดการ</th></tr></thead><tbody>${promotions.map(promotion => `<tr><td><b>${esc(promotion.name)}</b></td><td class="money">${formatMoney(promotion.amount)}</td><td>${esc(promotion.condition_note || "—")}</td><td><span class="status ${promotion.active ? "" : "off"}">${promotion.active ? "เปิดใช้งาน" : "ปิดใช้งาน"}</span></td><td><div class="actions"><button class="ghost" type="button" data-edit-promotion="${promotion.id}">แก้</button><button class="${promotion.active ? "danger" : "ghost"}" type="button" data-toggle-promotion="${promotion.id}">${promotion.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button>${canAdmin ? `<button class="icon-btn" type="button" data-delete-promotion="${promotion.id}" aria-label="ลบ ${esc(promotion.name)}">🗑</button>` : ""}</div></td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function openPromotionForm(promotion = null) {
+  editingPromotionId = promotion?.id || null;
+  el("promotion-form-title").textContent = promotion ? `แก้โปรโมชั่น ${promotion.name}` : "เพิ่มโปรโมชั่น";
+  el("promotion-name").value = promotion?.name || "";
+  el("promotion-amount").value = promotion?.amount ?? "";
+  el("promotion-condition").value = promotion?.condition_note || "";
+  el("promotion-active").checked = promotion ? promotion.active : true;
+  el("promotion-form").hidden = false;
+  el("promotion-name").focus();
+}
+
+async function savePromotion(event) {
+  event.preventDefault();
+  const name = el("promotion-name").value.trim();
+  const amount = Number(el("promotion-amount").value);
+  if (!name) return toast("กรุณากรอกชื่อโปรโมชั่น", true);
+  if (!Number.isFinite(amount) || amount <= 0) return toast("จำนวนเงินโปรโมชั่นต้องมากกว่า 0 บาท และกรอกเป็นจำนวนบวก", true);
+  const payload = {
+    year:currentYear, name, amount:Math.round(amount * 100) / 100,
+    condition_note:el("promotion-condition").value.trim() || null,
+    active:el("promotion-active").checked, updated_at:new Date().toISOString()
+  };
+  const request = editingPromotionId
+    ? sb.from("fee_promotions").update(payload).eq("id", editingPromotionId)
+    : sb.from("fee_promotions").insert({ ...payload, created_by:session.user.id });
+  const { error } = await request;
+  if (error) return toast(friendlyError(error), true);
+  el("promotion-form").hidden = true;
+  toast(editingPromotionId ? "แก้โปรโมชั่นแล้ว" : "เพิ่มโปรโมชั่นแล้ว");
+  editingPromotionId = null;
+  await loadYearData();
+}
+
+async function togglePromotion(promotion) {
+  const action = promotion.active ? "ปิดใช้งาน" : "เปิดใช้งาน";
+  if (!await window.crsAskConfirm({ title:`${action}โปรโมชั่น`, message:`${promotion.name}\nจำนวน ${formatMoney(promotion.amount)} · ประวัติเดิมยังอยู่ครบ`, okLabel:action, danger:promotion.active })) return;
+  const { error } = await sb.from("fee_promotions").update({ active:!promotion.active, updated_at:new Date().toISOString() }).eq("id", promotion.id);
+  if (error) throw error;
+  toast(`${action}แล้ว`);
+  await loadYearData();
+}
+
+async function deletePromotion(promotion) {
+  if (!canAdmin || !await window.crsAskConfirm({
+    title:"ลบโปรโมชั่น", message:`${promotion.name}\n1 โปรโมชั่นจะหายจากปี ${currentYear} · การลบกู้คืนไม่ได้`,
+    requireText:promotion.name, okLabel:"ลบโปรโมชั่น", danger:true
+  })) return;
+  const { data, error } = await sb.from("fee_promotions").delete().eq("id", promotion.id).select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("ลบไม่สำเร็จ กรุณาตรวจสิทธิ์ admin");
+  toast("ลบโปรโมชั่นแล้ว");
+  await loadYearData();
+}
+
+async function loadItems() {
+  const { data, error } = await sb.from("fee_items").select("id,category,group_name,variant_label,display_name,unit,track_stock,active,sort_order,created_at,updated_at").order("sort_order").order("display_name");
+  if (error) throw new Error("โหลดรายการค่าใช้จ่ายไม่สำเร็จ: " + error.message);
+  items = data || [];
+  renderItems();
+}
+
+async function loadYearData() {
+  if (!currentYear) return;
+  const [ratesRes, pricesRes, subsidiesRes, promotionsRes] = await Promise.all([
+    sb.from("fee_admin_rates").select("year,term,grade_level,item_id,amount").eq("year", currentYear),
+    sb.from("fee_product_prices").select("year,item_id,amount").eq("year", currentYear),
+    sb.from("fee_subsidies").select("year,grade_level,amount,note").eq("year", currentYear),
+    sb.from("fee_promotions").select("id,year,name,amount,condition_note,active,created_at,updated_at").eq("year", currentYear).order("name")
+  ]);
+  for (const [label, result] of [["อัตราค่าบริหาร", ratesRes], ["ราคาสินค้า", pricesRes], ["เงินอุดหนุน", subsidiesRes], ["โปรโมชั่น", promotionsRes]]) {
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+  }
+  rateRows = ratesRes.data || [];
+  priceRows = pricesRes.data || [];
+  subsidyRows = subsidiesRes.data || [];
+  promotions = promotionsRes.data || [];
+  renderRates();
+  renderPrices();
+  renderSubsidies();
+  renderPromotions();
+}
+
+document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => setTab(button.dataset.tab)));
+el("item-category").addEventListener("change", syncItemStock);
+el("add-item").addEventListener("click", () => openItemForm());
+el("cancel-item").addEventListener("click", () => { editingItemId = null; el("item-form").hidden = true; });
+el("item-form").addEventListener("submit", event => saveItem(event).catch(error => toast(friendlyError(error), true)));
+el("add-many-items").addEventListener("click", () => { el("item-form").hidden = true; el("many-form").hidden = false; el("many-group").focus(); });
+el("cancel-many").addEventListener("click", () => { el("many-form").hidden = true; });
+el("many-form").addEventListener("submit", event => saveManyItems(event).catch(error => toast(friendlyError(error), true)));
+el("items-list").addEventListener("click", event => {
+  const edit = event.target.closest("[data-edit-item]");
+  const toggle = event.target.closest("[data-toggle-item]");
+  const remove = event.target.closest("[data-delete-item]");
+  if (edit) openItemForm(items.find(item => item.id === edit.dataset.editItem));
+  if (toggle) toggleItem(items.find(item => item.id === toggle.dataset.toggleItem)).catch(error => toast(friendlyError(error), true));
+  if (remove) deleteItem(items.find(item => item.id === remove.dataset.deleteItem)).catch(error => toast(friendlyError(error), true));
+});
+el("term-select").addEventListener("change", () => renderRates());
+el("fill-column").addEventListener("click", fillColumn);
+el("copy-term").addEventListener("click", copyTermOne);
+el("save-rates").addEventListener("click", () => saveRates().catch(error => toast(friendlyError(error), true)));
+el("copy-prices").addEventListener("click", () => copyPreviousPrices().catch(error => toast(friendlyError(error), true)));
+el("save-prices").addEventListener("click", () => savePrices().catch(error => toast(friendlyError(error), true)));
+el("save-subsidies").addEventListener("click", () => saveSubsidies().catch(error => toast(friendlyError(error), true)));
+el("add-promotion").addEventListener("click", () => openPromotionForm());
+el("cancel-promotion").addEventListener("click", () => { editingPromotionId = null; el("promotion-form").hidden = true; });
+el("promotion-form").addEventListener("submit", event => savePromotion(event).catch(error => toast(friendlyError(error), true)));
+el("promotions-list").addEventListener("click", event => {
+  const edit = event.target.closest("[data-edit-promotion]");
+  const toggle = event.target.closest("[data-toggle-promotion]");
+  const remove = event.target.closest("[data-delete-promotion]");
+  if (edit) openPromotionForm(promotions.find(item => item.id === edit.dataset.editPromotion));
+  if (toggle) togglePromotion(promotions.find(item => item.id === toggle.dataset.togglePromotion)).catch(error => toast(friendlyError(error), true));
+  if (remove) deletePromotion(promotions.find(item => item.id === remove.dataset.deletePromotion)).catch(error => toast(friendlyError(error), true));
+});
+el("year-select").addEventListener("change", async () => {
+  currentYear = el("year-select").value;
+  el("promotion-form").hidden = true;
+  try { await loadYearData(); }
+  catch (error) { toast(friendlyError(error), true); }
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    if (!canFinance) {
+      el("access-card").hidden = false;
+      el("access-card").innerHTML = '<div class="readonly"><b>เปิดหน้าตั้งค่าค่าใช้จ่ายไม่ได้</b><br>หน้านี้สำหรับฝ่ายการเงินและผู้ดูแลระบบเท่านั้น กรุณาให้ผู้ดูแลตรวจสิทธิ์ฝ่ายการเงินของบัญชีคุณ</div>';
+    } else {
+      const profileRes = await sb.from("profiles").select("role").eq("id", session.user.id).maybeSingle();
+      canAdmin = profileRes.data?.role === "admin";
+      years = await getAcademicYears();
+      if (!years.length) throw new Error("ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน");
+      currentYear = academicYearOf(today, years);
+      if (!currentYear) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้ กรุณาตรวจวันเริ่มปีการศึกษา");
+      el("year-select").innerHTML = [...years].sort((a, b) => String(b.year).localeCompare(String(a.year), "th", { numeric:true })).map(row => `<option value="${esc(row.year)}">${esc(row.year)}</option>`).join("");
+      el("year-select").value = currentYear;
+      el("year-select").disabled = false;
+      el("settings-app").hidden = false;
+      await loadItems();
+      await loadYearData();
+    }
+  } catch (error) {
+    el("access-card").hidden = false;
+    el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าตั้งค่าค่าใช้จ่ายไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+    toast(friendlyError(error), true);
+  }
+}
+</script>
+</body>
+</html>

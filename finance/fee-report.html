@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>รายงานค่าใช้จ่ายนักเรียน — CRS MIS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+:root{
+  --ink:#1f2a2e;
+  --muted:#5f6b70;
+  --line:#dfe4e3;
+  --teal:#0f6e56;
+  --teal-soft:#e1f5ee;
+  --bg:#f7f8f7;
+  --white:#fff;
+  --danger:#a32d2d;
+  --danger-soft:#fceaea;
+  --amber:#93690f;
+  --amber-soft:#faf1dd
+}
+*{
+  box-sizing:border-box
+}
+html,body{
+  max-width:100%;
+  overflow-x:hidden
+}
+body{
+  margin:0;
+  padding:16px;
+  color:var(--ink);
+  background:var(--bg);
+  font-family:"Sarabun",sans-serif;
+  font-size:16px;
+  line-height:1.6
+}
+.wrap{
+  max-width:1040px;
+  margin:auto
+}
+header h1{
+  margin:4px 0;
+  font-size:22px
+}
+header p{
+  margin:0 0 8px;
+  color:var(--muted);
+  font-size:14px
+}
+header .nav{
+  min-height:54px
+}
+.card{
+  margin-bottom:16px;
+  padding:16px;
+  overflow:hidden;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#fff
+}
+.controls{
+  display:grid;
+  grid-template-columns:minmax(180px,1fr) minmax(220px,1.4fr);
+  gap:14px;
+  align-items:end
+}
+.field label{
+  display:block;
+  margin-bottom:6px;
+  font-weight:600
+}
+select{
+  width:100%;
+  min-height:44px;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#fff;
+  color:var(--ink);
+  font:inherit;
+  font-size:16px
+}
+.check{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:44px
+}
+.check input{
+  width:22px;
+  height:22px;
+  accent-color:var(--teal)
+}
+.section-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  margin-bottom:12px
+}
+.section-head h2{
+  margin:0;
+  font-size:19px
+}
+.section-head p,.meta,.hint{
+  margin:2px 0 0;
+  color:var(--muted);
+  font-size:14px
+}
+.stats{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px
+}
+.stat{
+  padding:13px;
+  border-radius:10px;
+  background:var(--teal-soft)
+}
+.stat span{
+  display:block;
+  color:var(--muted);
+  font-size:13px
+}
+.stat b{
+  display:block;
+  color:var(--teal);
+  font-size:20px
+}
+.table-wrap{
+  max-width:100%;
+  overflow-x:auto;
+  border:1px solid var(--line);
+  border-radius:10px
+}
+table{
+  width:100%;
+  min-width:760px;
+  border-collapse:collapse
+}
+th,td{
+  padding:10px 12px;
+  border-bottom:1px solid var(--line);
+  text-align:left;
+  vertical-align:top
+}
+th{
+  background:var(--bg);
+  color:var(--muted);
+  font-size:13px;
+  white-space:nowrap
+}
+tr[data-room],tr[data-student]{
+  cursor:pointer
+}
+tr[data-room]:hover,tr[data-student]:hover{
+  background:var(--teal-soft)
+}
+.money{
+  text-align:right;
+  white-space:nowrap
+}
+.negative{
+  color:var(--teal)
+}
+.due{
+  color:var(--danger);
+  font-weight:700
+}
+.zero{
+  color:var(--muted)
+}
+button{
+  min-height:44px;
+  padding:9px 14px;
+  border:0;
+  border-radius:9px;
+  color:var(--teal);
+  background:var(--teal-soft);
+  font:inherit;
+  font-weight:600;
+  cursor:pointer
+}
+.breadcrumb{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+  margin-bottom:12px
+}
+.banner,.readonly{
+  margin-bottom:14px;
+  padding:12px 14px;
+  border-radius:10px;
+  color:var(--amber);
+  background:var(--amber-soft)
+}
+.banner.bad,.readonly{
+  color:var(--danger);
+  background:var(--danger-soft)
+}
+.empty{
+  padding:22px 8px;
+  text-align:center;
+  color:var(--muted)
+}
+[hidden]{
+  display:none!important
+}
+@media(max-width:760px){
+  .stats{
+    grid-template-columns:1fr 1fr
+  }
+}
+@media(max-width:560px){
+  .controls{
+    grid-template-columns:1fr
+  }
+  .section-head{
+    flex-direction:column;
+    align-items:stretch
+  }
+  .stats{
+    grid-template-columns:1fr 1fr
+  }
+}
+</style><link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>รายงานค่าใช้จ่ายนักเรียน</h1>
+        <p>ดูยอดตั้งหนี้ ส่วนลด และยอดค้างจากระดับห้องถึงรายการของนักเรียน</p>
+        <div class="nav">
+        </div>
+        <script src="../app-shell.js?v=20260830-2">
+        </script>
+      </header>
+      <main class="academic-content">
+        <section id="access-card" class="card" hidden>
+        </section>
+        <div id="report" hidden>
+          <section class="card">
+            <div class="controls">
+              <div class="field">
+                <label for="year">ปีการศึกษาปัจจุบัน</label>
+                <select id="year" disabled>
+                </select>
+              </div>
+              <label class="check">
+                <input id="current-only" type="checkbox"> แสดงเฉพาะรายการของปีที่เลือก</label>
+              </div>
+              <div id="load-time" class="hint">
+              </div>
+            </section>
+            <section id="overview" class="card">
+              <div class="section-head">
+                <div>
+                  <h2 id="overview-title">ภาพรวมทุกห้อง</h2>
+                  <p id="overview-note">ยอดค้างเริ่มต้นแสดงทุกปี หนี้จึงไม่หายเมื่อเปลี่ยนปีการศึกษา</p>
+                </div>
+              </div>
+              <div id="stats" class="stats">
+              </div>
+            </section>
+            <section class="card">
+              <div class="breadcrumb">
+                <button id="back-rooms" hidden>← ทุกห้อง</button>
+                <button id="back-students" hidden>← รายชื่อนักเรียน</button>
+                <b id="level-title">รายห้อง</b>
+              </div>
+              <div id="room-view">
+              </div>
+              <div id="student-view" hidden>
+              </div>
+              <div id="line-view" hidden>
+              </div>
+            </section>
+            <section id="departed-card" class="card" hidden>
+              <div class="section-head">
+                <div>
+                  <h2>นักเรียนที่ออกแล้วยังค้าง</h2>
+                  <p>แสดงจากสถานะนักเรียนโดยตรง ไม่ใช้ active placement เพื่อไม่ทำหนี้หาย</p>
+                </div>
+              </div>
+              <div id="departed-list">
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+<script type="module">
+import {
+  sb,
+  requireAuth,
+  signOut,
+  checkDepartment,
+  applyRestrictedMenuAccess,
+  financeMenuKeepHrefs,
+  getAcademicYears,
+  academicYearOf,
+  bangkokNow,
+  toDateStr,
+  getStudentPlacements,
+  activePlacements,
+  summarizeFeeByRoom,
+  computeFeeOutstanding,
+  chargeLineRemaining,
+  formatMoney,
+  fetchAllRows
+} from "../supabase-client.js?v=20260830-2";
+
+const el=id=>document.getElementById(id);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({
+  "&":"&amp;",
+  "<":"&lt;",
+  ">":"&gt;",
+  '"':"&quot;",
+  "'":"&#39;"
+})[c]);
+const money=n=>formatMoney(n,{minimumFractionDigits:2});
+const roomKey=p=>`${p.grade_level}\u0000${p.classroom}`;
+
+function roomLabel(room){
+  const grade=String(room?.grade_level||"");
+  const classroom=String(room?.classroom||"");
+  return classroom.startsWith(`${grade}/`)?classroom:`${grade}/${classroom}`
+}
+
+let currentYear="",placements=[],charges=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudent=null,canFinance=false;
+
+function filterCharges(rows,year,onlyCurrent){
+  return(rows||[]).filter(row=>!row.voided_at&&(!onlyCurrent||row.year===year))
+}
+
+function renderRoomReport(roomRows){
+  return roomRows.length
+    ?`<div class="table-wrap">
+      <table>
+        <thead><tr><th>ห้อง</th><th class="money">เรียกเก็บ</th><th class="money">ลด/อุดหนุน</th><th class="money">ชำระแล้ว</th><th class="money">ค้างชำระ</th></tr></thead>
+        <tbody>${roomRows.map((r,i)=>`
+          <tr data-room="${i}"><td><b>${esc(roomLabel(r))} · ${r.students.length} คน</b><span class="meta">ปี ${esc(r.year)}</span></td><td class="money">${money(r.charged)}</td><td class="money negative">−${money(r.credited)}</td><td class="money">${money(r.paid)}</td><td class="money ${r.outstanding>0?"due":"zero"}">${money(r.outstanding)}</td></tr>
+        `).join("")}</tbody>
+      </table>
+    </div>`
+    :'<div class="empty">ยังไม่มีห้องที่คุณมีสิทธิ์ดูในปีนี้</div>'
+}
+
+function studentName(student){
+  return student?.placement?.student?.name||"ไม่พบชื่อ"
+}
+
+function renderStudents(room){
+  return room.students.length
+    ?`<div class="table-wrap">
+      <table>
+        <thead><tr><th>นักเรียน</th><th class="money">เรียกเก็บ</th><th class="money">ลด/อุดหนุน</th><th class="money">ค้างชำระ</th></tr></thead>
+        <tbody>${room.students.map((s,i)=>`
+          <tr data-student="${i}"><td><b>${esc(studentName(s))}</b><span class="meta">เลขที่ ${esc(s.placement.student?.student_no||"—")}</span></td><td class="money">${money(s.charged)}</td><td class="money negative">−${money(s.credited)}</td><td class="money ${s.outstanding>0?"due":"zero"}">${money(s.outstanding)}</td></tr>
+        `).join("")}</tbody>
+      </table>
+    </div>`
+    :'<div class="empty">ไม่มีนักเรียนในห้องนี้</div>'
+}
+
+function renderLines(student){
+  const rows=student.charges.filter(c=>!c.voided_at);
+  const total=computeFeeOutstanding(rows,[]);
+  return`<div class="section-head"><div><h2>${esc(studentName(student))}</h2><p>${esc(roomLabel(student.placement))} · รวมรายการด้านล่างต้องเท่ากับยอดค้าง</p></div><b class="${total.outstanding>0?"due":"zero"}">${money(total.outstanding)}</b></div>${rows.length?`
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>วันที่ / รายการ</th><th>ปี / ภาคเรียน</th><th>ชนิด</th><th class="money">ยอดคงเหลือรายการ</th></tr></thead>
+        <tbody>${rows.map(c=>`
+          <tr><td><b>${esc(c.description)}</b><span class="meta">${esc(c.charge_date||"")}${c.note?` · ${esc(c.note)}`:""}</span></td><td>${esc(c.year)}${c.term?` / ${esc(c.term)}`:""}</td><td>${esc(c.kind)}</td><td class="money ${Number(c.amount)<0?"negative":""}">${money(chargeLineRemaining(c,[]))}</td></tr>
+        `).join("")}</tbody>
+      </table>
+    </div>
+  `:'<div class="empty">นักเรียนคนนี้ยังไม่มีรายการ</div>'}`
+}
+
+function syncViews(level="rooms"){
+  el("room-view").hidden=level!=="rooms";
+  el("student-view").hidden=level!=="students";
+  el("line-view").hidden=level!=="lines";
+  el("back-rooms").hidden=level==="rooms";
+  el("back-students").hidden=level!=="lines";
+  el("level-title").textContent=level==="rooms"?"รายห้อง":level==="students"?roomLabel(selectedRoom):studentName(selectedStudent)
+}
+
+// เหตุผล: เด็กจบหรือย้ายออกไม่มี active placement แล้ว จึงต้องสรุปจากรายการหนี้โดยตรงเพื่อไม่ให้ยอดค้างหาย
+function renderDeparted(){
+  if(!canFinance){
+    el("departed-card").hidden=true;
+    return
+  }
+  const byStudent=new Map();
+  for(const c of visibleCharges){
+    const s=c.student;
+    if(!s?.graduated&&!s?.left_school)continue;
+    if(!byStudent.has(c.student_id))byStudent.set(c.student_id,{student:s,charges:[]});
+    byStudent.get(c.student_id).charges.push(c)
+  }
+  const rows=[...byStudent.values()]
+    .map(x=>({...x,...computeFeeOutstanding(x.charges,[])}))
+    .filter(x=>x.outstanding!==0);
+  el("departed-card").hidden=!rows.length;
+  el("departed-list").innerHTML=rows.length
+    ?`<div class="table-wrap">
+      <table>
+        <thead><tr><th>นักเรียน</th><th>สถานะ</th><th class="money">ค้างชำระ</th></tr></thead>
+        <tbody>${rows.map(x=>`
+          <tr><td>${esc(x.student.name)}</td><td>${x.student.left_school?"ย้ายออก/เลิกเรียน":"จบการศึกษา"}</td><td class="money due">${money(x.outstanding)}</td></tr>
+        `).join("")}</tbody>
+      </table>
+    </div>`
+    :""
+}
+
+function render(){
+  visibleCharges=filterCharges(charges,currentYear,el("current-only").checked);
+  rooms=summarizeFeeByRoom(visibleCharges,placements,[]);
+  const total=computeFeeOutstanding(visibleCharges.filter(c=>placements.some(p=>p.student_id===c.student_id)),[]);
+  // เหตุผล: amount ของส่วนลดและเงินอุดหนุนติดลบจาก generated column แล้ว จึงรวมตรง ๆ โดยไม่กลับเครื่องหมาย
+  el("stats").innerHTML=`<div class="stat"><span>เรียกเก็บ</span><b>${money(total.charged)}</b></div><div class="stat"><span>ลด/อุดหนุน</span><b>${money(total.credited)}</b></div><div class="stat"><span>ชำระแล้ว</span><b>${money(total.paid)}</b></div><div class="stat"><span>ค้างชำระ</span><b>${money(total.outstanding)}</b></div>`;
+  el("room-view").innerHTML=renderRoomReport(rooms);
+  selectedRoom=null;
+  selectedStudent=null;
+  syncViews();
+  renderDeparted()
+}
+
+async function load(){
+  const started=performance.now();
+  const [placementRes,chargeRes]=await Promise.all([
+    getStudentPlacements(currentYear),
+    fetchAllRows(()=>sb.from("student_charges").select("*,student:student_id(id,student_no,name,graduated,left_school)"),["student_id","charge_date","id"])
+  ]);
+  if(placementRes.error)throw new Error("โหลดทะเบียนไม่สำเร็จ: "+placementRes.error.message);
+  if(chargeRes.error)throw new Error("โหลดค่าใช้จ่ายไม่สำเร็จ: "+chargeRes.error.message);
+  const returned=chargeRes.data||[],readableIds=new Set(returned.map(c=>c.student_id));
+  // เหตุผล: RLS คืน student_charges เฉพาะเด็กที่ครูอ่านได้ จึงใช้ readableIds จำกัดทะเบียนให้ตรงกับสิทธิ์นั้น
+  placements=activePlacements(placementRes.data||[]).filter(p=>canFinance||readableIds.has(p.student_id));
+  const ids=new Set(placements.map(p=>p.student_id));
+  charges=returned.filter(c=>ids.has(c.student_id)||canFinance&&(c.student?.graduated||c.student?.left_school));
+  render();
+  const elapsed=performance.now()-started;
+  el("load-time").textContent=`โหลดรายงาน ${Math.round(elapsed)} มิลลิวินาที`;
+  console.info(`[fee-report] whole-room ${Math.round(elapsed)}ms`);
+  if(elapsed>2000)el("load-time").textContent+= " · ช้ากว่าเป้าหมาย 2 วินาที กรุณาหยุดและรายงานผู้ดูแล"
+}
+
+el("room-view").onclick=e=>{
+  const tr=e.target.closest("[data-room]");
+  if(!tr)return;
+  selectedRoom=rooms[Number(tr.dataset.room)];
+  el("student-view").innerHTML=renderStudents(selectedRoom);
+  syncViews("students")
+};
+
+el("student-view").onclick=e=>{
+  const tr=e.target.closest("[data-student]");
+  if(!tr)return;
+  selectedStudent=selectedRoom.students[Number(tr.dataset.student)];
+  el("line-view").innerHTML=renderLines(selectedStudent);
+  syncViews("lines")
+};
+
+el("back-rooms").onclick=()=>syncViews("rooms");
+el("back-students").onclick=()=>syncViews("students");
+el("current-only").onchange=render;
+
+const session=await requireAuth();
+if(session){
+  el("btn-signout")?.addEventListener("click",e=>{
+    e.preventDefault();
+    signOut()
+  });
+  try{
+    canFinance=await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    if(!canFinance){
+      el("overview-title").textContent="ห้องของคุณ";
+      el("overview-note").textContent="ฐานข้อมูลและสิทธิ์รายห้องเป็นผู้กำหนดรายการที่เห็น"
+    }
+    const years=await getAcademicYears(),today=toDateStr(bangkokNow());
+    currentYear=academicYearOf(today,years);
+    if(!currentYear)throw new Error("ยังไม่พบปีการศึกษาปัจจุบัน");
+    el("year").innerHTML=[...years]
+      .sort((a,b)=>String(b.year).localeCompare(String(a.year),"th",{numeric:true}))
+      .map(y=>`<option>${esc(y.year)}</option>`)
+      .join("");
+    el("year").value=currentYear;
+    el("year").disabled=false;
+    el("report").hidden=false;
+    await load()
+  }catch(e){
+    el("access-card").hidden=false;
+    el("access-card").innerHTML=`<div class="banner bad"><b>เปิดรายงานไม่สำเร็จ</b><br>${esc(e.message)}</div>`
+  }
+}
+
+el("year").onchange=async()=>{
+  currentYear=el("year").value;
+  try{
+    await load()
+  }catch(e){
+    el("access-card").hidden=false;
+    el("access-card").innerHTML=`<div class="banner bad">${esc(e.message)}</div>`
+  }
+};
+</script></body>
+    </html>

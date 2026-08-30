@@ -146,7 +146,7 @@ export async function isHomeroomTeacherNow(userId) {
 // ⛔ ห้ามใส่หน้าที่ถือเงินสด/ภาพรวมทั้งโรงเรียน (savings-payout · savings-remit ·
 //    savings-opening · transport-remit) เด็ดขาด
 export const HOMEROOM_FINANCE_LINKS = [
-  "transport-settings.html", "savings-report.html", "transport-report.html"
+  "transport-settings.html", "savings-report.html", "transport-report.html", "fee-report.html"
 ];
 
 export async function financeMenuKeepHrefs(canFinance, userId) {
@@ -753,6 +753,80 @@ export function computeTransportOutstanding(charges, payments) {
     return Number.isFinite(amount) ? sum + amount : sum;
   }, 0);
   return (Number(charges?.total) || 0) - paid;
+}
+
+// ---------- ค่าใช้จ่ายนักเรียน ----------
+// amount ของส่วนลด/เงินอุดหนุนเป็นลบจาก generated column ในฐานอยู่แล้ว
+// ฟังก์ชันชุดนี้จึงรวม amount ตรง ๆ และไม่กลับเครื่องหมายซ้ำ
+export function computeStockBalance(moves) {
+  return (Array.isArray(moves) ? moves : []).reduce((sum, move) => {
+    const qty = Number(move?.qty);
+    return Number.isFinite(qty) ? sum + qty : sum;
+  }, 0);
+}
+
+export function computeFeeOutstanding(charges, payments = []) {
+  const active = (Array.isArray(charges) ? charges : []).filter(charge => !charge?.voided_at);
+  const charged = active.reduce((sum, charge) => {
+    const amount = Number(charge?.amount);
+    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
+  }, 0);
+  const credited = active.reduce((sum, charge) => {
+    const amount = Number(charge?.amount);
+    return Number.isFinite(amount) && amount < 0 ? sum + Math.abs(amount) : sum;
+  }, 0);
+  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+    if (payment?.voided_at) return sum;
+    const amount = Number(payment?.amount);
+    return Number.isFinite(amount) ? sum + amount : sum;
+  }, 0);
+  return { charged, credited, paid, outstanding:charged - credited - paid };
+}
+
+export function chargeLineRemaining(charge, payments = []) {
+  if (!charge || charge.voided_at) return 0;
+  const amount = Number(charge.amount);
+  if (!Number.isFinite(amount)) return 0;
+  if (amount < 0) return amount;
+  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+    if (payment?.voided_at || payment?.charge_id !== charge.id) return sum;
+    const value = Number(payment.amount);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+  return amount - paid;
+}
+
+export function summarizeFeeByRoom(charges, placements, payments = []) {
+  const chargesByStudent = new Map();
+  for (const charge of (Array.isArray(charges) ? charges : [])) {
+    if (charge?.voided_at || !charge?.student_id) continue;
+    if (!chargesByStudent.has(charge.student_id)) chargesByStudent.set(charge.student_id, []);
+    chargesByStudent.get(charge.student_id).push(charge);
+  }
+  const roomMap = new Map();
+  for (const placement of (Array.isArray(placements) ? placements : [])) {
+    if (!placement?.student_id || !placement?.grade_level || !placement?.classroom) continue;
+    const key = [placement.year || "", placement.grade_level, placement.classroom].join("\u0000");
+    if (!roomMap.has(key)) roomMap.set(key, {
+      year:placement.year || "", grade_level:placement.grade_level, classroom:placement.classroom,
+      students:[], charged:0, credited:0, paid:0, outstanding:0
+    });
+    const studentCharges = chargesByStudent.get(placement.student_id) || [];
+    const studentPayments = (Array.isArray(payments) ? payments : []).filter(payment => payment?.student_id === placement.student_id);
+    const summary = computeFeeOutstanding(studentCharges, studentPayments);
+    const room = roomMap.get(key);
+    room.students.push({ placement, charges:studentCharges, ...summary });
+    room.charged += summary.charged;
+    room.credited += summary.credited;
+    room.paid += summary.paid;
+    room.outstanding += summary.outstanding;
+  }
+  return [...roomMap.values()].sort((a, b) => {
+    const yearDiff = String(b.year).localeCompare(String(a.year), "th", { numeric:true });
+    if (yearDiff) return yearDiff;
+    const gradeDiff = GRADE_ORDER.indexOf(a.grade_level) - GRADE_ORDER.indexOf(b.grade_level);
+    return gradeDiff || String(a.classroom).localeCompare(String(b.classroom), "th", { numeric:true });
+  });
 }
 
 // ยอดที่เบิกได้จริง = ยอดคงเหลือ − คำขอที่ยังรอจ่าย
