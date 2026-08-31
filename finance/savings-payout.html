@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>จ่ายเงินออมทรัพย์ — CRS MIS</title>
+<title>จ่ายเงินคืนนักเรียน — CRS MIS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -42,6 +42,13 @@
   .queue-list { border-top:1px solid var(--line); }
   .queue-row { display:grid; grid-template-columns:minmax(180px,1.35fr) minmax(130px,.8fr) minmax(120px,.75fr) minmax(180px,1fr); gap:14px; align-items:start; padding:15px 0; border-bottom:1px solid var(--line); }
   .queue-row:last-child { border-bottom:0; }
+  .departed-row { display:grid; grid-template-columns:minmax(170px,1fr) minmax(230px,1fr) minmax(230px,1fr); gap:14px; align-items:start; padding:15px 0; border-bottom:1px solid var(--line); }
+  .departed-row:last-child { border-bottom:0; }
+  .account-box { min-width:0; padding:10px; border-radius:10px; background:var(--bg); }
+  .account-box .head { font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:6px; }
+  .account-box .amount { display:block; color:var(--teal); font-size:17px; font-weight:700; }
+  .account-box .amount.none { color:var(--muted); font-size:14px; font-weight:600; }
+  .account-box input[type="text"] { margin:8px 0 9px; }
   .student-name { min-width:0; font-weight:700; overflow-wrap:anywhere; }
   .meta, .hint { display:block; color:var(--muted); font-size:13px; font-weight:400; }
   .money b { display:block; color:var(--teal); font-size:17px; }
@@ -58,10 +65,11 @@
   [hidden] { display:none !important; }
   @media (max-width:820px) {
     .queue-row { grid-template-columns:minmax(0,1fr) 1fr; }
+    .departed-row { grid-template-columns:1fr; }
     .payout-box { grid-column:1/-1; }
   }
   @media (max-width:560px) {
-    .summary-grid, .filters, .queue-row { grid-template-columns:1fr; }
+    .summary-grid, .filters, .queue-row, .departed-row { grid-template-columns:1fr; }
     .payout-box { grid-column:auto; }
   }
 </style>
@@ -70,10 +78,10 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>จ่ายเงินออมทรัพย์</h1>
+    <h1>จ่ายเงินคืนนักเรียน</h1>
     <p>ฝ่ายการเงินตรวจคิว ยืนยันผู้รับ และจ่ายเงินออกจากสมุดออมทรัพย์</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260831-1"></script>
+    <script src="../app-shell.js?v=20260831-2"></script>
   </header>
 
   <main class="academic-content">
@@ -101,8 +109,8 @@
         <div id="queue-list" class="queue-list"><div class="empty">กำลังโหลด…</div></div>
       </section>
       <section id="departed-card" class="card">
-        <div class="section">นักเรียนที่ออกแล้วยังมียอดคงเหลือ</div>
-        <div class="hint">รวมยอดออมทรัพย์ทุกปี · ต้องคืนเต็มยอดและบันทึกชื่อผู้รับก่อนปิดบัญชี</div>
+        <div class="section">นักเรียนที่ออกแล้วยังมีเงินค้าง</div>
+        <div class="hint">เด็กที่ออกไปแล้วอาจมีเงิน 2 บัญชี · <b>คืนแยกกันทีละบัญชี</b> ต้องคืนเต็มยอดและบันทึกชื่อผู้รับทุกครั้ง · รวมทุกปีการศึกษา</div>
         <div id="departed-list" class="queue-list"><div class="empty">กำลังโหลด…</div></div>
       </section>
     </div>
@@ -113,7 +121,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, bangkokNow, toDateStr,
-  fetchAllRows, summarizeSavingsByStudent, formatMoney
+  fetchAllRows, summarizeSavingsByStudent, computeScholarshipBalance, formatMoney
 } from "../supabase-client.js?v=20260831-1";
 
 const el = id => document.getElementById(id);
@@ -146,6 +154,9 @@ let session = null;
 let queue = [];
 let balanceByStudent = new Map();
 let departedAccounts = [];
+// สถานะที่คืนเงิน 'ทุน' ได้ — เงื่อนไขของผู้ให้ทุน ไม่ใช่กติกาของสมุดออมทรัพย์
+// ⛔ ห้ามเอาชุดนี้ไปใช้กับการคืนเงินออมทรัพย์ เงินในสมุดเป็นของเด็กเอง ไม่มีเงื่อนไขผูก
+const SCHOLARSHIP_PAYOUT_STATUSES = ["จบการศึกษา", "ย้ายสถานศึกษา", "ลาออกกลางคัน", "ถึงแก่กรรม"];
 const createdTxnByRequest = new Map();
 const withdrawalNote = request => `จ่ายตามคำขอเบิกวันที่ ${request.request_date}` +
   (request.payout_method === "โอน"
@@ -209,27 +220,59 @@ function renderQueue() {
   }).join("") || '<div class="empty">ไม่มีคำขอรอจ่ายตามตัวกรองนี้</div>';
 }
 
+// คืนเงินออมทรัพย์: เงินของเด็กเอง ไม่มีเงื่อนไขสถานะ
+// เหตุผลเดียวที่ปิดปุ่มได้คือมีคำขอเบิกรอจ่ายอยู่ (กันจ่ายซ้ำสองทาง)
+function savingsPayoutState(balance, pendingRequest) {
+  if (!(Number(balance) > 0)) return { enabled:false, note:"ไม่มียอดค้าง" };
+  if (pendingRequest) return { enabled:false, note:"มีคำขอเบิกรอจ่าย · ต้องจ่ายหรือยกเลิกคำขอนั้นก่อนปิดบัญชี" };
+  return { enabled:true, note:"พร้อมปิดบัญชี" };
+}
+
+// คืนเงินทุน: มีเงื่อนไขของผู้ให้ทุน — คืนได้เฉพาะตอนออกจากโรงเรียนจริง
+// 🪤 'ขาดเรียนนาน' คืนไม่ได้ เพราะยังตามตัวไม่เจอ (ฐานปฏิเสธด้วย)
+function scholarshipPayoutState(status, balance, closingRow) {
+  const value = Number(balance);
+  if (!(value > 0)) return { enabled:false, note:"ไม่มียอดค้าง" };
+  if (closingRow) return {
+    enabled:false,
+    note:`ปิดบัญชีทุนไปแล้วเมื่อ ${thaiDate(closingRow.txn_date)} แต่มีเงินกลับเข้ามาใหม่ · ต้องยกเลิกรายการปิดบัญชีเดิมก่อนจึงจะคืนใหม่ได้`
+  };
+  const current = status || "กำลังศึกษา";
+  if (!SCHOLARSHIP_PAYOUT_STATUSES.includes(current)) return {
+    enabled:false,
+    note:`ทุนคืนได้เฉพาะนักเรียนที่จบหรือย้ายออกแล้ว · สถานะตอนนี้คือ ${current}`
+  };
+  return { enabled:true, note:"พร้อมปิดบัญชีทุน" };
+}
+
 function renderDepartedAccounts() {
   el("departed-list").innerHTML = departedAccounts.map(row => {
     const student = row.student || {};
-    const pending = row.pendingRequest;
     const last = row.lastTxn || {};
-    const studentStatus = student.status || "กำลังศึกษา";
-    const statusDate = student.status_date ? ` · วันที่มีผล ${thaiDate(student.status_date)}` : "";
-    return `<div class="queue-row" data-departed-id="${esc(row.id)}">
+    const status = student.status || "กำลังศึกษา";
+    const sv = savingsPayoutState(row.balance, row.pendingRequest);
+    const sc = scholarshipPayoutState(status, row.scholarshipBalance, row.closingRow);
+    const box = (kind, title, balance, state, inputClass, buttonClass, buttonLabel) => `
+      <div class="account-box">
+        <div class="head">${esc(title)}</div>
+        ${Number(balance) > 0
+          ? `<span class="amount">${formatMoney(balance)}</span>`
+          : '<span class="amount none">ไม่มียอดค้าง</span>'}
+        <span class="meta">${esc(state.note)}</span>
+        ${state.enabled ? `
+        <label class="meta" for="${kind}-receiver-${esc(row.id)}">ชื่อผู้รับเงินคืน</label>
+        <input id="${kind}-receiver-${esc(row.id)}" class="${inputClass}" type="text" maxlength="200" autocomplete="name">
+        <button class="primary ${buttonClass}" type="button">${esc(buttonLabel)}</button>` : ""}
+      </div>`;
+    return `<div class="departed-row" data-departed-id="${esc(row.id)}">
       <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
-        <span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(studentStatus)}${esc(statusDate)}</span>
+        <span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(status)}${student.status_date ? ` · วันที่มีผล ${esc(thaiDate(student.status_date))}` : ""}</span>
         <span class="meta">ข้อมูลรายการล่าสุด: ${esc(last.year || "—")} · ${esc(last.grade_level || "—")} · ${esc(last.classroom || "—")}</span>
       </div>
-      <div class="money"><span class="meta">ยอดที่ต้องคืน</span><b>${formatMoney(row.balance)}</b></div>
-      <div>${pending ? '<span class="retry-note">มีคำขอเบิกรอจ่าย · ต้องจ่ายหรือยกเลิกคำขอนั้นก่อนปิดบัญชี</span>' : '<span class="meta">พร้อมปิดบัญชี</span>'}</div>
-      <div class="payout-box">
-        <label class="meta" for="close-receiver-${esc(row.id)}">ชื่อผู้รับเงินคืน</label>
-        <input id="close-receiver-${esc(row.id)}" class="close-receiver" type="text" maxlength="200" autocomplete="name"${pending ? " disabled" : ""}>
-        <button class="primary close-account-button" type="button"${pending ? " disabled" : ""}>ปิดบัญชีและจ่ายคืน</button>
-      </div>
+      ${box("close", "สมุดออมทรัพย์", row.balance, sv, "close-receiver", "close-account-button", "ปิดบัญชีและจ่ายคืน")}
+      ${box("sch", "บัญชีทุนการศึกษา", row.scholarshipBalance, sc, "close-scholarship-receiver", "close-scholarship-button", "ปิดบัญชีทุนและจ่ายคืน")}
     </div>`;
-  }).join("") || '<div class="empty">ไม่มีนักเรียนที่ออกแล้วและยังมียอดคงเหลือ</div>';
+  }).join("") || '<div class="empty">ไม่มีนักเรียนที่ออกแล้วและยังมีเงินค้าง</div>';
 }
 
 async function loadQueue() {
@@ -251,6 +294,19 @@ async function loadQueue() {
     if (txnRes.error) throw new Error("โหลดสมุดออมทรัพย์ไม่สำเร็จ: " + txnRes.error.message);
     const txnRows = txnRes.data || [];
     balanceByStudent = summarizeSavingsByStudent(txnRows);
+    // บัญชีทุนดึงเฉพาะเด็กที่ออกแล้ว — คิวรอจ่ายเป็นเรื่องของสมุดออมทรัพย์อย่างเดียว
+    const departedIds = departed.map(row => row.id);
+    let schByStudent = new Map();
+    if (departedIds.length) {
+      const schRes = await fetchAllRows(() => sb.from("scholarship_txns")
+        .select("id,student_id,year,grade_level,classroom,kind,amount,txn_date,created_at,voided_at")
+        .in("student_id", departedIds), ["student_id", "txn_date", "id"]);
+      if (schRes.error) throw new Error("โหลดบัญชีทุนการศึกษาไม่สำเร็จ: " + schRes.error.message);
+      for (const row of (schRes.data || [])) {
+        if (!schByStudent.has(row.student_id)) schByStudent.set(row.student_id, []);
+        schByStudent.get(row.student_id).push(row);
+      }
+    }
     const txnsByStudent = new Map();
     for (const txn of txnRows) {
       if (!txnsByStudent.has(txn.student_id)) txnsByStudent.set(txn.student_id, []);
@@ -259,12 +315,16 @@ async function loadQueue() {
     departedAccounts = departed.map(student => {
       const rows = txnsByStudent.get(student.id) || [];
       const lastTxn = [...rows].sort((a, b) => String(b.txn_date || "").localeCompare(String(a.txn_date || "")) || String(b.recorded_at || "").localeCompare(String(a.recorded_at || "")) || String(b.id).localeCompare(String(a.id)))[0] || null;
+      const schRows = schByStudent.get(student.id) || [];
       return {
-        id:student.id, student, lastTxn,
+        id:student.id, student, lastTxn, schRows,
         balance:balanceByStudent.get(student.id) || 0,
+        scholarshipBalance:computeScholarshipBalance(schRows),
+        // แถวปิดบัญชีทุนที่ยังไม่ถูกยกเลิก — ถ้ามีทั้งอันนี้และยอดคงเหลือ แปลว่ามีเงินไหลกลับเข้ามาทีหลัง
+        closingRow:schRows.find(txn => txn.kind === "คืนเงินคงเหลือ" && !txn.voided_at) || null,
         pendingRequest:queue.some(request => request.student_id === student.id)
       };
-    }).filter(row => row.balance > 0).sort((a, b) => String(a.student.student_no || "").localeCompare(String(b.student.student_no || ""), "th", { numeric:true }));
+    }).filter(row => row.balance > 0 || row.scholarshipBalance > 0).sort((a, b) => String(a.student.student_no || "").localeCompare(String(b.student.student_no || ""), "th", { numeric:true }));
     await Promise.all(queue.map(recoverOrphanTxn));
   } else {
     balanceByStudent = new Map();
@@ -362,7 +422,7 @@ el("queue-list").addEventListener("click", async event => {
 el("departed-list").addEventListener("click", async event => {
   const button = event.target.closest(".close-account-button");
   if (!button) return;
-  const rowEl = button.closest(".queue-row");
+  const rowEl = button.closest(".departed-row");
   const account = departedAccounts.find(row => row.id === rowEl?.dataset.departedId);
   if (!account) return toast("ไม่พบข้อมูลนักเรียน กรุณาโหลดหน้าใหม่", true);
   if (account.pendingRequest) return toast("ต้องจ่ายหรือยกเลิกคำขอเบิกที่รอจ่ายก่อนปิดบัญชี", true);
@@ -420,6 +480,76 @@ el("departed-list").addEventListener("click", async event => {
   catch (loadError) { toast(`ปิดบัญชีสำเร็จแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ · ${friendlyError(loadError)}`, true); }
 });
 
+// ---------- ปิดบัญชีทุนการศึกษา ----------
+// ⛔ แยกจากปุ่มออมทรัพย์โดยตั้งใจ — คนละบัญชี คนละกติกา คนละยอด
+//    ถ้ารวมเป็นปุ่มเดียวแล้วพลาดกลางทาง จะไม่รู้ว่าคืนอันไหนไปแล้ว
+el("departed-list").addEventListener("click", async event => {
+  const button = event.target.closest(".close-scholarship-button");
+  if (!button) return;
+  const rowEl = button.closest(".departed-row");
+  const account = departedAccounts.find(row => row.id === rowEl?.dataset.departedId);
+  if (!account) return toast("ไม่พบข้อมูลนักเรียน กรุณาโหลดหน้าใหม่", true);
+  const receiverName = rowEl.querySelector(".close-scholarship-receiver")?.value.trim() || "";
+  if (!receiverName) return toast("กรุณาระบุชื่อผู้รับเงินคืน", true);
+  button.disabled = true;
+  button.textContent = "กำลังตรวจข้อมูล…";
+  // 🪤 โหลดยอดล่าสุดใหม่ก่อนลงมือเสมอ กันสองคนกดพร้อมกันหรือหน้าค้างข้อมูลเก่า
+  const schRes = await fetchAllRows(() => sb.from("scholarship_txns")
+    .select("id,student_id,year,grade_level,classroom,kind,amount,txn_date,created_at,voided_at")
+    .eq("student_id", account.id), ["txn_date", "id"]);
+  if (schRes.error) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีทุนและจ่ายคืน";
+    return toast("ตรวจข้อมูลล่าสุดก่อนปิดบัญชีทุนไม่สำเร็จ: " + friendlyError(schRes.error), true);
+  }
+  const latestRows = schRes.data || [];
+  const currentBalance = computeScholarshipBalance(latestRows);
+  const closingRow = latestRows.find(txn => txn.kind === "คืนเงินคงเหลือ" && !txn.voided_at) || null;
+  const state = scholarshipPayoutState(account.student?.status, currentBalance, closingRow);
+  if (!state.enabled) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีทุนและจ่ายคืน";
+    toast(state.note, true);
+    try { await loadQueue(); } catch {}
+    return;
+  }
+  // เด็กออกไปแล้วอาจไม่มี placement ของปีปัจจุบัน ⟹ ใช้ปี/ชั้น/ห้องจากแถวทุนล่าสุด
+  const latestTxn = [...latestRows].filter(txn => !txn.voided_at)
+    .sort((a, b) => String(b.txn_date || "").localeCompare(String(a.txn_date || ""))
+      || String(b.created_at || "").localeCompare(String(a.created_at || ""))
+      || String(b.id).localeCompare(String(a.id)))[0] || null;
+  if (!latestTxn) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีทุนและจ่ายคืน";
+    return toast("ไม่พบปีและห้องจากรายการทุน กรุณาตรวจบัญชีทุนก่อน", true);
+  }
+  if (!await window.crsAskConfirm({
+    title:"ยืนยันปิดบัญชีทุนการศึกษา",
+    message:`${account.student?.name || "นักเรียน"}\nคืนเต็มยอด ${formatMoney(currentBalance)}\nผู้รับเงิน: ${receiverName}`,
+    okLabel:"ปิดบัญชีทุนและจ่ายคืน",
+    danger:false
+  })) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีทุนและจ่ายคืน";
+    return;
+  }
+  button.textContent = "กำลังปิดบัญชีทุน…";
+  // ⛔ ห้ามส่ง source_id — ฐานอนุญาตเฉพาะแถว 'รับทุน'
+  const { error } = await sb.from("scholarship_txns").insert({
+    student_id:account.id, year:latestTxn.year, grade_level:latestTxn.grade_level,
+    classroom:latestTxn.classroom, txn_date:today, kind:"คืนเงินคงเหลือ", amount:currentBalance,
+    note:`ปิดบัญชีทุน — ผู้รับเงิน: ${receiverName}`, created_by:session.user.id
+  });
+  if (error) {
+    button.disabled = false;
+    button.textContent = "ปิดบัญชีทุนและจ่ายคืน";
+    return toast(friendlyError(error), true);
+  }
+  toast(`ปิดบัญชีทุน ${account.student?.name || "นักเรียน"} และคืน ${formatMoney(currentBalance)} แล้ว`);
+  try { await loadQueue(); }
+  catch (loadError) { toast(`ปิดบัญชีทุนสำเร็จแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ · ${friendlyError(loadError)}`, true); }
+});
+
 session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
@@ -428,7 +558,7 @@ if (session) {
     applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
     if (!canFinance) {
       el("access-card").hidden = false;
-      el("access-card").innerHTML = '<div class="readonly"><b>คุณไม่มีสิทธิ์จ่ายเงินออมทรัพย์</b><br>หน้านี้ใช้สำหรับผู้ที่ได้รับสิทธิ์ฝ่ายการเงินเท่านั้น</div>';
+      el("access-card").innerHTML = '<div class="readonly"><b>คุณไม่มีสิทธิ์จ่ายเงินคืนนักเรียน</b><br>หน้านี้ใช้สำหรับผู้ที่ได้รับสิทธิ์ฝ่ายการเงินเท่านั้น</div>';
     } else {
       el("finance-content").hidden = false;
       await loadQueue();
