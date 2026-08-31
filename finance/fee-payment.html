@@ -117,7 +117,7 @@
           </div>
           <div class="field">
             <label for="method">ช่องทาง</label>
-            <select id="method"><option value="เงินสด">เงินสด</option><option value="โอน">โอน</option><option value="หักออมทรัพย์">หักออมทรัพย์</option></select>
+            <select id="method"><option value="เงินสด">เงินสด</option><option value="โอน">โอน</option><option value="หักออมทรัพย์">หักออมทรัพย์</option><option value="หักทุน">หักทุนการศึกษา</option></select>
           </div>
         </div>
         <div class="actions"><button id="auto-fill" class="ghost" type="button">เติมยอดเก่าสุดก่อน</button></div>
@@ -152,7 +152,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, getStudentPlacements,
   activePlacements, roomsFromPlacements, computeFeeOutstanding, chargeLineRemaining,
-  computeSavingsBalance, formatMoney, fetchAllRows, getStaffNamesByUser
+  computeSavingsBalance, computeScholarshipBalance, formatMoney, fetchAllRows, getStaffNamesByUser
 } from "../supabase-client.js?v=20260831-1";
 
 const el=id=>document.getElementById(id);
@@ -187,13 +187,17 @@ function paymentDraftError(received,allocations,outstanding){
   return""
 }
 
-function paymentFailureState(paymentSaved,savingsWritten,requestUncertain){
-  const blocked=Boolean(paymentSaved||savingsWritten||requestUncertain);
+function paymentFailureState(paymentSaved,savingsWritten,scholarshipWritten,requestUncertain){
+  const blocked=Boolean(paymentSaved||savingsWritten||scholarshipWritten||requestUncertain);
   const prefix=paymentSaved
     ?"รับเงินบันทึกแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่: "
-    :blocked
-      ?"ผลการบันทึกไม่แน่ชัดหรือบางขั้นอาจสำเร็จแล้ว · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน: "
-      :"รับเงินไม่สำเร็จ: ";
+    :scholarshipWritten
+      ?"ตัดทุนไปแล้วแต่ยังไม่ได้ผูกกับใบเสร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และให้ฝ่ายการเงินตรวจบัญชีทุนก่อน: "
+      :savingsWritten
+        ?"หักออมทรัพย์ไปแล้วแต่ยังไม่ได้ผูกกับใบเสร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจสมุดออมทรัพย์ก่อน: "
+        :requestUncertain
+          ?"ผลการบันทึกไม่แน่ชัด · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน: "
+          :"รับเงินไม่สำเร็จ: ";
   return{blocked,prefix}
 }
 
@@ -204,6 +208,8 @@ function roomLabel(room){
 
 function friendly(error){
   const message=error?.message||String(error||"");
+  const scholarshipInsufficient=message.match(/ยอดทุนคงเหลือไม่พอ\s*·?\s*คงเหลือ\s+([0-9.,]+)\s+บาท/);
+  if(scholarshipInsufficient)return`ยอดทุนไม่พอ (เหลือ ${money(scholarshipInsufficient[1])}) · ยังไม่มีการบันทึก`;
   const insufficient=message.match(/ยอดคงเหลือ\s+([0-9.,]+)\s+บาท\s+ไม่พอ/);
   if(insufficient)return`ยอดออมทรัพย์ไม่พอ (เหลือ ${money(insufficient[1])}) · ยังไม่มีการบันทึก`;
   if(message.includes("fee_payments_amount_positive"))return"จำนวนรับเงินต้องมากกว่า 0 บาท";
@@ -229,7 +235,7 @@ function renderPaymentHistory(rows,chargeRows,names,canVoid=true){
 }
 
 let session,currentYear="",placements=[],rooms=[],charges=[],roomPlacements=[];
-let receipt=null,payments=[],savingsTxns=[],saving=false,submissionBlocked=false,loadToken=0;
+let receipt=null,payments=[],savingsTxns=[],scholarshipTxns=[],saving=false,submissionBlocked=false,loadToken=0;
 let activeVoidPayment=null,voidBusy=false,voidBlocked=false;
 const profileNames=new Map();
 
@@ -266,9 +272,11 @@ function renderChargeList(){
 }
 
 function updateSavingsHint(){
-  const show=el("method").value==="หักออมทรัพย์";
+  const method=el("method").value;
+  const show=method==="หักออมทรัพย์"||method==="หักทุน";
   el("savings-hint").hidden=!show;
-  if(show)el("savings-hint").innerHTML=`ยอดคงเหลือในสมุด <b>${money(computeSavingsBalance(savingsTxns))}</b> · ฐานข้อมูลจะปฏิเสธและย้อนชุดหักทั้งหมดถ้ายอดไม่พอ`
+  if(method==="หักออมทรัพย์")el("savings-hint").innerHTML=`ยอดคงเหลือในสมุด <b>${money(computeSavingsBalance(savingsTxns))}</b> · ฐานข้อมูลจะปฏิเสธและย้อนชุดหักทั้งหมดถ้ายอดไม่พอ`;
+  if(method==="หักทุน")el("savings-hint").innerHTML=`ยอดทุนคงเหลือ <b>${money(computeScholarshipBalance(scholarshipTxns))}</b> · ถ้ายอดไม่พอ ระบบจะไม่ให้บันทึก`
 }
 
 function collectAllocations(){
@@ -315,18 +323,21 @@ function renderPayment(){
 
 async function loadStudent(){
   const placement=selectedPlacement(),token=++loadToken;
-  receipt=null;payments=[];savingsTxns=[];
+  receipt=null;payments=[];savingsTxns=[];scholarshipTxns=[];
   if(!placement){renderPayment();return}
   const term=Number(el("term").value);
-  const [receiptRes,savingsRes]=await Promise.all([
+  const [receiptRes,savingsRes,scholarshipRes]=await Promise.all([
     sb.from("fee_receipts").select("*").eq("student_id",placement.student_id).eq("year",currentYear).eq("term",term).is("voided_at",null).maybeSingle(),
-    fetchAllRows(()=>sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").eq("student_id",placement.student_id),["txn_date","id"])
+    fetchAllRows(()=>sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").eq("student_id",placement.student_id),["txn_date","id"]),
+    fetchAllRows(()=>sb.from("scholarship_txns").select("id,student_id,kind,amount,txn_date,voided_at").eq("student_id",placement.student_id),["txn_date","id"])
   ]);
   if(receiptRes.error)throw new Error("โหลดเอกสารไม่สำเร็จ: "+receiptRes.error.message);
   if(savingsRes.error)throw new Error("โหลดยอดออมทรัพย์ไม่สำเร็จ: "+savingsRes.error.message);
+  if(scholarshipRes.error)throw new Error("โหลดยอดทุนไม่สำเร็จ: "+scholarshipRes.error.message);
   if(token!==loadToken)return;
   receipt=receiptRes.data||null;
   savingsTxns=savingsRes.data||[];
+  scholarshipTxns=scholarshipRes.data||[];
   if(receipt){
     const paymentRes=await fetchAllRows(()=>sb.from("fee_payments").select("*").eq("receipt_id",receipt.id),["paid_at","id"]);
     if(paymentRes.error)throw new Error("โหลดรายการรับเงินไม่สำเร็จ: "+paymentRes.error.message);
@@ -388,7 +399,12 @@ el("payment-history").onclick=event=>{
   activeVoidPayment=payments.find(row=>row.id===button.dataset.voidPayment&&!row.voided_at)||null;
   if(!activeVoidPayment)return toast("รายการนี้ถูกยกเลิกไปแล้ว · โหลดข้อมูลล่าสุดแล้วตรวจอีกครั้ง",true);
   const charge=selectedCharges().find(row=>row.id===activeVoidPayment.charge_id);
-  el("void-payment-detail").textContent=`${charge?.description||"รายการค่าใช้จ่าย"} · ${money(activeVoidPayment.amount)} · ${activeVoidPayment.method}\nเลขที่เอกสารจะคงเดิม และยอดนี้จะกลับมาเป็นยอดค้าง${activeVoidPayment.method==="หักออมทรัพย์"?"\nเงินจะถูกคืนเข้าสมุดออมทรัพย์พร้อมกัน":""}`;
+  const returnDetail=activeVoidPayment.method==="หักออมทรัพย์"
+    ?"\nเงินจะถูกคืนเข้าสมุดออมทรัพย์พร้อมกัน"
+    :activeVoidPayment.method==="หักทุน"
+      ?"\nเงินจะถูกคืนเข้าบัญชีทุนพร้อมกัน"
+      :"\nไม่มีเงินคืนเข้าบัญชีภายใน เพราะรายการนี้รับด้วยเงินสดหรือโอน";
+  el("void-payment-detail").textContent=`${charge?.description||"รายการค่าใช้จ่าย"} · ${money(activeVoidPayment.amount)} · ${activeVoidPayment.method}\nเลขที่เอกสารจะคงเดิม และยอดนี้จะกลับมาเป็นยอดค้าง${returnDetail}`;
   el("void-payment-reason").value="";
   el("void-payment-error").textContent="";
   el("void-payment-overlay").hidden=false;
@@ -410,7 +426,7 @@ el("void-payment-form").onsubmit=async event=>{
     requestUncertain=false;
     if(error){el("void-payment-error").textContent=friendly(error);return}
     const result=Array.isArray(data)?data[0]:data;
-    if(!result||!Number.isFinite(Number(result.amount))||typeof result.method!=="string"||typeof result.savings_returned!=="boolean"){
+    if(!result||!Number.isFinite(Number(result.amount))||typeof result.method!=="string"||typeof result.savings_returned!=="boolean"||typeof result.scholarship_returned!=="boolean"){
       voidBlocked=true;
       el("void-payment-error").textContent="ยังยืนยันผลการยกเลิกไม่ได้ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน";
       return
@@ -418,7 +434,9 @@ el("void-payment-form").onsubmit=async event=>{
     el("void-payment-overlay").hidden=true;activeVoidPayment=null;
     toast(result.savings_returned
       ?`ยกเลิกรายการแล้ว · คืนเงิน ${money(result.amount)} เข้าสมุดออมทรัพย์แล้ว`
-      :`ยกเลิกรายการ ${money(result.amount)} แล้ว · เลขที่เอกสารคงเดิม`);
+      :result.scholarship_returned
+        ?`ยกเลิกรายการแล้ว · คืนเงิน ${money(result.amount)} เข้าบัญชีทุนแล้ว`
+        :`ยกเลิกรายการ ${money(result.amount)} แล้ว · ไม่มีการคืนเข้าบัญชีภายใน · เลขที่เอกสารคงเดิม`);
     try{await loadStudent()}catch(loadError){toast("ยกเลิกแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ: "+friendly(loadError),true)}
   }catch(voidError){
     voidBlocked=requestUncertain;
@@ -439,6 +457,10 @@ el("save-payment").onclick=async()=>{
   const error=paymentDraftError(received,allocations,outstanding);
   if(error)return toast(error,true);
   const method=el("method").value;
+  if(method==="หักทุน"){
+    const balance=computeScholarshipBalance(scholarshipTxns);
+    if(balance+0.005<received)return toast(`ยอดทุนไม่พอ (เหลือ ${money(balance)}) · ลดจำนวนที่รับหรือเลือกช่องทางอื่น`,true)
+  }
   if(!await window.crsAskConfirm({
     title:"ยืนยันรับเงินค่าใช้จ่าย",
     message:`${placement.student?.name||"นักเรียน"}\n${el("term").value}/${currentYear} · ${allocations.length} รายการ\n${method} ${money(received)}`,
@@ -447,13 +469,14 @@ el("save-payment").onclick=async()=>{
   }))return;
   saving=true;
   el("save-payment").disabled=true;
-  let savingsWritten=false,requestUncertain=false,paymentSaved=false;
+  let savingsWritten=false,scholarshipWritten=false,requestUncertain=false,paymentSaved=false;
   try{
     const receiptRes=await sb.rpc("get_or_create_fee_receipt",{p_student_id:placement.student_id,p_year:currentYear,p_term:Number(el("term").value)});
     if(receiptRes.error)throw receiptRes.error;
     const savedReceipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
     if(!savedReceipt?.id)throw new Error("ฐานข้อมูลไม่คืนเอกสาร กรุณาโหลดใหม่ก่อนลองอีกครั้ง");
     let savingsByCharge=new Map();
+    let scholarshipByCharge=new Map();
     if(method==="หักออมทรัพย์"){
       const today=toDateStr(bangkokNow());
       const payloads=allocations.map((allocation,index)=>({
@@ -471,9 +494,27 @@ el("save-payment").onclick=async()=>{
       savingsByCharge=new Map(allocations.map((allocation,index)=>[allocation.charge_id,idByNote.get(payloads[index].note)]));
       if([...savingsByCharge.values()].some(id=>!id))throw new Error("ฐานข้อมูลคืนรายการหักออมทรัพย์ไม่ครบ กรุณาหยุดและแจ้งผู้ดูแล")
     }
+    if(method==="หักทุน"){
+      const today=toDateStr(bangkokNow());
+      const payloads=allocations.map((allocation,index)=>({
+        student_id:placement.student_id,year:placement.year,grade_level:placement.grade_level,classroom:placement.classroom,
+        txn_date:today,kind:"จ่ายค่าใช้จ่าย",amount:allocation.amount,
+        note:`เอกสาร ${savedReceipt.receipt_no} · ลำดับ ${index+1}: ${allocation.description}`,
+        created_by:session.user.id
+      }));
+      requestUncertain=true;
+      const scholarshipRes=await sb.from("scholarship_txns").insert(payloads).select("id,note");
+      requestUncertain=false;
+      if(scholarshipRes.error)throw scholarshipRes.error;
+      scholarshipWritten=true;
+      const idByNote=new Map((scholarshipRes.data||[]).map(row=>[row.note,row.id]));
+      scholarshipByCharge=new Map(allocations.map((allocation,index)=>[allocation.charge_id,idByNote.get(payloads[index].note)]));
+      if([...scholarshipByCharge.values()].some(id=>!id))throw new Error("ฐานข้อมูลคืนรายการหักทุนไม่ครบ กรุณาหยุดและแจ้งผู้ดูแล")
+    }
     const paymentRows=allocations.map(allocation=>({
       receipt_id:savedReceipt.id,charge_id:allocation.charge_id,amount:allocation.amount,method,
       savings_txn_id:method==="หักออมทรัพย์"?savingsByCharge.get(allocation.charge_id):null,
+      scholarship_txn_id:method==="หักทุน"?scholarshipByCharge.get(allocation.charge_id):null,
       recorded_by:session.user.id
     }));
     requestUncertain=true;
@@ -484,7 +525,7 @@ el("save-payment").onclick=async()=>{
     toast(`รับเงิน ${money(received)} แล้ว · เอกสารเลขที่ ${savedReceipt.receipt_no}`);
     await loadStudent()
   }catch(saveError){
-    const failure=paymentFailureState(paymentSaved,savingsWritten,requestUncertain);
+    const failure=paymentFailureState(paymentSaved,savingsWritten,scholarshipWritten,requestUncertain);
     submissionBlocked=failure.blocked;
     toast(failure.prefix+friendly(saveError),true)
   }finally{
