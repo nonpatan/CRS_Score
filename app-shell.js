@@ -436,7 +436,7 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html", "scholarship-grant.html", "scholarship-sources.html"],
       groups: [
         {
           label: "บันทึก",
@@ -453,7 +453,8 @@
             ["savings-remit.html", "รับเงินส่งจากครู"],
             ["transport-remit.html", "รับเงินค่ารถจากครู"],
             ["fee-assign.html", "ตั้งหนี้นักเรียน"],
-            ["fee-payment.html", "รับเงินค่าใช้จ่ายนักเรียน"]
+            ["fee-payment.html", "รับเงินค่าใช้จ่ายนักเรียน"],
+            ["scholarship-grant.html", "บันทึกทุนการศึกษา"]
           ]
         },
         {
@@ -461,7 +462,8 @@
           items: [
             ["savings-report.html", "รายงานออมทรัพย์"],
             ["transport-report.html", "รายงานค่ารถ"],
-            ["fee-report.html", "รายงานค่าใช้จ่ายนักเรียน"]
+            ["fee-report.html", "รายงานค่าใช้จ่ายนักเรียน"],
+            ["scholarship-report.html", "รายงานทุนการศึกษา"]
           ]
         },
         {
@@ -470,7 +472,8 @@
             ["savings-opening.html", "ยอดยกมาออมทรัพย์"],
             ["transport-settings.html", "ตั้งค่าค่ารถ"],
             ["fee-settings.html", "ตั้งค่าค่าใช้จ่าย"],
-            ["fee-stock.html", "คลังสินค้า"]
+            ["fee-stock.html", "คลังสินค้า"],
+            ["scholarship-sources.html", "ทะเบียนแหล่งทุน"]
           ]
         }
       ],
@@ -554,6 +557,21 @@
           title: "รายงานค่าใช้จ่ายนักเรียน",
           description: "ดูยอดเรียกเก็บ ส่วนลด และยอดค้างจากระดับห้องถึงรายการรายคน",
           steps: ["ดูรายห้อง", "ดูรายคน", "ตรวจรายการ"]
+        },
+        "scholarship-grant.html": {
+          title: "บันทึกทุนการศึกษา",
+          description: "เลือกปี ห้อง และนักเรียน แล้วบันทึกรับทุนหรือยอดยกมาพร้อมตรวจประวัติ",
+          steps: ["เลือกนักเรียน", "กรอกรายการ", "ยืนยันบันทึก"]
+        },
+        "scholarship-report.html": {
+          title: "รายงานทุนการศึกษา",
+          description: "ดูยอดทุนจากระดับห้องถึงรายคน และสรุปรายแหล่งทุนโดยไม่แยกการใช้เงิน",
+          steps: ["ดูรายห้อง", "ดูรายคน", "ดูแหล่งทุน"]
+        },
+        "scholarship-sources.html": {
+          title: "ทะเบียนแหล่งทุน",
+          description: "เพิ่ม แก้ และปิดใช้งานรายชื่อผู้ให้ทุนก่อนบันทึกรายการรับทุน",
+          steps: ["เพิ่มแหล่งทุน", "ตรวจรายการ", "เปิดหรือปิดใช้"]
         }
       }
     }

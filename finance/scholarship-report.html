@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายงานทุนการศึกษา — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p, .meta { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .tabs { display:flex; gap:8px; padding:4px; border-radius:10px; background:var(--bg); }
+  .tabs button { flex:1; color:var(--muted); background:transparent; }
+  .tabs button[aria-selected="true"] { color:#fff; background:var(--teal); }
+  button { min-height:44px; padding:10px 14px; border:0; border-radius:9px; font:inherit; font-weight:700; cursor:pointer; }
+  .metric-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  .metric { padding:14px; border-radius:10px; background:var(--teal-soft); }
+  .metric:nth-child(2) { background:var(--amber-soft); }
+  .metric span { display:block; color:var(--muted); font-size:13px; }
+  .metric b { display:block; color:var(--teal); font-size:22px; overflow-wrap:anywhere; }
+  .limited-note { padding:12px 14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; min-width:700px; border-collapse:collapse; }
+  th, td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-size:13px; }
+  th.money, td.money { text-align:right; white-space:nowrap; }
+  tr.room-row { cursor:pointer; }
+  tr.room-row:hover, tr.room-row.active { background:var(--teal-soft); }
+  .student-grid { display:grid; grid-template-columns:minmax(260px,.8fr) minmax(0,1.2fr); gap:16px; }
+  .student-list { border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .student-button { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; width:100%; min-height:54px; padding:10px 12px; border:0; border-bottom:1px solid var(--line); border-radius:0; color:var(--ink); background:#fff; text-align:left; }
+  .student-button:last-child { border-bottom:0; }
+  .student-button:hover, .student-button.active { background:var(--teal-soft); }
+  .student-button strong { color:var(--teal); white-space:nowrap; }
+  .ledger { min-height:160px; padding:12px; border-radius:10px; background:var(--bg); }
+  .ledger-row { display:grid; grid-template-columns:100px 110px minmax(0,1fr) 120px; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); }
+  .ledger-row.voided { opacity:.65; text-decoration:line-through; }
+  .positive { color:var(--teal); }
+  .negative { color:var(--danger); }
+  .readonly, .banner.bad { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
+  .empty { padding:28px 8px; color:var(--muted); text-align:center; }
+  [hidden] { display:none !important; }
+  @media (max-width:820px) { .student-grid { grid-template-columns:1fr; } }
+  @media (max-width:560px) { .metric-grid { grid-template-columns:1fr; } .section-head { display:block; } .ledger-row { grid-template-columns:1fr 1fr; } }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header><h1>รายงานทุนการศึกษา</h1><p>ดูยอดรวมรายนักเรียนและสรุปว่าได้รับทุนจากแหล่งใด</p><div class="nav"></div><script src="../app-shell.js?v=20260831-1"></script></header>
+  <main class="academic-content">
+    <section id="error-card" class="card" hidden></section>
+    <section id="limited-note" class="card" hidden><div class="limited-note"><b>แสดงเฉพาะปีและห้องที่คุณสอน</b><br>ยอดทุนสะสมข้ามปี ดังนั้นยอดจริงของนักเรียนอาจมากกว่านี้ หากต้องการยอดเต็มให้สอบถามฝ่ายการเงิน</div></section>
+    <section class="card"><div class="tabs" role="tablist" aria-label="มุมมองรายงาน"><button id="student-tab" type="button" role="tab" aria-selected="true">รายนักเรียน</button><button id="source-tab" type="button" role="tab" aria-selected="false">รายแหล่งทุน</button></div></section>
+    <div id="student-panel" role="tabpanel">
+      <section class="card"><div class="metric-grid"><div class="metric"><span>นักเรียนที่มีรายการทุน</span><b id="student-count">0 คน</b></div><div class="metric"><span>รายการที่ยังไม่ยกเลิก</span><b id="txn-count">0 รายการ</b></div><div class="metric"><span>ยอดทุนคงเหลือที่มองเห็น</span><b id="total-balance">0.00 บาท</b></div></div></section>
+      <section class="card"><div class="section-head"><div><h2>สรุปรายห้อง</h2><p>กดแถวเพื่อดูรายชื่อและรายละเอียดต่อด้านล่าง</p></div></div><div class="table-wrap"><table><thead><tr><th>ปี / ห้อง</th><th class="money">นักเรียน</th><th class="money">ยอดคงเหลือที่มองเห็น</th></tr></thead><tbody id="room-body"><tr><td colspan="3" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
+      <section id="student-card" class="card" hidden><div class="section-head"><div><h2 id="student-title">รายชื่อนักเรียน</h2><p>กดชื่อเพื่อดูรายการเดินบัญชี</p></div></div><div class="student-grid"><div id="student-list" class="student-list"></div><div id="ledger" class="ledger"><div class="empty">เลือกนักเรียนเพื่อดูรายการเดินบัญชี</div></div></div></section>
+    </div>
+    <section id="source-panel" class="card" role="tabpanel" hidden><div class="section-head"><div><h2>สรุปรายแหล่งทุน</h2><p>แสดงว่าใครให้ รวมเท่าไหร่ เด็กกี่คน และช่วงวันที่ให้ · ไม่แยกการนำเงินไปใช้</p></div></div><div class="table-wrap"><table><thead><tr><th>แหล่งทุน</th><th>ประเภท</th><th class="money">รวมรับทุน</th><th class="money">นักเรียน</th><th>ช่วงวันที่ให้</th></tr></thead><tbody id="source-body"><tr><td colspan="5" class="empty">กำลังโหลด…</td></tr></tbody></table></div></section>
+  </main>
+</div>
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
+  fetchAllRows, computeScholarshipBalance, summarizeScholarshipByStudent, formatMoney
+} from "../supabase-client.js?v=20260831-1";
+
+const el = id => document.getElementById(id);
+const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
+const thaiDate = value => value ? new Intl.DateTimeFormat("th-TH", {day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Bangkok"}).format(new Date(value + "T00:00:00+07:00")) : "—";
+const roomKey = row => [row.year,row.grade_level,row.classroom].join("\u0000");
+let txns = [], balances = new Map(), rooms = [], selectedRoom = null, selectedStudentId = null, canFinance = false;
+
+function rowsForStudent(studentId) { return txns.filter(row => row.student_id === studentId); }
+function buildRooms() {
+  const grouped = new Map();
+  for (const row of txns) {
+    const key = roomKey(row);
+    if (!grouped.has(key)) grouped.set(key, { key, year:row.year, grade_level:row.grade_level, classroom:row.classroom, students:new Map() });
+    if (!grouped.get(key).students.has(row.student_id)) grouped.get(key).students.set(row.student_id, row.student || { id:row.student_id });
+  }
+  rooms = [...grouped.values()].sort((a,b) => String(b.year).localeCompare(String(a.year), "th", {numeric:true}) || String(a.grade_level).localeCompare(String(b.grade_level), "th", {numeric:true}) || String(a.classroom).localeCompare(String(b.classroom), "th", {numeric:true}));
+}
+function roomRows(room) { return txns.filter(row => roomKey(row) === room.key); }
+function renderOverview() {
+  const studentIds = new Set(txns.map(row => row.student_id));
+  el("student-count").textContent = `${studentIds.size} คน`;
+  el("txn-count").textContent = `${txns.filter(row => !row.voided_at).length} รายการ`;
+  el("total-balance").textContent = formatMoney(computeScholarshipBalance(txns));
+}
+function renderRooms() {
+  el("room-body").innerHTML = rooms.map(room => `<tr class="room-row${selectedRoom?.key === room.key ? " active" : ""}" data-room-key="${escapeHtml(room.key)}"><td><b>ปี ${escapeHtml(room.year)} · ${escapeHtml(room.grade_level)} · ${escapeHtml(room.classroom)}</b></td><td class="money">${room.students.size} คน</td><td class="money">${formatMoney(computeScholarshipBalance(roomRows(room)))}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">ยังไม่มีรายการทุนที่คุณมีสิทธิ์เห็น</td></tr>';
+}
+function renderStudents() {
+  if (!selectedRoom) { el("student-card").hidden = true; return; }
+  el("student-card").hidden = false;
+  el("student-title").textContent = `รายชื่อนักเรียน ปี ${selectedRoom.year} · ${selectedRoom.grade_level} · ${selectedRoom.classroom}`;
+  const students = [...selectedRoom.students.values()].sort((a,b) => String(a.student_no || "").localeCompare(String(b.student_no || ""), "th", {numeric:true}) || String(a.name || "").localeCompare(String(b.name || ""), "th"));
+  el("student-list").innerHTML = students.map(student => `<button type="button" class="student-button${selectedStudentId === student.id ? " active" : ""}" data-student-id="${escapeHtml(student.id)}"><span>${escapeHtml(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${escapeHtml(student.student_no || "—")}</span></span><strong>${formatMoney(balances.get(student.id) || 0)}</strong></button>`).join("") || '<div class="empty">ไม่มีรายชื่อนักเรียน</div>';
+  renderLedger();
+}
+function renderLedger() {
+  if (!selectedStudentId) { el("ledger").innerHTML = '<div class="empty">เลือกนักเรียนเพื่อดูรายการเดินบัญชี</div>'; return; }
+  const student = selectedRoom?.students.get(selectedStudentId);
+  const rows = [...rowsForStudent(selectedStudentId)].sort((a,b) => String(b.txn_date).localeCompare(String(a.txn_date)) || String(b.created_at).localeCompare(String(a.created_at)));
+  el("ledger").innerHTML = `<b>${escapeHtml(student?.name || "นักเรียน")}</b><div class="meta">ยอดที่มองเห็น ${formatMoney(computeScholarshipBalance(rows))}</div>` + (rows.map(row => {
+    const positive = row.kind === "ยอดยกมา" || row.kind === "รับทุน";
+    const sourceName = row.source?.name || "";
+    return `<div class="ledger-row${row.voided_at ? " voided" : ""}"><span>${thaiDate(row.txn_date)}</span><b>${escapeHtml(row.kind)}</b><span>${sourceName ? `แหล่งทุน ${escapeHtml(sourceName)} · ` : ""}${escapeHtml(row.note || (row.voided_at ? row.void_reason : "—"))}</span><strong class="${positive ? "positive" : "negative"}">${positive ? "+" : "−"}${formatMoney(row.amount)}</strong></div>`;
+  }).join("") || '<div class="empty">ยังไม่มีรายการเดินบัญชี</div>');
+}
+function renderSources() {
+  const grouped = new Map();
+  for (const row of txns.filter(item => item.kind === "รับทุน" && !item.voided_at && item.source_id)) {
+    if (!grouped.has(row.source_id)) grouped.set(row.source_id, { source:row.source || {}, rows:[], students:new Set(), dates:[] });
+    const group = grouped.get(row.source_id); group.rows.push(row); group.students.add(row.student_id); group.dates.push(row.txn_date);
+  }
+  const rows = [...grouped.values()].sort((a,b) => String(a.source.name || "").localeCompare(String(b.source.name || ""), "th"));
+  el("source-body").innerHTML = rows.map(group => {
+    const dates = [...group.dates].sort();
+    const range = dates.length === 1 ? thaiDate(dates[0]) : `${thaiDate(dates[0])} – ${thaiDate(dates.at(-1))}`;
+    return `<tr><td><b>${escapeHtml(group.source.name || "ไม่พบชื่อแหล่งทุน")}</b></td><td>${escapeHtml(group.source.kind || "—")}</td><td class="money">${formatMoney(computeScholarshipBalance(group.rows))}</td><td class="money">${group.students.size} คน</td><td>${range}</td></tr>`;
+  }).join("") || '<tr><td colspan="5" class="empty">ยังไม่มีรายการรับทุนจากแหล่งทุน</td></tr>';
+}
+function renderAll() { balances = summarizeScholarshipByStudent(txns); buildRooms(); renderOverview(); renderRooms(); renderStudents(); renderSources(); }
+function showTab(tab) {
+  const source = tab === "source";
+  el("student-tab").setAttribute("aria-selected", String(!source));
+  el("source-tab").setAttribute("aria-selected", String(source));
+  el("student-panel").hidden = source;
+  el("source-panel").hidden = !source;
+}
+el("student-tab").addEventListener("click", () => showTab("student"));
+el("source-tab").addEventListener("click", () => showTab("source"));
+el("room-body").addEventListener("click", event => {
+  const row = event.target.closest(".room-row"); if (!row) return;
+  selectedRoom = rooms.find(room => room.key === row.dataset.roomKey) || null; selectedStudentId = null; renderRooms(); renderStudents();
+});
+el("student-list").addEventListener("click", event => {
+  const button = event.target.closest(".student-button"); if (!button) return;
+  selectedStudentId = button.dataset.studentId; renderStudents();
+});
+async function loadReport() {
+  const result = await fetchAllRows(() => sb.from("scholarship_txns")
+    .select("id,student_id,year,grade_level,classroom,kind,amount,source_id,txn_date,note,created_at,voided_at,void_reason,student:student_id(id,student_no,name),source:source_id(id,name,kind)"), ["year","grade_level","classroom","student_id","txn_date","id"]);
+  if (result.error) throw new Error("โหลดข้อมูลทุนไม่สำเร็จ: " + result.error.message);
+  txns = result.data || [];
+  renderAll();
+}
+
+const session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    if (!canFinance) el("limited-note").hidden = false;
+    await loadReport();
+  } catch (error) {
+    el("error-card").hidden = false;
+    el("error-card").innerHTML = `<div class="banner bad"><b>เปิดรายงานทุนไม่สำเร็จ</b><br>${escapeHtml(error.message)}</div>`;
+    el("room-body").innerHTML = '<tr><td colspan="3" class="empty">โหลดข้อมูลไม่สำเร็จ</td></tr>';
+    el("source-body").innerHTML = '<tr><td colspan="5" class="empty">โหลดข้อมูลไม่สำเร็จ</td></tr>';
+  }
+}
+</script>
+</body>
+</html>

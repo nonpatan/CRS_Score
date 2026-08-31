@@ -694,6 +694,31 @@ export function summarizeSavingsByStudent(txns) {
   return new Map([...grouped].map(([studentId, rows]) => [studentId, computeSavingsBalance(rows)]));
 }
 
+// ---------- ทุนการศึกษา ----------
+// ยอดคงเหลือ = ยอดยกมา + รับทุน − จ่ายค่าใช้จ่าย − คืนเงินคงเหลือ
+// ข้ามรายการที่ยกเลิกและชนิดที่ไม่รู้จัก เพื่อไม่ให้ข้อมูลผิดรูปเปลี่ยนยอดเงินจริง
+export function computeScholarshipBalance(txns) {
+  return (Array.isArray(txns) ? txns : []).reduce((balance, txn) => {
+    if (txn?.voided_at) return balance;
+    const amount = Number(txn?.amount);
+    if (!Number.isFinite(amount)) return balance;
+    if (txn.kind === "ยอดยกมา" || txn.kind === "รับทุน") return balance + amount;
+    if (txn.kind === "จ่ายค่าใช้จ่าย" || txn.kind === "คืนเงินคงเหลือ") return balance - amount;
+    return balance;
+  }, 0);
+}
+
+// จัดกลุ่มยอดทุน → Map(student_id -> ยอด) โดยใช้สูตรกลางเดียวกับรายคน
+export function summarizeScholarshipByStudent(txns) {
+  const grouped = new Map();
+  for (const txn of (Array.isArray(txns) ? txns : [])) {
+    if (!txn?.student_id) continue;
+    if (!grouped.has(txn.student_id)) grouped.set(txn.student_id, []);
+    grouped.get(txn.student_id).push(txn);
+  }
+  return new Map([...grouped].map(([studentId, rows]) => [studentId, computeScholarshipBalance(rows)]));
+}
+
 // ---------- ค่ารถรับส่ง ----------
 // ต้องแก้พร้อมชุดสถานะใน transport_payments_guard() ที่ schema.sql หากกติกาเปลี่ยน
 export const TRANSPORT_CHARGE_STATUSES = ["มา", "มาสาย"];

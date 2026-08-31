@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Final exam year scope — visual fixture</title>
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+    --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
+    --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body { font-family:Sarabun,sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:560px; margin:auto; }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .section-title { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
+  .field { margin-bottom:14px; }
+  label { display:block; font-weight:500; margin-bottom:6px; }
+  select, input { width:100%; min-height:44px; min-width:0; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  .weight-grid { display:grid; grid-template-columns:minmax(72px,1fr) repeat(2,minmax(0,1fr)); gap:8px 10px; align-items:center; }
+  .grid-head { color:var(--muted); font-size:13px; font-weight:600; text-align:center; }
+  .level-name { font-weight:600; }
+  .weight-grid input { text-align:center; }
+  .field-note { color:var(--muted); font-size:13px; margin-top:10px; }
+  .weight-missing { background:var(--amber-soft); color:var(--amber); padding:10px 12px; border-radius:8px; }
+  button { min-height:44px; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  button.primary { width:100%; margin-top:8px; background:var(--teal); color:var(--white); }
+  button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  .weight-missing button { width:100%; margin-top:10px; }
+  .exam-status { padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
+  .exam-status.closed { border-color:var(--amber); background:var(--amber-soft); }
+  .status-title { font-weight:600; }
+  .exam-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px; }
+  .hint { color:var(--muted); font-size:14px; }
+  .fixture-controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .permission { display:flex; align-items:center; gap:8px; min-height:44px; }
+  .permission input { width:20px; min-height:20px; }
+  @media (max-width:520px) { .fixture-controls { grid-template-columns:1fr; } .exam-actions { align-items:stretch; flex-direction:column; } .exam-actions button { width:100%; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>จัดการโครงสร้าง</h1>
+  <p class="field-note">Fixture สำหรับตรวจ responsive/interaction เท่านั้น — ไม่เชื่อมฐานข้อมูล</p>
+
+  <div class="card">
+    <div class="section-title">สถานการณ์ทดสอบ</div>
+    <div class="fixture-controls">
+      <div>
+        <label for="fixture-subject-type">ประเภทวิชาที่เลือก</label>
+        <select id="fixture-subject-type"><option value="พื้นฐาน">พื้นฐาน</option><option value="บูรณาการ">บูรณาการ</option></select>
+      </div>
+      <label class="permission"><input id="fixture-can-edit" type="checkbox" checked> มีสิทธิ์ฝ่ายวิชาการ</label>
+    </div>
+  </div>
+
+  <div class="card" id="fixture-exam-card">
+    <div class="section-title">ปิด/เปิดคะแนนสอบ</div>
+    <div class="exam-status" id="fixture-exam-status">
+      <div class="status-title">ยังไม่ปิดคะแนนสอบ</div>
+      <div class="field-note">ก่อนปิด นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้นว่ายังไม่ครบและยังไม่ตัดสินผลทางการ</div>
+      <div class="exam-actions">
+        <span class="hint">ยังไม่มีคะแนนสอบ 4 คน</span>
+        <button class="danger" id="fixture-close-exam" type="button">ปิดคะแนนสอบ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="grade-weights-card">
+    <div class="section-title" id="fixture-weight-title">อัตราส่วนคะแนนเก็บ : คะแนนสอบ · ปีการศึกษา 2569</div>
+    <div class="field">
+      <label for="fixture-weight-year">ปีการศึกษาของอัตราส่วน</label>
+      <select id="fixture-weight-year"><option>2569</option><option>2570</option><option>2571</option></select>
+    </div>
+    <div class="weight-missing" id="fixture-missing" hidden>
+      <div>ยังไม่ได้ตั้งอัตราส่วนของปีการศึกษา 2571</div>
+      <button class="ghost" id="fixture-init-weights" type="button">ตั้งค่าเริ่มต้น (ประถม 80:20 · มัธยม 70:30)</button>
+    </div>
+    <div class="weight-grid" id="fixture-weight-editor">
+      <div></div><div class="grid-head">คะแนนเก็บ</div><div class="grid-head">คะแนนสอบ</div>
+      <label class="level-name" for="primary-collect">ประถม</label>
+      <input id="primary-collect" type="number" min="0" max="100" step="0.01" value="80">
+      <input id="primary-exam" aria-label="คะแนนสอบระดับประถม" type="number" min="0" max="100" step="0.01" value="20">
+      <label class="level-name" for="secondary-collect">มัธยม</label>
+      <input id="secondary-collect" type="number" min="0" max="100" step="0.01" value="70">
+      <input id="secondary-exam" aria-label="คะแนนสอบระดับมัธยม" type="number" min="0" max="100" step="0.01" value="30">
+    </div>
+    <div class="field-note" id="fixture-weight-note">ตัวเลขคะแนนสอบเป็นทั้งน้ำหนักและคะแนนเต็มของข้อสอบ การเปลี่ยนค่านี้หลังเริ่มกรอกคะแนนสอบจะทำให้คะแนนเดิมเปลี่ยนความหมายและอาจทำให้เกรดเปลี่ยนทันที</div>
+    <button class="primary" id="fixture-save-weights" type="button">บันทึกอัตราส่วน</button>
+  </div>
+</main>
+<script src="../app-shell.js?v=20260831-1"></script>
+<script>
+  const values = {
+    "2569": [[80, 20], [70, 30]],
+    "2570": [[70, 30], [60, 40]]
+  };
+  const yearEl = document.getElementById("fixture-weight-year");
+  const canEditEl = document.getElementById("fixture-can-edit");
+  const inputEls = ["primary-collect", "primary-exam", "secondary-collect", "secondary-exam"].map(id => document.getElementById(id));
+
+  function renderFixture() {
+    const year = yearEl.value;
+    const canEdit = canEditEl.checked;
+    const rows = values[year];
+    document.getElementById("fixture-weight-title").textContent = "อัตราส่วนคะแนนเก็บ : คะแนนสอบ · ปีการศึกษา " + year;
+    document.getElementById("fixture-missing").hidden = Boolean(rows);
+    document.getElementById("fixture-weight-editor").style.display = rows ? "grid" : "none";
+    document.getElementById("fixture-weight-note").style.display = rows ? "block" : "none";
+    document.getElementById("fixture-save-weights").style.display = rows && canEdit ? "block" : "none";
+    document.getElementById("fixture-init-weights").style.display = !rows && canEdit ? "block" : "none";
+    if (rows) {
+      const flat = rows.flat();
+      inputEls.forEach((input, index) => { input.value = flat[index]; input.disabled = !canEdit; });
+    }
+    const basic = document.getElementById("fixture-subject-type").value === "พื้นฐาน";
+    document.getElementById("fixture-exam-card").style.display = basic ? "block" : "none";
+    document.getElementById("fixture-close-exam").style.display = basic && canEdit ? "inline-block" : "none";
+  }
+  yearEl.addEventListener("change", renderFixture);
+  canEditEl.addEventListener("change", renderFixture);
+  document.getElementById("fixture-subject-type").addEventListener("change", renderFixture);
+  document.getElementById("fixture-init-weights").addEventListener("click", () => {
+    values[yearEl.value] = [[80, 20], [70, 30]];
+    renderFixture();
+  });
+  document.getElementById("fixture-save-weights").addEventListener("click", () => {
+    window.crsAskConfirm({
+      title: "อัตราส่วนใหม่นี้กระทบคะแนนเดิม",
+      message: "ระดับประถม ปีการศึกษา " + yearEl.value + ": มี 12 วิชาที่กรอกคะแนนสอบแล้ว · เปลี่ยนคะแนนเต็มจาก 20 เป็น 30\n\nคะแนนที่กรอกไว้แล้วทั้งหมดจะเปลี่ยนความหมาย และเกรดของนักเรียนอาจเปลี่ยนตามทันที",
+      okLabel: "บันทึกอัตราส่วน",
+      danger: true
+    });
+  });
+  document.getElementById("fixture-close-exam").addEventListener("click", () => {
+    window.crsAskConfirm({
+      title: "ปิดคะแนนสอบวิชานี้",
+      message: "นักเรียน 4 คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที",
+      okLabel: "ปิดคะแนนสอบ",
+      danger: true
+    });
+  });
+  renderFixture();
+</script>
+</body>
+</html>
