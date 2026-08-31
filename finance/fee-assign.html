@@ -125,7 +125,7 @@ button:disabled{
 }
 .tabs{
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-columns:repeat(5,minmax(0,1fr));
   gap:8px;
   margin-bottom:16px
 }
@@ -251,6 +251,32 @@ th{
   background:var(--teal-soft);
   font-size:13px
 }
+.status.voided{
+  color:var(--danger);
+  background:var(--danger-soft)
+}
+.bill-summary{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px 16px;
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px solid var(--line)
+}
+.bill-summary strong{
+  color:var(--teal);
+  font-size:18px
+}
+.add-kind{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:14px
+}
+.add-kind button[aria-pressed="true"]{
+  color:#fff;
+  background:var(--teal)
+}
 .overlay{
   position:fixed;
   inset:0;
@@ -323,6 +349,9 @@ th{
   .modal-actions{
     flex-direction:column-reverse
   }
+  .bill-summary{
+    grid-template-columns:1fr
+  }
 }
 </style>
     <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -331,7 +360,7 @@ th{
     <div class="wrap">
       <header>
         <h1>ตั้งหนี้นักเรียน</h1>
-        <p>ตั้งค่าบริหาร สินค้า เงินอุดหนุน และส่วนลดเป็นรายคน พร้อมยกเลิกแบบมีประวัติ</p>
+        <p>ตั้งค่าบริหาร สินค้า เงินอุดหนุน และส่วนลดเป็นรายคน ยกเลิกได้และเก็บประวัติไว้</p>
         <div class="nav">
         </div>
         <script src="../app-shell.js?v=20260830-3">
@@ -370,6 +399,7 @@ th{
             <button class="tab" data-tab="product" role="tab" aria-selected="false">สินค้า</button>
             <button class="tab" data-tab="subsidy" role="tab" aria-selected="false">เงินอุดหนุน</button>
             <button class="tab" data-tab="promo" role="tab" aria-selected="false">ส่วนลด</button>
+            <button class="tab" data-tab="person" role="tab" aria-selected="false">รายคน</button>
           </div>
           <section id="admin-panel" class="card panel">
             <div class="section-head">
@@ -467,11 +497,51 @@ th{
               <button id="save-promo" class="primary">บันทึกส่วนลด</button>
             </div>
           </section>
+          <section id="person-panel" class="panel" hidden>
+            <section class="card">
+              <div class="section-head">
+                <div><h2>บิลรายคน</h2><p>เลือกนักเรียนเพื่อดูรายการทั้งหมดของภาคเรียนนี้</p></div>
+              </div>
+              <div class="field"><label for="person-student">นักเรียน</label><select id="person-student"></select></div>
+              <div id="person-admin-warning" class="banner" hidden></div>
+              <div id="person-bill"></div>
+            </section>
+            <section class="card">
+              <div class="section-head"><div><h2>เพิ่มรายการให้เด็กคนนี้</h2><p>ค่าบริหารตั้งจากแท็บทั้งห้องเท่านั้น</p></div></div>
+              <div id="person-kind" class="add-kind" role="group" aria-label="ชนิดรายการที่จะเพิ่ม">
+                <button class="ghost" type="button" data-person-kind="product" aria-pressed="true">สินค้า</button>
+                <button class="ghost" type="button" data-person-kind="promo" aria-pressed="false">ส่วนลด</button>
+                <button class="ghost" type="button" data-person-kind="subsidy" aria-pressed="false">เงินอุดหนุน</button>
+              </div>
+              <div id="person-product-form">
+                <div class="row2">
+                  <div class="field"><label for="person-product-group">กลุ่มสินค้า</label><select id="person-product-group"></select></div>
+                  <div class="field"><label for="person-product-item">ตัวเลือก</label><select id="person-product-item"></select></div>
+                </div>
+                <div class="row2">
+                  <div class="field"><label for="person-product-qty">จำนวน</label><input id="person-product-qty" type="number" min="1" step="1" value="1"></div>
+                  <div class="field"><label for="person-product-price">ราคาต่อหน่วย</label><input id="person-product-price" type="number" min="0" step="0.01"></div>
+                </div>
+                <div id="person-stock-hint" class="banner info"></div>
+                <div class="field"><label for="person-product-note">เหตุผลเมื่อราคาไม่ตรงอัตรา</label><textarea id="person-product-note" placeholder="เว้นว่างได้เมื่อใช้ราคาที่ประกาศ"></textarea></div>
+                <div class="actions"><button id="person-save-product" class="primary" type="button">ตั้งหนี้สินค้า</button></div>
+              </div>
+              <div id="person-promo-form" hidden>
+                <div class="field"><label for="person-promo">โปรโมชั่น</label><select id="person-promo"></select></div>
+                <div id="person-promo-status" class="banner info"></div>
+                <div class="actions"><button id="person-save-promo" class="primary" type="button">บันทึกส่วนลด</button></div>
+              </div>
+              <div id="person-subsidy-form" hidden>
+                <div id="person-subsidy-status" class="banner info"></div>
+                <div class="actions"><button id="person-save-subsidy" class="primary" type="button">บันทึกเงินอุดหนุน</button></div>
+              </div>
+            </section>
+          </section>
           <section class="card">
             <div class="section-head">
               <div>
                 <h2>รายการของห้องนี้</h2>
-                <p>ยกเลิกแทนการลบ และต้องกรอกเหตุผลทุกครั้ง</p>
+                <p>ตั้งผิดให้กดยกเลิก · ระบบเก็บไว้ให้ตรวจย้อนหลังพร้อมเหตุผล</p>
               </div>
             </div>
             <div id="charge-list">
@@ -513,7 +583,10 @@ import {
   getStudentPlacements,
   activePlacements,
   roomsFromPlacements,
+  fetchAllRows,
   computeStockBalance,
+  computeFeeOutstanding,
+  chargeLineRemaining,
   formatMoney
 } from "../supabase-client.js?v=20260830-3";
 
@@ -546,7 +619,26 @@ function subsidyCounter(rows){
   }
 }
 
-let session,canFinance=false,currentYear="",placements=[],roomPlacements=[],rooms=[],items=[],rates=[],prices=[],subsidies=[],promotions=[],moves=[],charges=[],voidId=null,toastTimer;
+function billForStudent(allCharges,allPayments,studentId,term){
+  const rows=(allCharges||[]).filter(charge=>charge.student_id===studentId&&Number(charge.term)===Number(term));
+  const ids=new Set(rows.map(charge=>charge.id));
+  const billPayments=(allPayments||[]).filter(payment=>ids.has(payment.charge_id));
+  return {
+    rows,
+    payments:billPayments,
+    totals:computeFeeOutstanding(rows,billPayments)
+  }
+}
+
+function annualSubsidyFor(allCharges,studentId){
+  return (allCharges||[]).find(charge=>charge.student_id===studentId&&charge.kind==="เงินอุดหนุน"&&!charge.voided_at)||null
+}
+
+function chargeHasPayment(charge,allPayments){
+  return Number(charge?.amount)>0&&chargeLineRemaining(charge,allPayments||[])<Number(charge.amount)
+}
+
+let session,canFinance=false,currentYear="",placements=[],roomPlacements=[],rooms=[],items=[],rates=[],prices=[],subsidies=[],promotions=[],moves=[],charges=[],payments=[],voidId=null,personStudentId=null,personKind="product",toastTimer;
 const nameOf=p=>p?.student?.name||"ไม่พบชื่อ";
 const money=n=>formatMoney(n,{
   minimumFractionDigits:2
@@ -659,6 +751,115 @@ function syncProduct(){
   syncProductStock()
 }
 
+function selectedPersonPlacement(){
+  return roomPlacements.find(placement=>placement.student_id===personStudentId)||roomPlacements[0]||null
+}
+
+function setPersonKind(kind){
+  personKind=["product","promo","subsidy"].includes(kind)?kind:"product";
+  el("person-kind").querySelectorAll("[data-person-kind]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.personKind===personKind)));
+  el("person-product-form").hidden=personKind!=="product";
+  el("person-promo-form").hidden=personKind!=="promo";
+  el("person-subsidy-form").hidden=personKind!=="subsidy";
+  if(personKind==="product")syncPersonProduct();
+  if(personKind==="promo")syncPersonPromo();
+  if(personKind==="subsidy")syncPersonSubsidy()
+}
+
+function resetPersonForm(){
+  personKind="product";
+  el("person-product-group").selectedIndex=0;
+  el("person-product-item").selectedIndex=0;
+  el("person-promo").selectedIndex=0;
+  el("person-product-qty").value="1";
+  el("person-product-note").value="";
+  setPersonKind("product")
+}
+
+function personProductItems(){
+  const group=el("person-product-group").value;
+  return items.filter(item=>item.category==="ค่าสินค้า"&&item.active&&item.group_name===group)
+}
+
+function syncPersonProduct(){
+  const current=el("person-product-item").value,variants=personProductItems();
+  el("person-product-item").innerHTML=variants.map(item=>`<option value="${item.id}">${esc(item.variant_label||item.display_name)}</option>`).join("");
+  if(variants.some(item=>item.id===current))el("person-product-item").value=current;
+  const item=variants.find(row=>row.id===el("person-product-item").value)||variants[0];
+  const published=prices.find(price=>price.item_id===item?.id);
+  el("person-product-price").value=published?.amount??"";
+  syncPersonProductStock()
+}
+
+function syncPersonProductStock(){
+  const item=items.find(row=>row.id===el("person-product-item").value);
+  const published=prices.find(price=>price.item_id===item?.id);
+  const stock=computeStockBalance(moves.filter(move=>move.item_id===item?.id));
+  const qty=Number(el("person-product-qty").value);
+  const short=Boolean(item?.track_stock)&&(!Number.isInteger(qty)||qty<1||qty>stock);
+  el("person-stock-hint").className="banner "+(short?"bad":"info");
+  el("person-stock-hint").textContent=item?(item.track_stock?`คงเหลือ ${stock} ${item.unit}${short?` · จำนวนที่ขอ ${qty||0} ไม่พร้อมตัดสต๊อก`:" · ระบบจะตรวจและตัดสต๊อกตอนบันทึก"}`:`${item.display_name} ไม่ได้คุมสต๊อก`):"ยังไม่มีสินค้าในกลุ่มนี้";
+  el("person-save-product").disabled=!selectedPersonPlacement()||!item||!published||short
+}
+
+function syncPersonPromo(){
+  const placement=selectedPersonPlacement(),promo=promotions.find(row=>row.id===el("person-promo").value);
+  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
+  el("person-promo-status").className="banner "+(existing?"":"info");
+  el("person-promo-status").textContent=existing?`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`:promo?`ส่วนลด ${money(promo.amount)} · บันทึกเป็นยอดลดในบิล`:"ยังไม่มีโปรโมชั่นที่เปิดใช้งานในปีนี้";
+  el("person-save-promo").disabled=!placement||!promo||Boolean(existing)
+}
+
+function displayChargeDate(charge){
+  const value=charge?.charge_date||charge?.created_at;
+  if(!value)return"ไม่พบวันที่";
+  return new Intl.DateTimeFormat("th-TH",{dateStyle:"medium",timeZone:"Asia/Bangkok"}).format(new Date(value))
+}
+
+function syncPersonSubsidy(){
+  const placement=selectedPersonPlacement(),existing=annualSubsidyFor(charges,placement?.student_id),rate=subsidies.find(row=>row.grade_level===placement?.grade_level);
+  if(existing){
+    el("person-subsidy-status").className="banner";
+    el("person-subsidy-status").textContent=`ได้รับแล้วเมื่อ ${displayChargeDate(existing)} · ภาคเรียน ${existing.term}`
+  }else if(!rate){
+    el("person-subsidy-status").className="banner bad";
+    el("person-subsidy-status").textContent=`ยังไม่มีอัตราเงินอุดหนุนของ ${placement?.grade_level||"ชั้นนี้"}`
+  }else{
+    el("person-subsidy-status").className="banner info";
+    el("person-subsidy-status").textContent=`อัตรา ${placement.grade_level} · ${money(rate.amount)} · นักเรียนได้รับได้ปีละครั้งเดียว`
+  }
+  el("person-save-subsidy").disabled=!placement||!rate||Boolean(existing)
+}
+
+function renderPersonBill(){
+  const placement=selectedPersonPlacement();
+  if(!placement){
+    el("person-admin-warning").hidden=true;
+    el("person-bill").innerHTML='<div class="empty">ยังไม่มีนักเรียนในห้องนี้</div>';
+    return
+  }
+  const bill=billForStudent(charges,payments,placement.student_id,el("term").value);
+  const hasAdmin=bill.rows.some(charge=>charge.kind==="ค่าบริหาร"&&!charge.voided_at);
+  el("person-admin-warning").hidden=hasAdmin;
+  el("person-admin-warning").innerHTML=hasAdmin?"":'ยังไม่ได้ตั้งค่าบริหารของห้องนี้ · <button class="ghost" type="button" data-go-admin>ไปที่แท็บค่าบริหาร</button>';
+  el("person-bill").innerHTML=`<div class="section-head"><div><h2>บิลของ ${esc(nameOf(placement))} · ภาคเรียน ${esc(el("term").value)}/${esc(currentYear)}</h2></div></div>${bill.rows.length?`<div class="table-wrap"><table><thead><tr><th>รายการ</th><th class="money">จำนวน</th><th class="money">ราคา/หน่วย</th><th class="money">รวม</th><th>สถานะ</th></tr></thead><tbody>${bill.rows.map(charge=>{
+    const paid=chargeHasPayment(charge,bill.payments);
+    return`<tr><td><b>${esc(charge.description)}</b>${charge.note?`<span class="meta">${esc(charge.note)}</span>`:""}</td><td class="money">${esc(charge.qty)}</td><td class="money">${money(charge.unit_price)}</td><td class="money">${money(charge.amount)}</td><td>${charge.voided_at?`<span class="status voided">ยกเลิกแล้ว</span><span class="meta">${esc(charge.void_reason||"ไม่พบเหตุผล")}</span>`:paid?'<button class="danger" type="button" disabled>ยกเลิกไม่ได้</button><span class="meta">จ่ายแล้ว ยกเลิกไม่ได้ · ต้องยกเลิกที่หน้ารับเงินก่อน</span>':`<button class="danger" type="button" data-person-void="${charge.id}">ยกเลิก</button>`}</td></tr>`
+  }).join("")}</tbody></table></div>`:'<div class="empty">ยังไม่มีรายการในบิลภาคเรียนนี้</div>'}<div class="bill-summary"><span>เรียกเก็บ ${money(bill.totals.charged)}</span><span>ลด/อุดหนุน −${money(bill.totals.credited)}</span><strong>ยอดสุทธิ ${money(bill.totals.charged-bill.totals.credited)}</strong><span>ชำระแล้ว ${money(bill.totals.paid)}</span><strong>ค้าง ${money(bill.totals.outstanding)}</strong></div>`
+}
+
+function renderPerson(){
+  const previous=personStudentId;
+  el("person-student").innerHTML=roomPlacements.map(placement=>`<option value="${placement.student_id}">${esc(placement.student?.student_no||"—")} · ${esc(nameOf(placement))}</option>`).join("");
+  personStudentId=roomPlacements.some(placement=>placement.student_id===previous)?previous:roomPlacements[0]?.student_id||null;
+  el("person-student").value=personStudentId||"";
+  const groups=[...new Set(items.filter(item=>item.category==="ค่าสินค้า"&&item.active).map(item=>item.group_name))];
+  el("person-product-group").innerHTML=groups.map(group=>`<option>${esc(group)}</option>`).join("");
+  el("person-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${promo.id}">${esc(promo.name)} · ${money(promo.amount)}</option>`).join("");
+  renderPersonBill();
+  setPersonKind(personKind)
+}
+
 function renderGuard(){
   const room=selectedRoom();
   if(!room){
@@ -711,7 +912,8 @@ function renderAll(){
   renderSubsidy();
   renderPromo();
   syncProduct();
-  renderCharges()
+  renderCharges();
+  renderPerson()
 }
 
 function selectedTab(){
@@ -729,7 +931,8 @@ function assignmentState(){
   return {
     roomKey:roomKey(selectedRoom()),
     term:el("term").value,
-    tab:selectedTab()
+    tab:selectedTab(),
+    personStudentId
   }
 }
 
@@ -737,12 +940,13 @@ function restoreAssignmentState(state){
   const roomIndex=rooms.findIndex(room=>roomKey(room)===state.roomKey);
   el("room").value=String(roomIndex>=0?roomIndex:0);
   el("term").value=state.term;
+  personStudentId=state.personStudentId||null;
   showTab(state.tab);
   selectRoom()
 }
 
 async function loadYear(viewState=assignmentState()){
-  const [pRes,iRes,rRes,prRes,sRes,proRes,mRes,cRes]=await Promise.all([
+  const [pRes,iRes,rRes,prRes,sRes,proRes,mRes,cRes,payRes]=await Promise.all([
     getStudentPlacements(currentYear),
     sb.from("fee_items").select("*").order("sort_order"),
     sb.from("fee_admin_rates").select("*").eq("year",currentYear),
@@ -750,9 +954,10 @@ async function loadYear(viewState=assignmentState()){
     sb.from("fee_subsidies").select("*").eq("year",currentYear),
     sb.from("fee_promotions").select("*").eq("year",currentYear),
     sb.from("fee_stock_moves").select("item_id,qty"),
-    sb.from("student_charges").select("*").eq("year",currentYear)
+    sb.from("student_charges").select("*").eq("year",currentYear),
+    fetchAllRows(()=>sb.from("fee_payments").select("id,charge_id,amount,voided_at,receipt:receipt_id!inner(year)").eq("receipt.year",currentYear),["charge_id","id"])
   ]);
-  for(const [label,res] of [["ทะเบียน",pRes],["รายการ",iRes],["อัตรา",rRes],["ราคา",prRes],["เงินอุดหนุน",sRes],["โปรโมชั่น",proRes],["คลัง",mRes],["หนี้",cRes]])
+  for(const [label,res] of [["ทะเบียน",pRes],["รายการ",iRes],["อัตรา",rRes],["ราคา",prRes],["เงินอุดหนุน",sRes],["โปรโมชั่น",proRes],["คลัง",mRes],["หนี้",cRes],["ยอดชำระ",payRes]])
     if(res.error)throw new Error(`โหลด${label}ไม่สำเร็จ: ${res.error.message}`);
   placements=activePlacements(pRes.data);
   items=iRes.data||[];
@@ -762,6 +967,7 @@ async function loadYear(viewState=assignmentState()){
   promotions=proRes.data||[];
   moves=mRes.data||[];
   charges=cRes.data||[];
+  payments=payRes.data||[];
   rooms=roomsFromPlacements(placements,currentYear);
   el("room").innerHTML=rooms.map((r,index)=>`<option value="${index}">${esc(roomLabel(r))} · ${r.studentCount} คน</option>`).join("");
   el("room").disabled=!rooms.length;
@@ -789,7 +995,7 @@ el("save-admin").onclick=async()=>{
     if(!await window.crsAskConfirm({
       title:"ยืนยันตั้งค่าบริหาร",
       message:`${item.display_name}\n${roomLabel(selectedRoom())} · ${selected.length} คน\nรวม ${money(selected.length*Number(rate.amount))}`,
-      okLabel:"ตั้งหนี้ทั้งห้อง",
+      okLabel:`ตั้งหนี้ ${selected.length} คน`,
       danger:false
     }))return;
     await insertRows(selected.map(r=>({
@@ -810,7 +1016,7 @@ el("save-admin").onclick=async()=>{
 };
 
 // เหตุผล: trigger ของ student_charges เป็นผู้ตัดและคืนสต๊อก จึงไม่เขียน fee_stock_moves เองเพื่อป้องกันยอดตัดซ้ำ
-el("save-product").onclick=async()=>{
+async function saveProductFromCurrentForm(){
   try{
     const p=roomPlacements.find(p=>p.student_id===el("product-student").value),item=items.find(i=>i.id===el("product-item").value),published=prices.find(x=>x.item_id===item?.id),qty=Number(el("product-qty").value),price=Number(el("product-price").value),note=el("product-note").value.trim();
     if(!p||!item||!published)return toast("กรุณาเลือกรายการที่มีราคาประกาศ",true);
@@ -818,26 +1024,32 @@ el("save-product").onclick=async()=>{
     if(price!==Number(published.amount)&&!note)return toast("ราคาต่างจากที่ประกาศ ต้องระบุเหตุผล",true);
     await insertRows([{
       student_id:p.student_id,year:currentYear,term:Number(el("term").value),grade_level:p.grade_level,kind:"ค่าสินค้า",item_id:item.id,description:item.display_name,qty,unit_price:price,note:note||null,created_by:session.user.id
-    }],"สินค้า")
+    }],"สินค้า");
+    return true
   }
   catch(e){
-    toast(friendly(e),true)
+    toast(friendly(e),true);
+    return false
   }
-};
+}
+el("save-product").onclick=saveProductFromCurrentForm;
 
-el("save-subsidy").onclick=async()=>{
+async function saveSubsidyFromRoster(){
   try{
     const room=selectedRoom(),rate=subsidies.find(s=>s.grade_level===room?.grade_level),rows=syncSubsidy();
     await insertRows(rows.filter(r=>r.checked&&!r.disabled).map(r=>({
       student_id:r.placement.student_id,year:currentYear,term:Number(el("term").value),grade_level:r.placement.grade_level,kind:"เงินอุดหนุน",description:"เงินอุดหนุน",qty:1,unit_price:Number(rate.amount),note:rate.note||null,created_by:session.user.id
-    })),"เงินอุดหนุน")
+    })),"เงินอุดหนุน");
+    return true
   }
   catch(e){
-    toast(friendly(e),true)
+    toast(friendly(e),true);
+    return false
   }
-};
+}
+el("save-subsidy").onclick=saveSubsidyFromRoster;
 
-el("save-promo").onclick=async()=>{
+async function savePromoFromRoster(){
   try{
     const promo=promotions.find(p=>p.id===el("promo-select").value),rows=rowsFor("ส่วนลด",promo.id);
     const picked=rows.filter((r,i)=>!r.disabled&&el("promo-roster").querySelector(`[data-promo-check="${i}"]`)?.checked);
@@ -853,17 +1065,76 @@ el("save-promo").onclick=async()=>{
       unit_price:Number(promo.amount),
       note:promo.condition_note||null,
       created_by:session.user.id
-    })),"ส่วนลด")
+    })),"ส่วนลด");
+    return true
   }catch(e){
-    toast(friendly(e),true)
+    toast(friendly(e),true);
+    return false
   }
+}
+el("save-promo").onclick=savePromoFromRoster;
+
+el("person-save-product").onclick=async()=>{
+  const placement=selectedPersonPlacement(),item=items.find(row=>row.id===el("person-product-item").value),published=prices.find(row=>row.item_id===item?.id),qty=Number(el("person-product-qty").value),price=Number(el("person-product-price").value),note=el("person-product-note").value.trim();
+  const stock=computeStockBalance(moves.filter(move=>move.item_id===item?.id));
+  if(!placement||!item||!published)return toast("กรุณาเลือกนักเรียนและสินค้าที่มีราคาประกาศ",true);
+  if(!Number.isInteger(qty)||qty<1)return toast("จำนวนต้องเป็นจำนวนเต็มอย่างน้อย 1",true);
+  if(item.track_stock&&qty>stock)return toast(`สินค้าเหลือ ${stock} ${item.unit} · ตั้งจำนวน ${qty} ไม่ได้`,true);
+  if(price!==Number(published.amount)&&!note)return toast("ราคาต่างจากที่ประกาศ ต้องระบุเหตุผล",true);
+  if(!await window.crsAskConfirm({
+    title:"ยืนยันตั้งหนี้สินค้า",message:`${nameOf(placement)}\n${item.display_name} · ${qty} ${item.unit}\nรวม ${money(qty*price)}`,
+    okLabel:"ตั้งหนี้สินค้า",danger:false
+  }))return;
+  el("product-student").value=placement.student_id;
+  el("product-group").value=item.group_name;
+  syncProduct();
+  el("product-item").value=item.id;
+  syncProduct();
+  el("product-qty").value=String(qty);
+  el("product-price").value=String(price);
+  el("product-note").value=note;
+  syncProductStock();
+  await saveProductFromCurrentForm()
+};
+
+el("person-save-promo").onclick=async()=>{
+  const placement=selectedPersonPlacement(),promo=promotions.find(row=>row.id===el("person-promo").value);
+  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
+  if(!placement||!promo)return toast("กรุณาเลือกนักเรียนและโปรโมชั่น",true);
+  if(existing)return toast(`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`,true);
+  if(!await window.crsAskConfirm({title:"ยืนยันให้ส่วนลด",message:`${nameOf(placement)}\n${promo.name} · ลด ${money(promo.amount)}`,okLabel:"บันทึกส่วนลด",danger:false}))return;
+  el("promo-select").value=promo.id;
+  renderPromo();
+  el("promo-roster").querySelectorAll("[data-promo-check]:not(:disabled)").forEach(input=>{input.checked=false});
+  const index=roomPlacements.findIndex(row=>row.student_id===placement.student_id);
+  const chosen=el("promo-roster").querySelector(`[data-promo-check="${index}"]:not(:disabled)`);
+  if(!chosen)return toast("รายการนี้ถูกตั้งไปแล้ว กรุณาโหลดข้อมูลล่าสุด",true);
+  chosen.checked=true;
+  await savePromoFromRoster()
+};
+
+el("person-save-subsidy").onclick=async()=>{
+  const placement=selectedPersonPlacement(),rate=subsidies.find(row=>row.grade_level===placement?.grade_level),existing=annualSubsidyFor(charges,placement?.student_id);
+  if(!placement||!rate)return toast("ยังไม่มีอัตราเงินอุดหนุนของชั้นนี้",true);
+  if(existing)return toast(`ได้รับแล้วเมื่อ ${displayChargeDate(existing)} · ภาคเรียน ${existing.term}`,true);
+  if(!await window.crsAskConfirm({title:"ยืนยันให้เงินอุดหนุน",message:`${nameOf(placement)}\nอัตรา ${placement.grade_level} · ${money(rate.amount)}`,okLabel:"บันทึกเงินอุดหนุน",danger:false}))return;
+  renderSubsidy();
+  el("subsidy-roster").querySelectorAll("[data-subsidy-check]:not(:disabled)").forEach(input=>{input.checked=false});
+  const index=roomPlacements.findIndex(row=>row.student_id===placement.student_id);
+  const chosen=el("subsidy-roster").querySelector(`[data-subsidy-check="${index}"]:not(:disabled)`);
+  if(!chosen)return toast("นักเรียนได้รับเงินอุดหนุนปีนี้แล้ว กรุณาโหลดข้อมูลล่าสุด",true);
+  chosen.checked=true;
+  await saveSubsidyFromRoster()
 };
 
 document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
-el("room").onchange=selectRoom;
+el("room").onchange=()=>{personStudentId=null;selectRoom();resetPersonForm()};
 el("term").onchange=()=>{
   renderGuard();
-  renderAdmin()
+  renderAdmin();
+  renderPersonBill();
+  syncPersonPromo();
+  syncPersonSubsidy()
 };
 el("admin-item").onchange=renderAdmin;
 el("admin-roster").onchange=syncAdminTotal;
@@ -872,16 +1143,33 @@ el("promo-select").onchange=renderPromo;
 el("product-group").onchange=syncProduct;
 el("product-item").onchange=syncProduct;
 el("product-qty").oninput=syncProductStock;
+el("person-student").onchange=()=>{personStudentId=el("person-student").value;resetPersonForm();renderPersonBill();syncPersonPromo();syncPersonSubsidy()};
+el("person-kind").onclick=event=>{const button=event.target.closest("[data-person-kind]");if(button)setPersonKind(button.dataset.personKind)};
+el("person-product-group").onchange=syncPersonProduct;
+el("person-product-item").onchange=syncPersonProduct;
+el("person-product-qty").oninput=syncPersonProductStock;
+el("person-promo").onchange=syncPersonPromo;
+el("person-admin-warning").onclick=event=>{if(event.target.closest("[data-go-admin]"))showTab("admin")};
 
-el("charge-list").onclick=e=>{
-  const b=e.target.closest("[data-void]");
-  if(!b)return;
-  voidId=b.dataset.void;
+function openVoidCharge(id){
+  voidId=id;
   const c=charges.find(c=>c.id===voidId);
+  if(!c)return toast("ไม่พบรายการนี้ กรุณาโหลดข้อมูลใหม่",true);
+  if(chargeHasPayment(c,payments))return toast("จ่ายแล้ว ยกเลิกไม่ได้ · ต้องยกเลิกที่หน้ารับเงินก่อน",true);
   el("void-detail").textContent=`${c.description} · ${money(c.amount)}`;
   el("void-reason").value="";
   el("void-overlay").hidden=false;
   el("void-reason").focus()
+}
+
+el("charge-list").onclick=e=>{
+  const b=e.target.closest("[data-void]");
+  if(!b)return;
+  openVoidCharge(b.dataset.void)
+};
+el("person-bill").onclick=e=>{
+  const b=e.target.closest("[data-person-void]");
+  if(b)openVoidCharge(b.dataset.personVoid)
 };
 
 const closeVoid=()=>{

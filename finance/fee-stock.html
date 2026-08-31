@@ -16,14 +16,17 @@
   * { box-sizing:border-box; }
   html, body { max-width:100%; overflow-x:hidden; }
   body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
-  .wrap { max-width:760px; margin:0 auto; }
+  .wrap { max-width:1040px; margin:0 auto; }
   header h1 { margin:4px 0; font-size:22px; }
   header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
   header .nav { min-height:54px; }
   .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
   .section { margin-bottom:12px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; }
   .field { margin-bottom:14px; }
-  .field label { display:block; margin-bottom:6px; font-weight:600; }
+  .field label, .field-label { display:block; margin-bottom:6px; font-weight:600; }
+  .row2, .row3 { display:grid; gap:12px; }
+  .row2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .row3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
   input[type="text"], input[type="number"], input[type="date"], select, textarea {
     width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
     color:var(--ink); background:var(--white); font:inherit; font-size:16px;
@@ -53,6 +56,7 @@
   .readonly { margin-bottom:16px; padding:14px; color:var(--danger); background:var(--danger-soft); border-radius:10px; }
   .banner { margin-bottom:16px; padding:14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
   .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
   .banner a { color:inherit; font-weight:700; }
   .alert-links { display:flex; flex-wrap:wrap; gap:8px 14px; margin-top:8px; }
   .status { display:inline-flex; align-items:center; min-height:28px; padding:3px 9px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:13px; font-weight:600; }
@@ -65,12 +69,19 @@
   .modal-actions { display:flex; gap:10px; margin-top:16px; }
   .modal-actions button { flex:1; }
   .history-title { scroll-margin-top:20px; }
+  .editor { border-color:var(--teal); background:var(--teal-soft); }
+  .editor h2 { margin:0 0 12px; font-size:19px; }
+  .save-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+  .money-input { min-width:120px; text-align:right; }
+  tfoot td { background:var(--bg); font-weight:700; }
   .toast { position:sticky; bottom:10px; z-index:20; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
   .toast.ok, .toast.err { display:block; }
   .toast.err { background:var(--danger); }
   [hidden] { display:none !important; }
   @media (max-width:560px) {
+    .row2, .row3 { grid-template-columns:1fr; }
     .section-head { align-items:stretch; flex-direction:column; }
+    .save-bar { align-items:stretch; flex-direction:column; }
     .actions { justify-content:flex-start; }
     .modal-actions { flex-direction:column-reverse; }
   }
@@ -81,7 +92,7 @@
 <div class="wrap">
   <header>
     <h1>คลังสินค้า</h1>
-    <p>ตั้งยอดยกมา รับสินค้าเข้า และปรับยอดด้วยประวัติที่ตรวจย้อนกลับได้</p>
+    <p>เพิ่มสินค้า ตั้งราคา รับเข้า และดูยอดคงเหลือได้จากที่เดียว</p>
     <div class="nav"></div>
     <script src="../app-shell.js?v=20260830-3"></script>
   </header>
@@ -89,13 +100,48 @@
   <main class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <div id="stock-app" hidden>
-      <section id="opening-alert" class="banner" hidden></section>
       <section class="card">
-        <div class="section-head"><div><h2>สินค้าที่คุมสต๊อก</h2><p>คงเหลือคำนวณจากผลรวมรายการเคลื่อนไหวทั้งหมด ไม่มีช่องยอดคงเหลือให้แก้ตรง ๆ</p></div></div>
+        <div class="section-head">
+          <div class="field" style="margin:0"><label for="year">ปีการศึกษา</label><select id="year" disabled><option value="">กำลังโหลด…</option></select></div>
+          <div class="actions"><button id="copy-prices" class="ghost" type="button">คัดลอกราคาจากปีก่อน</button><button id="add-product" class="primary" type="button">เพิ่มสินค้า</button></div>
+        </div>
+        <div class="hint">ราคาขายผูกกับปีที่เลือก · รายการสินค้าและประวัติคลังใช้ต่อเนื่องทุกปี</div>
+      </section>
+      <form id="product-form" class="card editor" hidden>
+        <h2 id="product-form-title">เพิ่มสินค้า</h2>
+        <div class="row3">
+          <div class="field"><label for="product-group">ชื่อกลุ่มสินค้า</label><input id="product-group" type="text" maxlength="160" required placeholder="เช่น ชุดนักเรียนหญิง"></div>
+          <div class="field"><label for="product-unit">หน่วย</label><input id="product-unit" type="text" maxlength="60" value="ตัว" required></div>
+          <div class="field"><label for="product-sort">ลำดับเริ่มต้น</label><input id="product-sort" type="number" step="1" value="0" inputmode="numeric"><div class="hint">ระบบไล่เลขให้เอง เช่น 0, 1, 2</div></div>
+        </div>
+        <div class="field"><label for="product-variants">เบอร์/สี/แบบ — คั่นด้วยจุลภาค</label><textarea id="product-variants" placeholder="เบอร์ S, เบอร์ M, เบอร์ L"></textarea><div class="hint">ถ้าไม่มีเบอร์/สี/แบบ เว้นว่างได้ · พิมพ์คั่นด้วยจุลภาค · เว้นวรรคเกินได้ · ใส่ซ้ำกันระบบจะไม่สร้างซ้ำให้</div></div>
+        <div class="row2">
+          <label class="field-label"><input id="product-track" type="checkbox" checked> คุมสต๊อกสินค้า</label>
+          <div class="field"><label for="product-threshold">เตือนเมื่อเหลือน้อยกว่า</label><input id="product-threshold" type="number" min="0" step="1" inputmode="numeric" placeholder="เว้นว่าง = ไม่เตือน"></div>
+        </div>
+        <div id="new-product-fields">
+          <div class="row2">
+            <div class="field"><label for="product-price">ราคาขายของปีที่เลือก (บาท)</label><input id="product-price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="เว้นว่างได้"></div>
+            <div class="field"><label for="product-opening">ยอดยกมา</label><input id="product-opening" type="number" min="1" step="1" inputmode="numeric" placeholder="เว้นว่างได้"></div>
+          </div>
+          <div class="row3">
+            <div class="field"><label for="product-cost">ราคาทุนต่อหน่วย (บาท)</label><input id="product-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="ควรกรอกถ้าทราบ"></div>
+            <div class="field"><label for="product-supplier">ผู้ขาย</label><input id="product-supplier" type="text" maxlength="160" placeholder="เว้นว่างได้"></div>
+            <div class="field"><label for="product-doc">เลขที่ใบส่งของ</label><input id="product-doc" type="text" maxlength="120" placeholder="เว้นว่างได้"></div>
+          </div>
+          <div class="hint">ราคาทุน ผู้ขาย และเลขที่ใบส่งของช่วยให้ตรวจของย้อนหลังได้ แม้ทุกช่องจะเว้นว่างได้</div>
+        </div>
+        <div class="actions"><button id="cancel-product" class="ghost" type="button">ยกเลิก</button><button class="primary" type="submit">บันทึกสินค้า</button></div>
+      </form>
+      <section id="opening-alert" class="banner" hidden></section>
+      <section id="low-stock-alert" class="banner bad" hidden></section>
+      <section class="card">
+        <div class="section-head"><div><h2>รายการสินค้า</h2><p>ยอดคงเหลือมาจากการบวกลบรายการรับเข้าและตัดออกทั้งหมด · แก้ตัวเลขนี้ตรง ๆ ไม่ได้ ต้องบันทึกรับเข้าหรือปรับยอด</p></div></div>
         <div id="stock-list"></div>
+        <div class="save-bar"><span class="hint">ช่องราคาเป็นของปีที่เลือก · จุดเตือนใช้กับสินค้าที่คุมสต๊อก</span><button id="save-product-settings" class="primary" type="button">บันทึกราคาและจุดเตือน</button></div>
       </section>
       <section id="history-card" class="card" hidden>
-        <div class="section-head history-title" id="history-title"><div><h2 id="history-name">ประวัติสินค้า</h2><p>รายการเก่าแก้ไม่ได้ กรอกผิดให้ออกแถวปรับยอดพร้อมเหตุผล</p></div><button id="close-history" class="ghost" type="button">ปิดประวัติ</button></div>
+        <div class="section-head history-title" id="history-title"><div><h2 id="history-name">ประวัติสินค้า</h2><p>รายการที่บันทึกไปแล้วแก้ไม่ได้ · ถ้ากรอกผิดให้บันทึก「ปรับยอด」พร้อมเหตุผลแทน</p></div><button id="close-history" class="ghost" type="button">ปิดประวัติ</button></div>
         <div id="history-list"></div>
       </section>
     </div>
@@ -107,6 +153,11 @@
         <div id="move-item" class="hint"></div>
         <div class="field" style="margin-top:14px"><label id="move-qty-label" for="move-qty">จำนวน</label><input id="move-qty" type="number" step="1" inputmode="numeric" required></div>
         <div id="move-qty-hint" class="hint"></div>
+        <div id="purchase-fields" hidden>
+          <div class="field"><label for="move-cost">ราคาทุนต่อหน่วย (บาท)</label><input id="move-cost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="เว้นว่างได้"></div>
+          <div class="field"><label for="move-supplier">ผู้ขาย</label><input id="move-supplier" type="text" maxlength="160" placeholder="เว้นว่างได้"></div>
+          <div class="field"><label for="move-doc">เลขที่ใบส่งของ</label><input id="move-doc" type="text" maxlength="120" placeholder="เว้นว่างได้"></div>
+        </div>
         <div id="reason-field" class="field" hidden><label for="move-reason">เหตุผลการปรับยอด</label><textarea id="move-reason" maxlength="500" placeholder="บังคับกรอก เพื่อให้ตรวจย้อนหลังได้"></textarea></div>
         <div class="field"><label for="move-note">หมายเหตุ</label><textarea id="move-note" maxlength="500" placeholder="ไม่บังคับ"></textarea></div>
         <div class="modal-actions"><button id="cancel-move" class="ghost" type="button">ยกเลิก</button><button id="save-move" class="primary" type="submit">บันทึก</button></div>
@@ -118,7 +169,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows,
-  computeStockBalance
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, formatMoney, computeStockBalance
 } from "../supabase-client.js?v=20260830-3";
 
 const el = id => document.getElementById(id);
@@ -131,11 +182,39 @@ function stockAlerts(items, moves) {
   return (items || []).filter(item => item.track_stock === true && !opened.has(item.id));
 }
 
+function parseVariantList(value) {
+  const seen = new Set();
+  return String(value ?? "").split(/[,，]/).map(item => item.trim()).filter(item => {
+    if (!item || seen.has(item)) return false;
+    seen.add(item);
+    return true;
+  });
+}
+
+function latestUnitCost(itemMoves) {
+  return [...(itemMoves || [])]
+    .filter(move => ["ยอดยกมา", "รับเข้า"].includes(move.kind) && move.unit_cost != null && Number.isFinite(Number(move.unit_cost)))
+    .sort((a, b) => String(b.recorded_at || "").localeCompare(String(a.recorded_at || "")) || String(b.id || "").localeCompare(String(a.id || "")))[0]?.unit_cost ?? null;
+}
+
+function inventoryValue(balance, unitCost) {
+  return unitCost == null ? null : Number(balance || 0) * Number(unitCost);
+}
+
+function lowStockAlerts(items, moves) {
+  return (items || []).filter(item => item.track_stock === true && item.low_stock_threshold != null &&
+    computeStockBalance((moves || []).filter(move => move.item_id === item.id)) <= Number(item.low_stock_threshold));
+}
+
 let session = null;
 let canAdmin = false;
+let years = [];
+let currentYear = "";
 let items = [];
 let moves = [];
+let priceRows = [];
 let profiles = new Map();
+let editingProductId = null;
 let currentItemId = null;
 let moveMode = null;
 let lastFocus = null;
@@ -165,25 +244,221 @@ function itemCompare(a, b) {
 
 function movesFor(itemId) { return moves.filter(move => move.item_id === itemId); }
 function openingFor(itemId) { return moves.find(move => move.item_id === itemId && move.kind === "ยอดยกมา") || null; }
+function currentPrice(itemId) { return priceRows.find(row => row.item_id === itemId)?.amount ?? null; }
 
 function renderOpeningAlert() {
   const missing = stockAlerts(items, moves);
   el("opening-alert").hidden = missing.length === 0;
   if (!missing.length) return;
-  el("opening-alert").innerHTML = `<b>ยังไม่ได้ตั้งยอดยกมา ${missing.length} รายการ</b><br>สินค้าที่คงเหลือเป็น 0 จะตั้งหนี้ใน Slice B ไม่ได้ กรุณาตั้งยอดจริงก่อนเริ่มใช้งาน<div class="alert-links">${missing.map(item => `<a href="#stock-${item.id}" data-alert-opening="${item.id}">${esc(item.display_name)} →</a>`).join("")}</div>`;
+  el("opening-alert").innerHTML = `<b>ยังไม่ได้ตั้งยอดยกมา ${missing.length} รายการ</b><br>สินค้าที่คงเหลือเป็น 0 จะตั้งหนี้ไม่ได้ กรุณาตั้งยอดจริงก่อนเริ่มใช้งาน<div class="alert-links">${missing.map(item => `<a href="#stock-${item.id}" data-alert-opening="${item.id}">${esc(item.display_name)} →</a>`).join("")}</div>`;
+}
+
+function renderLowStockAlert() {
+  const low = lowStockAlerts(items, moves);
+  el("low-stock-alert").hidden = low.length === 0;
+  if (!low.length) return;
+  el("low-stock-alert").innerHTML = `<b>ของใกล้หมด ${low.length} รายการ</b><br>ยอดคงเหลือถึงจุดเตือนแล้ว ควรตรวจของจริงและเตรียมรับเข้า<div class="alert-links">${low.map(item => `<a href="#stock-${item.id}" data-alert-low="${item.id}">${esc(item.display_name)} เหลือ ${esc(computeStockBalance(movesFor(item.id)))} ${esc(item.unit)} →</a>`).join("")}</div>`;
 }
 
 function renderStock() {
   renderOpeningAlert();
+  renderLowStockAlert();
   if (!items.length) {
-    el("stock-list").innerHTML = '<div class="empty">ยังไม่มีสินค้าที่เปิดคุมสต๊อก · ไปเพิ่มหรือแก้รายการที่หน้า “ตั้งค่าค่าใช้จ่าย” ก่อน</div>';
+    el("stock-list").innerHTML = '<div class="empty">ยังไม่มีสินค้า · กด「เพิ่มสินค้า」เพื่อเริ่มรายการแรก</div>';
+    el("save-product-settings").disabled = true;
     return;
   }
-  el("stock-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>สินค้า</th><th class="number">คงเหลือ</th><th>จัดการ</th></tr></thead><tbody>${items.map(item => {
+  el("save-product-settings").disabled = false;
+  let totalValue = 0;
+  let valuedCount = 0;
+  el("stock-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>สินค้า</th><th class="number">ราคา (${esc(currentYear)})</th><th class="number">คงเหลือ</th><th class="number">จุดเตือน</th><th class="number">มูลค่าคงคลัง</th><th>จัดการ</th></tr></thead><tbody>${items.map(item => {
     const balance = computeStockBalance(movesFor(item.id));
     const opening = openingFor(item.id);
-    return `<tr id="stock-${item.id}"><td><b>${esc(item.display_name)}</b><span class="meta">หน่วย ${esc(item.unit)} · ${item.active ? "เปิดใช้งาน" : "ปิดใช้งานแล้ว"}</span>${opening ? '<span class="status">ตั้งยอดยกมาแล้ว</span>' : '<span class="status pending">ยังไม่ตั้งยอดยกมา</span>'}</td><td class="number"><span class="balance">${esc(balance)}</span> ${esc(item.unit)}</td><td><div class="actions">${opening ? "" : `<button class="ghost" type="button" data-move="opening" data-item-id="${item.id}">ตั้งยอดยกมา</button>`}<button class="primary" type="button" data-move="receive" data-item-id="${item.id}">รับเข้า</button><button class="ghost" type="button" data-move="adjust" data-item-id="${item.id}">ปรับยอด</button><button class="ghost" type="button" data-history="${item.id}">ประวัติ</button></div></td></tr>`;
-  }).join("")}</tbody></table></div>`;
+    const cost = latestUnitCost(movesFor(item.id));
+    const value = inventoryValue(balance, cost);
+    if (value != null) { totalValue += value; valuedCount++; }
+    return `<tr id="stock-${item.id}"><td><b>${esc(item.display_name)}</b><span class="meta">หน่วย ${esc(item.unit)} · ${item.active ? "เปิดใช้งาน" : "ปิดใช้งานแล้ว"} · ${item.track_stock ? "คุมสต๊อก" : "ไม่คุมสต๊อก"}</span>${item.track_stock ? (opening ? '<span class="status">ตั้งยอดยกมาแล้ว</span>' : '<span class="status pending">ยังไม่ตั้งยอดยกมา</span>') : ""}</td><td><input class="money-input" type="number" min="0" step="0.01" inputmode="decimal" data-price-item="${item.id}" aria-label="ราคาของ ${esc(item.display_name)}" value="${currentPrice(item.id) == null ? "" : esc(currentPrice(item.id))}" placeholder="ว่าง"></td><td class="number"><span class="balance">${esc(balance)}</span> ${esc(item.unit)}</td><td><input class="money-input" type="number" min="0" step="1" inputmode="numeric" data-threshold-item="${item.id}" aria-label="จุดเตือนของ ${esc(item.display_name)}" value="${item.low_stock_threshold == null ? "" : esc(item.low_stock_threshold)}" placeholder="ไม่เตือน" ${item.track_stock ? "" : "disabled"}></td><td class="number">${value == null ? "—" : formatMoney(value)}${cost == null ? "" : `<span class="meta">ทุนล่าสุด ${formatMoney(cost)}</span>`}</td><td><div class="actions">${item.track_stock && !opening ? `<button class="ghost" type="button" data-move="opening" data-item-id="${item.id}">ตั้งยอดยกมา</button>` : ""}${item.track_stock ? `<button class="primary" type="button" data-move="receive" data-item-id="${item.id}">รับเข้า</button><button class="ghost" type="button" data-move="adjust" data-item-id="${item.id}">ปรับยอด</button><button class="ghost" type="button" data-history="${item.id}">ประวัติ</button>` : ""}<button class="ghost" type="button" data-edit-product="${item.id}">แก้สินค้า</button><button class="${item.active ? "danger" : "ghost"}" type="button" data-toggle-product="${item.id}">${item.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button>${canAdmin ? `<button class="icon-btn" type="button" data-delete-product="${item.id}" aria-label="ลบ ${esc(item.display_name)}">🗑</button>` : ""}</div></td></tr>`;
+  }).join("")}</tbody><tfoot><tr><td colspan="4">รวมมูลค่าคงคลัง${valuedCount < items.length ? ` · คำนวณได้ ${valuedCount}/${items.length} รายการ` : ""}</td><td class="number">${valuedCount ? formatMoney(totalValue) : "—"}</td><td></td></tr></tfoot></table></div>`;
+}
+
+function parseOptionalNumber(input, { integer = false, positive = false } = {}) {
+  const raw = input.value.trim();
+  if (raw === "") return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || (integer && !Number.isInteger(value)) || (positive ? value <= 0 : value < 0)) {
+    input.focus();
+    throw new Error(positive ? "จำนวนต้องเป็นจำนวนเต็มมากกว่า 0" : integer ? "จำนวนต้องเป็นจำนวนเต็มตั้งแต่ 0 ขึ้นไป" : "จำนวนเงินต้องเป็น 0 หรือมากกว่า");
+  }
+  return integer ? value : Math.round(value * 100) / 100;
+}
+
+function openProductForm(item = null) {
+  editingProductId = item?.id || null;
+  el("product-form-title").textContent = item ? `แก้สินค้า ${item.display_name}` : "เพิ่มสินค้า";
+  el("product-group").value = item?.group_name || "";
+  el("product-variants").value = item?.variant_label || "";
+  el("product-unit").value = item?.unit || "ตัว";
+  el("product-sort").value = item?.sort_order ?? 0;
+  el("product-track").checked = item ? !!item.track_stock : true;
+  el("product-threshold").value = item?.low_stock_threshold ?? "";
+  el("product-threshold").disabled = item ? !item.track_stock : false;
+  el("product-price").value = "";
+  el("product-opening").value = "";
+  el("product-cost").value = "";
+  el("product-supplier").value = "";
+  el("product-doc").value = "";
+  el("new-product-fields").hidden = !!item;
+  el("product-form").hidden = false;
+  el("product-group").focus();
+}
+
+function closeProductForm() {
+  editingProductId = null;
+  el("product-form").hidden = true;
+}
+
+async function saveProduct(event) {
+  event.preventDefault();
+  const groupName = el("product-group").value.trim();
+  const parsedVariants = parseVariantList(el("product-variants").value);
+  const variants = parsedVariants.length ? parsedVariants : [""];
+  const unit = el("product-unit").value.trim();
+  const sortStart = Number(el("product-sort").value || 0);
+  const trackStock = el("product-track").checked;
+  const threshold = parseOptionalNumber(el("product-threshold"), { integer:true });
+  if (!groupName) return toast("กรุณากรอกชื่อกลุ่มสินค้า", true);
+  if (!unit) return toast("กรุณากรอกหน่วย", true);
+  if (!Number.isInteger(sortStart)) return toast("ลำดับต้องเป็นจำนวนเต็ม", true);
+  if (!trackStock && threshold != null) return toast("ตั้งจุดเตือนได้เฉพาะสินค้าที่คุมสต๊อก", true);
+  if (editingProductId) {
+    if (variants.length !== 1) return toast("ตอนแก้สินค้าให้ใส่เบอร์/สี/แบบเพียง 1 รายการ", true);
+    const { error } = await sb.from("fee_items").update({
+      group_name:groupName, variant_label:variants[0], unit, sort_order:sortStart,
+      track_stock:trackStock, low_stock_threshold:trackStock ? threshold : null,
+      updated_at:new Date().toISOString()
+    }).eq("id", editingProductId);
+    if (error) return toast(friendlyError(error), true);
+    closeProductForm();
+    toast("แก้สินค้าแล้ว");
+    await loadStock();
+    return;
+  }
+
+  const price = parseOptionalNumber(el("product-price"));
+  const opening = parseOptionalNumber(el("product-opening"), { integer:true, positive:true });
+  const unitCost = parseOptionalNumber(el("product-cost"));
+  const supplier = el("product-supplier").value.trim() || null;
+  const docNo = el("product-doc").value.trim() || null;
+  if (!trackStock && opening != null) return toast("ยอดยกมาใช้ได้เฉพาะสินค้าที่คุมสต๊อก", true);
+  if (opening == null && (unitCost != null || supplier || docNo)) return toast("กรุณาใส่ยอดยกมาก่อน จึงจะบันทึกราคาทุน ผู้ขาย หรือเลขที่ใบส่งของได้", true);
+  const payloads = variants.map((variant, index) => ({
+    category:"ค่าสินค้า", group_name:groupName, variant_label:variant, unit,
+    track_stock:trackStock, low_stock_threshold:trackStock ? threshold : null,
+    sort_order:sortStart + index, created_by:session.user.id, updated_at:new Date().toISOString()
+  }));
+  const created = await sb.from("fee_items").insert(payloads).select("id,display_name");
+  if (created.error) return toast(friendlyError(created.error), true);
+  const createdItems = created.data || [];
+  const results = [`สร้างสินค้า ${createdItems.length} รายการแล้ว`];
+  const failures = [];
+  if (price != null) {
+    const savedPrices = await sb.from("fee_product_prices").insert(createdItems.map(item => ({
+      year:currentYear, item_id:item.id, amount:price, updated_by:session.user.id, updated_at:new Date().toISOString()
+    })));
+    if (savedPrices.error) failures.push(`ราคาไม่สำเร็จ: ${friendlyError(savedPrices.error)}`);
+    else results.push("บันทึกราคาแล้ว");
+  }
+  if (opening != null) {
+    const savedOpening = await sb.from("fee_stock_moves").insert(createdItems.map(item => ({
+      item_id:item.id, kind:"ยอดยกมา", qty:opening, unit_cost:unitCost,
+      supplier, doc_no:docNo, recorded_by:session.user.id
+    })));
+    if (savedOpening.error) failures.push(`ยอดยกมาไม่สำเร็จ: ${friendlyError(savedOpening.error)}`);
+    else results.push("บันทึกยอดยกมาแล้ว");
+  }
+  closeProductForm();
+  try { await loadStock(); }
+  catch (error) { failures.push(`โหลดรายการใหม่ไม่สำเร็จ: ${friendlyError(error)}`); }
+  toast([...results, ...failures, failures.length ? "รายการสินค้าถูกสร้างแล้ว ห้ามกดเพิ่มซ้ำ · แก้ราคาที่ตารางหรือตั้งยอดยกมาจากปุ่มของสินค้า" : ""].filter(Boolean).join(" · "), failures.length > 0);
+}
+
+async function copyPreviousPrices() {
+  const ordered = [...years].sort((a, b) => String(a.year).localeCompare(String(b.year), "th", { numeric:true }));
+  const index = ordered.findIndex(row => String(row.year) === String(currentYear));
+  if (index <= 0) return toast("ไม่มีปีก่อนหน้าในรายการปีการศึกษา", true);
+  const previousYear = ordered[index - 1].year;
+  const { data, error } = await sb.from("fee_product_prices").select("item_id,amount").eq("year", previousYear);
+  if (error) throw error;
+  let copied = 0;
+  for (const row of data || []) {
+    const input = el("stock-list").querySelector(`[data-price-item="${CSS.escape(row.item_id)}"]`);
+    if (!input || input.value.trim() !== "") continue;
+    input.value = String(Number(row.amount));
+    copied++;
+  }
+  toast(`คัดลอกราคาจากปี ${previousYear} เพิ่ม ${copied} รายการ · ยังไม่บันทึก`);
+}
+
+async function saveProductSettings() {
+  const priceInputs = [...el("stock-list").querySelectorAll("[data-price-item]")];
+  const thresholdInputs = [...el("stock-list").querySelectorAll("[data-threshold-item]")];
+  const prices = priceInputs.map(input => ({ input, amount:parseOptionalNumber(input) }));
+  const thresholds = thresholdInputs.map(input => ({ input, amount:parseOptionalNumber(input, { integer:true }) }));
+  const blankPriceIds = new Set(prices.filter(row => row.amount == null).map(row => row.input.dataset.priceItem));
+  const removing = priceRows.filter(row => blankPriceIds.has(row.item_id));
+  if (removing.length && !canAdmin) return toast(`มีราคาเดิม ${removing.length} รายการที่ถูกเว้นว่าง · การล้างราคาเดิมทำได้เฉพาะผู้ดูแลระบบ`, true);
+
+  const thresholdResults = await Promise.all(thresholds.map(row => sb.from("fee_items").update({
+    low_stock_threshold:row.input.disabled ? null : row.amount, updated_at:new Date().toISOString()
+  }).eq("id", row.input.dataset.thresholdItem)));
+  const thresholdErrors = thresholdResults.filter(result => result.error).map(result => friendlyError(result.error));
+  const filledPrices = prices.filter(row => row.amount != null);
+  let priceError = null;
+  if (filledPrices.length) {
+    const result = await sb.from("fee_product_prices").upsert(filledPrices.map(row => ({
+      year:currentYear, item_id:row.input.dataset.priceItem, amount:row.amount,
+      updated_by:session.user.id, updated_at:new Date().toISOString()
+    })), { onConflict:"year,item_id" });
+    priceError = result.error;
+  }
+  const removeErrors = [];
+  for (const row of removing) {
+    const result = await sb.from("fee_product_prices").delete().eq("year", currentYear).eq("item_id", row.item_id).select("item_id");
+    if (result.error || !result.data?.length) removeErrors.push(result.error ? friendlyError(result.error) : "ล้างราคาไม่สำเร็จ");
+  }
+  const errors = [...thresholdErrors, ...(priceError ? [friendlyError(priceError)] : []), ...removeErrors];
+  await loadStock();
+  toast(errors.length ? `บันทึกได้บางส่วน · ${errors.join(" · ")}` : `บันทึกราคา ${filledPrices.length} รายการ และจุดเตือนแล้ว`, errors.length > 0);
+}
+
+async function toggleProduct(item) {
+  const action = item.active ? "ปิดใช้งาน" : "เปิดใช้งาน";
+  if (!await window.crsAskConfirm({
+    title:`${action}สินค้า`, message:`${item.display_name}\n${item.active ? "สินค้าจะหายจากตัวเลือกตั้งหนี้ แต่ราคาและประวัติคลังยังอยู่ครบ" : "สินค้าจะกลับมาให้เลือกใช้งานได้"}`,
+    okLabel:action, danger:item.active
+  })) return;
+  const { error } = await sb.from("fee_items").update({ active:!item.active, updated_at:new Date().toISOString() }).eq("id", item.id);
+  if (error) throw error;
+  toast(`${action}แล้ว`);
+  await loadStock();
+}
+
+async function deleteProduct(item) {
+  if (!canAdmin) return;
+  const [prices, moveRefs] = await Promise.all([
+    sb.from("fee_product_prices").select("item_id", { count:"exact", head:true }).eq("item_id", item.id),
+    sb.from("fee_stock_moves").select("id", { count:"exact", head:true }).eq("item_id", item.id)
+  ]);
+  const refs = Number(prices.count || 0) + Number(moveRefs.count || 0);
+  if (!await window.crsAskConfirm({
+    title:"ลบสินค้า", message:`${item.display_name}\nมีราคาหรือรายการคลังอ้างถึง ${refs} รายการ · ถ้ามีข้อมูลอ้างถึง ระบบจะไม่ยอมลบ ให้ปิดใช้งานแทน\nการลบกู้คืนไม่ได้`,
+    requireText:item.display_name, okLabel:"ลบสินค้า", danger:true
+  })) return;
+  const { data, error } = await sb.from("fee_items").delete().eq("id", item.id).select("id");
+  if (error) return toast(friendlyError(error), true);
+  if (!data?.length) return toast("ลบไม่ได้ กรุณาตรวจสิทธิ์ผู้ดูแลระบบ", true);
+  toast("ลบสินค้าแล้ว");
+  await loadStock();
 }
 
 function cumulativeBalances(itemMoves) {
@@ -214,7 +489,7 @@ function renderHistory(itemId, shouldScroll = true) {
   const after = cumulativeBalances(itemMoves);
   const ordered = [...itemMoves].sort((a, b) => String(b.recorded_at).localeCompare(String(a.recorded_at)) || String(b.id).localeCompare(String(a.id)));
   el("history-name").textContent = `ประวัติ · ${item.display_name}`;
-  el("history-list").innerHTML = ordered.length ? `<div class="table-wrap"><table><thead><tr><th>ชนิด</th><th class="number">จำนวน</th><th class="number">ยอดหลังรายการ</th><th>ผู้บันทึก / เวลา</th>${canAdmin ? "<th>ลบ</th>" : ""}</tr></thead><tbody>${ordered.map(move => `<tr><td><b>${esc(move.kind)}</b>${move.reason ? `<span class="meta">เหตุผล: ${esc(move.reason)}</span>` : ""}${move.note ? `<span class="meta">หมายเหตุ: ${esc(move.note)}</span>` : ""}</td><td class="number"><b class="qty ${Number(move.qty) > 0 ? "in" : "out"}">${Number(move.qty) > 0 ? "+" : ""}${esc(move.qty)}</b> ${esc(item.unit)}</td><td class="number">${esc(after.get(move.id))} ${esc(item.unit)}</td><td>${esc(recordedBy(move))}<span class="meta">${esc(thaiDateTime(move.recorded_at))}</span></td>${canAdmin ? `<td><button class="icon-btn" type="button" data-delete-move="${move.id}" aria-label="ลบรายการ ${esc(move.kind)}">🗑</button></td>` : ""}</tr>`).join("")}</tbody></table></div>` : '<div class="empty">ยังไม่มีประวัติของสินค้านี้</div>';
+  el("history-list").innerHTML = ordered.length ? `<div class="table-wrap"><table><thead><tr><th>ชนิด / ที่มา</th><th class="number">จำนวน</th><th class="number">ยอดหลังรายการ</th><th>ผู้บันทึก / เวลา</th>${canAdmin ? "<th>ลบ</th>" : ""}</tr></thead><tbody>${ordered.map(move => `<tr><td><b>${esc(move.kind)}</b>${move.unit_cost != null ? `<span class="meta">ราคาทุน ${formatMoney(move.unit_cost)}</span>` : ""}${move.supplier ? `<span class="meta">ผู้ขาย: ${esc(move.supplier)}</span>` : ""}${move.doc_no ? `<span class="meta">ใบส่งของ: ${esc(move.doc_no)}</span>` : ""}${move.reason ? `<span class="meta">เหตุผล: ${esc(move.reason)}</span>` : ""}${move.note ? `<span class="meta">หมายเหตุ: ${esc(move.note)}</span>` : ""}</td><td class="number"><b class="qty ${Number(move.qty) > 0 ? "in" : "out"}">${Number(move.qty) > 0 ? "+" : ""}${esc(move.qty)}</b> ${esc(item.unit)}</td><td class="number">${esc(after.get(move.id))} ${esc(item.unit)}</td><td>${esc(recordedBy(move))}<span class="meta">${esc(thaiDateTime(move.recorded_at))}</span></td>${canAdmin ? `<td><button class="icon-btn" type="button" data-delete-move="${move.id}" aria-label="ลบรายการ ${esc(move.kind)}">🗑</button></td>` : ""}</tr>`).join("")}</tbody></table></div>` : '<div class="empty">ยังไม่มีประวัติของสินค้านี้</div>';
   el("history-card").hidden = false;
   if (shouldScroll) el("history-title").scrollIntoView({ behavior:"smooth", block:"start" });
 }
@@ -237,8 +512,12 @@ function openMove(mode, itemId, trigger = null) {
   el("move-qty-hint").textContent = setup.hint;
   el("save-move").textContent = setup.button;
   el("move-qty").value = "";
+  el("move-cost").value = "";
+  el("move-supplier").value = "";
+  el("move-doc").value = "";
   el("move-reason").value = "";
   el("move-note").value = "";
+  el("purchase-fields").hidden = mode === "adjust";
   el("reason-field").hidden = mode !== "adjust";
   el("move-overlay").hidden = false;
   setTimeout(() => el("move-qty").focus(), 0);
@@ -256,6 +535,7 @@ async function saveMove(event) {
   const item = items.find(row => row.id === currentItemId);
   const qty = Number(el("move-qty").value);
   const reason = el("move-reason").value.trim();
+  const unitCost = moveMode === "adjust" ? null : parseOptionalNumber(el("move-cost"));
   if (!Number.isInteger(qty) || qty === 0) return toast("จำนวนต้องเป็นจำนวนเต็มและไม่เป็น 0", true);
   if (moveMode !== "adjust" && qty < 0) return toast("ยอดยกมาและรับเข้าต้องเป็นจำนวนมากกว่า 0", true);
   if (moveMode === "adjust" && !reason) return toast("กรุณากรอกเหตุผลการปรับยอดก่อนบันทึก", true);
@@ -264,6 +544,9 @@ async function saveMove(event) {
   const kind = { opening:"ยอดยกมา", receive:"รับเข้า", adjust:"ปรับยอด" }[moveMode];
   const { error } = await sb.from("fee_stock_moves").insert({
     item_id:currentItemId, kind, qty,
+    unit_cost:unitCost,
+    supplier:moveMode === "adjust" ? null : el("move-supplier").value.trim() || null,
+    doc_no:moveMode === "adjust" ? null : el("move-doc").value.trim() || null,
     reason:moveMode === "adjust" ? reason : null,
     note:el("move-note").value.trim() || null,
     recorded_by:session.user.id
@@ -306,14 +589,17 @@ async function loadProfiles() {
 }
 
 async function loadStock() {
-  const [itemsRes, movesRes] = await Promise.all([
-    sb.from("fee_items").select("id,display_name,unit,track_stock,active,sort_order").eq("track_stock", true).order("sort_order").order("display_name"),
-    fetchAllRows(() => sb.from("fee_stock_moves").select("id,item_id,kind,qty,charge_id,reason,note,recorded_by,recorded_at"), ["item_id", "recorded_at", "id"])
+  const [itemsRes, movesRes, pricesRes] = await Promise.all([
+    sb.from("fee_items").select("id,category,group_name,variant_label,display_name,unit,track_stock,low_stock_threshold,active,sort_order").eq("category", "ค่าสินค้า").order("sort_order").order("display_name"),
+    fetchAllRows(() => sb.from("fee_stock_moves").select("id,item_id,kind,qty,charge_id,reason,note,unit_cost,supplier,doc_no,recorded_by,recorded_at"), ["item_id", "recorded_at", "id"]),
+    sb.from("fee_product_prices").select("year,item_id,amount").eq("year", currentYear)
   ]);
-  if (itemsRes.error) throw new Error("โหลดรายการสินค้าที่คุมสต๊อกไม่สำเร็จ: " + itemsRes.error.message);
+  if (itemsRes.error) throw new Error("โหลดรายการสินค้าไม่สำเร็จ: " + itemsRes.error.message);
   if (movesRes.error) throw new Error("โหลดประวัติคลังไม่สำเร็จ: " + movesRes.error.message);
+  if (pricesRes.error) throw new Error("โหลดราคาสินค้าไม่สำเร็จ: " + pricesRes.error.message);
   items = (itemsRes.data || []).sort(itemCompare);
   moves = movesRes.data || [];
+  priceRows = pricesRes.data || [];
   await loadProfiles();
   renderStock();
 }
@@ -321,8 +607,14 @@ async function loadStock() {
 el("stock-list").addEventListener("click", event => {
   const moveButton = event.target.closest("[data-move]");
   const historyButton = event.target.closest("[data-history]");
+  const editButton = event.target.closest("[data-edit-product]");
+  const toggleButton = event.target.closest("[data-toggle-product]");
+  const deleteButton = event.target.closest("[data-delete-product]");
   if (moveButton) openMove(moveButton.dataset.move, moveButton.dataset.itemId, moveButton);
   if (historyButton) renderHistory(historyButton.dataset.history);
+  if (editButton) openProductForm(items.find(item => item.id === editButton.dataset.editProduct));
+  if (toggleButton) toggleProduct(items.find(item => item.id === toggleButton.dataset.toggleProduct)).catch(error => toast(friendlyError(error), true));
+  if (deleteButton) deleteProduct(items.find(item => item.id === deleteButton.dataset.deleteProduct)).catch(error => toast(friendlyError(error), true));
 });
 el("opening-alert").addEventListener("click", event => {
   const link = event.target.closest("[data-alert-opening]");
@@ -330,6 +622,27 @@ el("opening-alert").addEventListener("click", event => {
   event.preventDefault();
   document.getElementById(`stock-${link.dataset.alertOpening}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
   openMove("opening", link.dataset.alertOpening, link);
+});
+el("low-stock-alert").addEventListener("click", event => {
+  const link = event.target.closest("[data-alert-low]");
+  if (!link) return;
+  event.preventDefault();
+  document.getElementById(`stock-${link.dataset.alertLow}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+});
+el("add-product").addEventListener("click", () => openProductForm());
+el("cancel-product").addEventListener("click", closeProductForm);
+el("product-form").addEventListener("submit", event => saveProduct(event).catch(error => toast(friendlyError(error), true)));
+el("product-track").addEventListener("change", () => {
+  el("product-threshold").disabled = !el("product-track").checked;
+  if (!el("product-track").checked) el("product-threshold").value = "";
+});
+el("copy-prices").addEventListener("click", () => copyPreviousPrices().catch(error => toast(friendlyError(error), true)));
+el("save-product-settings").addEventListener("click", () => saveProductSettings().catch(error => toast(friendlyError(error), true)));
+el("year").addEventListener("change", async () => {
+  currentYear = el("year").value;
+  closeProductForm();
+  try { await loadStock(); }
+  catch (error) { toast(friendlyError(error), true); }
 });
 el("history-list").addEventListener("click", event => {
   const button = event.target.closest("[data-delete-move]");
@@ -354,6 +667,13 @@ if (session) {
     } else {
       const profileRes = await sb.from("profiles").select("role").eq("id", session.user.id).maybeSingle();
       canAdmin = profileRes.data?.role === "admin";
+      years = await getAcademicYears();
+      if (!years.length) throw new Error("ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน");
+      currentYear = academicYearOf(toDateStr(bangkokNow()), years);
+      if (!currentYear) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้ กรุณาตรวจวันเริ่มปีการศึกษา");
+      el("year").innerHTML = [...years].sort((a, b) => String(b.year).localeCompare(String(a.year), "th", { numeric:true })).map(row => `<option value="${esc(row.year)}">${esc(row.year)}</option>`).join("");
+      el("year").value = currentYear;
+      el("year").disabled = false;
       el("stock-app").hidden = false;
       await loadStock();
     }
