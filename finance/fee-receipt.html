@@ -21,6 +21,7 @@
     .actions { display:flex; flex-wrap:wrap; gap:8px; }
     button, .button-link { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:9px 14px; border:0; border-radius:9px; color:var(--teal); background:var(--teal-soft); font:inherit; font-weight:600; text-decoration:none; cursor:pointer; }
     button.primary { color:var(--white); background:var(--teal); }
+    button.danger { color:var(--white); background:var(--danger); }
     button:disabled { cursor:not-allowed; opacity:.55; }
     .document { position:relative; min-height:248mm; padding:14mm 12mm; color:#111; }
     .document-head { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:start; padding-bottom:14px; border-bottom:2px solid #111; }
@@ -46,17 +47,31 @@
     .signature { display:flex; justify-content:flex-end; margin-top:40px; text-align:center; }
     .signature div { width:250px; }
     .signature-line { margin-top:38px; border-top:1px dotted #333; }
+    .void-document { margin-bottom:14px; padding:12px 14px; border:3px solid var(--danger); color:var(--danger); font-weight:700; white-space:pre-line; }
     .banner, .readonly { margin-bottom:14px; padding:12px 14px; border-radius:10px; color:var(--amber); background:var(--amber-soft); }
     .banner.bad, .readonly { color:var(--danger); background:var(--danger-soft); }
     .toast { position:sticky; bottom:10px; z-index:20; display:none; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
     .toast.ok, .toast.err { display:block; }
     .toast.err { background:var(--danger); }
+    .overlay { position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(15,23,42,.58); }
+    .modal { width:min(100%,540px); max-height:calc(100vh - 40px); overflow:auto; padding:20px; border-radius:14px; background:var(--white); box-shadow:0 24px 70px rgba(15,23,42,.3); }
+    .modal h2 { margin:0 0 4px; font-size:19px; }
+    .modal > p { margin:0 0 16px; color:var(--muted); font-size:14px; white-space:pre-line; }
+    .field { margin-bottom:14px; }
+    .field label { display:block; margin-bottom:6px; font-weight:600; }
+    textarea { width:100%; min-height:88px; padding:10px 12px; resize:vertical; border:1px solid var(--line); border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px; }
+    textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+    .paper-check { display:flex; align-items:flex-start; gap:10px; min-height:44px; padding:10px 12px; border-radius:9px; background:var(--danger-soft); }
+    .paper-check input { flex:0 0 auto; width:22px; height:22px; margin-top:1px; accent-color:var(--danger); }
+    .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+    .form-error { min-height:24px; margin:0; color:var(--danger); font-size:14px; }
     [hidden] { display:none!important; }
     @media (max-width:620px) {
       .toolbar, .student-meta { grid-template-columns:1fr; }
       .toolbar { align-items:stretch; flex-direction:column; }
       .actions { flex-direction:column; }
       .button-link { width:100%; }
+      .modal-actions { flex-direction:column-reverse; }
       .document { min-height:0; padding:16px; }
       .document-head { grid-template-columns:1fr; }
       .receipt-meta { text-align:left; }
@@ -94,10 +109,11 @@
           <a id="payment-link" class="button-link" href="#">กลับไปรับเงิน</a>
           <a class="button-link" href="fee-report.html">กลับไปรายงาน</a>
         </div>
-        <button id="print-button" class="primary no-print" type="button">พิมพ์เอกสาร</button>
+        <div class="actions"><button id="print-button" class="primary no-print" type="button">พิมพ์เอกสาร</button><button id="void-receipt-button" class="danger no-print" type="button">ยกเลิกเอกสารทั้งใบ</button></div>
       </section>
 
       <article id="receipt-document" class="card document">
+        <div id="void-document" class="void-document avoid-break" hidden></div>
         <div class="document-head avoid-break">
           <div class="school"><h2 id="school-name"></h2><p id="school-address"></p></div>
           <div class="receipt-meta">
@@ -121,6 +137,16 @@
       </article>
     </div>
     <div id="toast" class="toast no-print"></div>
+    <div id="void-receipt-overlay" class="overlay no-print" hidden>
+      <form id="void-receipt-form" class="modal" role="dialog" aria-modal="true" aria-labelledby="void-receipt-title" aria-describedby="void-receipt-detail">
+        <h2 id="void-receipt-title">ยกเลิกเอกสารทั้งใบ</h2>
+        <p id="void-receipt-detail"></p>
+        <div class="field"><label for="void-receipt-reason">เหตุผลการยกเลิก</label><textarea id="void-receipt-reason" maxlength="500" placeholder="ระบุเหตุผลให้ตรวจย้อนหลังได้"></textarea></div>
+        <label id="paper-returned-field" class="paper-check"><input id="paper-returned" type="checkbox"><span><b>ได้ใบเดิมคืนหรือทำลายแล้ว</b><br>ต้องยืนยันข้อนี้เพื่อป้องกันกระดาษสองใบใช้เลขเดียวกัน</span></label>
+        <p id="void-receipt-error" class="form-error" role="alert"></p>
+        <div class="modal-actions"><button id="void-receipt-cancel" type="button">กลับ</button><button id="void-receipt-submit" class="danger" type="submit">ยืนยันยกเลิกทั้งใบ</button></div>
+      </form>
+    </div>
   </main>
 </div>
 
@@ -148,6 +174,12 @@ function buildReceiptRows(charges,payments){
   }
 }
 
+function receiptVoidError(printedCount,paperReturned,reason){
+  if(!String(reason||"").trim())return"กรุณากรอกเหตุผลการยกเลิก";
+  if(Number(printedCount)>0&&!paperReturned)return"กรุณายืนยันว่าได้ใบเดิมคืนหรือทำลายแล้ว";
+  return""
+}
+
 function formatThaiDate(value){
   const date=new Date(value);
   return Number.isNaN(date.getTime())?"—":new Intl.DateTimeFormat("th-TH",{day:"numeric",month:"long",year:"numeric"}).format(date)
@@ -162,7 +194,15 @@ function toast(message,isError=false){
 
 function friendly(error){return error?.message||String(error||"")}
 
-let receipt=null,printing=false;
+let receipt=null,printing=false,voiding=false,voidBlocked=false;
+
+function renderReceiptState(){
+  const voided=Boolean(receipt?.voided_at);
+  el("void-document").hidden=!voided;
+  if(voided)el("void-document").textContent=`ยกเลิกแล้ว\nเหตุผล: ${receipt.void_reason||"ไม่พบเหตุผล"}`;
+  el("print-button").hidden=voided;
+  el("void-receipt-button").hidden=voided
+}
 
 function renderDocument({student,charges,payments,settings}){
   const required=["receipt_school_name","receipt_address","receipt_doc_title"];
@@ -186,7 +226,8 @@ function renderDocument({student,charges,payments,settings}){
     <tfoot><tr><td>รวมเงิน</td><td class="money">${money(table.full)}</td><td class="money">${money(table.paid)}</td><td class="money">${money(table.remaining)}</td></tr></tfoot>
   </table></div>`:'<div class="banner bad">ยังไม่มีรายการค่าใช้จ่ายในเอกสารนี้</div>';
   el("paid-words").textContent=bahtText(table.paid);
-  el("outstanding-total").textContent=money(table.remaining)
+  el("outstanding-total").textContent=money(table.remaining);
+  renderReceiptState()
 }
 
 async function loadDocument(studentId,year,term){
@@ -207,7 +248,7 @@ async function loadDocument(studentId,year,term){
 }
 
 el("print-button").onclick=async()=>{
-  if(printing||!receipt)return;
+  if(printing||!receipt||receipt.voided_at)return;
   printing=true;
   el("print-button").disabled=true;
   try{
@@ -220,6 +261,59 @@ el("print-button").onclick=async()=>{
     window.print()
   }catch(error){toast("พิมพ์เอกสารไม่สำเร็จ: "+friendly(error),true)}
   finally{printing=false;el("print-button").disabled=false}
+};
+
+function closeVoidReceipt(){
+  if(voiding||voidBlocked)return;
+  el("void-receipt-overlay").hidden=true;
+  el("void-receipt-error").textContent=""
+}
+
+el("void-receipt-button").onclick=()=>{
+  if(!receipt||receipt.voided_at||voiding||voidBlocked)return;
+  el("void-receipt-detail").textContent=`เลขที่ ${receipt.receipt_no} จะถูกนำกลับมาใช้กับใบถัดไป\nรายการรับเงินทั้งหมดในใบนี้จะถูกยกเลิก และยอดหักออมทรัพย์จะคืนเข้าสมุดโดยอัตโนมัติ`;
+  el("void-receipt-reason").value="";
+  el("paper-returned").checked=false;
+  el("paper-returned-field").hidden=Number(receipt.printed_count||0)<=0;
+  el("void-receipt-error").textContent="";
+  el("void-receipt-overlay").hidden=false;
+  setTimeout(()=>el("void-receipt-reason").focus(),0)
+};
+el("void-receipt-cancel").onclick=closeVoidReceipt;
+el("void-receipt-overlay").onclick=event=>{if(event.target===el("void-receipt-overlay"))closeVoidReceipt()};
+document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!el("void-receipt-overlay").hidden)closeVoidReceipt()});
+el("void-receipt-form").onsubmit=async event=>{
+  event.preventDefault();
+  if(voiding||voidBlocked||!receipt||receipt.voided_at)return;
+  const reason=el("void-receipt-reason").value.trim(),paperReturned=el("paper-returned").checked;
+  const validation=receiptVoidError(receipt.printed_count,paperReturned,reason);
+  if(validation){el("void-receipt-error").textContent=validation;return}
+  const button=el("void-receipt-submit");
+  voiding=true;button.disabled=true;el("void-receipt-cancel").disabled=true;el("void-receipt-reason").readOnly=true;el("paper-returned").disabled=true;
+  let requestUncertain=true;
+  try{
+    const {data,error}=await sb.rpc("void_fee_receipt",{p_receipt_id:receipt.id,p_reason:reason,p_paper_returned:Number(receipt.printed_count||0)>0?paperReturned:false});
+    requestUncertain=false;
+    if(error){el("void-receipt-error").textContent=friendly(error);return}
+    const result=Array.isArray(data)?data[0]:data;
+    if(!result||result.receipt_no!==receipt.receipt_no||!Number.isInteger(Number(result.voided_payments))||!Number.isInteger(Number(result.savings_returned))){
+      voidBlocked=true;
+      el("void-receipt-error").textContent="ยังยืนยันผลการยกเลิกไม่ได้ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจเอกสารก่อน";
+      return
+    }
+    receipt.voided_at=new Date().toISOString();receipt.void_reason=reason;
+    el("void-receipt-overlay").hidden=true;
+    renderReceiptState();
+    toast(`ยกเลิกเอกสารเลขที่ ${receipt.receipt_no} แล้ว · ยกเลิก ${result.voided_payments} รายการ${Number(result.savings_returned)>0?` · คืนเงินออมทรัพย์ ${result.savings_returned} รายการ`:""} · เลขนี้พร้อมนำกลับมาใช้กับใบถัดไป`)
+  }catch(error){
+    voidBlocked=requestUncertain;
+    el("void-receipt-error").textContent=requestUncertain
+      ?"ผลการยกเลิกไม่แน่ชัด · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจเอกสารก่อน: "+friendly(error)
+      :friendly(error)
+  }finally{
+    voiding=false;
+    if(!voidBlocked){button.disabled=false;el("void-receipt-cancel").disabled=false;el("void-receipt-reason").readOnly=false;el("paper-returned").disabled=false}
+  }
 };
 
 const session=await requireAuth();

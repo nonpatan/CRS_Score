@@ -72,7 +72,7 @@ header .nav{
   margin-bottom:6px;
   font-weight:600
 }
-select{
+select,input{
   width:100%;
   min-height:44px;
   padding:10px 12px;
@@ -82,6 +82,29 @@ select{
   color:var(--ink);
   font:inherit;
   font-size:16px
+}
+.tabs{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  margin-bottom:16px;
+  padding:6px;
+  border-radius:12px;
+  background:var(--teal-soft)
+}
+.tab[aria-selected="true"]{
+  color:#fff;
+  background:var(--teal)
+}
+.revenue-controls{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-bottom:12px
+}
+.revenue-note{
+  margin-top:12px;
+  color:var(--muted)
 }
 .check{
   display:flex;
@@ -114,6 +137,9 @@ select{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
   gap:10px
+}
+#revenue-stats{
+  grid-template-columns:repeat(3,minmax(0,1fr))
 }
 .stat{
   padding:13px;
@@ -279,12 +305,15 @@ button{
   }
 }
 @media(max-width:760px){
-  .stats{
+  .stats,#revenue-stats{
     grid-template-columns:1fr 1fr
   }
 }
 @media(max-width:560px){
   .controls{
+    grid-template-columns:1fr
+  }
+  .tabs,.revenue-controls{
     grid-template-columns:1fr
   }
   .section-head{
@@ -293,6 +322,9 @@ button{
   }
   .stats{
     grid-template-columns:1fr 1fr
+  }
+  #revenue-stats{
+    grid-template-columns:1fr
   }
 }
 </style><link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -324,6 +356,11 @@ button{
               <div id="load-time" class="hint">
               </div>
             </section>
+            <div id="report-tabs" class="tabs" role="tablist" aria-label="มุมมองรายงาน" hidden>
+              <button id="debt-tab" class="tab" type="button" role="tab" aria-selected="true">ยอดตั้งหนี้และค้างชำระ</button>
+              <button id="revenue-tab" class="tab" type="button" role="tab" aria-selected="false">สรุปรายรับ</button>
+            </div>
+            <div id="debt-panel">
             <section id="overview" class="card">
               <div class="section-head">
                 <div>
@@ -369,6 +406,19 @@ button{
               <div id="departed-list">
               </div>
             </section>
+            </div>
+            <section id="revenue-panel" class="card" hidden>
+              <div class="section-head">
+                <div><h2>สรุปรายรับตามช่องทาง</h2><p>เงินสดคือเงินที่ต้องเทียบกับลิ้นชัก · ยอดหักออมทรัพย์แยกไว้ต่างหาก</p></div>
+              </div>
+              <div class="revenue-controls">
+                <div class="field"><label for="revenue-start">ตั้งแต่วันที่</label><input id="revenue-start" type="date"></div>
+                <div class="field"><label for="revenue-end">ถึงวันที่</label><input id="revenue-end" type="date"></div>
+              </div>
+              <div id="revenue-error" class="banner bad" hidden></div>
+              <div id="revenue-stats" class="stats"></div>
+              <div id="revenue-note" class="revenue-note"></div>
+            </section>
           </div>
         </main>
       </div>
@@ -410,7 +460,29 @@ function roomLabel(room){
   return classroom.startsWith(`${grade}/`)?classroom:`${grade}/${classroom}`
 }
 
-let currentYear="",placements=[],charges=[],payments=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudentId=null,canFinance=false;
+function bangkokDateOf(value){
+  const date=new Date(value);
+  if(Number.isNaN(date.getTime()))return"";
+  const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Bangkok",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date);
+  const get=type=>parts.find(part=>part.type===type)?.value||"";
+  return`${get("year")}-${get("month")}-${get("day")}`
+}
+
+function summarizeFeeRevenue(rows,start,end){
+  const totals={"เงินสด":0,"โอน":0,"หักออมทรัพย์":0,count:0};
+  for(const payment of rows||[]){
+    if(payment?.voided_at||payment?.receipt_voided_at||!Object.hasOwn(totals,payment.method))continue;
+    const date=bangkokDateOf(payment.paid_at);
+    if(!date||date<start||date>end)continue;
+    const amount=Number(payment.amount);
+    if(!Number.isFinite(amount))continue;
+    totals[payment.method]+=amount;
+    totals.count++
+  }
+  return totals
+}
+
+let currentYear="",placements=[],charges=[],payments=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudentId=null,canFinance=false,reportTab="debt";
 
 function filterCharges(rows,year,onlyCurrent){
   return(rows||[]).filter(row=>!row.voided_at&&(!onlyCurrent||row.year===year))
@@ -518,12 +590,36 @@ function render(){
   renderDeparted()
 }
 
+function renderRevenue(){
+  if(!canFinance)return;
+  const start=el("revenue-start").value,end=el("revenue-end").value;
+  const invalid=!start||!end||start>end;
+  el("revenue-error").hidden=!invalid;
+  if(invalid){
+    el("revenue-error").textContent=!start||!end?"เลือกวันเริ่มและวันสิ้นสุดให้ครบ":"วันเริ่มต้องไม่อยู่หลังวันสิ้นสุด";
+    el("revenue-stats").innerHTML="";el("revenue-note").textContent="";
+    return
+  }
+  const totals=summarizeFeeRevenue(payments,start,end);
+  el("revenue-stats").innerHTML=`<div class="stat"><span>เงินสด</span><b>${money(totals["เงินสด"])}</b></div><div class="stat"><span>โอน</span><b>${money(totals["โอน"])}</b></div><div class="stat"><span>หักออมทรัพย์</span><b>${money(totals["หักออมทรัพย์"])}</b></div>`;
+  el("revenue-note").textContent=`รวม ${totals.count} รายการที่ยังไม่ยกเลิก · เงินสดไม่รวมยอดหักออมทรัพย์`
+}
+
+function showReportTab(tab){
+  reportTab=canFinance&&tab==="revenue"?"revenue":"debt";
+  el("debt-tab").setAttribute("aria-selected",String(reportTab==="debt"));
+  el("revenue-tab").setAttribute("aria-selected",String(reportTab==="revenue"));
+  el("debt-panel").hidden=reportTab!=="debt";
+  el("revenue-panel").hidden=reportTab!=="revenue";
+  if(reportTab==="revenue")renderRevenue()
+}
+
 async function load(){
   const started=performance.now();
   const [placementRes,chargeRes,paymentRes]=await Promise.all([
     getStudentPlacements(currentYear),
     fetchAllRows(()=>sb.from("student_charges").select("*,student:student_id(id,student_no,name,graduated,left_school)"),["student_id","charge_date","id"]),
-    fetchAllRows(()=>sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,receipt:receipt_id(student_id,voided_at)"),["receipt_id","paid_at","id"])
+    fetchAllRows(()=>sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,voided_at,void_reason,voided_by,receipt:receipt_id(student_id,voided_at)"),["receipt_id","paid_at","id"])
   ]);
   if(placementRes.error)throw new Error("โหลดทะเบียนไม่สำเร็จ: "+placementRes.error.message);
   if(chargeRes.error)throw new Error("โหลดค่าใช้จ่ายไม่สำเร็จ: "+chargeRes.error.message);
@@ -535,9 +631,10 @@ async function load(){
   charges=returned.filter(c=>ids.has(c.student_id)||canFinance&&(c.student?.graduated||c.student?.left_school));
   payments=(paymentRes.data||[]).map(row=>{
     const linked=Array.isArray(row.receipt)?row.receipt[0]:row.receipt;
-    return{...row,student_id:linked?.student_id,voided_at:linked?.voided_at}
-  }).filter(row=>row.student_id&&!row.voided_at);
+    return{...row,student_id:linked?.student_id,receipt_voided_at:linked?.voided_at}
+  }).filter(row=>row.student_id&&!row.receipt_voided_at);
   render();
+  renderRevenue();
   const elapsed=performance.now()-started;
   el("load-time").textContent=`โหลดรายงาน ${Math.round(elapsed)} มิลลิวินาที`;
   console.info(`[fee-report] whole-room ${Math.round(elapsed)}ms`);
@@ -561,6 +658,10 @@ el("student-list").onclick=e=>{
 };
 
 el("current-only").onchange=render;
+el("debt-tab").onclick=()=>showReportTab("debt");
+el("revenue-tab").onclick=()=>showReportTab("revenue");
+el("revenue-start").onchange=renderRevenue;
+el("revenue-end").onchange=renderRevenue;
 
 const session=await requireAuth();
 if(session){
@@ -576,6 +677,9 @@ if(session){
       el("overview-note").textContent="ฐานข้อมูลและสิทธิ์รายห้องเป็นผู้กำหนดรายการที่เห็น"
     }
     const years=await getAcademicYears(),today=toDateStr(bangkokNow());
+    el("report-tabs").hidden=!canFinance;
+    el("revenue-start").value=today;
+    el("revenue-end").value=today;
     currentYear=academicYearOf(today,years);
     if(!currentYear)throw new Error("ยังไม่พบปีการศึกษาปัจจุบัน");
     el("year").innerHTML=[...years]
