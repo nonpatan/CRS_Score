@@ -214,9 +214,11 @@ function renderDepartedAccounts() {
     const student = row.student || {};
     const pending = row.pendingRequest;
     const last = row.lastTxn || {};
+    const studentStatus = student.status || "กำลังศึกษา";
+    const statusDate = student.status_date ? ` · วันที่มีผล ${thaiDate(student.status_date)}` : "";
     return `<div class="queue-row" data-departed-id="${esc(row.id)}">
       <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}
-        <span class="meta">รหัส ${esc(student.student_no || "—")} · ${student.left_school ? "ย้าย/ลาออก" : "จบการศึกษา"}</span>
+        <span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(studentStatus)}${esc(statusDate)}</span>
         <span class="meta">ข้อมูลรายการล่าสุด: ${esc(last.year || "—")} · ${esc(last.grade_level || "—")} · ${esc(last.classroom || "—")}</span>
       </div>
       <div class="money"><span class="meta">ยอดที่ต้องคืน</span><b>${formatMoney(row.balance)}</b></div>
@@ -235,7 +237,7 @@ async function loadQueue() {
     fetchAllRows(() => sb.from("savings_withdrawals")
       .select("id,student_id,year,grade_level,classroom,request_date,amount,requester_type,requester_name,note,status,requested_at,payout_method,bank_name,bank_account_name,bank_account_no,student:student_id(id,student_no,name)")
       .eq("status", "รอจ่าย"), ["request_date", "requested_at", "id"]),
-    fetchAllRows(() => sb.from("students").select("id,student_no,name,graduated,left_school")
+    fetchAllRows(() => sb.from("students").select("id,student_no,name,graduated,left_school,status,status_date")
       .or("graduated.eq.true,left_school.eq.true"), "id")
   ]);
   if (queueRes.error) throw new Error("โหลดคิวรอจ่ายไม่สำเร็จ: " + queueRes.error.message);

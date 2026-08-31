@@ -233,17 +233,25 @@ async function loadYearContext(dateStr) {
   el("room-select").innerHTML = '<option value="">กำลังโหลดห้อง…</option>';
   el("room-select").disabled = true;
 
-  const [placementRes, activeStudents, homeroomRes, ownStaffRes, myCoverage] = await Promise.all([
+  const [placementRes, activeStudents, studentStatusRes, homeroomRes, ownStaffRes, myCoverage] = await Promise.all([
     getStudentPlacements(currentYear),
     getActiveStudents(),
+    sb.from("students").select("id,status"),
     sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
     sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
     getMyCoverageFor(dateStr)
   ]);
   if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  if (studentStatusRes.error) throw new Error("โหลดสถานะนักเรียนไม่สำเร็จ: " + studentStatusRes.error.message);
   if (homeroomRes.error) throw new Error("โหลดข้อมูลครูประจำชั้นไม่สำเร็จ: " + homeroomRes.error.message);
 
-  placements = placementRes.data || [];
+  const statusByStudent = new Map((studentStatusRes.data || []).map(student => [student.id, student.status]));
+  placements = (placementRes.data || []).map(placement => ({
+    ...placement,
+    student:placement.student
+      ? {...placement.student, status:statusByStudent.get(placement.student_id) || "กำลังศึกษา"}
+      : placement.student
+  }));
   const placedIds = new Set(placements.map(p => p.student_id));
   const missingCount = (activeStudents || []).filter(s => !placedIds.has(s.id)).length;
   el("placement-warning").hidden = missingCount === 0;
@@ -321,10 +329,10 @@ function renderRoster() {
     const student = p.student || {};
     const item = stateByStudent.get(p.student_id) || { status:"มา", note:"" };
     const inactive = isInactiveForSelectedYear(p);
-    const inactiveLabel = student.left_school === true ? "ย้ายออก" : "จบแล้ว";
+    const inactiveLabel = student.status || "กำลังศึกษา";
     const disabled = inactive ? " disabled" : "";
     return `<div class="student-row${inactive ? " inactive" : ""}">
-      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${inactiveLabel})</span>` : ""}
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${esc(inactiveLabel)})</span>` : ""}
         <span class="student-meta">เลขที่ ${esc(student.student_no || "—")}</span>
       </div>
       <select class="status-select" data-student="${esc(p.student_id)}" data-status="${esc(item.status)}" aria-label="สถานะของ ${esc(student.name || "นักเรียน")}"${disabled}>
