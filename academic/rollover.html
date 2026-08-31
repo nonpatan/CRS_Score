@@ -489,6 +489,12 @@ function actionLabel(action, plan) {
   return action;
 }
 
+function studentStatusForRollover(action) {
+  if (action === "graduate") return "จบการศึกษา";
+  if (action === "left") return "ย้ายสถานศึกษา";
+  return null;
+}
+
 // ---------- วาดพรีวิวเลื่อนชั้น (จัดกลุ่มตามชั้น มี dropdown 3 ทางต่อคน) ----------
 function renderPromote() {
   if (activeStudents.length === 0) {
@@ -1003,6 +1009,8 @@ btnRun.addEventListener("click", async () => {
 
     // 3) จัดการนักเรียนตาม action ที่เลือก (คำนวณจากชั้นเดิมที่ snapshot ไว้ แล้วค่อยเขียน)
     addLog("• กำลังจัดการนักเรียน (เลื่อน/จบ/ซ้ำ/ย้ายออก)...");
+    const rolloverStatusDate = new Date().toLocaleDateString("sv-SE", { timeZone:"Asia/Bangkok" });
+    const rolloverStatusAt = new Date().toISOString();
     for (const stu of activeStudents) {
       const a = actionById[stu.id];
       if (a === "promote") {
@@ -1010,10 +1018,10 @@ btnRun.addEventListener("click", async () => {
         const { error } = await sb.from("students").update({ grade_level: p.targetGrade, classroom: p.targetClassroom }).eq("id", stu.id);
         if (error) throw new Error("เลื่อนชั้น " + stu.name + " ไม่สำเร็จ: " + error.message);
       } else if (a === "graduate") {
-        const { error } = await sb.from("students").update({ graduated: true }).eq("id", stu.id);
+        const { error } = await sb.from("students").update({ status:studentStatusForRollover(a), status_date:rolloverStatusDate, status_by:session.user.id, status_at:rolloverStatusAt }).eq("id", stu.id);
         if (error) throw new Error("ทำเครื่องหมายจบ " + stu.name + " ไม่สำเร็จ: " + error.message);
       } else if (a === "left") {
-        const { error } = await sb.from("students").update({ left_school: true }).eq("id", stu.id);
+        const { error } = await sb.from("students").update({ status:studentStatusForRollover(a), status_date:rolloverStatusDate, status_by:session.user.id, status_at:rolloverStatusAt }).eq("id", stu.id);
         if (error) throw new Error("ทำเครื่องหมายย้ายออก " + stu.name + " ไม่สำเร็จ: " + error.message);
       }
       // "hold" (ซ้ำชั้น) = ไม่แตะ ให้คงชั้นเดิม
@@ -1022,10 +1030,14 @@ btnRun.addEventListener("click", async () => {
     for (const stu of activeStudents) {
       const a = actionById[stu.id];
       if (a === "promote") { const p = planFor(stu); stu.grade_level = p.targetGrade; stu.classroom = p.targetClassroom; }
-      else if (a === "graduate") stu.graduated = true;
-      else if (a === "left") stu.left_school = true;
+      else if (studentStatusForRollover(a)) {
+        stu.status = studentStatusForRollover(a);
+        stu.status_date = rolloverStatusDate;
+        stu.status_by = session.user.id;
+        stu.status_at = rolloverStatusAt;
+      }
     }
-    activeStudents = activeStudents.filter(s => !s.graduated && !s.left_school);
+    activeStudents = activeStudents.filter(s => (s.status || "กำลังศึกษา") === "กำลังศึกษา");
     addLog("  เลื่อน " + upN + " · จบ " + gradN + " · ซ้ำชั้น " + holdN + " · ย้ายออก " + leftN + " เรียบร้อย");
 
     // 4) บันทึกชั้น/ห้องของปีใหม่สำหรับคนที่ยังเรียนต่อ

@@ -55,7 +55,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
-  select, input[type="text"], textarea {
+  select, input[type="text"], input[type="date"], textarea {
     width: 100%;
     font-family: inherit;
     font-size: 16px;
@@ -120,6 +120,8 @@
   }
   .icon-btn:hover { background: var(--bg); }
   .icon-btn.del:hover { background: var(--danger-soft); color: var(--danger); }
+  .student-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .status-btn { min-height: 44px; white-space: nowrap; }
 
   table.preview { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
   table.preview th, table.preview td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
@@ -167,6 +169,11 @@
   .confirm-field { margin-top: 14px; }
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
   .modal-actions button { flex: 1; margin-top: 0; }
+  .status-modal textarea { min-height: 88px; font-family: inherit; font-size: 16px; }
+  @media (max-width: 420px) {
+    .student-row { align-items: flex-start; flex-wrap: wrap; }
+    .student-actions { width: 100%; justify-content: flex-end; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
@@ -279,7 +286,7 @@
     </div>
     <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin:0">
       <input type="checkbox" id="filter-show-graduated" style="width:18px; height:18px">
-      <span>แสดงนักเรียนที่ไม่ได้เรียนต่อด้วย (จบ / ย้ายออก)</span>
+      <span>แสดงนักเรียนที่ไม่ได้กำลังศึกษาด้วย</span>
     </label>
   </div>
 
@@ -290,6 +297,38 @@
 
   <div class="toast" id="toast"></div>
   </main>
+</div>
+
+<!-- modal กำหนดสถานะนักเรียน -->
+<div class="modal-overlay" id="status-modal">
+  <div class="modal-card status-modal" role="dialog" aria-modal="true" aria-labelledby="status-modal-title">
+    <h2 id="status-modal-title">กำหนดสถานะนักเรียน</h2>
+    <p class="sub" id="status-modal-sub"></p>
+    <div class="field">
+      <label for="student-status">สถานะ</label>
+      <select id="student-status">
+        <option value="กำลังศึกษา">กำลังศึกษา</option>
+        <option value="จบการศึกษา">จบการศึกษา</option>
+        <option value="ย้ายสถานศึกษา">ย้ายสถานศึกษา</option>
+        <option value="ลาออกกลางคัน">ลาออกกลางคัน</option>
+        <option value="ขาดเรียนนาน">ขาดเรียนนาน</option>
+        <option value="ถึงแก่กรรม">ถึงแก่กรรม</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="student-status-date">วันที่สถานะมีผล</label>
+      <input type="date" id="student-status-date" required>
+      <div class="field-note">ใช้วันที่เด็กย้าย จบ หรือเปลี่ยนสถานะจริง</div>
+    </div>
+    <div class="field">
+      <label for="student-status-note">หมายเหตุ</label>
+      <textarea id="student-status-note" placeholder="เช่น ย้ายไปโรงเรียนบ้านคลอง"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="status-modal-cancel">ยกเลิก</button>
+      <button type="button" class="primary" id="status-modal-save">บันทึกสถานะ</button>
+    </div>
+  </div>
 </div>
 
 <!-- modal ลบนักเรียนที่มีข้อมูลผูกอยู่ -->
@@ -306,7 +345,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260830-3";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260830-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -316,6 +355,7 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 
 const myProfile = await getProfile(session.user.id);
 const isAdminUser = !!myProfile && myProfile.role === "admin";
+const canSetStudentStatus = isAdminUser || await checkDepartment("วิชาการ");
 
 const elToast = document.getElementById("toast");
 function showToast(msg, ok) {
@@ -325,7 +365,11 @@ function showToast(msg, ok) {
 }
 
 if (!isAdminUser) {
-  document.getElementById("readonly-note").style.display = "block";
+  const readonlyNote = document.getElementById("readonly-note");
+  readonlyNote.style.display = "block";
+  readonlyNote.textContent = canSetStudentStatus
+    ? "คุณกำหนดสถานะนักเรียนได้ · การเพิ่มนักเรียนและการลบข้อมูลทั้งหมดสงวนไว้สำหรับ admin"
+    : "คุณดูรายชื่อนักเรียนได้อย่างเดียว · การกำหนดสถานะใช้สิทธิ์ฝ่ายวิชาการ และการลบใช้สิทธิ์ admin";
 } else {
   document.getElementById("placement-year-card").style.display = "block";
   document.getElementById("import-card").style.display = "block";
@@ -430,21 +474,33 @@ function renderList() {
       row.className = "student-row";
       const info = document.createElement("div");
       info.className = "info";
+      const studentStatus = stu.status || "กำลังศึกษา";
       info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) +
-        (stu.graduated ? " <span class='hint'>(จบแล้ว)</span>" : "") +
-        (stu.left_school ? " <span class='hint'>(ย้ายออก)</span>" : "") + "</div>" +
+        (studentStatus !== "กำลังศึกษา" ? " <span class='hint'>(" + escapeHtml(studentStatus) + ")</span>" : "") + "</div>" +
         "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
         (stu.grade_level ? " · " + escapeHtml(stu.grade_level) : "") +
         (stu.classroom ? "/" + escapeHtml(stu.classroom) : "") + "</div>";
       row.appendChild(info);
+      const actions = document.createElement("div");
+      actions.className = "student-actions";
+      if (canSetStudentStatus) {
+        const statusBtn = document.createElement("button");
+        statusBtn.type = "button";
+        statusBtn.className = "ghost small status-btn";
+        statusBtn.textContent = "กำหนดสถานะ";
+        statusBtn.setAttribute("aria-label", "กำหนดสถานะนักเรียน " + stu.name);
+        statusBtn.addEventListener("click", () => openStatusModal(stu));
+        actions.appendChild(statusBtn);
+      }
       if (isAdminUser) {
         const delBtn = document.createElement("button");
         delBtn.className = "icon-btn del";
         delBtn.textContent = "🗑";
         delBtn.setAttribute("aria-label", "ลบนักเรียน " + stu.name);
         delBtn.addEventListener("click", () => deleteStudent(stu));
-        row.appendChild(delBtn);
+        actions.appendChild(delBtn);
       }
+      if (actions.childElementCount) row.appendChild(actions);
       body.appendChild(row);
     }
 
@@ -457,6 +513,71 @@ function renderList() {
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+function todayIsoDate() {
+  return new Date().toLocaleDateString("sv-SE", { timeZone:"Asia/Bangkok" });
+}
+
+function statusNoteForSave(student, nextStatus, enteredNote, statusDate) {
+  const previousStatus = student?.status || "กำลังศึกษา";
+  const previousNote = String(student?.status_note || "").trim();
+  const nextNote = String(enteredNote || "").trim();
+  if (nextStatus !== "กำลังศึกษา" || previousStatus === "กำลังศึกษา" || !previousNote) return nextNote || null;
+  const restoredNote = `[คืนสถานะ ${statusDate}] เดิม: ${previousNote}`;
+  return nextNote && nextNote !== previousNote ? `${restoredNote}\n${nextNote}` : restoredNote;
+}
+
+const statusModal = document.getElementById("status-modal");
+const statusModalSub = document.getElementById("status-modal-sub");
+const statusSelect = document.getElementById("student-status");
+const statusDate = document.getElementById("student-status-date");
+const statusNote = document.getElementById("student-status-note");
+const statusSave = document.getElementById("status-modal-save");
+let statusTarget = null;
+
+function closeStatusModal() {
+  statusModal.classList.remove("show");
+  statusTarget = null;
+  statusSave.disabled = false;
+}
+
+function openStatusModal(student) {
+  statusTarget = student;
+  statusModalSub.textContent = `${student.student_no || "ไม่พบรหัส"} · ${student.name}`;
+  statusSelect.value = student.status || "กำลังศึกษา";
+  statusDate.value = student.status_date || todayIsoDate();
+  statusNote.value = student.status_note || "";
+  statusModal.classList.add("show");
+  statusSelect.focus();
+}
+
+document.getElementById("status-modal-cancel").addEventListener("click", closeStatusModal);
+statusModal.addEventListener("click", event => { if (event.target === statusModal) closeStatusModal(); });
+statusSave.addEventListener("click", async () => {
+  if (!statusTarget || !canSetStudentStatus) return;
+  const nextStatus = statusSelect.value;
+  const nextDate = statusDate.value;
+  if (!nextDate) { showToast("กรุณาระบุวันที่สถานะมีผล", false); statusDate.focus(); return; }
+  const nextNote = statusNoteForSave(statusTarget, nextStatus, statusNote.value, nextDate);
+  if (!await window.crsAskConfirm({
+    title: "ยืนยันสถานะนักเรียน",
+    message: `${statusTarget.name}\nสถานะ: ${nextStatus}\nวันที่มีผล: ${nextDate}${nextNote ? `\nหมายเหตุ: ${nextNote}` : ""}`,
+    okLabel: "บันทึกสถานะ"
+  })) return;
+  statusSave.disabled = true;
+  const payload = {
+    status: nextStatus,
+    status_date: nextDate,
+    status_note: nextNote,
+    status_by: session.user.id,
+    status_at: new Date().toISOString()
+  };
+  const { error } = await sb.from("students").update(payload).eq("id", statusTarget.id);
+  if (error) { showToast("บันทึกสถานะไม่สำเร็จ: " + error.message, false); statusSave.disabled = false; return; }
+  closeStatusModal();
+  showToast("บันทึกสถานะนักเรียนแล้ว", true);
+  await loadStudents();
+});
 
 function placementYear() {
   const year = elPlacementYear.value.trim();
@@ -641,7 +762,7 @@ async function deleteStudent(stu) {
   }
 
   body += "<div class='danger-box'>⚠ การลบนี้ <b>กู้คืนไม่ได้</b> — คะแนนและข้อมูลทั้งหมดของนักเรียนคนนี้จะถูกลบถาวร<br>"
-    + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้ใช้ปุ่ม \"จบ/ย้ายออก\" ที่หน้าขึ้นปีใหม่แทน (ยังไม่ทำในหน้านี้)</div>";
+    + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้กดปุ่ม \"กำหนดสถานะ\" ของนักเรียนคนนี้แทน — เลือกย้ายสถานศึกษา ลาออกกลางคัน หรือจบการศึกษา ข้อมูลทั้งหมดจะยังอยู่ครบ</div>";
   body += "<div class='confirm-field'><label for='del-confirm-name'>พิมพ์ชื่อนักเรียนให้ตรงเพื่อยืนยัน: <b>" + escapeHtml(stu.name) + "</b></label>"
     + "<input type='text' id='del-confirm-name' autocomplete='off' placeholder='พิมพ์ชื่อ-นามสกุลให้ตรง'></div>";
 
