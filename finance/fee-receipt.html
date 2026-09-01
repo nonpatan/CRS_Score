@@ -137,7 +137,7 @@
         <div id="receipt-table"></div>
         <div class="words avoid-break"><b>ตัวอักษร</b> <span id="paid-words"></span></div>
         <div class="summary avoid-break"><span>รวมยอดค้างชำระ</span><b id="outstanding-total"></b></div>
-        <div class="signature avoid-break"><div><div class="signature-line"></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
+        <div class="signature avoid-break"><div><div class="signature-line"></div><div id="cashier-name" hidden></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
       </article>
     </div>
     <div id="toast" class="toast no-print"></div>
@@ -157,7 +157,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
-  computeFeeOutstanding, chargeLineRemaining, formatMoney, bahtText, fetchAllRows
+  computeFeeOutstanding, chargeLineRemaining, formatMoney, bahtText, fetchAllRows, getStaffNamesByUser
 } from "../supabase-client.js?v=20260901-1";
 
 const el=id=>document.getElementById(id);
@@ -187,6 +187,17 @@ function payerNamesForCharge(payments,chargeId){
   const names=[...new Set((payments||[]).filter(payment=>!payment.voided_at&&payment.charge_id===chargeId)
     .map(payment=>String(payment.payer_name??"").replace(/\s+/g," ").trim()).filter(Boolean))];
   return names.length?names.join(" / "):"—"
+}
+
+function activeCashierNames(payments,staffNames){
+  const names=[],seen=new Set();
+  for(const payment of payments||[]){
+    if(payment.voided_at)continue;
+    const name=String(staffNames?.get(payment.recorded_by)||"").trim();
+    if(!name||seen.has(name))continue;
+    seen.add(name);names.push(name)
+  }
+  return names
 }
 
 function receiptVoidError(printedCount,paperReturned,reason){
@@ -219,10 +230,10 @@ function renderReceiptState(){
   el("void-receipt-button").hidden=voided
 }
 
-function renderDocument({student,charges,payments,settings}){
+function renderDocument({student,charges,payments,settings,staffNames}){
   const required=["receipt_school_name","receipt_address","receipt_doc_title"];
   for(const key of required)if(!String(settings.get(key)||"").trim())throw new Error(`ยังไม่ได้ตั้งค่าหัวเอกสาร ${key}`);
-  const table=buildReceiptRows(charges,payments),summary=computeFeeOutstanding(charges,payments),payerNames=activePayerNames(payments),showPayerColumn=payerNames.length>1;
+  const table=buildReceiptRows(charges,payments),summary=computeFeeOutstanding(charges,payments),payerNames=activePayerNames(payments),showPayerColumn=payerNames.length>1,cashierNames=activeCashierNames(payments,staffNames);
   if(Math.abs(table.remaining-summary.outstanding)>0.005)throw new Error("ยอดรวมคอลัมน์คงเหลือไม่ตรงกับยอดค้าง กรุณาหยุดและแจ้งผู้ดูแล");
   el("school-name").textContent=settings.get("receipt_school_name");
   el("school-address").textContent=settings.get("receipt_address");
@@ -244,6 +255,8 @@ function renderDocument({student,charges,payments,settings}){
   </table></div>`:'<div class="banner bad">ยังไม่มีรายการค่าใช้จ่ายในเอกสารนี้</div>';
   el("paid-words").textContent=bahtText(table.paid);
   el("outstanding-total").textContent=money(table.remaining);
+  el("cashier-name").hidden=!cashierNames.length;
+  el("cashier-name").textContent=cashierNames.length?`(${cashierNames.join(" / ")})`:"";
   renderReceiptState()
 }
 
@@ -252,15 +265,16 @@ async function loadDocument(studentId,year,term){
   if(receiptRes.error)throw receiptRes.error;
   receipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
   if(!receipt?.id)throw new Error("ฐานข้อมูลไม่คืนเอกสาร กรุณากลับไปรายงานแล้วลองใหม่");
-  const [studentRes,chargeRes,paymentRes,settingRes]=await Promise.all([
+  const [studentRes,chargeRes,paymentRes,settingRes,staffNames]=await Promise.all([
     sb.from("students").select("id,student_no,name").eq("id",studentId).single(),
     fetchAllRows(()=>sb.from("student_charges").select("*").eq("student_id",studentId).eq("year",year).eq("term",term),["charge_date","id"]),
     fetchAllRows(()=>sb.from("fee_payments").select("*").eq("receipt_id",receipt.id),["paid_at","id"]),
-    sb.from("app_settings").select("key,value").in("key",["receipt_school_name","receipt_address","receipt_doc_title"])
+    sb.from("app_settings").select("key,value").in("key",["receipt_school_name","receipt_address","receipt_doc_title"]),
+    getStaffNamesByUser()
   ]);
   for(const [label,result] of [["นักเรียน",studentRes],["รายการค่าใช้จ่าย",chargeRes],["รายการรับเงิน",paymentRes],["หัวเอกสาร",settingRes]])if(result.error)throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
   const settings=new Map((settingRes.data||[]).map(row=>[row.key,row.value]));
-  renderDocument({student:studentRes.data,charges:chargeRes.data||[],payments:paymentRes.data||[],settings});
+  renderDocument({student:studentRes.data,charges:chargeRes.data||[],payments:paymentRes.data||[],settings,staffNames});
   el("payment-link").href=`fee-payment.html?student=${encodeURIComponent(studentId)}&year=${encodeURIComponent(year)}&term=${term}`
 }
 
