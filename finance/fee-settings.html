@@ -269,7 +269,7 @@ function friendlyError(error) {
   if (message.includes("fee_promotions_year_name_uniq")) return "มีชื่อโปรโมชั่นนี้อยู่แล้วในปีที่เลือก กรุณาแก้รายการเดิมหรือเปลี่ยนชื่อ";
   if (message.includes("fee_items_name_uniq")) return "มีชื่อกลุ่มและตัวเลือกนี้อยู่แล้ว กรุณาแก้รายการเดิมหรือเปลี่ยนตัวเลือก";
   if (message.includes("fee_items_stock_goods_only")) return "ค่าบริการเปิดคุมสต๊อกไม่ได้";
-  if (message.includes("violates foreign key constraint")) return "ลบไม่ได้เพราะมีอัตราหรือรายการคลังอ้างถึงอยู่ ให้ปิดใช้งานแทน";
+  if (message.includes("violates foreign key constraint")) return "ลบไม่ได้เพราะรายการนี้ถูกใช้ตั้งหนี้หรือมีรายการคลังแล้ว · ให้กด \"ปิดใช้งาน\" แทน ข้อมูลเดิมจะยังอยู่ครบ";
   if (message.includes("fee_subsidies_amount_positive")) return "เงินอุดหนุนต้องมากกว่า 0 บาท";
   if (message.includes("fee_promotions_amount_positive")) return "จำนวนเงินโปรโมชั่นต้องมากกว่า 0 บาท";
   return message;
@@ -348,15 +348,21 @@ async function toggleItem(item) {
 
 async function deleteItem(item) {
   if (!canAdmin) return;
-  const [adminRates, prices, moves] = await Promise.all([
+  const [adminRates, prices, moves, charges] = await Promise.all([
     sb.from("fee_admin_rates").select("item_id", { count:"exact", head:true }).eq("item_id", item.id),
     sb.from("fee_product_prices").select("item_id", { count:"exact", head:true }).eq("item_id", item.id),
-    sb.from("fee_stock_moves").select("id", { count:"exact", head:true }).eq("item_id", item.id)
+    sb.from("fee_stock_moves").select("id", { count:"exact", head:true }).eq("item_id", item.id),
+    sb.from("student_charges").select("id", { count:"exact", head:true }).eq("item_id", item.id)
   ]);
-  const refs = Number(adminRates.count || 0) + Number(prices.count || 0) + Number(moves.count || 0);
+  // อัตรา/ราคา = คุณสมบัติของรายการ ⟹ ลบตามไปได้
+  // หนี้/คลัง   = สิ่งที่เกิดขึ้นจริง  ⟹ ฐานจะไม่ยอมให้ลบ
+  const settings = Number(adminRates.count || 0) + Number(prices.count || 0);
+  const history = Number(moves.count || 0) + Number(charges.count || 0);
+  if (history > 0) return toast(
+    `ลบไม่ได้ เพราะรายการนี้ถูกใช้ไปแล้ว · ตั้งหนี้ ${Number(charges.count || 0)} รายการ · รายการคลัง ${Number(moves.count || 0)} รายการ · ให้กด "ปิดใช้งาน" แทน ข้อมูลเดิมจะยังอยู่ครบ`, true);
   if (!await window.crsAskConfirm({
     title:"ลบรายการค่าใช้จ่าย",
-    message:`${item.display_name}\nมีอัตราหรือรายการคลังอ้างถึง ${refs} แถว · ถ้ามีแถวอ้างถึง ฐานจะไม่ยอมลบ ให้ปิดใช้งานแทน\nการลบกู้คืนไม่ได้`,
+    message:`${item.display_name}\n${settings > 0 ? `จะลบอัตราที่ตั้งไว้ ${settings} ช่องไปพร้อมกัน\n` : ""}รายการนี้ยังไม่เคยถูกใช้ตั้งหนี้ จึงลบได้\nการลบกู้คืนไม่ได้`,
     requireText:item.display_name, okLabel:"ลบรายการ", danger:true
   })) return;
   const { data, error } = await sb.from("fee_items").delete().eq("id", item.id).select("id");
