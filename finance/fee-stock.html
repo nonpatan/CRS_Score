@@ -182,9 +182,13 @@ function stockAlerts(items, moves) {
   return (items || []).filter(item => item.track_stock === true && !opened.has(item.id));
 }
 
+// ตัดหัวท้าย + บีบช่องว่างซ้อนให้เหลือช่องเดียว
+// 🪤 ห้ามใช้แค่ trim() — เว้นวรรคซ้อนตรงกลางเคยทำให้เลือกสินค้าไม่ได้ทั้งกลุ่ม (2026-09-01)
+const squash = value => String(value ?? "").replace(/\s+/g, " ").trim();
+
 function parseVariantList(value) {
   const seen = new Set();
-  return String(value ?? "").split(/[,，]/).map(item => item.trim()).filter(item => {
+  return String(value ?? "").split(/[,，]/).map(squash).filter(item => {
     if (!item || seen.has(item)) return false;
     seen.add(item);
     return true;
@@ -319,10 +323,10 @@ function closeProductForm() {
 
 async function saveProduct(event) {
   event.preventDefault();
-  const groupName = el("product-group").value.trim();
+  const groupName = squash(el("product-group").value);
   const parsedVariants = parseVariantList(el("product-variants").value);
   const variants = parsedVariants.length ? parsedVariants : [""];
-  const unit = el("product-unit").value.trim();
+  const unit = squash(el("product-unit").value);
   const sortStart = Number(el("product-sort").value || 0);
   const trackStock = el("product-track").checked;
   const threshold = parseOptionalNumber(el("product-threshold"), { integer:true });

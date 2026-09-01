@@ -24,7 +24,8 @@
     button.danger { color:var(--white); background:var(--danger); }
     button:disabled { cursor:not-allowed; opacity:.55; }
     .document { position:relative; min-height:248mm; padding:14mm 12mm; color:#111; }
-    .document-head { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:start; padding-bottom:14px; border-bottom:2px solid #111; }
+    .document-head { display:grid; grid-template-columns:68px 1fr auto; gap:18px; align-items:center; padding-bottom:14px; border-bottom:2px solid #111; }
+    .school-logo { display:block; width:68px; height:68px; object-fit:contain; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
     .school h2 { margin:0; font-size:23px; }
     .school p { margin:3px 0 0; white-space:pre-line; }
     .document-title { margin:18px 0 12px; text-align:center; font-size:24px; }
@@ -73,7 +74,8 @@
       .button-link { width:100%; }
       .modal-actions { flex-direction:column-reverse; }
       .document { min-height:0; padding:16px; }
-      .document-head { grid-template-columns:1fr; }
+      .document-head { grid-template-columns:68px 1fr; }
+      .receipt-meta { grid-column:1 / -1; }
       .receipt-meta { text-align:left; }
       .student-meta { display:grid; }
     }
@@ -115,6 +117,7 @@
       <article id="receipt-document" class="card document">
         <div id="void-document" class="void-document avoid-break" hidden></div>
         <div class="document-head avoid-break">
+          <img class="school-logo" src="../logo.png" alt="ตราโรงเรียน" width="68" height="68">
           <div class="school"><h2 id="school-name"></h2><p id="school-address"></p></div>
           <div class="receipt-meta">
             <div id="copy-mark" class="copy-mark" hidden>สำเนา</div>
@@ -129,6 +132,7 @@
           <div>เลขที่ <span id="student-no"></span></div>
           <div>ปีการศึกษา <span id="receipt-year"></span></div>
           <div>ภาคเรียน <span id="receipt-term"></span></div>
+          <div id="payer-meta" hidden>ผู้จ่ายเงิน <span id="payer-name"></span></div>
         </div>
         <div id="receipt-table"></div>
         <div class="words avoid-break"><b>ตัวอักษร</b> <span id="paid-words"></span></div>
@@ -174,6 +178,17 @@ function buildReceiptRows(charges,payments){
   }
 }
 
+function activePayerNames(payments){
+  return [...new Set((payments||[]).filter(payment=>!payment.voided_at)
+    .map(payment=>String(payment.payer_name??"").replace(/\s+/g," ").trim()).filter(Boolean))]
+}
+
+function payerNamesForCharge(payments,chargeId){
+  const names=[...new Set((payments||[]).filter(payment=>!payment.voided_at&&payment.charge_id===chargeId)
+    .map(payment=>String(payment.payer_name??"").replace(/\s+/g," ").trim()).filter(Boolean))];
+  return names.length?names.join(" / "):"—"
+}
+
 function receiptVoidError(printedCount,paperReturned,reason){
   if(!String(reason||"").trim())return"กรุณากรอกเหตุผลการยกเลิก";
   if(Number(printedCount)>0&&!paperReturned)return"กรุณายืนยันว่าได้ใบเดิมคืนหรือทำลายแล้ว";
@@ -207,7 +222,7 @@ function renderReceiptState(){
 function renderDocument({student,charges,payments,settings}){
   const required=["receipt_school_name","receipt_address","receipt_doc_title"];
   for(const key of required)if(!String(settings.get(key)||"").trim())throw new Error(`ยังไม่ได้ตั้งค่าหัวเอกสาร ${key}`);
-  const table=buildReceiptRows(charges,payments),summary=computeFeeOutstanding(charges,payments);
+  const table=buildReceiptRows(charges,payments),summary=computeFeeOutstanding(charges,payments),payerNames=activePayerNames(payments),showPayerColumn=payerNames.length>1;
   if(Math.abs(table.remaining-summary.outstanding)>0.005)throw new Error("ยอดรวมคอลัมน์คงเหลือไม่ตรงกับยอดค้าง กรุณาหยุดและแจ้งผู้ดูแล");
   el("school-name").textContent=settings.get("receipt_school_name");
   el("school-address").textContent=settings.get("receipt_address");
@@ -220,10 +235,12 @@ function renderDocument({student,charges,payments,settings}){
   el("student-no").textContent=student.student_no||"—";
   el("receipt-year").textContent=receipt.year;
   el("receipt-term").textContent=receipt.term;
+  el("payer-meta").hidden=payerNames.length!==1;
+  el("payer-name").textContent=payerNames.length===1?payerNames[0]:"";
   el("receipt-table").innerHTML=table.rows.length?`<div class="table-wrap"><table>
-    <thead><tr><th>รายการ</th><th class="money">จำนวนเต็ม</th><th class="money">จำนวนเงินที่จ่าย</th><th class="money">คงเหลือ</th></tr></thead>
-    <tbody>${table.rows.map(row=>`<tr><td><b>${esc(row.description)}</b>${row.note?`<div class="meta">${esc(row.note)}</div>`:""}</td><td class="money ${row.full<0?"negative":""}">${money(row.full)}</td><td class="money">${money(row.paid)}</td><td class="money ${row.remaining<0?"negative":""}">${money(row.remaining)}</td></tr>`).join("")}</tbody>
-    <tfoot><tr><td>รวมเงิน</td><td class="money">${money(table.full)}</td><td class="money">${money(table.paid)}</td><td class="money">${money(table.remaining)}</td></tr></tfoot>
+    <thead><tr><th>รายการ</th>${showPayerColumn?"<th>ผู้จ่ายเงิน</th>":""}<th class="money">จำนวนเต็ม</th><th class="money">จำนวนเงินที่จ่าย</th><th class="money">คงเหลือ</th></tr></thead>
+    <tbody>${table.rows.map(row=>`<tr><td><b>${esc(row.description)}</b>${row.note?`<div class="meta">${esc(row.note)}</div>`:""}</td>${showPayerColumn?`<td>${esc(payerNamesForCharge(payments,row.id))}</td>`:""}<td class="money ${row.full<0?"negative":""}">${money(row.full)}</td><td class="money">${money(row.paid)}</td><td class="money ${row.remaining<0?"negative":""}">${money(row.remaining)}</td></tr>`).join("")}</tbody>
+    <tfoot><tr><td${showPayerColumn?' colspan="2"':""}>รวมเงิน</td><td class="money">${money(table.full)}</td><td class="money">${money(table.paid)}</td><td class="money">${money(table.remaining)}</td></tr></tfoot>
   </table></div>`:'<div class="banner bad">ยังไม่มีรายการค่าใช้จ่ายในเอกสารนี้</div>';
   el("paid-words").textContent=bahtText(table.paid);
   el("outstanding-total").textContent=money(table.remaining);

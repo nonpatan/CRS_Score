@@ -206,6 +206,10 @@ function buildRateGrid(grades, items, rows) {
   }));
 }
 
+// ตัดหัวท้าย + บีบช่องว่างซ้อนให้เหลือช่องเดียว
+// 🪤 ห้ามใช้แค่ trim() — เว้นวรรคซ้อนตรงกลางเคยทำให้เลือกสินค้าไม่ได้ทั้งกลุ่ม (2026-09-01)
+const squash = value => String(value ?? "").replace(/\s+/g, " ").trim();
+
 function copyTermRates(rows, fromTerm, toTerm) {
   const output = (rows || []).map(row => ({ ...row }));
   const targetKeys = new Set(output.filter(row => Number(row.term) === Number(toTerm))
@@ -222,7 +226,7 @@ function copyTermRates(rows, fromTerm, toTerm) {
 
 function parseVariantList(value) {
   const seen = new Set();
-  return String(value ?? "").split(/[,，]/).map(item => item.trim()).filter(item => {
+  return String(value ?? "").split(/[,，]/).map(squash).filter(item => {
     if (!item || seen.has(item)) return false;
     seen.add(item);
     return true;
@@ -310,8 +314,8 @@ function openItemForm(item = null) {
 
 async function saveItem(event) {
   event.preventDefault();
-  const groupName = el("item-group").value.trim();
-  const unit = el("item-unit").value.trim();
+  const groupName = squash(el("item-group").value);
+  const unit = squash(el("item-unit").value);
   const sortOrder = Number(el("item-sort").value || 0);
   if (!groupName) return toast("กรุณากรอกชื่อกลุ่ม", true);
   if (!unit) return toast("กรุณากรอกหน่วย", true);

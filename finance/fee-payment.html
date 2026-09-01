@@ -53,7 +53,8 @@
     .history { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
     .history h3 { margin:0; font-size:17px; }
     .history-list { display:grid; gap:10px; margin-top:10px; }
-    .history-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:start; gap:10px; padding:11px 12px; border:1px solid var(--line); border-radius:10px; }
+    .history-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,.5fr) auto auto; align-items:start; gap:10px; padding:11px 12px; border:1px solid var(--line); border-radius:10px; }
+    .history-payer b { display:block; }
     .history-status { display:inline-flex; width:max-content; padding:2px 8px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:12px; font-weight:700; }
     .history-status.voided { color:var(--danger); background:var(--danger-soft); }
     .overlay { position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(15,23,42,.58); }
@@ -110,6 +111,11 @@
           <a id="receipt-link" class="button-link" href="#" hidden>เปิดใบแจ้งหนี้/ใบเสร็จ</a>
         </div>
         <div id="stats" class="stats"></div>
+        <div class="field">
+          <label for="payer-name">ชื่อผู้จ่ายเงิน</label>
+          <input id="payer-name" type="text" maxlength="120" required>
+          <div class="hint">ใครเป็นคนเอาเงินมาจ่าย เช่น ชื่อผู้ปกครอง</div>
+        </div>
         <div class="row2">
           <div class="field">
             <label for="received">เงินที่รับ</label>
@@ -159,6 +165,7 @@ const el=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 const money=value=>formatMoney(value,{minimumFractionDigits:2});
 const roundMoney=value=>Math.round((Number(value)||0)*100)/100;
+const squash=value=>String(value??"").replace(/\s+/g," ").trim();
 
 function allocateOldestFirst(lines,received){
   let remaining=Math.max(0,roundMoney(received));
@@ -230,7 +237,7 @@ function renderPaymentHistory(rows,chargeRows,names,canVoid=true){
   return sorted.map(payment=>{
     const charge=chargeById.get(payment.charge_id),voided=Boolean(payment.voided_at);
     const trail=voided?`<span class="meta">เหตุผล: ${esc(payment.void_reason||"ไม่พบเหตุผล")} · ยกเลิกโดย ${esc(nameOf(payment.voided_by)||payment.voided_by||"ไม่พบผู้ยกเลิก")} · ${esc(formatThaiDateTime(payment.voided_at))}</span>`:"";
-    return`<div class="history-row" data-payment-row="${esc(payment.id)}"><div><b>${esc(charge?.description||"รายการค่าใช้จ่าย")}</b><span class="meta">${esc(formatThaiDateTime(payment.paid_at))} · ${esc(payment.method)}</span>${trail}</div><b>${money(payment.amount)}</b><div>${voided?'<span class="history-status voided">ยกเลิกแล้ว</span>':`<span class="history-status">รับแล้ว</span>${canVoid?` <button class="danger" type="button" data-void-payment="${esc(payment.id)}">ยกเลิกรายการนี้</button>`:""}`}</div></div>`
+    return`<div class="history-row" data-payment-row="${esc(payment.id)}"><div><b>${esc(charge?.description||"รายการค่าใช้จ่าย")}</b><span class="meta">${esc(formatThaiDateTime(payment.paid_at))} · ${esc(payment.method)}</span>${trail}</div><div class="history-payer"><span class="meta">ผู้จ่ายเงิน</span><b>${esc(payment.payer_name||"—")}</b></div><b>${money(payment.amount)}</b><div>${voided?'<span class="history-status voided">ยกเลิกแล้ว</span>':`<span class="history-status">รับแล้ว</span>${canVoid?` <button class="danger" type="button" data-void-payment="${esc(payment.id)}">ยกเลิกรายการนี้</button>`:""}`}</div></div>`
   }).join("")
 }
 
@@ -292,7 +299,13 @@ function syncSelectedTotal(){
   el("selected-total").textContent=`รวมที่เลือก ${money(total)}`;
   const error=paymentDraftError(el("received").value,collectAllocations(),computeFeeOutstanding(selectedCharges(),payments).outstanding);
   el("draft-hint").textContent=error||"ยอดตรงกันแล้ว · ตรวจช่องทางก่อนบันทึก";
-  el("draft-hint").className=`hint${error?" due":""}`
+  el("draft-hint").className=`hint${error?" due":""}`;
+  updateSavePaymentButton()
+}
+
+function updateSavePaymentButton(){
+  const placement=selectedPlacement(),outstanding=computeFeeOutstanding(selectedCharges(),payments).outstanding;
+  el("save-payment").disabled=saving||submissionBlocked||!placement||outstanding<=0||!squash(el("payer-name").value)
 }
 
 function applyOldestFirst(){
@@ -314,9 +327,9 @@ function renderPayment(){
   renderChargeList();
   el("payment-history").innerHTML=renderPaymentHistory(payments,rows,profileNames,true);
   el("received").value="";
+  el("payer-name").value="";
   el("receipt-link").hidden=!receipt;
   el("receipt-link").href=receiptHref();
-  el("save-payment").disabled=!placement||summary.outstanding<=0;
   updateSavingsHint();
   syncSelectedTotal()
 }
@@ -380,6 +393,7 @@ el("room").onchange=async()=>{renderStudents();try{await loadStudent()}catch(err
 el("student").onchange=async()=>{try{await loadStudent()}catch(error){toast(friendly(error),true)}};
 el("term").onchange=async()=>{try{await loadStudent()}catch(error){toast(friendly(error),true)}};
 el("method").onchange=updateSavingsHint;
+el("payer-name").oninput=updateSavePaymentButton;
 el("received").onchange=applyOldestFirst;
 el("auto-fill").onclick=applyOldestFirst;
 el("charge-list").oninput=syncSelectedTotal;
@@ -453,6 +467,9 @@ el("save-payment").onclick=async()=>{
   if(saving)return;
   if(submissionBlocked)return toast("ผลการบันทึกครั้งก่อนยังไม่แน่ชัด · โหลดหน้าใหม่ก่อนทำรายการต่อเพื่อป้องกันรับเงินซ้ำ",true);
   const placement=selectedPlacement(),received=roundMoney(el("received").value),allocations=collectAllocations();
+  const payerName=squash(el("payer-name").value);
+  if(!payerName)return toast("กรุณากรอกชื่อผู้จ่ายเงินก่อนบันทึก",true);
+  el("payer-name").value=payerName;
   const outstanding=computeFeeOutstanding(selectedCharges(),payments).outstanding;
   const error=paymentDraftError(received,allocations,outstanding);
   if(error)return toast(error,true);
@@ -463,7 +480,7 @@ el("save-payment").onclick=async()=>{
   }
   if(!await window.crsAskConfirm({
     title:"ยืนยันรับเงินค่าใช้จ่าย",
-    message:`${placement.student?.name||"นักเรียน"}\n${el("term").value}/${currentYear} · ${allocations.length} รายการ\n${method} ${money(received)}`,
+    message:`${placement.student?.name||"นักเรียน"}\nผู้จ่ายเงิน: ${payerName}\n${el("term").value}/${currentYear} · ${allocations.length} รายการ\n${method} ${money(received)}`,
     okLabel:"บันทึกรับเงิน",
     danger:false
   }))return;
@@ -513,6 +530,7 @@ el("save-payment").onclick=async()=>{
     }
     const paymentRows=allocations.map(allocation=>({
       receipt_id:savedReceipt.id,charge_id:allocation.charge_id,amount:allocation.amount,method,
+      payer_name:payerName,
       savings_txn_id:method==="หักออมทรัพย์"?savingsByCharge.get(allocation.charge_id):null,
       scholarship_txn_id:method==="หักทุน"?scholarshipByCharge.get(allocation.charge_id):null,
       recorded_by:session.user.id
@@ -530,7 +548,7 @@ el("save-payment").onclick=async()=>{
     toast(failure.prefix+friendly(saveError),true)
   }finally{
     saving=false;
-    el("save-payment").disabled=submissionBlocked||computeFeeOutstanding(selectedCharges(),payments).outstanding<=0
+    updateSavePaymentButton()
   }
 };
 
