@@ -740,11 +740,13 @@ function transportRateKey(year, ym, zoneId, tripMode) {
 // คำนวณยอดจากช่วงใช้รถ + เช็คชื่อ + override + ยอดเดือนที่ประกาศ โดยไม่แตะ DOM/ฐานข้อมูล
 // monthRates ต้องมี year เสมอ เพราะเดือน พ.ค. เดียวกันอยู่ได้ใน 2 ปีการศึกษา
 export function computeTransportCharges({
-  periods = [], attendance = [], overrides = [], monthRates = [], from, to
+  periods = [], attendance = [], overrides = [], monthRates = [], openingDebt = 0, from, to
 } = {}) {
   if (!from || !to || from > to) {
-    return { days:[], months:[], total:0, missingAttendanceDates:[], unannouncedMonths:[] };
+    return { days:[], months:[], openingDebt:0, total:0, missingAttendanceDates:[], unannouncedMonths:[] };
   }
+
+  const opening = Number(openingDebt) > 0 ? Number(openingDebt) : 0;
 
   const attendanceByDate = new Map(
     (attendance || []).map(row => [row.attend_date || row.date, row.status])
@@ -803,10 +805,11 @@ export function computeTransportCharges({
     }
   }
 
-  const total = [...days, ...months].reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  const total = [...days, ...months].reduce((sum, row) => sum + (Number(row.amount) || 0), 0) + opening;
   return {
     days,
     months,
+    openingDebt:opening,
     total,
     missingAttendanceDates:[...missing].sort(),
     unannouncedMonths:[...unannounced].sort()

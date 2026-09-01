@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>หนี้ค่ารถยกมา — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#93690f; --amber-soft:#faf1dd;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card { margin-bottom:16px; padding:16px; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .row3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  .field { margin-bottom:14px; }
+  label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
+  input[type="text"], input[type="number"], select {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  select:focus, input:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  input.invalid { border-color:var(--danger); background:var(--danger-soft); }
+  button { min-height:44px; padding:10px 14px; border:0; border-radius:9px; font:inherit; font-weight:600; cursor:pointer; }
+  button.primary { color:var(--white); background:var(--teal); }
+  button.icon-btn { min-width:44px; padding:8px; color:var(--danger); background:var(--danger-soft); }
+  button:disabled { opacity:.55; cursor:default; }
+  .year-note { padding:11px 13px; border-radius:10px; color:var(--teal); background:var(--teal-soft); font-weight:600; }
+  .readonly { margin-bottom:16px; padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); }
+  .banner { margin:0 0 16px; padding:12px 14px; border-radius:10px; font-size:14px; }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner a { color:inherit; font-weight:700; }
+  .section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+  .section-head h2 { margin:0; font-size:18px; }
+  .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .progress { padding:8px 12px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:13px; font-weight:700; white-space:nowrap; }
+  .student-list { border-top:1px solid var(--line); }
+  .student-row { display:grid; grid-template-columns:minmax(190px,1.1fr) minmax(130px,.7fr) minmax(140px,.7fr) minmax(220px,1fr) 48px; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line); }
+  .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
+  .meta { display:block; color:var(--muted); font-size:13px; font-weight:400; }
+  .system-debt { padding:9px 10px; border-radius:8px; background:var(--teal-soft); }
+  .system-debt span { display:block; color:var(--muted); font-size:12px; }
+  .system-debt b { color:var(--teal); }
+  .input-wrap label { margin:0 0 4px; color:var(--muted); font-size:12px; }
+  .save-bar { position:sticky; bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 10px 28px rgba(25,77,73,.14); }
+  .save-bar span { color:var(--muted); font-size:13px; }
+  .empty { padding:26px 10px; color:var(--muted); text-align:center; }
+  .toast { position:sticky; bottom:10px; display:none; margin-top:12px; padding:11px 14px; border-radius:10px; color:var(--white); background:var(--teal); }
+  .toast.ok, .toast.err { display:block; }
+  .toast.err { background:var(--danger); }
+  [hidden] { display:none !important; }
+  @media (max-width:860px) { .student-row { grid-template-columns:minmax(180px,1fr) minmax(130px,.7fr) 48px; } .input-wrap { grid-row:2; } .amount-wrap { grid-column:1/2; } .reason-wrap { grid-column:2/4; } }
+  @media (max-width:620px) { .row3, .student-row { grid-template-columns:1fr; } .student-row > *, .amount-wrap, .reason-wrap { grid-column:1; grid-row:auto; } .student-row button { width:100%; } .section-head { display:block; } .progress { display:inline-block; margin-top:8px; } .save-bar { align-items:stretch; flex-direction:column; } .save-bar button { width:100%; } }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>หนี้ค่ารถยกมา</h1>
+    <p>บันทึกเฉพาะหนี้ค่ารถที่ระบบคำนวณจากข้อมูลเดิมไม่ได้</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260901-1"></script>
+  </header>
+
+  <main class="academic-content">
+    <div id="readonly-note" class="readonly" hidden></div>
+    <div class="banner warn">
+      <b>ถ้าหนี้เกิดจากวันที่ยังไม่ได้เช็คชื่อ ให้ไปเช็คชื่อย้อนหลังแทน อย่าใช้หน้านี้</b><br>
+      หนี้ยกมาใช้เฉพาะกรณีที่แก้ข้อมูลต้นทางไม่ได้จริง ๆ เช่น หนี้ก่อนเริ่มใช้ระบบ
+      · <a href="../general-affairs/daily-attendance.html">ไปหน้าเช็คชื่อประจำวัน</a>
+    </div>
+    <section id="selector-card" class="card" hidden>
+      <div class="row3">
+        <div class="field"><label for="year-select">ปีการศึกษา</label><select id="year-select" disabled><option value="">กำลังโหลด…</option></select></div>
+        <div class="field"><label for="grade-select">ชั้นเรียน</label><select id="grade-select" disabled><option value="">— เลือกปีก่อน —</option></select></div>
+        <div class="field"><label for="room-select">ห้องเรียน</label><select id="room-select" disabled><option value="">— เลือกชั้นก่อน —</option></select></div>
+      </div>
+      <div id="year-note" class="year-note">กำลังตรวจปีการศึกษา…</div>
+    </section>
+    <section id="error-card" class="card" hidden></section>
+    <section id="opening-card" class="card" hidden>
+      <div class="section-head"><div><h2 id="room-title">รายชื่อนักเรียน</h2><p>ยอดจากระบบไม่รวมหนี้ยกมา · กรอก 0 เพื่อลบแถวเดิม (เฉพาะผู้ดูแลระบบ)</p></div><span id="progress" class="progress">ตั้งหนี้ยกมาแล้ว 0 คน · รวม 0.00 บาท</span></div>
+      <div id="student-list" class="student-list"></div>
+      <div class="save-bar"><span id="save-note">ตรวจยอดและเหตุผลของทุกคนก่อนบันทึก</span><button id="save-button" class="primary" type="button">บันทึกทั้งห้อง</button></div>
+    </section>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
+  getAcademicYears, academicYearOf, academicYearRange, getStudentPlacements,
+  roomsFromPlacements, activePlacements, bangkokNow, toDateStr, fetchAllRows,
+  computeTransportCharges, computeTransportOutstanding, formatMoney
+} from "../supabase-client.js?v=20260901-1";
+
+const el = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
+const today = toDateStr(bangkokNow());
+const studentCompare = (a, b) => String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }) || String(a.student?.name || "").localeCompare(String(b.student?.name || ""), "th");
+const groupByStudent = rows => {
+  const grouped = new Map();
+  for (const row of rows || []) {
+    if (!grouped.has(row.student_id)) grouped.set(row.student_id, []);
+    grouped.get(row.student_id).push(row);
+  }
+  return grouped;
+};
+
+let toastTimer = null;
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").className = "toast " + (isError ? "err" : "ok");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el("toast").className = "toast"; }, 5000);
+}
+function friendlyError(error) {
+  const message = error?.message || "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ";
+  if (message.includes("row-level security")) return "คุณไม่มีสิทธิ์ทำรายการนี้";
+  if (message.includes("transport_opening_debts_amount_positive")) return "ยอดหนี้ยกมาต้องมากกว่า 0 บาท";
+  if (message.includes("transport_opening_debts_reason_not_blank")) return "ต้องระบุเหตุผล";
+  if (message.includes("transport_opening_debts_student_year_uniq") || message.includes("duplicate key")) return "นักเรียนคนนี้มีหนี้ยกมาของปีนี้แล้ว กรุณาโหลดใหม่";
+  return message;
+}
+
+let session = null;
+let canFinance = false;
+let canAdmin = false;
+let years = [];
+let currentYear = "";
+let yearRange = null;
+let placements = [];
+let rooms = [];
+let roster = [];
+let openingsByStudent = new Map();
+let calculatedByStudent = new Map();
+
+function renderRoster() {
+  const existingRows = [...openingsByStudent.values()];
+  const total = existingRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  el("progress").textContent = `ตั้งหนี้ยกมาแล้ว ${existingRows.length} คน · รวม ${formatMoney(total)}`;
+  el("student-list").innerHTML = roster.map(placement => {
+    const student = placement.student || {};
+    const existing = openingsByStudent.get(placement.student_id) || null;
+    return `<div class="student-row" data-student-id="${esc(placement.student_id)}">
+      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")}${existing ? ` · มีหนี้ยกมาเดิม ${formatMoney(existing.amount)}` : " · ยังไม่มีหนี้ยกมา"}</span></div>
+      <div class="system-debt"><span>ยอดค้างจากระบบตอนนี้</span><b>${formatMoney(calculatedByStudent.get(placement.student_id) || 0)}</b></div>
+      <div class="input-wrap amount-wrap"><label for="debt-${esc(placement.student_id)}">หนี้ยกมา (บาท)</label><input id="debt-${esc(placement.student_id)}" class="debt-input" type="number" min="0" step="0.01" inputmode="decimal" value="${existing ? Number(existing.amount).toFixed(2) : ""}" data-original="${esc(existing?.amount || "")}" placeholder="0.00"></div>
+      <div class="input-wrap reason-wrap"><label for="reason-${esc(placement.student_id)}">เหตุผล</label><input id="reason-${esc(placement.student_id)}" class="reason-input" type="text" value="${esc(existing?.reason || "")}" data-original="${esc(existing?.reason || "")}" placeholder="เช่น ค้างก่อนเข้าระบบ"></div>
+      ${existing && canAdmin ? `<button class="icon-btn" type="button" data-delete-id="${esc(existing.id)}" data-student-name="${esc(student.name || "นักเรียน")}" aria-label="ลบหนี้ยกมาของ ${esc(student.name || "นักเรียน")}">🗑</button>` : '<span aria-hidden="true"></span>'}
+    </div>`;
+  }).join("") || '<div class="empty">ห้องนี้ยังไม่มีรายชื่อนักเรียน</div>';
+  el("save-button").disabled = !canFinance || roster.length === 0;
+}
+
+async function loadRoom(roomIndex) {
+  el("opening-card").hidden = true;
+  const room = rooms[Number(roomIndex)] || null;
+  if (!room || !yearRange) return;
+  roster = activePlacements(placements).filter(row => row.grade_level === room.grade_level && row.classroom === room.classroom).sort(studentCompare);
+  if (!roster.length) {
+    el("error-card").hidden = false;
+    el("error-card").innerHTML = '<div class="banner bad"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจรายชื่อในปีการศึกษาที่เลือก</div>';
+    return;
+  }
+  el("error-card").hidden = true;
+  const studentIds = roster.map(row => row.student_id);
+  const calculationTo = today > yearRange.end ? yearRange.end : today;
+  const [periodRes, attendanceRes, overrideRes, rateRes, paymentRes, openingRes] = await Promise.all([
+    fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date").eq("year", currentYear).in("student_id", studentIds).lte("start_date", calculationTo).or(`end_date.is.null,end_date.gte.${yearRange.start}`), ["student_id","start_date","id"]),
+    fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status").eq("year", currentYear).in("student_id", studentIds).gte("attend_date", yearRange.start).lte("attend_date", calculationTo), ["attend_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_day_overrides").select("id,student_id,charge_date,amount").eq("year", currentYear).in("student_id", studentIds).gte("charge_date", yearRange.start).lte("charge_date", calculationTo), ["charge_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_month_rates").select("year,ym,zone_id,trip_mode,amount").eq("year", currentYear), ["year","ym","zone_id","trip_mode"]),
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,amount,pay_date").eq("year", currentYear).in("student_id", studentIds), ["pay_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_opening_debts").select("id,student_id,year,amount,reason,updated_at").eq("year", currentYear).in("student_id", studentIds), ["student_id"])
+  ]);
+  for (const [label, result] of [["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["อัตรารายเดือน",rateRes],["รายการรับเงิน",paymentRes],["หนี้ยกมา",openingRes]]) {
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+  }
+  const periodsByStudent = groupByStudent(periodRes.data || []);
+  const attendanceByStudent = groupByStudent(attendanceRes.data || []);
+  const overridesByStudent = groupByStudent(overrideRes.data || []);
+  const paymentsByStudent = groupByStudent(paymentRes.data || []);
+  const monthRates = rateRes.data || [];
+  openingsByStudent = new Map((openingRes.data || []).map(row => [row.student_id, row]));
+  calculatedByStudent = new Map(roster.map(placement => {
+    const charges = computeTransportCharges({ periods:periodsByStudent.get(placement.student_id) || [], attendance:attendanceByStudent.get(placement.student_id) || [], overrides:overridesByStudent.get(placement.student_id) || [], monthRates, from:yearRange.start, to:calculationTo });
+    return [placement.student_id, computeTransportOutstanding(charges, paymentsByStudent.get(placement.student_id) || [])];
+  }));
+  el("room-title").textContent = `${room.grade_level} · ${room.classroom} (${roster.length} คน)`;
+  renderRoster();
+  el("opening-card").hidden = false;
+}
+
+function syncRoomOptions() {
+  el("opening-card").hidden = true;
+  const grade = el("grade-select").value;
+  const roomIndexes = rooms.map((room, index) => ({ room, index })).filter(item => item.room.grade_level === grade);
+  el("room-select").innerHTML = '<option value="">— เลือกห้อง —</option>' + roomIndexes.map(item => `<option value="${item.index}">${esc(item.room.classroom)}</option>`).join("");
+  el("room-select").disabled = roomIndexes.length === 0;
+  if (roomIndexes.length === 1) { el("room-select").value = String(roomIndexes[0].index); loadRoom(roomIndexes[0].index).catch(error => toast(friendlyError(error), true)); }
+}
+
+async function loadYear(year) {
+  el("opening-card").hidden = true;
+  currentYear = year || "";
+  yearRange = currentYear ? academicYearRange(currentYear, years) : null;
+  if (!currentYear || !yearRange) return;
+  el("year-note").textContent = `ปีการศึกษา ${currentYear} · คำนวณยอดจาก ${yearRange.start} ถึง ${today > yearRange.end ? yearRange.end : today}`;
+  const placementRes = await getStudentPlacements(currentYear);
+  if (placementRes.error) throw new Error("โหลดข้อมูลห้องเรียนไม่สำเร็จ: " + placementRes.error.message);
+  placements = placementRes.data || [];
+  rooms = roomsFromPlacements(activePlacements(placements), currentYear);
+  const grades = [...new Set(rooms.map(room => room.grade_level))];
+  el("grade-select").innerHTML = '<option value="">— เลือกชั้น —</option>' + grades.map(grade => `<option value="${esc(grade)}">${esc(grade)}</option>`).join("");
+  el("grade-select").disabled = grades.length === 0;
+  el("room-select").innerHTML = '<option value="">— เลือกชั้นก่อน —</option>';
+  el("room-select").disabled = true;
+  if (grades.length === 1) { el("grade-select").value = grades[0]; syncRoomOptions(); }
+}
+
+async function loadContext() {
+  years = await getAcademicYears();
+  const selected = academicYearOf(today, years) || years[0]?.year || "";
+  el("year-select").innerHTML = '<option value="">— เลือกปี —</option>' + years.map(row => `<option value="${esc(row.year)}">${esc(row.year)}</option>`).join("");
+  el("year-select").disabled = years.length === 0;
+  el("selector-card").hidden = false;
+  if (selected) { el("year-select").value = selected; await loadYear(selected); }
+}
+
+el("year-select").addEventListener("change", async () => { try { await loadYear(el("year-select").value); } catch (error) { toast(friendlyError(error), true); } });
+el("grade-select").addEventListener("change", syncRoomOptions);
+el("room-select").addEventListener("change", async () => { try { await loadRoom(el("room-select").value); } catch (error) { toast(friendlyError(error), true); } });
+el("student-list").addEventListener("input", event => {
+  const row = event.target.closest(".student-row");
+  if (!row) return;
+  const amountInput = row.querySelector(".debt-input");
+  const reasonInput = row.querySelector(".reason-input");
+  const amount = Number(amountInput.value);
+  amountInput.classList.toggle("invalid", amountInput.value !== "" && (!Number.isFinite(amount) || amount < 0));
+  reasonInput.classList.toggle("invalid", amountInput.value !== "" && amount > 0 && !reasonInput.value.trim());
+});
+
+el("student-list").addEventListener("click", async event => {
+  const button = event.target.closest("[data-delete-id]");
+  if (!button || !canAdmin) return;
+  const existing = [...openingsByStudent.values()].find(row => row.id === button.dataset.deleteId);
+  if (!existing || !await window.crsAskConfirm({ title:"ลบหนี้ค่ารถยกมา", message:`${button.dataset.studentName} · ${formatMoney(existing.amount)}\nยอดนี้จะถูกหักออกจากยอดค้างชำระทันที`, okLabel:"ลบหนี้ยกมา", requireText:"ลบ", danger:true })) return;
+  const { error } = await sb.from("transport_opening_debts").delete().eq("id", existing.id);
+  if (error) return toast(friendlyError(error), true);
+  toast("ลบหนี้ค่ารถยกมาแล้ว");
+  try { await loadRoom(el("room-select").value); } catch (error) { toast("ลบแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + friendlyError(error), true); }
+});
+
+el("save-button").addEventListener("click", async () => {
+  const rows = [...el("student-list").querySelectorAll(".student-row")];
+  const items = [];
+  let invalid = false;
+  for (const row of rows) {
+    const studentId = row.dataset.studentId;
+    const existing = openingsByStudent.get(studentId) || null;
+    const amountInput = row.querySelector(".debt-input");
+    const reasonInput = row.querySelector(".reason-input");
+    const raw = amountInput.value.trim();
+    const reason = reasonInput.value.trim();
+    if (!raw && !existing && !reason) continue;
+    const amount = Number(raw);
+    if (!raw || !Number.isFinite(amount) || amount < 0) { amountInput.classList.add("invalid"); invalid = true; continue; }
+    if (amount > 0 && !reason) { reasonInput.classList.add("invalid"); invalid = true; continue; }
+    if (amount === 0 && !existing) continue;
+    if (existing && amount === Number(existing.amount) && reason === existing.reason) continue;
+    items.push({ studentId, existingId:existing?.id || null, amount:Math.round(amount * 100) / 100, reason });
+  }
+  if (invalid) return toast("กรุณาตรวจยอดหนี้ยกมาและระบุเหตุผลให้ครบ", true);
+  if (!items.length) return toast("ยังไม่มีรายการที่เปลี่ยนแปลง", true);
+  const deletes = items.filter(item => item.amount === 0);
+  if (deletes.length && !canAdmin) return toast("การลบหนี้ยกมาทำได้เฉพาะผู้ดูแลระบบ", true);
+  const saves = items.filter(item => item.amount > 0);
+  const total = saves.reduce((sum, item) => sum + item.amount, 0);
+  if (!await window.crsAskConfirm({ title:"บันทึกหนี้ค่ารถยกมาทั้งห้อง", message:`บันทึกหรือแก้ ${saves.length} คน · ยอดรวมรายการที่บันทึก ${formatMoney(total)}${deletes.length ? `\nลบ ${deletes.length} คน` : ""}\nกรุณาตรวจยอดและเหตุผลก่อนยืนยัน`, okLabel:"บันทึกทั้งห้อง", danger:false })) return;
+  const button = el("save-button");
+  button.disabled = true;
+  button.textContent = "กำลังบันทึก…";
+  let saved = 0;
+  let firstError = null;
+  for (const item of items) {
+    let request;
+    if (item.amount === 0) request = sb.from("transport_opening_debts").delete().eq("id", item.existingId);
+    else if (item.existingId) request = sb.from("transport_opening_debts").update({ amount:item.amount, reason:item.reason, recorded_by:session.user.id, updated_at:new Date().toISOString() }).eq("id", item.existingId);
+    else request = sb.from("transport_opening_debts").insert({ student_id:item.studentId, year:currentYear, amount:item.amount, reason:item.reason, recorded_by:session.user.id });
+    const { error } = await request;
+    if (error) firstError ||= error;
+    else saved += 1;
+  }
+  button.textContent = "บันทึกทั้งห้อง";
+  if (firstError) toast(`บันทึกได้ ${saved} / ${items.length} คน · ${friendlyError(firstError)}`, true);
+  else toast(`บันทึกหนี้ยกมา ${saved} คนแล้ว`);
+  try { await loadRoom(el("room-select").value); } catch (error) { toast("บันทึกแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + friendlyError(error), true); }
+});
+
+session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canFinance = await checkDepartment("การเงิน");
+    applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
+    const profileRes = await sb.from("profiles").select("role").eq("id", session.user.id).maybeSingle();
+    canAdmin = profileRes.data?.role === "admin";
+    if (!canFinance) {
+      el("readonly-note").hidden = false;
+      el("readonly-note").innerHTML = "<b>เปิดหน้าหนี้ค่ารถยกมาไม่ได้</b><br>หน้านี้ใช้ได้เฉพาะผู้ที่ได้รับสิทธิ์ฝ่ายการเงิน";
+    } else await loadContext();
+  } catch (error) {
+    el("error-card").hidden = false;
+    el("error-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าหนี้ค่ารถยกมาไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
+  }
+}
+</script>
+</body>
+</html>

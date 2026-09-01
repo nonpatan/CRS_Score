@@ -436,7 +436,7 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html", "scholarship-grant.html", "scholarship-sources.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-opening.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html", "scholarship-grant.html", "scholarship-sources.html"],
       groups: [
         {
           label: "บันทึก",
@@ -471,6 +471,7 @@
           items: [
             ["savings-opening.html", "ยอดยกมาออมทรัพย์"],
             ["transport-settings.html", "ตั้งค่าค่ารถ"],
+            ["transport-opening.html", "หนี้ค่ารถยกมา"],
             ["fee-settings.html", "ตั้งค่าค่าใช้จ่าย"],
             ["fee-stock.html", "คลังสินค้า"],
             ["scholarship-sources.html", "ทะเบียนแหล่งทุน"]
@@ -527,6 +528,11 @@
           title: "ตั้งค่าค่ารถ",
           description: "ตั้งโซนและอัตรา ผูกนักเรียน แล้วประกาศยอดที่จะเก็บรายเดือน",
           steps: ["ตั้งโซน", "ผูกนักเรียน", "ประกาศยอด"]
+        },
+        "transport-opening.html": {
+          title: "หนี้ค่ารถยกมา",
+          description: "เลือกปี ชั้น และห้อง แล้วบันทึกเฉพาะหนี้ค่ารถที่แก้จากข้อมูลต้นทางไม่ได้",
+          steps: ["เลือกห้อง", "ตรวจยอดระบบ", "บันทึกหนี้ยกมา"]
         },
         "fee-settings.html": {
           title: "ตั้งค่าค่าใช้จ่าย",

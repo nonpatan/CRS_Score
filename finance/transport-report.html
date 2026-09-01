@@ -40,6 +40,7 @@
   .ledger-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:10px 0; }
   .ledger-summary div { padding:9px; border-radius:8px; background:#fff; }
   .ledger-summary span { display:block; color:var(--muted); font-size:12px; }
+  .opening-debt { margin:10px 0; padding:9px 11px; border-radius:8px; color:var(--amber); background:var(--amber-soft); }
   .ledger-row { display:grid; grid-template-columns:120px 1fr 130px; gap:10px; padding:9px 0; border-bottom:1px solid var(--line); }
   .empty { padding:28px 8px; color:var(--muted); text-align:center; }
   .readonly, .banner { margin-bottom:16px; padding:12px 14px; border-radius:10px; }
@@ -55,7 +56,7 @@
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
 <body><div class="wrap">
-  <header><h1>รายงานค่ารถ</h1><p>ดูยอดที่เก็บได้ตามช่วงวัน พร้อมยอดค้างชำระสะสมทั้งหมด</p><div class="nav"></div><script src="../app-shell.js?v=20260831-2"></script></header>
+  <header><h1>รายงานค่ารถ</h1><p>ดูยอดที่เก็บได้ตามช่วงวัน พร้อมยอดค้างชำระสะสมทั้งหมด</p><div class="nav"></div><script src="../app-shell.js?v=20260901-1"></script></header>
   <main class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <div id="report-content" hidden>
@@ -89,14 +90,14 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows,
   academicYearOf, academicYearRange, bangkokNow, toDateStr, computeTransportCharges,
   computeTransportOutstanding, computeTransportUnremitted, formatMoney
-} from "../supabase-client.js?v=20260831-1";
+} from "../supabase-client.js?v=20260901-1";
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 const today = toDateStr(bangkokNow());
 const roomKey = row => [row.grade_level, row.classroom].join("\u0000");
 const thaiDate = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
 const thaiMonth = value => new Intl.DateTimeFormat("th-TH", { month:"long", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
-let currentYear = "", yearRange = null, placements = [], periods = [], attendance = [], overrides = [], monthRates = [], payments = [], unremittedAll = [];
+let currentYear = "", yearRange = null, placements = [], periods = [], attendance = [], overrides = [], monthRates = [], payments = [], unremittedAll = [], openingDebts = [];
 let students = [], roomSummaries = [], selectedRoom = null, selectedStudentId = null, sortKey = "room", sortDirection = 1, canFinance = false, toastTimer;
 
 function toast(message) { el("toast").textContent = message; el("toast").className = "toast err"; clearTimeout(toastTimer); toastTimer = setTimeout(() => el("toast").className = "toast", 6000); }
@@ -137,6 +138,7 @@ function buildStudents() {
   const attendanceByStudent = groupByStudent(attendance);
   const overridesByStudent = groupByStudent(overrides);
   const paymentsByStudent = groupByStudent(payments);
+  const openingByStudent = new Map(openingDebts.map(row => [row.student_id, row]));
   const transportIds = new Set(periods.map(row => row.student_id));
   const range = selectedRange();
   students = placements.filter(row => transportIds.has(row.student_id)).map(placement => {
@@ -145,11 +147,13 @@ function buildStudents() {
       periods:periodsByStudent.get(placement.student_id) || [],
       attendance:attendanceByStudent.get(placement.student_id) || [],
       overrides:overridesByStudent.get(placement.student_id) || [],
-      monthRates, from:yearRange.start, to:today
+      monthRates, openingDebt:openingByStudent.get(placement.student_id)?.amount || 0,
+      from:yearRange.start, to:today
     });
     const inRange = studentPayments.filter(row => row.pay_date >= range.from && row.pay_date <= range.to);
     return {
       ...placement, charges, payments:studentPayments, inRange,
+      openingDebtRecord:openingByStudent.get(placement.student_id) || null,
       billingModes:[...new Set((periodsByStudent.get(placement.student_id) || [])
         .map(row => row.billing_mode).filter(Boolean))],
       collectedInRange:inRange.reduce((sum, row) => sum + Number(row.amount || 0), 0),
@@ -220,7 +224,10 @@ function renderLedger() {
   if (!row) { el("ledger").innerHTML = '<div class="empty">เลือกนักเรียนเพื่อดูรายละเอียด</div>'; return; }
   const paidLifetime = row.payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const history = [...row.payments].sort((a, b) => String(b.pay_date).localeCompare(String(a.pay_date)) || String(b.id).localeCompare(String(a.id)));
-  el("ledger").innerHTML = `<b>${esc(row.student?.name || "นักเรียน")}</b><div class="ledger-summary"><div><span>ยอดตามระบบถึงวันนี้</span><b>${row.outstandingKnown ? formatMoney(row.charges.total) : "ยังคำนวณไม่ได้"}</b></div><div><span>ชำระสะสมทั้งหมด</span><b>${formatMoney(paidLifetime)}</b></div><div><span>ยอดค้างชำระ</span><b>${row.outstandingKnown ? formatMoney(row.outstandingLifetime) : "ยังคำนวณไม่ได้"}</b></div></div>` + (history.map(payment => `<div class="ledger-row"><span>${thaiDate(payment.pay_date)}</span><span>${esc(payment.method)}${payment.note ? ` · ${esc(payment.note)}` : ""}</span><strong>${formatMoney(payment.amount)}</strong></div>`).join("") || '<div class="empty">ยังไม่มีรายการชำระค่ารถ</div>');
+  const openingLine = row.openingDebtRecord
+    ? `<div class="opening-debt"><b>หนี้ยกมา ${formatMoney(row.openingDebtRecord.amount)}</b> · ${esc(row.openingDebtRecord.reason)}</div>`
+    : "";
+  el("ledger").innerHTML = `<b>${esc(row.student?.name || "นักเรียน")}</b>${openingLine}<div class="ledger-summary"><div><span>ยอดตามระบบถึงวันนี้</span><b>${row.outstandingKnown ? formatMoney(row.charges.total) : "ยังคำนวณไม่ได้"}</b></div><div><span>ชำระสะสมทั้งหมด</span><b>${formatMoney(paidLifetime)}</b></div><div><span>ยอดค้างชำระ</span><b>${row.outstandingKnown ? formatMoney(row.outstandingLifetime) : "ยังคำนวณไม่ได้"}</b></div></div>` + (history.map(payment => `<div class="ledger-row"><span>${thaiDate(payment.pay_date)}</span><span>${esc(payment.method)}${payment.note ? ` · ${esc(payment.note)}` : ""}</span><strong>${formatMoney(payment.amount)}</strong></div>`).join("") || '<div class="empty">ยังไม่มีรายการชำระค่ารถ</div>');
 }
 function renderReport() {
   buildStudents(); buildRooms(); renderSchool();
@@ -255,7 +262,7 @@ async function loadReport() {
   if (!currentYear || !yearRange) throw new Error("ยังไม่พบปีการศึกษาที่ครอบคลุมวันที่วันนี้");
   el("from-date").value = yearRange.start; el("to-date").value = today;
   el("year-note").textContent = `ปีการศึกษา ${currentYear} · ค่าเริ่มต้นตั้งแต่ต้นปีการศึกษาถึงวันนี้`;
-  const [placementRes, periodRes, attendanceRes, overrideRes, rateRes, paymentRes, unremittedRes] = await Promise.all([
+  const [placementRes, periodRes, attendanceRes, overrideRes, rateRes, paymentRes, unremittedRes, openingRes] = await Promise.all([
     fetchAllRows(() => sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school)").eq("year", currentYear), ["grade_level","classroom","id"]),
     fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date").eq("year", currentYear), ["student_id","start_date","id"]),
     fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status").eq("year", currentYear).gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
@@ -264,13 +271,15 @@ async function loadReport() {
     fetchAllRows(() => sb.from("transport_payments").select("id,student_id,year,grade_level,classroom,pay_date,amount,method,note,remittance_id").eq("year", currentYear), ["pay_date","student_id","id"]),
     fetchAllRows(() => sb.from("transport_payments")
       .select("id,student_id,year,grade_level,classroom,amount,method,remittance_id")
-      .eq("method", "เงินสด").is("remittance_id", null), ["year","grade_level","classroom","id"])
+      .eq("method", "เงินสด").is("remittance_id", null), ["year","grade_level","classroom","id"]),
+    fetchAllRows(() => sb.from("transport_opening_debts").select("student_id,year,amount,reason")
+      .eq("year", currentYear), ["student_id"])
   ]);
-  for (const [label, result] of [["รายชื่อห้อง",placementRes],["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["อัตรารายเดือน",rateRes],["รายการรับเงิน",paymentRes],["ยอดค้างส่งทุกปี",unremittedRes]]) {
+  for (const [label, result] of [["รายชื่อห้อง",placementRes],["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["อัตรารายเดือน",rateRes],["รายการรับเงิน",paymentRes],["ยอดค้างส่งทุกปี",unremittedRes],["หนี้ยกมา",openingRes]]) {
     if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
   }
   placements = placementRes.data || []; periods = periodRes.data || []; attendance = attendanceRes.data || [];
-  overrides = overrideRes.data || []; monthRates = rateRes.data || []; payments = paymentRes.data || []; unremittedAll = unremittedRes.data || [];
+  overrides = overrideRes.data || []; monthRates = rateRes.data || []; payments = paymentRes.data || []; unremittedAll = unremittedRes.data || []; openingDebts = openingRes.data || [];
   if (!canFinance) {
     const roomMap = new Map();
     for (const placement of placements) roomMap.set(roomKey(placement), placement);
