@@ -261,6 +261,13 @@ function renderWarnings() {
   el("warnings").hidden = !blocks.length;
 }
 
+// เด็กที่ใช้ทุนก้อนสุดท้ายหมดพอดีวันนี้ ยอดคงเหลือจะเป็น 0 แต่ยังมีรายการหักทุนของวันนี้อยู่
+// ⟹ ถ้าดูแค่ยอดคงเหลือ ช่องจะขึ้น "—" ทั้งที่ดรอปดาวน์เลือกหักทุนค้างอยู่ · ครูอ่านแล้วขัดกัน
+// 🪤 เงื่อนไขนี้ต้องใช้ร่วมทุกจุดที่แสดงเรื่องทุน ห้ามเขียนซ้ำแยกกัน
+function showsScholarship(state) {
+  return Number(state?.scholarshipBalance || 0) > 0 || state?.todayPayment?.method === "หักทุน";
+}
+
 function actionAvailability(studentId, amount) {
   const state = stateByStudent.get(studentId);
   const unknown = Boolean(state?.charges.unannouncedMonths.length);
@@ -344,7 +351,7 @@ function renderStudentRows(rows) {
       <div class="money-cell ${unknown ? "unknown" : ""}"><span>ค้างทั้งหมด (รวมวันนี้)</span><b>${unknown ? "ยังคำนวณไม่ได้" : formatMoney(state.outstanding)}</b></div>
       <div class="money-cell ${currentCharge?.announced === false ? "unknown" : ""}"><span>${stopped ? "ของวันนี้" : period?.billing_mode === "รายเดือน" ? "ในนั้นเป็นของเดือนนี้" : "ในนั้นเป็นของวันนี้"}</span><b>${currentText}</b></div>
       <div class="money-cell"><span>ออมทรัพย์คงเหลือ</span><b>${formatMoney(state.balance)}</b></div>
-      <div class="money-cell"><span>ทุนคงเหลือ</span><b>${state.scholarshipBalance > 0 ? formatMoney(state.scholarshipBalance) : "—"}</b></div>
+      <div class="money-cell"><span>ทุนคงเหลือ</span><b>${showsScholarship(state) ? formatMoney(state.scholarshipBalance) : "—"}</b></div>
       <div class="actions">
         <input class="amount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(suggested || '')}" placeholder="ยอดรับ/ยอดหัก (บาท)" aria-label="ยอดที่รับของ ${esc(student.name || "นักเรียน")}">
         <select class="method" aria-label="วิธีรับเงินของ ${esc(student.name || "นักเรียน")}">
@@ -353,7 +360,7 @@ function renderStudentRows(rows) {
           <option value="หักออมทรัพย์"${state.todayPayment?.method === "หักออมทรัพย์" ? " selected" : ""}>หักออมทรัพย์</option>
           <option value="หักทุน"${state.todayPayment?.method === "หักทุน" ? " selected" : ""}>หักทุน</option>
         </select>
-        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${state.scholarshipBalance > 0 ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`}</span>
+        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${showsScholarship(state) ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`}</span>
       </div>
     </div>`;
   }).join("");
@@ -395,10 +402,10 @@ function updateActionRow(row) {
     resetReason = available.unknown ? "ยังไม่ประกาศยอด" : method.value === "เงินสด" ? "สถานะเช็คชื่อรับเงินสดไม่ได้" : method.value === "หักออมทรัพย์" ? "ยอดออมทรัพย์ไม่พอ" : "ยอดทุนไม่พอ";
     method.value = "";
   }
-  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${state.scholarshipBalance > 0 ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`;
+  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${showsScholarship(state) ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`;
   if (Number.isFinite(amount) && amount > available.max) note = `เกินยอดที่ค้างอยู่ · ${state.todayPayment ? "แก้ทับได้ไม่เกิน" : "เก็บได้สูงสุด"} ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ถ้าเด็กค้างมากกว่านี้ ให้ตรวจว่าวันที่ค้างนั้นเช็คชื่อไว้ว่าอะไร`;
   if (Number.isFinite(amount) && amount > available.savingsAvailable) note += ` · ออมทรัพย์เหลือ ${formatMoney(state.balance)}${state.todayPayment?.method === "หักออมทรัพย์" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.savingsAvailable)}` : ""} · ตัวเลือกหักออมทรัพย์ถูกปิด`;
-  if (state.scholarshipBalance > 0 && Number.isFinite(amount) && amount > available.scholarshipAvailable) note += ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)}${state.todayPayment?.method === "หักทุน" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.scholarshipAvailable)}` : ""} · ตัวเลือกหักทุนถูกปิด`;
+  if (showsScholarship(state) && Number.isFinite(amount) && amount > available.scholarshipAvailable) note += ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)}${state.todayPayment?.method === "หักทุน" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.scholarshipAvailable)}` : ""} · ตัวเลือกหักทุนถูกปิด`;
   if (!TRANSPORT_CHARGE_STATUSES.includes(available.cashStatus)) note += ` · เงินสดปิดเพราะสถานะ ${available.cashStatus || "ยังไม่เช็คชื่อ"}`;
   if (resetReason) note += ` · ยกเลิกวิธีที่เลือกไว้เพราะ${resetReason} กรุณาเลือกวิธีใหม่`;
   if (state.todayPayment && (input.value === "" || amount === 0)) {
