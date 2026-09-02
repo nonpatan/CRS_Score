@@ -68,7 +68,10 @@
       <div id="unannounced-warning" class="banner warn" hidden></div>
       <div id="carryover-warning" class="banner warn" hidden></div>
       <section id="school-overview" class="card"><div class="section-head"><div><h2>ภาพรวมโรงเรียน</h2><p>ยอดที่เก็บได้อิงช่วงวันที่เลือก · ยอดค้างชำระคำนวณสะสมตั้งแต่ต้นปีการศึกษาถึงวันนี้</p></div></div><div class="metric-grid">
-        <div class="metric"><span>ยอดที่เก็บได้ (ในช่วง)</span><b id="school-collected">0.00 บาท</b></div>
+        <div class="metric"><span>ยอดที่เก็บได้ (ในช่วง) · รวมทุกวิธี</span><b id="school-collected">0.00 บาท</b></div>
+        <div class="metric"><span>เงินสด (ในช่วง)</span><b id="school-cash">0.00 บาท</b></div>
+        <div class="metric"><span>หักออมทรัพย์ (ในช่วง)</span><b id="school-savings">0.00 บาท</b></div>
+        <div class="metric"><span>หักทุน (ในช่วง)</span><b id="school-scholarship">0.00 บาท</b></div>
         <div class="metric"><span>รายการรับเงิน (ในช่วง)</span><b id="school-payment-count">0 รายการ</b></div>
         <div class="metric"><span>ยอดค้างชำระ (สะสมทั้งหมด)</span><b id="school-outstanding">0.00 บาท</b></div>
         <div class="metric"><span>นักเรียนที่ยังค้าง</span><b id="school-outstanding-count">0 คน</b></div>
@@ -188,7 +191,11 @@ function sortedRooms() {
 function renderSchool() {
   const unknownMonths = [...new Set(students.flatMap(row => row.charges.unannouncedMonths))].sort();
   const outstandingKnown = unknownMonths.length === 0;
+  const inRangePayments = students.flatMap(row => row.inRange);
   el("school-collected").textContent = formatMoney(students.reduce((sum, row) => sum + row.collectedInRange, 0));
+  el("school-cash").textContent = formatMoney(inRangePayments.filter(row => row.method === "เงินสด").reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  el("school-savings").textContent = formatMoney(inRangePayments.filter(row => row.method === "หักออมทรัพย์").reduce((sum, row) => sum + Number(row.amount || 0), 0));
+  el("school-scholarship").textContent = formatMoney(inRangePayments.filter(row => row.method === "หักทุน").reduce((sum, row) => sum + Number(row.amount || 0), 0));
   el("school-payment-count").textContent = `${students.reduce((sum, row) => sum + row.inRange.length, 0)} รายการ`;
   el("school-outstanding").textContent = outstandingKnown ? formatMoney(students.reduce((sum, row) => sum + row.outstandingLifetime, 0)) : "ยังคำนวณไม่ได้";
   el("school-outstanding-count").textContent = outstandingKnown ? `${students.filter(row => row.outstandingLifetime > 0).length} คน` : "—";

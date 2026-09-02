@@ -102,7 +102,7 @@
   <main class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <section class="card">
-      <div class="section-head"><div><h2>ห้องที่มีรายการต้องตรวจรับ</h2><p>ห้องที่มีเงินสดเรียงยอดมากไปน้อย · ห้องที่มีเฉพาะหักออมทรัพย์แสดงต่อท้าย</p></div></div>
+      <div class="section-head"><div><h2>ห้องที่มีรายการต้องตรวจรับ</h2><p>ห้องที่มีเงินสดเรียงยอดมากไปน้อย · ห้องที่มีเฉพาะหักออมทรัพย์หรือหักทุนแสดงต่อท้าย</p></div></div>
       <div id="room-grid" class="room-grid"><div class="empty">กำลังโหลด…</div></div>
     </section>
     <section id="detail-card" class="card" hidden>
@@ -132,6 +132,11 @@
         <p id="savings-boundary"></p>
         <div id="savings-list" class="table-wrap"></div>
       </section>
+      <section id="scholarship-section" class="savings-section" hidden>
+        <h3>หักทุนในรอบนี้ · ไม่ใช่เงินที่ครูถือมาส่ง</h3>
+        <p id="scholarship-boundary"></p>
+        <div id="scholarship-list" class="table-wrap"></div>
+      </section>
     </section>
     <section class="card">
       <div class="section-head"><div><h2>ประวัติการรับเงิน</h2><p id="history-note">ทุกห้อง · เรียงจากใหม่ไปเก่า</p></div></div>
@@ -159,7 +164,7 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;"
 const roomKey = row => [row.year, row.grade_level, row.classroom].join("\u0000");
 const thaiDate = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok" }).format(new Date(value + "T00:00:00+07:00"));
 const thaiDateTime = value => new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", timeZone:"Asia/Bangkok" }).format(new Date(value));
-let pending = [], savingsRows = [], remittances = [], groups = [], selected = null, canFinance = false, canAdmin = false, toastTimer;
+let pending = [], savingsRows = [], scholarshipRows = [], remittances = [], groups = [], selected = null, canFinance = false, canAdmin = false, toastTimer;
 let detailView = "person";
 let actionMode = "", activeTxn = null, activeRemittance = null;
 let voidBusy = false;
@@ -191,6 +196,13 @@ function savingsForRoom(year, grade, classroom) {
     && row.classroom === classroom && (boundary == null || row.pay_date >= boundary));
 }
 function buildGroups() {
+  // typeof ทำให้ชุดทดสอบรุ่นเดิมที่จำลองเฉพาะเงินสด/ออมทรัพย์ยังเรียกฟังก์ชันนี้ได้
+  const scholarshipData = typeof scholarshipRows === "undefined" ? [] : scholarshipRows;
+  const scholarshipForRoom = (year, grade, classroom) => {
+    const boundary = lastRemitDate(year, grade, classroom);
+    return scholarshipData.filter(row => row.year === year && row.grade_level === grade
+      && row.classroom === classroom && (boundary == null || row.pay_date >= boundary));
+  };
   const byRoom = new Map();
   for (const txn of pending) {
     const key = roomKey(txn);
@@ -200,31 +212,34 @@ function buildGroups() {
   const cashGroups = [...byRoom.values()].map(group => ({
     ...group,
     savings:savingsForRoom(group.year, group.grade_level, group.classroom),
+    scholarships:scholarshipForRoom(group.year, group.grade_level, group.classroom),
     total:group.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
     pendingDays:new Set(group.rows.map(row => row.pay_date)).size,
     oldest:[...group.rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date))[0]?.pay_date || ""
   })).sort((a,b) => b.total - a.total || a.key.localeCompare(b.key, "th", { numeric:true }));
   const savingsOnly = new Map();
-  for (const txn of savingsRows) {
+  for (const txn of [...savingsRows, ...scholarshipData]) {
     const key = roomKey(txn);
     if (byRoom.has(key)) continue;
     if (!savingsOnly.has(key)) savingsOnly.set(key, { key, year:txn.year, grade_level:txn.grade_level, classroom:txn.classroom });
   }
   const savingsGroups = [...savingsOnly.values()].map(group => ({
     ...group, rows:[], savings:savingsForRoom(group.year, group.grade_level, group.classroom),
+    scholarships:scholarshipForRoom(group.year, group.grade_level, group.classroom),
     total:0, pendingDays:0, oldest:""
-  })).filter(group => group.savings.length)
+  })).filter(group => group.savings.length || group.scholarships.length)
     .sort((a,b) => a.key.localeCompare(b.key, "th", { numeric:true }));
   groups = [...cashGroups, ...savingsGroups];
 }
 function renderRooms() {
   el("room-grid").innerHTML = groups.map((group, index) => {
     const savingsMeta = group.savings.length ? `<span class="meta">หักออมทรัพย์ ${group.savings.length} รายการ</span>` : "";
+    const scholarshipMeta = (group.scholarships || []).length ? `<span class="meta">หักทุน ${group.scholarships.length} รายการ</span>` : "";
     const cashSummary = group.rows.length
       ? `<strong>${formatMoney(group.total)}</strong><span class="meta">ค้าง ${group.pendingDays} วัน · ${group.rows.length} รายการ</span><span class="meta">เก่าสุด ${thaiDate(group.oldest)} · ปีการศึกษา ${esc(group.year)}</span>`
       : `<strong>ไม่มีเงินต้องนับ</strong><span class="meta">ปีการศึกษา ${esc(group.year)}</span>`;
     return `<button type="button" class="room-card${selected?.key === group.key ? " active" : ""}" data-room-index="${index}">
-      <b>${esc(group.grade_level)} · ${esc(group.classroom)}</b>${cashSummary}${savingsMeta}
+      <b>${esc(group.grade_level)} · ${esc(group.classroom)}</b>${cashSummary}${savingsMeta}${scholarshipMeta}
     </button>`;
   }).join("") || '<div class="empty">ยังไม่มีรายการค่ารถที่ต้องตรวจรับ</div>';
 }
@@ -312,6 +327,24 @@ function renderSavingsList() {
   const total = sortedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
   el("savings-list").innerHTML = `<table><thead><tr><th>วันที่</th><th>นักเรียน</th><th class="money">ยอด</th>${actionHead}</tr></thead><tbody>${sortedRows.map(txn => `<tr><td>${thaiDate(txn.pay_date)}</td><td>${esc(txn.student?.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(txn.student?.student_no || "—")}</span></td><td class="money">${formatMoney(txn.amount)}</td>${canAdmin ? `<td><button type="button" class="txn-void danger" data-void-txn="${esc(txn.id)}">ลบรายการ</button></td>` : ""}</tr>`).join("")}</tbody></table><p class="savings-total">รวม ${sortedRows.length} รายการ · ${formatMoney(total)}</p>`;
 }
+function renderScholarshipList() {
+  const rows = selected?.scholarships || [];
+  el("scholarship-section").hidden = !rows.length;
+  if (!rows.length) {
+    el("scholarship-boundary").textContent = "";
+    el("scholarship-list").innerHTML = "";
+    return;
+  }
+  const boundary = lastRemitDate(selected.year, selected.grade_level, selected.classroom);
+  el("scholarship-boundary").textContent = boundary
+    ? `แสดงตั้งแต่รอบนำส่งล่าสุด ${thaiDate(boundary)}`
+    : "ยังไม่เคยมีรอบนำส่ง — แสดงทั้งหมด";
+  const sortedRows = [...rows].sort((a,b) => a.pay_date.localeCompare(b.pay_date)
+    || String(a.student?.student_no || "").localeCompare(String(b.student?.student_no || ""), "th", { numeric:true }));
+  const actionHead = canAdmin ? "<th>ลบ</th>" : "";
+  const total = sortedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  el("scholarship-list").innerHTML = `<table><thead><tr><th>วันที่</th><th>นักเรียน</th><th class="money">ยอด</th>${actionHead}</tr></thead><tbody>${sortedRows.map(txn => `<tr><td>${thaiDate(txn.pay_date)}</td><td>${esc(txn.student?.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(txn.student?.student_no || "—")}</span></td><td class="money">${formatMoney(txn.amount)}</td>${canAdmin ? `<td><button type="button" class="txn-void danger" data-void-txn="${esc(txn.id)}">ลบรายการ</button></td>` : ""}</tr>`).join("")}</tbody></table><p class="savings-total">รวม ${sortedRows.length} รายการ · ${formatMoney(total)}</p>`;
+}
 function renderDetail() {
   if (!selected) { el("detail-card").hidden = true; renderHistory(); return; }
   el("detail-card").hidden = false;
@@ -324,6 +357,7 @@ function renderDetail() {
   el("expected-count").textContent = `${selected.rows.length} รายการ`;
   renderTxnList();
   renderSavingsList();
+  renderScholarshipList();
   el("counted-total").value = "";
   el("remit-note").value = "";
   el("counted-total").disabled = !canFinance;
@@ -343,12 +377,16 @@ async function loadData(preferred = selected?.key) {
   const rows = txnRes.data || [];
   pending = rows.filter(row => row.method === "เงินสด");
   savingsRows = rows.filter(row => row.method === "หักออมทรัพย์");
+  scholarshipRows = rows.filter(row => row.method === "หักทุน");
   remittances = [...(remitRes.data || [])].sort((a,b) => b.confirmed_at.localeCompare(a.confirmed_at));
   profileNames.clear();
   for (const [userId, name] of staffNames) profileNames.set(userId, name);
   buildGroups();
+  const selectedBoundary = selected ? lastRemitDate(selected.year, selected.grade_level, selected.classroom) : null;
   selected = groups.find(group => group.key === preferred) || (preferred && selected?.key === preferred
-    ? { ...selected, rows:[], savings:savingsForRoom(selected.year, selected.grade_level, selected.classroom), total:0, pendingDays:0 }
+    ? { ...selected, rows:[], savings:savingsForRoom(selected.year, selected.grade_level, selected.classroom),
+        scholarships:scholarshipRows.filter(row => row.year === selected.year && row.grade_level === selected.grade_level
+          && row.classroom === selected.classroom && (selectedBoundary == null || row.pay_date >= selectedBoundary)), total:0, pendingDays:0 }
     : groups[0] || null);
   renderRooms();
   renderDetail();
@@ -387,7 +425,8 @@ function openVoidModal(txn) {
   el("action-summary").textContent =
     `${txn.student?.name || "ไม่พบชื่อนักเรียน"} · ${thaiDate(txn.pay_date)}\n`
     + `${formatMoney(txn.amount)} · ${txn.method}`
-    + (txn.method === "หักออมทรัพย์" ? "\nเงินจะถูกคืนเข้าสมุดออมทรัพย์ของนักเรียนพร้อมกัน" : "");
+    + (txn.method === "หักออมทรัพย์" ? "\nเงินจะถูกคืนเข้าสมุดออมทรัพย์ของนักเรียนพร้อมกัน"
+      : txn.method === "หักทุน" ? "\nเงินจะถูกคืนเข้าบัญชีทุนของนักเรียนพร้อมกัน" : "");
   el("amount-field").hidden = true;
   el("action-reason-label").textContent = "เหตุผลที่ลบ";
   el("action-reason").value = "";
@@ -430,7 +469,8 @@ function handleTxnClick(event) {
   const voidButton = event.target.closest("[data-void-txn]");
   if (voidButton) {
     openVoidModal(pending.find(row => row.id === voidButton.dataset.voidTxn)
-      || savingsRows.find(row => row.id === voidButton.dataset.voidTxn));
+      || savingsRows.find(row => row.id === voidButton.dataset.voidTxn)
+      || scholarshipRows.find(row => row.id === voidButton.dataset.voidTxn));
     return;
   }
   const editButton = event.target.closest("[data-edit-txn]");
@@ -447,6 +487,7 @@ function handleTxnClick(event) {
 }
 el("txn-list").addEventListener("click", handleTxnClick);
 el("savings-list").addEventListener("click", handleTxnClick);
+el("scholarship-list").addEventListener("click", handleTxnClick);
 el("history-list").addEventListener("click", event => {
   if (voidBusy) return;
   const button = event.target.closest("[data-unlock-remittance]");
@@ -503,7 +544,9 @@ el("action-submit").addEventListener("click", async () => {
       + `${formatMoney(txn.amount)} · ${txn.method}\n`
       + (txn.method === "หักออมทรัพย์"
           ? "เงินจะถูกคืนเข้าสมุดออมทรัพย์ของนักเรียน"
-          : "ยอดค้างส่งของห้องจะลดลงตามจำนวนนี้")
+          : txn.method === "หักทุน"
+            ? "เงินจะถูกคืนเข้าบัญชีทุนของนักเรียน"
+            : "ยอดค้างส่งของห้องจะลดลงตามจำนวนนี้")
       + "\nลบแล้วกู้คืนไม่ได้ · ยอดค้างค่ารถของนักเรียนจะกลับมาเป็นค้างอีกครั้ง";
     // กันกดซ้ำและปิดกล่องระหว่างยืนยัน/รอผล โดยไม่เปลี่ยน state ของกล่องแก้ยอดเดิม
     voidBusy = true;
@@ -522,14 +565,18 @@ el("action-submit").addEventListener("click", async () => {
       });
       if (error) { el("action-error").textContent = friendlyError(error); return; }
       const result = Array.isArray(data) ? data[0] : data;
-      if (!result || result.student_id !== txn.student_id || !Number.isFinite(Number(result.amount)) || result.amount == null || typeof result.savings_removed !== "boolean") {
+      if (!result || result.student_id !== txn.student_id || !Number.isFinite(Number(result.amount)) || result.amount == null
+          || typeof result.savings_removed !== "boolean"
+          || (txn.method === "หักทุน" && typeof result.scholarship_returned !== "boolean")) {
         el("action-error").textContent = "ยังยืนยันผลการลบไม่ได้ กรุณาโหลดข้อมูลใหม่และตรวจรายการก่อนทำซ้ำ";
         return;
       }
       closeActionModal();
-      toast(result.savings_removed
-        ? `ลบรายการแล้ว · คืนเงิน ${formatMoney(result.amount)} เข้าสมุดออมทรัพย์แล้ว`
-        : `ลบรายการ ${formatMoney(result.amount)} แล้ว`);
+      toast(result.scholarship_returned
+        ? `ลบรายการแล้ว · คืนเงิน ${formatMoney(result.amount)} เข้าบัญชีทุนแล้ว`
+        : result.savings_removed
+          ? `ลบรายการแล้ว · คืนเงิน ${formatMoney(result.amount)} เข้าสมุดออมทรัพย์แล้ว`
+          : `ลบรายการ ${formatMoney(result.amount)} แล้ว`);
       try { await loadData(preferred); }
       catch (loadError) { toast("ลบแล้ว แต่โหลดคิวล่าสุดไม่สำเร็จ: " + friendlyError(loadError), true); }
     } catch (error) {

@@ -34,7 +34,7 @@
   .date-list { margin:8px 0 0; padding-left:22px; columns:3 150px; }
   #roster-card { overflow:visible; }
   .student-list { display:grid; min-width:0; gap:10px; margin-top:14px; }
-  .student-row { display:grid; grid-template-columns:minmax(130px,1.35fr) repeat(3,minmax(85px,.75fr)) minmax(260px,1.35fr); gap:10px; align-items:center; padding:13px; border:1px solid var(--line); border-radius:13px; background:var(--white); }
+  .student-row { display:grid; grid-template-columns:minmax(130px,1.35fr) repeat(4,minmax(85px,.75fr)) minmax(260px,1.35fr); gap:10px; align-items:center; padding:13px; border:1px solid var(--line); border-radius:13px; background:var(--white); }
   .student-row.row-bad { border-color:var(--danger); background:var(--danger-soft); }
   .student-name { font-weight:800; }
   .money-cell span { display:block; color:var(--muted); font-size:.78rem; }
@@ -153,6 +153,7 @@ let monthRates = [];
 let payments = [];
 let zones = [];
 let balanceByStudent = new Map();
+let scholarshipByStudent = new Map();
 let openingByStudent = new Map();
 let stateByStudent = new Map();
 let writableRoomKeys = new Set();
@@ -221,6 +222,7 @@ function buildState() {
       todayRemitted:(paymentsByStudent.get(studentId) || []).filter(row => row.pay_date === today && row.remittance_id != null)
         .reduce((total, row) => total + Number(row.amount || 0), 0),
       balance:balanceByStudent.get(studentId) || 0,
+      scholarshipBalance:(typeof scholarshipByStudent === "undefined" ? 0 : scholarshipByStudent.get(studentId)) || 0,
       period:currentPeriod(studentId),
       lastPeriod:[...studentPeriods].sort((a, b) => String(b.start_date).localeCompare(String(a.start_date)))[0] || null,
       attendance:(attendanceByStudent.get(studentId) || []).find(row => row.attend_date === today) || null,
@@ -266,13 +268,16 @@ function actionAvailability(studentId, amount) {
   const previousAmount = Number(state?.todayPayment?.amount || 0);
   const max = Math.round((Number(state?.outstanding || 0) + previousAmount) * 100) / 100;
   const savingsAvailable = Math.round((Number(state?.balance || 0) + (state?.todayPayment?.method === "หักออมทรัพย์" ? previousAmount : 0)) * 100) / 100;
+  const scholarshipAvailable = Math.round((Number(state?.scholarshipBalance || 0) + (state?.todayPayment?.method === "หักทุน" ? previousAmount : 0)) * 100) / 100;
   const valid = Number.isFinite(amount) && amount > 0 && !unknown && amount <= max;
   const cashStatus = state?.attendance?.status || null;
   return {
     cash:valid && TRANSPORT_CHARGE_STATUSES.includes(cashStatus),
     savings:valid && savingsAvailable >= amount,
+    scholarship:valid && scholarshipAvailable >= amount,
     max,
     savingsAvailable,
+    scholarshipAvailable,
     unknown,
     cashStatus
   };
@@ -290,7 +295,10 @@ function blockReason(studentId, amount, method) {
   if (method === "หักออมทรัพย์" && available.savingsAvailable < amount) {
     return `ออมทรัพย์ไม่พอ (เหลือ ${formatMoney(available.savingsAvailable)} บาท)`;
   }
-  if (method !== "เงินสด" && method !== "หักออมทรัพย์") return "วิธีรับเงินไม่ถูกต้อง";
+  if (method === "หักทุน" && available.scholarshipAvailable < amount) {
+    return `ทุนไม่พอ (เหลือ ${formatMoney(available.scholarshipAvailable)} บาท)`;
+  }
+  if (method !== "เงินสด" && method !== "หักออมทรัพย์" && method !== "หักทุน") return "วิธีรับเงินไม่ถูกต้อง";
   return null;
 }
 
@@ -336,14 +344,16 @@ function renderStudentRows(rows) {
       <div class="money-cell ${unknown ? "unknown" : ""}"><span>ค้างทั้งหมด (รวมวันนี้)</span><b>${unknown ? "ยังคำนวณไม่ได้" : formatMoney(state.outstanding)}</b></div>
       <div class="money-cell ${currentCharge?.announced === false ? "unknown" : ""}"><span>${stopped ? "ของวันนี้" : period?.billing_mode === "รายเดือน" ? "ในนั้นเป็นของเดือนนี้" : "ในนั้นเป็นของวันนี้"}</span><b>${currentText}</b></div>
       <div class="money-cell"><span>ออมทรัพย์คงเหลือ</span><b>${formatMoney(state.balance)}</b></div>
+      <div class="money-cell"><span>ทุนคงเหลือ</span><b>${state.scholarshipBalance > 0 ? formatMoney(state.scholarshipBalance) : "—"}</b></div>
       <div class="actions">
         <input class="amount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(suggested || '')}" placeholder="ยอดรับ/ยอดหัก (บาท)" aria-label="ยอดที่รับของ ${esc(student.name || "นักเรียน")}">
         <select class="method" aria-label="วิธีรับเงินของ ${esc(student.name || "นักเรียน")}">
           <option value=""></option>
           <option value="เงินสด"${state.todayPayment?.method === "เงินสด" ? " selected" : ""}>เงินสด</option>
           <option value="หักออมทรัพย์"${state.todayPayment?.method === "หักออมทรัพย์" ? " selected" : ""}>หักออมทรัพย์</option>
+          <option value="หักทุน"${state.todayPayment?.method === "หักทุน" ? " selected" : ""}>หักทุน</option>
         </select>
-        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท`}</span>
+        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${state.scholarshipBalance > 0 ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`}</span>
       </div>
     </div>`;
   }).join("");
@@ -370,27 +380,39 @@ function updateActionRow(row) {
   const method = row.querySelector(".method");
   const cashOption = method.querySelector('[value="เงินสด"]');
   const savingsOption = method.querySelector('[value="หักออมทรัพย์"]');
+  const scholarshipOption = method.querySelector('[value="หักทุน"]');
   cashOption.disabled = !TRANSPORT_CHARGE_STATUSES.includes(state.attendance?.status);
   savingsOption.disabled = available.savingsAvailable < amount;
+  if (scholarshipOption) scholarshipOption.disabled = available.scholarshipAvailable < amount;
   input.disabled = available.unknown || savingRoom;
   method.disabled = available.unknown || savingRoom;
   let resetReason = "";
   const isExistingMethod = state.todayPayment?.method === method.value;
-  if (method.value && !isExistingMethod && (available.unknown || (method.value === "เงินสด" ? cashOption.disabled : savingsOption.disabled))) {
-    resetReason = available.unknown ? "ยังไม่ประกาศยอด" : method.value === "เงินสด" ? "สถานะเช็คชื่อรับเงินสดไม่ได้" : "ยอดออมทรัพย์ไม่พอ";
+  const selectedOptionDisabled = method.value === "เงินสด" ? cashOption.disabled
+    : method.value === "หักออมทรัพย์" ? savingsOption.disabled
+    : method.value === "หักทุน" ? Boolean(scholarshipOption?.disabled) : false;
+  if (method.value && !isExistingMethod && (available.unknown || selectedOptionDisabled)) {
+    resetReason = available.unknown ? "ยังไม่ประกาศยอด" : method.value === "เงินสด" ? "สถานะเช็คชื่อรับเงินสดไม่ได้" : method.value === "หักออมทรัพย์" ? "ยอดออมทรัพย์ไม่พอ" : "ยอดทุนไม่พอ";
     method.value = "";
   }
-  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท`;
+  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${state.scholarshipBalance > 0 ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`;
   if (Number.isFinite(amount) && amount > available.max) note = `เกินยอดที่ค้างอยู่ · ${state.todayPayment ? "แก้ทับได้ไม่เกิน" : "เก็บได้สูงสุด"} ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ถ้าเด็กค้างมากกว่านี้ ให้ตรวจว่าวันที่ค้างนั้นเช็คชื่อไว้ว่าอะไร`;
   if (Number.isFinite(amount) && amount > available.savingsAvailable) note += ` · ออมทรัพย์เหลือ ${formatMoney(state.balance)}${state.todayPayment?.method === "หักออมทรัพย์" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.savingsAvailable)}` : ""} · ตัวเลือกหักออมทรัพย์ถูกปิด`;
+  if (state.scholarshipBalance > 0 && Number.isFinite(amount) && amount > available.scholarshipAvailable) note += ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)}${state.todayPayment?.method === "หักทุน" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.scholarshipAvailable)}` : ""} · ตัวเลือกหักทุนถูกปิด`;
   if (!TRANSPORT_CHARGE_STATUSES.includes(available.cashStatus)) note += ` · เงินสดปิดเพราะสถานะ ${available.cashStatus || "ยังไม่เช็คชื่อ"}`;
   if (resetReason) note += ` · ยกเลิกวิธีที่เลือกไว้เพราะ${resetReason} กรุณาเลือกวิธีใหม่`;
   if (state.todayPayment && (input.value === "" || amount === 0)) {
     note += " · ล้างช่องไม่ได้ยกเลิกรายการที่บันทึกแล้ว · ต้องแจ้งฝ่ายการเงินให้ลบ";
   } else if (state.todayPayment && method.value && method.value !== state.todayPayment.method && amount > 0) {
-    note += state.todayPayment.method === "หักออมทรัพย์"
-      ? ` · จะยกเลิกการหักออมทรัพย์ ${formatMoney(state.todayPayment.amount)} และคืนเงินเข้าสมุดให้ก่อน แล้วลงเป็นเงินสดแทน`
-      : ` · จะยกเลิกรายการเงินสด ${formatMoney(state.todayPayment.amount)} แล้วหักจากสมุดออมทรัพย์แทน`;
+    if (state.todayPayment.method === "หักออมทรัพย์") {
+      note += ` · จะยกเลิกการหักออมทรัพย์ ${formatMoney(state.todayPayment.amount)} และคืนเงินเข้าสมุดให้ก่อน แล้วลงเป็น${method.value === "เงินสด" ? "เงินสด" : "หักทุน"}แทน`;
+    } else if (state.todayPayment.method === "หักทุน") {
+      note += ` · จะยกเลิกการหักทุน ${formatMoney(state.todayPayment.amount)} และคืนเงินเข้าบัญชีทุนให้ก่อน แล้วลงเป็น${method.value === "เงินสด" ? "เงินสด" : "หักออมทรัพย์"}แทน`;
+    } else {
+      note += method.value === "หักออมทรัพย์"
+        ? ` · จะยกเลิกรายการเงินสด ${formatMoney(state.todayPayment.amount)} แล้วหักจากสมุดออมทรัพย์แทน`
+        : ` · จะยกเลิกรายการเงินสด ${formatMoney(state.todayPayment.amount)} แล้วหักจากบัญชีทุนแทน`;
+    }
   }
   const reason = blockReason(studentId, amount, method.value);
   if (reason) note = amount > available.max ? `⛔ ยังบันทึกไม่ได้ · ${note}` : `⛔ ยังบันทึกไม่ได้ · ${reason} · ${note}`;
@@ -459,7 +481,7 @@ async function loadRoom(index) {
     return;
   }
 
-  const [attendanceRes, roomAttendanceRes, overrideRes, rateRes, paymentRes, savingsRes, zoneRes, openingRes] = await Promise.all([
+  const [attendanceRes, roomAttendanceRes, overrideRes, rateRes, paymentRes, savingsRes, zoneRes, openingRes, scholarshipRes] = await Promise.all([
     fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status")
       .eq("year", currentYear).in("student_id", studentIds)
       .gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
@@ -478,9 +500,12 @@ async function loadRoom(index) {
     fetchAllRows(() => sb.from("transport_zones").select("id,year,name,daily_round,daily_one_way,monthly_round,monthly_one_way")
       .eq("year", currentYear), ["year","name","id"]),
     fetchAllRows(() => sb.from("transport_opening_debts").select("student_id,year,amount,reason")
-      .eq("year", currentYear).in("student_id", studentIds), ["student_id"])
+      .eq("year", currentYear).in("student_id", studentIds), ["student_id"]),
+    sb.rpc("scholarship_balances_for_room", {
+      p_year:currentYear, p_grade:selectedRoom.grade_level, p_classroom:selectedRoom.classroom
+    })
   ]);
-  const failed = [["ข้อมูลเช็คชื่อรายคน",attendanceRes],["ข้อมูลเช็คชื่อของห้อง",roomAttendanceRes],["ยอดที่แก้",overrideRes],["ยอดรายเดือน",rateRes],["การรับเงิน",paymentRes],["สมุดออมทรัพย์",savingsRes],["อัตราโซน",zoneRes],["หนี้ยกมา",openingRes]].find(([, result]) => result.error);
+  const failed = [["ข้อมูลเช็คชื่อรายคน",attendanceRes],["ข้อมูลเช็คชื่อของห้อง",roomAttendanceRes],["ยอดที่แก้",overrideRes],["ยอดรายเดือน",rateRes],["การรับเงิน",paymentRes],["สมุดออมทรัพย์",savingsRes],["อัตราโซน",zoneRes],["หนี้ยกมา",openingRes],["ยอดทุน",scholarshipRes]].find(([, result]) => result.error);
   if (failed) throw new Error(`โหลด${failed[0]}ไม่สำเร็จ: ${failed[1].error.message}`);
   attendance = attendanceRes.data || [];
   roomAttendance = roomAttendanceRes.data || [];
@@ -491,6 +516,7 @@ async function loadRoom(index) {
   //    เพราะเทสต์ล็อกลำดับ query 7 ตัวไว้กันคนเผลอลบคิวรี่ transport_day_overrides ทิ้ง — จะเอาออกต้องแก้เทสต์นั้นพร้อมกัน
   zones = zoneRes.data || [];
   balanceByStudent = summarizeSavingsByStudent(savingsRes.data || []);
+  scholarshipByStudent = new Map((scholarshipRes.data || []).map(row => [row.student_id, Number(row.balance || 0)]));
   openingByStudent = new Map((openingRes.data || []).map(row => [row.student_id, row]));
   buildState();
   renderWarnings();
@@ -509,6 +535,7 @@ async function saveRoom() {
 
   const cash = items.filter(item => item.method === "เงินสด");
   const savings = items.filter(item => item.method === "หักออมทรัพย์");
+  const scholarship = items.filter(item => item.method === "หักทุน");
   const newItems = items.filter(item => !stateByStudent.get(item.student_id)?.todayPayment);
   const overwrites = items.filter(item => stateByStudent.get(item.student_id)?.todayPayment);
   const methodChanges = overwrites.filter(item => stateByStudent.get(item.student_id).todayPayment.method !== item.method);
@@ -529,6 +556,7 @@ async function saveRoom() {
         + (methodChanges.length ? `เปลี่ยนวิธีรับเงิน ${methodChanges.length} คน\n` : "")
         + (cash.length ? `เงินสด ${formatMoney(sum(cash))} (${cash.length} คน)\n` : "")
         + (savings.length ? `หักออมทรัพย์ ${formatMoney(sum(savings))} (${savings.length} คน)\n` : "")
+        + (scholarship.length ? `หักทุน ${formatMoney(sum(scholarship))} (${scholarship.length} คน)\n` : "")
         + `รวม ${formatMoney(sum(items))} จาก ${items.length} คน`,
       okLabel:"บันทึกทั้งห้อง", danger:false
     })) return;
@@ -546,11 +574,15 @@ async function saveRoom() {
       return toast(friendlyError(error, { batch:true }), true);
     }
     const result = Array.isArray(data) ? data[0] : data;
-    if (!result || ![result.paid_count, result.cash_total, result.savings_total].every(value => value != null && Number.isFinite(Number(value)))) throw new Error("ไม่พบยอดยืนยันจากฐานข้อมูล");
+    const resultTotals = result ? [result.paid_count, result.cash_total, result.savings_total] : [];
+    // รุ่น Slice 3 ต้องคืน scholarship_total เมื่อมีการหักทุน; ชุดเงินสด/ออมทรัพย์เดิมยังยอมรับผลรูปแบบเก่าได้
+    if (scholarship.length || result?.scholarship_total != null) resultTotals.push(result?.scholarship_total);
+    if (!result || !resultTotals.every(value => value != null && Number.isFinite(Number(value)))) throw new Error("ไม่พบยอดยืนยันจากฐานข้อมูล");
     // แสดงเฉพาะวิธีที่มียอดจริง — กติกาเดียวกับกล่องยืนยัน ไม่งั้นขึ้น "เงินสด 0.00 บาท" ทั้งที่ไม่มีเงินสด
     const savedParts = [`บันทึกแล้ว ${result.paid_count} คน`];
     if (Number(result.cash_total) > 0) savedParts.push(`เงินสด ${formatMoney(result.cash_total)}`);
     if (Number(result.savings_total) > 0) savedParts.push(`หักออมทรัพย์ ${formatMoney(result.savings_total)}`);
+    if (Number(result.scholarship_total) > 0) savedParts.push(`หักทุน ${formatMoney(result.scholarship_total)}`);
     const savedMessage = savedParts.join(" · ");
     toast(savedMessage);
     try { await loadRoom(el("room-select").value); }
