@@ -187,7 +187,7 @@
           <div class="field wide"><label for="p-detail">รายละเอียด</label><textarea id="p-detail" maxlength="6000" required></textarea></div>
         </div>
         </fieldset>
-        <div class="field wide" id="project-links-field"><label>ไฟล์แนบ</label><div class="banner warn" id="project-link-note">ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้</div><div id="project-link-list"></div><button class="ghost" id="add-project-link" type="button">เพิ่มไฟล์แนบ</button><div class="hint" id="project-link-hint">URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ</div></div>
+        <div class="field wide" id="project-links-field"><label>ไฟล์แนบ</label><div class="banner warn" id="project-link-note">ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้</div><div id="project-link-list"></div><button class="ghost" id="add-project-link" type="button">เพิ่มไฟล์แนบ</button><div class="hint" id="project-link-hint">URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ · แนบเป็นไฟล์ PDF เท่านั้น · ถ้าเป็นลิงก์ Google Drive ระบบตรวจแทนไม่ได้ ครูต้องเปิดดูเองว่าไฟล์ปลายทางเป็น PDF</div></div>
         <div class="subform" id="project-progress-fields" hidden>
           <h3>รายงานผล</h3>
           <div class="row2">
@@ -611,6 +611,12 @@ if (!session) {
     el("responsible-note").textContent = option?.value && option.dataset.login === "false" ? "บุคลากรรายนี้ยังไม่ผูกบัญชี แต่เลือกเป็นผู้รับผิดชอบได้" : "";
   }
 
+  // 🔴 ไฟล์แนบของหน้านี้เก็บเป็น "ลิงก์" ไม่ใช่การอัปโหลดไฟล์ ⟹ ระบบไม่มีไฟล์ให้ตรวจชนิด
+  //    และลิงก์ drive.google.com/file/d/… ก็ไม่บอกว่าปลายทางเป็นอะไร
+  //    ⟹ ทำได้แค่บอกกติกาให้ครูรู้ · ห้ามเขียนโค้ดเดาชนิดไฟล์แล้วขึ้นว่า "ไม่ใช่ PDF"
+  //      เพราะจะเตือนผิดกับลิงก์ Drive ซึ่งเป็นเคสที่ครูใช้บ่อยที่สุด (ผู้ใช้เคาะ 2026-09-02)
+  const PDF_ATTACHMENT_NOTE = "แนบเป็นไฟล์ PDF เท่านั้น · ถ้าเป็นลิงก์ Google Drive ระบบตรวจแทนไม่ได้ ครูต้องเปิดดูเองว่าไฟล์ปลายทางเป็น PDF";
+
   function addLinkRow(containerId, prefix, link = {}, options = {}) {
     const isProjectLink = prefix === "project-link";
     const isFirstProjectLink = isProjectLink && !el(containerId).querySelector(".link-row");
@@ -774,9 +780,10 @@ if (!session) {
     el("project-link-note").textContent = progressMode
       ? "เอกสารนำเสนอเพื่ออนุมัติและเอกสารอื่นที่แนบไว้แล้วถูกล็อก · เอกสารสรุปโครงการแก้ไขหรือลบได้"
       : "ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้";
-    el("project-link-hint").textContent = progressMode
+    el("project-link-hint").textContent = (progressMode
       ? "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์ใหม่เริ่มต้นเป็นประเภทสรุปโครงการ"
-      : "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ";
+      : "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ")
+      + " · " + PDF_ATTACHMENT_NOTE;
     const reportStatuses = reportStatusOptions(project?.status || "วางแผน");
     el("p-report-status").innerHTML = reportStatuses.map(value => `<option>${esc(value)}</option>`).join("");
     el("p-report-status").value = reportStatuses.includes(project?.status) ? project.status : reportStatuses[0];
