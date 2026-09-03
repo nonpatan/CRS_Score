@@ -2658,6 +2658,70 @@ function latestApprovalAction(project, action) {
     .sort((a, b) => String(b?.created_at || "").localeCompare(String(a?.created_at || "")))[0] || null;
 }
 
+export function projectLatestReturnedAt(project) {
+  return latestApprovalAction(project, "ส่งกลับให้แก้")?.created_at || null;
+}
+
+export const PROJECT_PENDING_DAYS = 7;
+export const PROJECT_RETURNED_DAYS = 14;
+
+const PROJECT_DAY_MS = 86_400_000;
+const PROJECT_TH_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function bangkokDayNumber(value) {
+  if (!value) return null;
+  const valueText = String(value);
+  const parsed = Date.parse(valueText.includes("T") ? valueText : `${valueText}T00:00:00+07:00`);
+  return Number.isFinite(parsed)
+    ? Math.floor((parsed + PROJECT_TH_OFFSET_MS) / PROJECT_DAY_MS)
+    : null;
+}
+
+export function projectDaysSince(value, todayIso) {
+  const start = bangkokDayNumber(value);
+  const today = bangkokDayNumber(todayIso);
+  return start == null || today == null ? null : today - start;
+}
+
+export function activeFollowUpProjects(projects) {
+  return (projects || []).filter(project => project?.status !== "ยกเลิก");
+}
+
+export function projectsPendingTooLong(projects, todayIso, days = PROJECT_PENDING_DAYS) {
+  return activeFollowUpProjects(projects).filter(project =>
+    project.approval_status === "รออนุมัติ" &&
+    projectDaysSince(project.submitted_at, todayIso) > days
+  );
+}
+
+export function projectsReturnedTooLong(projects, todayIso, days = PROJECT_RETURNED_DAYS) {
+  return activeFollowUpProjects(projects).filter(project => {
+    if (project.approval_status !== "ส่งกลับให้แก้") return false;
+    const returned = latestApprovalAction(project, "ส่งกลับให้แก้");
+    return projectDaysSince(returned?.created_at, todayIso) > days;
+  });
+}
+
+export function projectsPastDueNotClosed(projects, todayIso) {
+  return activeFollowUpProjects(projects).filter(project => {
+    const endDate = project.end_date ?? project.start_date;
+    return Boolean(project.approved_at && endDate && endDate < todayIso &&
+      !["เสร็จสิ้น", "ยกเลิก"].includes(project.status));
+  });
+}
+
+export function projectsFinishedWithoutSummary(projects) {
+  return activeFollowUpProjects(projects).filter(project =>
+    project.status === "เสร็จสิ้น" && !String(project.result_summary ?? "").trim()
+  );
+}
+
+export function projectsFinishedWithoutActualBudget(projects) {
+  return activeFollowUpProjects(projects).filter(project =>
+    project.status === "เสร็จสิ้น" && project.budget_actual == null
+  );
+}
+
 function formatApprovalDate(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -2806,6 +2870,135 @@ export async function loadMyProjects(year, staffId) {
     .order("name");
   if (error) throw new Error("โหลดโครงการ/กิจกรรมของฉันไม่สำเร็จ: " + error.message);
   return enrichApprovalProjects(data || []);
+}
+
+// โหลดเฉพาะงานส่วนตัวที่หน้าแรกต้องใช้ — ทั้งห้าทางยิงพร้อมกันและไม่ดึงประวัติเช็คชื่อทั้งเดือน
+export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
+  if (!staffId || !year || !today) {
+    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [] };
+  }
+
+  const [swaps, coverageRes, dutyRes, projects, homeroomRes] = await Promise.all([
+    listMyDutySwaps(),
+    sb.rpc("my_coverage_from", { p_from: today }),
+    sb.from("duty_roster")
+      .select("duty_date,duty_type,note")
+      .eq("staff_id", staffId)
+      .eq("duty_date", today)
+      .order("duty_type"),
+    loadMyProjects(year, staffId),
+    sb.from("homeroom_teachers")
+      .select("id,year,grade_level,classroom,staff_id")
+      .eq("year", year)
+      .eq("staff_id", staffId)
+      .order("grade_level")
+      .order("classroom")
+  ]);
+
+  if (coverageRes.error) {
+    throw new Error("โหลดงานที่ต้องไปแทนไม่สำเร็จ: " + coverageRes.error.message);
+  }
+  if (dutyRes.error) throw new Error("โหลดเวรวันนี้ไม่สำเร็จ: " + dutyRes.error.message);
+  if (homeroomRes.error) {
+    throw new Error("โหลดห้องประจำชั้นของคุณไม่สำเร็จ: " + homeroomRes.error.message);
+  }
+
+  return {
+    swaps,
+    coverage: coverageRes.data || [],
+    duty: dutyRes.data || [],
+    projects,
+    homerooms: homeroomRes.data || []
+  };
+}
+
+// 🔑 คีย์ห้องและชื่อห้องใช้ homeroomAuditRoomKey / homeroomAuditRoomLabel ร่วมกับรายงาน
+// ตรวจเช็คชื่อ — ห้ามเขียนตัวใหม่ · ข้อมูลจริงมีแถวที่ classroom เก็บชื่อเต็มมาแล้ว
+// ("ป.3/1" ไม่ใช่ "1") ถ้าต่อ grade + "/" + classroom ตรง ๆ จะได้ "ป.3/ป.3/1"
+// (รีโปนี้กันเคสนี้ไว้แล้ว 4 จุด — supabase-client 2036 · fee-assign · fee-report · fee-payment)
+
+function dashboardCoverageLabel(row) {
+  const absent = row?.absent_name ? ` (แทน ${row.absent_name})` : "";
+  if (row?.kind === "วิชา") return `ไปสอนแทน ${row.subject_label || "ไม่ระบุวิชา"}${absent}`;
+  if (row?.kind === "ครูประจำชั้น") {
+    return `ไปดูแลห้อง ${row.room_label || "ไม่ระบุห้อง"}${absent}`;
+  }
+  if (row?.kind === "เวร") return `ไปเข้าเวร ${row.duty_type || "ไม่ระบุงาน"}${absent}`;
+  return `ไปทำงานแทน ${row?.subject_label || row?.room_label || row?.duty_type || "ไม่ระบุงาน"}${absent}`;
+}
+
+// คำนวณล้วนสำหรับการ์ด “งานของฉัน” — ผู้เรียกต้อง escape ข้อความก่อนใส่ DOM
+export function pickMyDashboardAlerts({
+  homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], today
+} = {}) {
+  const alerts = [];
+
+  if (!daily?.isHoliday) {
+    const activeRoomKeys = new Set((daily?.rooms || []).map(homeroomAuditRoomKey));
+    const checkedRoomKeys = new Set((daily?.rows || []).map(homeroomAuditRoomKey));
+    const unchecked = (homerooms || []).filter(room => {
+      const key = homeroomAuditRoomKey(room);
+      return activeRoomKeys.has(key) && !checkedRoomKeys.has(key);
+    });
+    if (unchecked.length) {
+      const labels = unchecked.map(homeroomAuditRoomLabel);
+      alerts.push({
+        text: `ห้อง ${labels.join(", ")} ยังไม่ได้เช็คชื่อวันนี้`,
+        href: "general-affairs/daily-attendance.html",
+        linkLabel: "ไปเช็คชื่อ"
+      });
+    }
+  }
+
+  const waitingSwaps = (swaps || []).filter(row =>
+    row?.source !== "ฝ่ายบุคคล" && row?.direction === "รับ" &&
+    row?.status === "รอตอบรับ" && !row?.is_expired
+  );
+  if (waitingSwaps.length) {
+    alerts.push({
+      text: `มีคำขอสลับเวรรอคุณตอบ ${waitingSwaps.length} รายการ`,
+      href: "personnel/my-work.html",
+      linkLabel: "ดูคำขอ"
+    });
+  }
+
+  const todayCoverage = (coverage || []).filter(row => row?.cover_date === today);
+  const todayDuty = (duty || []).filter(row => row?.duty_date === today);
+  const todayTasks = [
+    ...todayCoverage.map(dashboardCoverageLabel),
+    ...todayDuty.map(row => `เข้าเวร ${row?.duty_type || "ไม่ระบุงาน"}`)
+  ];
+  if (todayTasks.length) {
+    alerts.push({
+      text: `วันนี้คุณต้อง${todayTasks.join(" · ")}`,
+      href: "personnel/my-work.html",
+      linkLabel: "ดูรายละเอียด"
+    });
+  }
+
+  const projectByKey = new Map();
+  const addProject = project => {
+    const key = project?.id ? `id:${project.id}` : project;
+    if (key != null) projectByKey.set(key, project);
+  };
+  for (const project of activeFollowUpProjects(projects)) {
+    if (project.approval_status === "ส่งกลับให้แก้" ||
+        (project.approval_status === "ร่าง" && !project.approved_at)) addProject(project);
+  }
+  for (const rows of [
+    projectsPastDueNotClosed(projects, today),
+    projectsFinishedWithoutSummary(projects),
+    projectsFinishedWithoutActualBudget(projects)
+  ]) rows.forEach(addProject);
+  if (projectByKey.size) {
+    alerts.push({
+      text: `โครงการของคุณต้องทำต่อ ${projectByKey.size} รายการ`,
+      href: "academic/projects.html",
+      linkLabel: "ไปแก้ไข"
+    });
+  }
+
+  return alerts;
 }
 
 export async function loadPendingApprovals(year) {

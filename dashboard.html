@@ -71,6 +71,11 @@
   .panels { display: grid; gap: 14px; }
   .panel { overflow: hidden; border: 1px solid rgba(255,255,255,.7); border-radius: 18px; background: rgba(255,255,255,.86); box-shadow: var(--shadow); backdrop-filter: blur(10px); transition: transform .2s var(--ease), box-shadow .2s var(--ease), border-color .2s var(--ease); }
   .panel:hover { transform: translateY(-3px); border-color: rgba(15,110,86,.24); box-shadow: 0 20px 44px rgba(16,69,69,.13), 0 3px 10px rgba(16,69,69,.05); }
+  #my-alerts { margin-bottom: 18px; border-color: var(--amber); background: var(--amber-soft); }
+  #my-alerts:hover { border-color: var(--amber); }
+  #my-alerts .panel-head { border-bottom-color: var(--amber); }
+  #my-alerts .panel-link { color: var(--amber); }
+  #my-alerts .dashboard-item:hover { background: var(--amber-soft); }
   .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 16px; border-bottom: 1px solid var(--line); }
   .panel-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; line-height: 1.25; }
   .panel-title .symbol { color: var(--amber); }
@@ -217,6 +222,10 @@
         <div><h1>ภาพรวมโรงเรียน</h1><p class="subhead">ข้อมูลวันนี้และงานที่กำลังจะถึง</p></div>
         <span class="year-chip" id="year-chip">กำลังโหลดปี…</span>
       </div>
+      <section class="panel" id="my-alerts" aria-labelledby="my-alerts-title" hidden>
+        <div class="panel-head"><h2 class="panel-title" id="my-alerts-title"><span class="symbol">●</span>งานของฉัน</h2></div>
+        <div class="dashboard-list" id="my-alerts-list"></div>
+      </section>
       <section class="metrics" aria-label="ตัวเลขภาพรวม">
         <article class="metric">
           <div class="metric-icon">◉</div>
@@ -257,15 +266,16 @@
 <script type="module">
   import {
     sb, requireAuth, getProfile,
-    getActiveYear, setActiveYear, distinctYears,
+    getAcademicYears, academicYearOf,
     getSetting, getMyProfilePresentation,
     loadDailyAttendanceToday, summarizeDailyAttendance,
     loadTodayStaffSummary,
     loadAcademicCalendar, pickCalendarUpcoming,
     loadAcademicProjects, filterProjectsInMonth, countPendingProjects, projectResponsibleName,
+    loadMyDashboardAlerts, pickMyDashboardAlerts,
     isProjectApprover,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20260901-1";
+  } from "./supabase-client.js?v=20260903-1";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayNote = document.getElementById("student-today-note");
@@ -279,6 +289,8 @@
   const projectPending = document.getElementById("project-pending");
   const projectFooter = document.getElementById("project-footer");
   const yearChip = document.getElementById("year-chip");
+  const myAlerts = document.getElementById("my-alerts");
+  const myAlertsList = document.getElementById("my-alerts-list");
 
   let isApprover = false;
 
@@ -295,6 +307,36 @@
     projectPending.innerHTML =
       `<span class="pending-flag">รออนุมัติทั้งปี ${pendingCount} รายการ</span>` +
       `<a class="panel-link" href="academic/project-approval.html">เปิดหน้าอนุมัติ</a>`;
+  }
+
+  function hideMyAlerts() {
+    myAlerts.hidden = true;
+    myAlertsList.innerHTML = "";
+  }
+
+  function renderMyAlerts(alertsResult, dailyResult, today) {
+    try {
+      const loaded = resultValue(alertsResult);
+      if (!loaded) {
+        hideMyAlerts();
+        return;
+      }
+      let daily = null;
+      try { daily = resultValue(dailyResult); } catch { daily = null; }
+      const rows = pickMyDashboardAlerts({ ...loaded, daily, today });
+      if (!rows.length) {
+        hideMyAlerts();
+        return;
+      }
+      myAlertsList.innerHTML = rows.map(row => `<div class="dashboard-item">
+        <div class="item-main"><div class="item-title">${escapeHtml(row.text)}</div></div>
+        <a class="panel-link" href="${escapeHtml(row.href)}">${escapeHtml(row.linkLabel)} →</a>
+      </div>`).join("");
+      myAlerts.hidden = false;
+    } catch {
+      // การ์ดทางลัดพังต้องไม่รบกวนการ์ดหลักบนหน้าแรก
+      hideMyAlerts();
+    }
   }
 
   function escapeHtml(value) {
@@ -523,11 +565,18 @@
     // Jibble ช้าที่สุดและมีสถานะโหลดของตัวเอง จึงจงใจไม่รวมใน Promise.all ของการ์ดอื่น
     loadStaffCard();
 
-    const { data: yearRows, error } = await sb.from("subjects").select("year");
-    if (error) throw error;
-    const years = distinctYears(yearRows || []);
-    const year = getActiveYear() || years[0] || "";
-    if (year) setActiveYear(year);
+    const today = toDateStr(bangkokNow());
+    const [years, staffResult] = await Promise.all([
+      getAcademicYears(),
+      capture(sb.from("staff").select("id,user_id").eq("user_id", session.user.id).maybeSingle())
+    ]);
+    // หน้าแรกเป็นข้อมูล “วันนี้” จึงต้องยึดวันเริ่มจริงจาก academic_years ไม่ใช้ปีที่เลือกค้างไว้
+    const year = academicYearOf(today, years) || "";
+    const staffQuery = staffResult?.value;
+    const me = !staffResult?.error && !staffQuery?.error ? staffQuery?.data : null;
+    // ⛔ ห้ามเรียก setActiveYear() ที่นี่ — ปีของหน้านี้มาจาก "วันนี้" ไม่ใช่ปีที่ผู้ใช้เลือก
+    // ถ้าเขียนทับ localStorage ฝ่ายวิชาการที่กำลังดูปีเก่าจะโดนดีดกลับปีปัจจุบันทุกครั้งที่
+    // แวะหน้าแรก (17 หน้าอ่านค่านี้ และทุกหน้าตั้งค่าเริ่มต้นของตัวเองได้อยู่แล้ว)
     yearChip.textContent = year ? "ปีการศึกษา " + year : "ยังไม่มีปีการศึกษา";
 
     if (!year) {
@@ -536,21 +585,22 @@
       renderRoomsMetric(noYear);
       renderCalendarPanel(noYear);
       renderProjectPanel(noYear);
+      hideMyAlerts();
       return;
     }
 
-    const today = toDateStr(bangkokNow());
     const yearMonth = today.slice(0, 7);
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
-    const [dailyResult, calendarResult, projectResult, approverResult] = await Promise.all([
-      capture(loadDailyAttendanceToday(year, today)),
+    const [dailyResult, calendarResult, projectResult, approverResult, myAlertsResult] = await Promise.all([
+      capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
         getSetting("academic_calendar_lead_days")
       ])),
       capture(loadAcademicProjects(year)),
-      capture(isProjectApprover())
+      capture(isProjectApprover()),
+      me ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today })) : Promise.resolve({ value:null })
     ]);
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
@@ -566,6 +616,7 @@
     }
     renderStudentMetric(dailySummaryResult);
     renderRoomsMetric(dailySummaryResult);
+    renderMyAlerts(myAlertsResult, dailyResult, today);
 
     let upcomingResult;
     try {
@@ -657,6 +708,7 @@
     renderRoomsMetric(failed);
     renderCalendarPanel(failed);
     renderProjectPanel(failed);
+    hideMyAlerts();
   });
 </script>
 </body>

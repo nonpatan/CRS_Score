@@ -222,71 +222,12 @@ import {
   sb, requireAuth, signOut, getActiveYear, setActiveYear, getAcademicYears,
   isProjectApprover, checkDepartment, loadAcademicProjects, loadSchoolOkrs,
   buildProjectTree, summarizeProjectBudget, buildOkrTree, okrCoverage,
-  projectResponsibleName, projectApprovalBadge, okrChipLabel,
+  projectResponsibleName, projectApprovalBadge, projectLatestReturnedAt, okrChipLabel,
+  PROJECT_PENDING_DAYS, PROJECT_RETURNED_DAYS, projectDaysSince,
+  projectsPendingTooLong, projectsReturnedTooLong, projectsPastDueNotClosed,
+  projectsFinishedWithoutSummary, projectsFinishedWithoutActualBudget,
   bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260901-1";
-
-const PENDING_DAYS = 7; // เปลี่ยนจุดเดียวถ้าผู้ใช้ขอปรับเกณฑ์รออนุมัติ
-const RETURNED_DAYS = 14; // เปลี่ยนจุดเดียวถ้าผู้ใช้ขอปรับเกณฑ์ส่งกลับให้แก้
-const DAY_MS = 86_400_000;
-const TH_OFFSET_MS = 7 * 60 * 60 * 1000;
-
-function bangkokDayNumber(value) {
-  if (!value) return null;
-  const text = String(value);
-  const parsed = Date.parse(text.includes("T") ? text : `${text}T00:00:00+07:00`);
-  return Number.isFinite(parsed) ? Math.floor((parsed + TH_OFFSET_MS) / DAY_MS) : null;
-}
-
-function daysSince(value, todayIso) {
-  const start = bangkokDayNumber(value);
-  const today = bangkokDayNumber(todayIso);
-  return start == null || today == null ? null : today - start;
-}
-
-function activeFollowUps(projects) {
-  return (projects || []).filter(project => project?.status !== "ยกเลิก");
-}
-
-function latestReturnedApproval(project) {
-  const rows = project?.approvals || project?.approval_history || [];
-  return (Array.isArray(rows) ? rows : []).filter(row => row?.action === "ส่งกลับให้แก้")
-    .slice().sort((a, b) => String(b?.created_at || "").localeCompare(String(a?.created_at || "")))[0] || null;
-}
-
-function pendingTooLong(projects, todayIso, days) {
-  return activeFollowUps(projects).filter(project =>
-    project.approval_status === "รออนุมัติ" &&
-    daysSince(project.submitted_at, todayIso) > days
-  );
-}
-
-function returnedTooLong(projects, todayIso, days) {
-  return activeFollowUps(projects).filter(project => {
-    if (project.approval_status !== "ส่งกลับให้แก้") return false;
-    return daysSince(latestReturnedApproval(project)?.created_at, todayIso) > days;
-  });
-}
-
-function pastDueNotClosed(projects, todayIso) {
-  return activeFollowUps(projects).filter(project => {
-    const endDate = project.end_date ?? project.start_date;
-    return Boolean(project.approved_at && endDate && endDate < todayIso &&
-      !["เสร็จสิ้น", "ยกเลิก"].includes(project.status));
-  });
-}
-
-function finishedWithoutSummary(projects, todayIso) {
-  return activeFollowUps(projects).filter(project =>
-    project.status === "เสร็จสิ้น" && !String(project.result_summary ?? "").trim()
-  );
-}
-
-function finishedWithoutActualBudget(projects, todayIso) {
-  return activeFollowUps(projects).filter(project =>
-    project.status === "เสร็จสิ้น" && project.budget_actual == null
-  );
-}
+} from "../supabase-client.js?v=20260903-1";
 
 function countByStatus(projects, todayIso) {
   const counts = { "วางแผน":0, "กำลังดำเนินการ":0, "เสร็จสิ้น":0, "ยกเลิก":0 };
@@ -356,7 +297,7 @@ if (!session) {
 
   function followProjectList(rows, todayIso, dateOf) {
     return `<ul class="follow-list">${rows.map(project => {
-      const days = daysSince(dateOf(project), todayIso);
+      const days = projectDaysSince(dateOf(project), todayIso);
       return `<li><b>${esc(project.name)}</b><div class="meta">ผู้รับผิดชอบ: ${esc(responsibleName(project))}${days == null ? "" : ` · ค้าง ${days} วัน`}</div></li>`;
     }).join("")}</ul>`;
   }
@@ -367,16 +308,16 @@ if (!session) {
   }
 
   function renderFollowUps(todayIso) {
-    const pending = pendingTooLong(projects, todayIso, PENDING_DAYS);
-    const returned = returnedTooLong(projects, todayIso, RETURNED_DAYS);
-    const overdue = pastDueNotClosed(projects, todayIso);
-    const noSummary = finishedWithoutSummary(projects, todayIso);
-    const noBudget = finishedWithoutActualBudget(projects, todayIso);
+    const pending = projectsPendingTooLong(projects, todayIso, PROJECT_PENDING_DAYS);
+    const returned = projectsReturnedTooLong(projects, todayIso, PROJECT_RETURNED_DAYS);
+    const overdue = projectsPastDueNotClosed(projects, todayIso);
+    const noSummary = projectsFinishedWithoutSummary(projects);
+    const noBudget = projectsFinishedWithoutActualBudget(projects);
     const uncovered = okrTree.objectives.flatMap(objective => objective.keyResults)
       .filter(kr => coverageByKr.get(kr.id)?.isUncovered);
     const cards = [
       followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
-      followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => latestReturnedApproval(project)?.created_at)),
+      followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => projectLatestReturnedAt(project))),
       followCard("follow-overdue", "📌 เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
       followCard("follow-summary", "📝 เสร็จแล้วแต่ไม่มีผลสรุป", noSummary, followProjectList(noSummary, todayIso, project => project.end_date ?? project.start_date)),
       followCard("follow-budget", "💸 เสร็จแล้วแต่ไม่กรอกงบใช้จริง", noBudget, followProjectList(noBudget, todayIso, project => project.end_date ?? project.start_date)),
