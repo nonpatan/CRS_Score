@@ -967,6 +967,125 @@ export async function getRosterForSubject(subjectId) {
 }
 
 // ============================================================
+// บันทึกหลังสอน — 1 บันทึกผูกได้หลายครั้งที่เช็คชื่อ
+// ------------------------------------------------------------
+// หน้าเช็คชื่อเป็นจุดเขียนใน Slice 1; หน้ารวม/พิมพ์เป็น Slice ถัดไป
+// RLS เป็นตัวตัดสินสิทธิ์ทั้งหมด ผู้เรียกไม่ต้องส่งข้อมูลผู้สร้างหรือเวลาแก้ไข
+// ============================================================
+
+function lessonSessionFromLink(row) {
+  const nested = row?.attendance_sessions;
+  const session = Array.isArray(nested) ? nested[0] : nested;
+  if (!session) return null;
+  return { ...session, attendance_records:session.attendance_records || [] };
+}
+
+export async function loadLessonLogBySession(sessionId) {
+  if (!sessionId) return null;
+  const linkRes = await sb.from("lesson_log_sessions")
+    .select("log_id")
+    .eq("session_id", sessionId)
+    .maybeSingle();
+  if (linkRes.error) throw new Error("โหลดบันทึกหลังสอนไม่สำเร็จ: " + linkRes.error.message);
+  if (!linkRes.data?.log_id) return null;
+
+  const [logRes, sessionsRes] = await Promise.all([
+    sb.from("lesson_logs").select("*").eq("id", linkRes.data.log_id).single(),
+    sb.from("lesson_log_sessions")
+      .select("session_id,attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status))")
+      .eq("log_id", linkRes.data.log_id)
+  ]);
+  if (logRes.error) throw new Error("โหลดบันทึกหลังสอนไม่สำเร็จ: " + logRes.error.message);
+  if (sessionsRes.error) {
+    throw new Error("โหลดครั้งที่อยู่ในบันทึกหลังสอนไม่สำเร็จ: " + sessionsRes.error.message);
+  }
+  const sessions = (sessionsRes.data || []).map(lessonSessionFromLink).filter(Boolean)
+    .sort((a, b) => String(b.session_date || "").localeCompare(String(a.session_date || "")));
+  return { ...logRes.data, sessions };
+}
+
+export async function loadUnlinkedSessions(subjectId, { withinDays = 60 } = {}) {
+  if (!subjectId) return [];
+  const days = Math.max(1, Math.floor(Number(withinDays) || 60));
+  const fromDate = addDaysStr(toDateStr(bangkokNow()), -(days - 1));
+  const sessionsRes = await sb.from("attendance_sessions")
+    .select("id,subject_id,session_date,periods_covered,attendance_records(status)")
+    .eq("subject_id", subjectId)
+    .gte("session_date", fromDate)
+    .order("session_date", { ascending:false })
+    .order("created_at", { ascending:false });
+  if (sessionsRes.error) {
+    throw new Error("โหลดครั้งที่เช็คชื่อย้อนหลังไม่สำเร็จ: " + sessionsRes.error.message);
+  }
+  const sessions = sessionsRes.data || [];
+  if (!sessions.length) return [];
+  const linksRes = await sb.from("lesson_log_sessions")
+    .select("session_id")
+    .in("session_id", sessions.map(row => row.id));
+  if (linksRes.error) {
+    throw new Error("ตรวจสอบครั้งที่มีบันทึกหลังสอนแล้วไม่สำเร็จ: " + linksRes.error.message);
+  }
+  const linked = new Set((linksRes.data || []).map(row => row.session_id));
+  return sessions.filter(row => !linked.has(row.id));
+}
+
+export async function saveLessonLog({ logId = null, subjectId, sessionIds, fields = {} } = {}) {
+  const selectedIds = [...new Set((sessionIds || []).filter(Boolean))];
+  if (!subjectId) throw new Error("ไม่พบวิชาของบันทึกหลังสอน");
+  if (!selectedIds.length) throw new Error("ต้องเลือกอย่างน้อย 1 ครั้ง");
+
+  const textOrNull = value => String(value ?? "").trim() || null;
+  const plannedText = String(fields.planned_periods ?? "").trim();
+  const payload = {
+    subject_id: subjectId,
+    plan_name: textOrNull(fields.plan_name),
+    planned_periods: plannedText ? Number(plannedText) : null,
+    learning_outcome: String(fields.learning_outcome ?? "").trim(),
+    problem: String(fields.problem ?? "").trim(),
+    improvement: textOrNull(fields.improvement),
+    assigned_work: textOrNull(fields.assigned_work)
+  };
+
+  let savedLog;
+  let created = false;
+  if (logId) {
+    const result = await sb.from("lesson_logs").update(payload).eq("id", logId).select("*").single();
+    if (result.error) throw new Error("แก้ไขบันทึกหลังสอนไม่สำเร็จ: " + result.error.message);
+    savedLog = result.data;
+  } else {
+    const result = await sb.from("lesson_logs").insert(payload).select("*").single();
+    if (result.error) throw new Error("สร้างบันทึกหลังสอนไม่สำเร็จ: " + result.error.message);
+    savedLog = result.data;
+    created = true;
+  }
+
+  const linksRes = await sb.from("lesson_log_sessions").select("session_id").eq("log_id", savedLog.id);
+  if (linksRes.error) throw new Error("โหลดรายการครั้งเดิมไม่สำเร็จ: " + linksRes.error.message);
+  const oldIds = new Set((linksRes.data || []).map(row => row.session_id));
+  const wantedIds = new Set(selectedIds);
+  const toAdd = selectedIds.filter(id => !oldIds.has(id));
+  const toRemove = [...oldIds].filter(id => !wantedIds.has(id));
+
+  if (toAdd.length) {
+    const addRes = await sb.from("lesson_log_sessions")
+      .insert(toAdd.map(session_id => ({ log_id:savedLog.id, session_id })));
+    if (addRes.error) {
+      if (created) await sb.from("lesson_logs").delete().eq("id", savedLog.id);
+      throw new Error("ผูกครั้งที่เช็คชื่อกับบันทึกไม่สำเร็จ: " + addRes.error.message);
+    }
+  }
+  // เพิ่มของใหม่ก่อนลบของเก่าเสมอ ไม่ให้ trigger เห็นบันทึกว่างชั่วคราวแล้วลบทั้งใบ
+  if (toRemove.length) {
+    const removeRes = await sb.from("lesson_log_sessions")
+      .delete().eq("log_id", savedLog.id).in("session_id", toRemove);
+    if (removeRes.error) {
+      throw new Error("ถอดครั้งที่เช็คชื่อจากบันทึกไม่สำเร็จ: " + removeRes.error.message);
+    }
+  }
+  return { ...savedLog, sessionIds:selectedIds };
+}
+
+// ============================================================
 // ตรรกะคิดเกรด/ร./มส. ใช้ร่วมกันทั้ง summary.html และ retention.html
 // อยู่ที่เดียวกันเพื่อกัน "แก้ที่หนึ่งแล้วลืมอีกที่" ตามที่เคยพลาดมาก่อน (ดู CLAUDE.md)
 // ============================================================

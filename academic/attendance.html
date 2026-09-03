@@ -58,7 +58,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
-  select, input[type="number"], input[type="date"], input[type="text"] {
+  select, input[type="number"], input[type="date"], input[type="text"], textarea {
     width: 100%;
     font-family: inherit;
     font-size: 16px;
@@ -68,6 +68,7 @@
     background: var(--white);
     color: var(--ink);
   }
+  textarea { min-height: 92px; resize: vertical; }
   /* ช่องวันที่แสดงแค่ค่า "18 ก.ค. 2569" ไม่ต้องยืดเต็มช่อง (กันล้น/ดูกว้างเกินบน iPad) */
   #inp-date { max-width: 240px; }
 
@@ -87,7 +88,7 @@
   .chip.active { background: var(--teal-soft); border-color: var(--teal); color: var(--teal); font-weight: 600; }
   /* ปุ่มลบครั้งที่เช็ค — แยกสีให้เห็นชัดว่าเป็นงานที่ย้อนกลับไม่ได้ */
   .chip-danger { color: var(--danger, #a32d2d); border-color: var(--danger, #a32d2d); background: var(--danger-soft, #fff0f0); }
-  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .field { margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
 
@@ -155,6 +156,18 @@
   .toast.err { display: block; background: #fceaea; color: var(--danger); }
 
   .hint { color: var(--muted); font-size: 14px; }
+  .lesson-log-title { margin: 0 0 12px; font-size: 18px; }
+  .lesson-log-sessions { display: grid; gap: 8px; margin: 10px 0; }
+  .lesson-log-session {
+    display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px; align-items: start;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font-weight: 400;
+  }
+  .lesson-log-session input { margin-top: 5px; }
+  .lesson-log-session.current { border-color: var(--teal); background: var(--teal-soft); }
+  .lesson-log-summary { padding: 9px 11px; border-radius: 8px; background: var(--teal-soft); color: var(--teal); font-weight: 600; }
+  .lesson-log-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(130px,.45fr); gap: 12px; }
+  .lesson-log-required { color: var(--danger); }
+  @media (max-width: 520px) { .lesson-log-grid { grid-template-columns: 1fr; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
 </head>
@@ -253,6 +266,47 @@
     <button class="save" id="btn-save">บันทึกการเช็คชื่อ</button>
   </div>
 
+  <div class="card" id="lesson-log-card" style="display:none">
+    <h2 class="lesson-log-title">บันทึกหลังสอน (ไม่บังคับ · เขียนตอนจบแผน)</h2>
+    <div class="hint">ครั้งที่แผนนี้ครอบคลุม — ติ๊กย้อนหลังได้</div>
+    <div class="lesson-log-sessions" id="lesson-log-sessions"></div>
+    <div class="lesson-log-summary" id="lesson-log-summary"></div>
+    <div class="hint" id="lesson-log-selection-note" style="display:none; margin-top:6px">ต้องเลือกอย่างน้อย 1 ครั้ง</div>
+    <div class="lesson-log-grid" style="margin-top:14px">
+      <div class="field">
+        <label for="lesson-plan-name">ชื่อแผน/หน่วยการเรียนรู้</label>
+        <input type="text" id="lesson-plan-name">
+      </div>
+      <div class="field">
+        <label for="lesson-planned-periods">แผนออกแบบไว้ (คาบ)</label>
+        <input type="number" id="lesson-planned-periods" min="0.5" step="0.5">
+      </div>
+    </div>
+    <div class="field">
+      <label for="lesson-learning-outcome">1. ผลการจัดการเรียนรู้ <span class="lesson-log-required">*</span></label>
+      <textarea id="lesson-learning-outcome" required></textarea>
+      <div class="hint">เด็กทำได้ตามเป้าหรือไม่</div>
+    </div>
+    <div class="field">
+      <label for="lesson-problem">2. ปัญหา/อุปสรรค <span class="lesson-log-required">*</span></label>
+      <textarea id="lesson-problem" required></textarea>
+      <div class="hint">ปัญหาที่เกิดจริง ถ้าไม่มีก็เขียน “ไม่มี”</div>
+    </div>
+    <div class="field">
+      <label for="lesson-improvement">3. แนวทางปรับปรุง/ช่วยเหลือ</label>
+      <textarea id="lesson-improvement"></textarea>
+      <div class="hint">ครั้งต่อไปจะทำอย่างไร</div>
+    </div>
+    <div class="field">
+      <label for="lesson-assigned-work">4. งานที่มอบหมาย/ชิ้นงาน</label>
+      <textarea id="lesson-assigned-work"></textarea>
+    </div>
+    <button class="save" id="btn-save-lesson-log" disabled>บันทึกหลังสอน</button>
+  </div>
+  <div class="access-note" id="lesson-log-block-note" style="display:none; margin-bottom:16px">
+    เขียนบันทึกหลังสอนได้ทีละวิชา — ติ๊กวิชาย่อยที่ต้องการทีละตัวแล้วกดโหลดรายชื่อ จะเปิดครั้งเดิมมาเขียนได้
+  </div>
+
   <div class="card hint" id="empty-hint">เลือกวิชาและวันที่ แล้วกด "โหลดรายชื่อ" เพื่อเริ่มเช็คชื่อ</div>
 
   <!-- ชั่วโมงชดเชย (เติมตัวเลขเข้าเรียนให้ถึงเกณฑ์ ไม่ใช่ข้ามเช็ค มส.) -->
@@ -291,7 +345,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms } from "../supabase-client.js?v=20260904-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog } from "../supabase-client.js?v=20260905-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -374,6 +428,18 @@ const elPrefillNote   = document.getElementById("prefill-note");
 const elEmptyHint     = document.getElementById("empty-hint");
 const elToast         = document.getElementById("toast");
 const btnSave         = document.getElementById("btn-save");
+const elLessonLogCard = document.getElementById("lesson-log-card");
+const elLessonLogSessions = document.getElementById("lesson-log-sessions");
+const elLessonLogSummary = document.getElementById("lesson-log-summary");
+const elLessonLogSelectionNote = document.getElementById("lesson-log-selection-note");
+const elLessonLogBlockNote = document.getElementById("lesson-log-block-note");
+const elLessonPlanName = document.getElementById("lesson-plan-name");
+const elLessonPlannedPeriods = document.getElementById("lesson-planned-periods");
+const elLessonLearningOutcome = document.getElementById("lesson-learning-outcome");
+const elLessonProblem = document.getElementById("lesson-problem");
+const elLessonImprovement = document.getElementById("lesson-improvement");
+const elLessonAssignedWork = document.getElementById("lesson-assigned-work");
+const btnSaveLessonLog = document.getElementById("btn-save-lesson-log");
 
 // เก็บ state ที่กำลังทำงานอยู่
 // pickedSubject = วิชาที่เลือกใน dropdown หลัก (พื้นฐานหรือบูรณาการ)
@@ -404,6 +470,225 @@ let placementByStudent = new Map();
 let classroomByValue = new Map();
 let acceptedClassroomValue = "";
 let rosterDirty = false;
+let lessonLog = null;
+let lessonLogAvailableSessions = [];
+let lessonLogSelectedIds = new Set();
+let lessonLogSaving = false;
+let lessonLogRequestSeq = 0;
+
+// สูตรล้วนสำหรับสรุปหลักฐานตามแผน: บวกคาบจริง (รวมครึ่งคาบ) นับครั้ง และหาวันแรก–วันสุดท้าย
+function summarizeLessonLogSessions(sessions, plannedPeriods = null) {
+  const rows = Array.isArray(sessions) ? sessions.filter(Boolean) : [];
+  const dates = rows.map(row => String(row.session_date || "")).filter(Boolean).sort();
+  const totalPeriods = rows.reduce((sum, row) => sum + (Number(row.periods_covered) || 0), 0);
+  const plannedText = String(plannedPeriods ?? "").trim();
+  const planned = plannedText ? Number(plannedText) : null;
+  const difference = Number.isFinite(planned) ? totalPeriods - planned : null;
+  return {
+    totalPeriods,
+    sessionCount: rows.length,
+    firstDate: dates[0] || null,
+    lastDate: dates[dates.length - 1] || null,
+    plannedPeriods: Number.isFinite(planned) ? planned : null,
+    difference,
+    matchesPlanned: difference === null ? null : Math.abs(difference) < 0.0001
+  };
+}
+
+function fmtLessonDate(iso, includeYear = false) {
+  const [y, m, d] = String(iso || "").split("-").map(Number);
+  if (!y || !m || !d) return String(iso || "");
+  return new Date(y, m - 1, d).toLocaleDateString("th-TH", {
+    day: "numeric", month: "short", ...(includeYear ? { year:"numeric" } : {})
+  });
+}
+
+function lessonLogDateRange(summary) {
+  if (!summary.firstDate) return "—";
+  if (summary.firstDate === summary.lastDate) return fmtLessonDate(summary.firstDate);
+  const crossYear = summary.firstDate.slice(0, 4) !== summary.lastDate.slice(0, 4);
+  return fmtLessonDate(summary.firstDate, crossYear) + " – " + fmtLessonDate(summary.lastDate, crossYear);
+}
+
+function hideLessonLogUI() {
+  lessonLogRequestSeq++;
+  elLessonLogCard.style.display = "none";
+  elLessonLogBlockNote.style.display = "none";
+  lessonLog = null;
+  lessonLogAvailableSessions = [];
+  lessonLogSelectedIds = new Set();
+  lessonLogSaving = false;
+}
+
+function showLessonLogBlockNote() {
+  lessonLogRequestSeq++;
+  elLessonLogCard.style.display = "none";
+  elLessonLogBlockNote.style.display = "block";
+}
+
+// 🪤 "ลา" ไม่ใช่ "ขาด" — ระบบแยกสองอย่างนี้ทุกที่ (STATUS_OPTIONS มี 5 ค่า · การ์ดหน้าแรก
+// แสดง "ขาด 15 · ลา 34" แยกกัน) ⟹ ห้ามเหมารวมเป็นขาด บรรทัดนี้ไปอยู่บนหลักฐานนิเทศ
+function lessonSessionAttendanceCounts(sessionRow) {
+  const records = sessionRow?.attendance_records || [];
+  let present = 0, leave = 0, absent = 0;
+  for (const row of records) {
+    if (row.status === "มา" || row.status === "มาสาย") present++;
+    else if (row.status === "ลาป่วย" || row.status === "ลากิจ") leave++;
+    else absent++;
+  }
+  return { present, leave, absent };
+}
+
+// ซ่อนตัวที่เป็น 0 เพื่อไม่ให้แถวยาวเกินจำเป็นบนมือถือ แต่ถ้าไม่มีใครมาเลยต้องยังบอก "มา 0"
+function lessonAttendanceText(counts) {
+  const parts = ["มา " + counts.present];
+  if (counts.leave > 0) parts.push("ลา " + counts.leave);
+  if (counts.absent > 0) parts.push("ขาด " + counts.absent);
+  return parts.join(" ");
+}
+
+function renderLessonLogSummary() {
+  const selected = lessonLogAvailableSessions.filter(row => lessonLogSelectedIds.has(row.id));
+  const summary = summarizeLessonLogSessions(selected, elLessonPlannedPeriods.value);
+  let text = "รวมที่ติ๊ก: " + fmtPeriods(summary.totalPeriods) + " คาบ · " +
+    summary.sessionCount + " ครั้ง · " + lessonLogDateRange(summary);
+  if (summary.matchesPlanned === true) {
+    text += " · ตรงตามแผน";
+  } else if (summary.difference !== null) {
+    text += summary.difference > 0
+      ? " · มากกว่าแผน " + fmtPeriods(summary.difference) + " คาบ"
+      : " · ขาดจากแผน " + fmtPeriods(Math.abs(summary.difference)) + " คาบ";
+  }
+  elLessonLogSummary.textContent = text;
+  const hasSelection = lessonLogSelectedIds.size > 0;
+  elLessonLogSelectionNote.style.display = hasSelection ? "none" : "block";
+  btnSaveLessonLog.disabled = lessonLogSaving || !hasSelection;
+}
+
+function renderLessonLogSessions() {
+  elLessonLogSessions.innerHTML = "";
+  for (const sessionRow of lessonLogAvailableSessions) {
+    const row = document.createElement("label");
+    row.className = "lesson-log-session" + (sessionRow.id === currentSession?.id ? " current" : "");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.lessonSessionId = sessionRow.id;
+    checkbox.checked = lessonLogSelectedIds.has(sessionRow.id);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) lessonLogSelectedIds.add(sessionRow.id);
+      else lessonLogSelectedIds.delete(sessionRow.id);
+      renderLessonLogSummary();
+    });
+
+    const counts = lessonSessionAttendanceCounts(sessionRow);
+    const text = document.createElement("span");
+    text.textContent = fmtLessonDate(sessionRow.session_date) + " · " +
+      fmtPeriods(sessionRow.periods_covered) + " คาบ · " + lessonAttendanceText(counts) +
+      (sessionRow.id === currentSession?.id ? " — ครั้งนี้" : "");
+    row.append(checkbox, text);
+    elLessonLogSessions.appendChild(row);
+  }
+  renderLessonLogSummary();
+}
+
+function fillLessonLogFields(logRow) {
+  // ใช้ value โดยตรง ไม่ประกอบ innerHTML เพื่อไม่ให้ข้อความที่ครูพิมพ์กลายเป็น markup
+  elLessonPlanName.value = logRow?.plan_name || "";
+  elLessonPlannedPeriods.value = logRow?.planned_periods == null ? "" : fmtPeriods(logRow.planned_periods);
+  elLessonLearningOutcome.value = logRow?.learning_outcome || "";
+  elLessonProblem.value = logRow?.problem || "";
+  elLessonImprovement.value = logRow?.improvement || "";
+  elLessonAssignedWork.value = logRow?.assigned_work || "";
+}
+
+async function refreshLessonLogCard() {
+  const requestSeq = ++lessonLogRequestSeq;
+  elLessonLogCard.style.display = "none";
+  elLessonLogBlockNote.style.display = "none";
+  if (blockMode && blockMembers.length > 1) {
+    showLessonLogBlockNote();
+    return;
+  }
+  if (!currentSession || !currentSubject || !canEditMakeup(currentSubject)) return;
+
+  const sessionId = currentSession.id;
+  try {
+    const [existingLog, unlinked] = await Promise.all([
+      loadLessonLogBySession(sessionId),
+      loadUnlinkedSessions(currentSubjectId, { withinDays:60 })
+    ]);
+    if (requestSeq !== lessonLogRequestSeq || currentSession?.id !== sessionId) return;
+
+    const byId = new Map();
+    for (const row of (existingLog?.sessions || [])) byId.set(row.id, row);
+    for (const row of (unlinked || [])) byId.set(row.id, row);
+    if (!byId.has(sessionId)) byId.set(sessionId, currentSession);
+    lessonLogAvailableSessions = [...byId.values()].sort((a, b) =>
+      String(b.session_date || "").localeCompare(String(a.session_date || ""))
+    );
+    lessonLog = existingLog;
+    // บันทึกใหม่เลือกเฉพาะครั้งปัจจุบันครั้งเดียว ห้ามเดาเลือกครั้งย้อนหลังให้ครู
+    lessonLogSelectedIds = existingLog
+      ? new Set((existingLog.sessions || []).map(row => row.id))
+      : new Set([currentSession.id]);
+    fillLessonLogFields(existingLog);
+    renderLessonLogSessions();
+    elLessonLogCard.style.display = "block";
+  } catch (error) {
+    if (requestSeq !== lessonLogRequestSeq) return;
+    showToast(error.message || String(error), false);
+  }
+}
+
+elLessonPlannedPeriods.addEventListener("input", renderLessonLogSummary);
+
+btnSaveLessonLog.addEventListener("click", async () => {
+  if (lessonLogSaving || lessonLogSelectedIds.size === 0) return;
+  const learningOutcome = elLessonLearningOutcome.value.trim();
+  const problem = elLessonProblem.value.trim();
+  if (!learningOutcome) {
+    showToast("กรอกผลการจัดการเรียนรู้ก่อนบันทึก", false);
+    elLessonLearningOutcome.focus();
+    return;
+  }
+  if (!problem) {
+    showToast("กรอกปัญหา/อุปสรรคก่อนบันทึก ถ้าไม่มีให้ครูพิมพ์ “ไม่มี”", false);
+    elLessonProblem.focus();
+    return;
+  }
+  const plannedText = elLessonPlannedPeriods.value.trim();
+  if (plannedText && !isValidPeriods(Number(plannedText))) {
+    showToast("แผนออกแบบไว้ต้องมากกว่า 0 และเพิ่มทีละ 0.5 คาบ", false);
+    elLessonPlannedPeriods.focus();
+    return;
+  }
+
+  lessonLogSaving = true;
+  renderLessonLogSummary();
+  try {
+    await saveLessonLog({
+      logId: lessonLog?.id || null,
+      subjectId: currentSubjectId,
+      sessionIds: [...lessonLogSelectedIds],
+      fields: {
+        plan_name: elLessonPlanName.value,
+        planned_periods: plannedText,
+        learning_outcome: learningOutcome,
+        problem,
+        improvement: elLessonImprovement.value,
+        assigned_work: elLessonAssignedWork.value
+      }
+    });
+    showToast("บันทึกหลังสอนแล้ว", true);
+    await refreshLessonLogCard();
+  } catch (error) {
+    showToast(error.message || String(error), false);
+  } finally {
+    lessonLogSaving = false;
+    renderLessonLogSummary();
+  }
+});
 
 // ป้ายกำกับวิชาในดรอปดาวน์: รหัสวิชา · ชื่อวิชา · ปีการศึกษา (ถ้ามี) · ภาคเรียน (ถ้ามี) · บูรณาการ (ถ้าใช่)
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
@@ -818,6 +1103,7 @@ async function loadRosterFromSelection() {
   if (!elDate.value) { showToast("เลือกวันที่ก่อน", false); return; }
 
   // ล้างทันทีก่อนเริ่มโหลด กันค่าของวัน/วิชาก่อนค้างมาถ้า query รอบใหม่ล้มเหลว
+  hideLessonLogUI();
   dailyPrefill = null;
   elPrefillNote.style.display = "none";
   elPrefillNote.innerHTML = "";
@@ -986,6 +1272,7 @@ async function loadBlockRoster() {
   // มีครั้งเดิม → เปิดครั้งแรกให้แก้ (กันเผลอสร้างครั้งซ้ำ) · ไม่มี → ตั้งต้นเพิ่มครั้งใหม่
   if (blockRounds.length > 0) selectBlockRound(0);
   else startNewBlockRound();
+  showLessonLogBlockNote();
 }
 
 // ---------- โหมดบล็อก: โหลด+จับคู่ครั้งที่เช็คของวันนี้ข้ามทุกวิชาที่ติ๊ก ----------
@@ -1072,6 +1359,20 @@ function renderBlockRoundChips() {
 
 // ลบครั้งที่เช็คชื่อ (โหมดบล็อก) — ลบ session ของทุกวิชาย่อยในครั้งนั้นที่ผู้ใช้มีสิทธิ์ลบ
 // วิชาที่ไม่มีสิทธิ์ต้องบอกในกล่องยืนยันให้เห็น ห้ามลบครึ่ง ๆ กลาง ๆ แบบเงียบ
+async function lessonLogDeleteWarning(sessionRow) {
+  try {
+    const linkedLog = await loadLessonLogBySession(sessionRow?.id);
+    if (!linkedLog) return "";
+    const plan = linkedLog.plan_name ? " “" + linkedLog.plan_name + "”" : "";
+    let warning = "ครั้งนี้อยู่ในบันทึกหลังสอน" + plan + " และจะถูกถอดออก";
+    if ((linkedLog.sessions || []).length <= 1) warning += " · บันทึกจะถูกลบทั้งใบ";
+    return warning;
+  } catch (error) {
+    showToast("ตรวจสอบผลกระทบบันทึกหลังสอนไม่สำเร็จ: " + (error.message || String(error)), false);
+    return null;
+  }
+}
+
 async function deleteBlockRound(r) {
   const round = blockRounds[r];
   if (!round) return;
@@ -1081,6 +1382,7 @@ async function deleteBlockRound(r) {
   if (targets.length === 0) { showToast("ไม่มีวิชาที่คุณมีสิทธิ์ลบในครั้งนี้", false); return; }
 
   const lines = [];
+  const lessonWarnings = [];
   for (const m of targets) {
     const sess = round.bySubject.get(m.id);
     const { count, error: cErr } = await sb
@@ -1089,11 +1391,17 @@ async function deleteBlockRound(r) {
       .eq("session_id", sess.id);
     if (cErr) { showToast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: " + cErr.message, false); return; }
     lines.push("· " + m.name + " (" + fmtPeriods(sess.periods_covered) + " คาบ · นักเรียน " + (count || 0) + " คน)");
+    const warning = await lessonLogDeleteWarning(sess);
+    if (warning === null) return;
+    if (warning) lessonWarnings.push("· " + m.name + ": " + warning);
   }
 
   let msg = "ลบการเช็คชื่อครั้งที่ " + (round.originalIndex + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n\n" +
     "วิชาที่จะถูกลบ:\n" + lines.join("\n") +
     "\n\nผลเช็คชื่อของนักเรียนในครั้งนี้จะถูกลบทั้งหมด และกู้คืนไม่ได้";
+  if (lessonWarnings.length > 0) {
+    msg += "\n\n⚠️ ผลต่อบันทึกหลังสอน:\n" + lessonWarnings.join("\n");
+  }
   if (blocked.length > 0) {
     msg += "\n\n⚠️ วิชาต่อไปนี้จะไม่ถูกลบ เพราะคุณไม่ใช่เจ้าของวิชา:\n" +
       blocked.map(m => "· " + m.name).join("\n");
@@ -1242,9 +1550,12 @@ async function deleteCurrentSession(idx) {
     .eq("session_id", s.id);
   if (cErr) { showToast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: " + cErr.message, false); return; }
 
-  const msg = "ลบการเช็คชื่อครั้งที่ " + (idx + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n" +
+  const lessonWarning = await lessonLogDeleteWarning(s);
+  if (lessonWarning === null) return;
+  let msg = "ลบการเช็คชื่อครั้งที่ " + (idx + 1) + " ของวันที่ " + fmtDateTH(elDate.value) + "\n" +
     "วิชา " + (currentSubject ? currentSubject.name : "") + " (" + fmtPeriods(s.periods_covered) + " คาบ)\n\n" +
     "ผลเช็คชื่อของนักเรียน " + (count || 0) + " คนในครั้งนี้จะถูกลบทั้งหมด และกู้คืนไม่ได้";
+  if (lessonWarning) msg += "\n\n⚠️ " + lessonWarning;
   if (!await window.crsAskConfirm({ title: "ลบการเช็คชื่อ", message: msg, okLabel: "ลบครั้งนี้" })) return;
 
   // ⚠️ ต้อง .select() ท้าย .delete() เสมอ — ถ้า RLS บล็อก PostgREST ตอบสำเร็จโดยไม่มี error
@@ -1275,11 +1586,13 @@ async function selectDaySession(s) {
     (roomOnly ? " — กำลังแก้เฉพาะห้อง " + selected.label + " · ข้อมูลห้องอื่นไม่ถูกเปลี่ยน" : "");
   renderStudents(scoreMap, { usePrefill: false });
   renderDaySessionChips();
+  await refreshLessonLogCard();
 }
 
 // เริ่มครั้งใหม่ (ของวันเดียวกันก็ได้ เช่น วันนี้เรียน 2 รอบ เช็คแยกกันคนละครั้ง)
 function startNewSession() {
   currentSession = null;
+  hideLessonLogUI();
   elSessionNote.textContent = daySessions.length > 0
     ? "กำลังเพิ่มครั้งใหม่ของวันนี้ (วันนี้เช็คไปแล้ว " + daySessions.length + " ครั้ง) — ตั้งจำนวนคาบข้างบนก่อนบันทึก"
     : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
@@ -1453,6 +1766,9 @@ async function saveSingleSubject() {
   rosterDirty = false;
   elSessionNote.textContent = "บันทึกล่าสุดแล้ว — แก้ต่อได้ถ้าจำเป็น";
   await refreshDaySessions(); // ครั้งใหม่ที่เพิ่งสร้างจะโผล่เป็นปุ่มให้สลับได้
+  const savedSession = daySessions.find(row => row.id === sessionId);
+  if (savedSession) currentSession = savedSession;
+  await refreshLessonLogCard();
 }
 
 // โหมดบล็อก: บันทึกครั้งเช็คชื่อของทุกวิชาที่ติ๊ก สถานะเด็กชุดเดียวกัน
@@ -1533,6 +1849,7 @@ async function saveBlock() {
 }
 
 function hideStudents() {
+  hideLessonLogUI();
   elStudentsCard.style.display = "none";
   elEmptyHint.style.display = "block";
   currentSession = null;
