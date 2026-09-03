@@ -94,7 +94,6 @@
   .item-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
   .item-badge { display: inline-flex; padding: 2px 8px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 11px; font-weight: 700; }
   .item-badge.status { color: var(--blue); background: #eaf2ff; }
-  .pending-flag { color: var(--amber); font-weight: 700; }
   .panel-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line); color: var(--muted); background: rgba(247,251,250,.75); font-size: 12px; }
   .staff-basic { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin-top: 3px; }
   .staff-basic strong { color: var(--amber); font-size: 30px; line-height: 1; }
@@ -249,7 +248,6 @@
         <article class="panel">
           <div class="panel-head"><h2 class="panel-title"><span class="symbol">◆</span>โครงการ/กิจกรรมเดือนนี้</h2><a class="panel-link" href="academic/projects.html">ดูทั้งหมด</a></div>
           <div class="dashboard-list" id="project-list"><div class="load-note">กำลังโหลดโครงการ…</div></div>
-          <div class="panel-footer" id="project-pending" hidden></div>
           <div class="panel-footer"><span id="project-footer">กำลังสรุปงบประมาณ…</span><a class="panel-link" href="academic/projects.html">จัดการโครงการ</a></div>
         </article>
       </section>
@@ -275,7 +273,7 @@
     loadMyDashboardAlerts, pickMyDashboardAlerts,
     isProjectApprover,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20260903-1";
+  } from "./supabase-client.js?v=20260904-1";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayNote = document.getElementById("student-today-note");
@@ -286,7 +284,6 @@
   const calendarList = document.getElementById("calendar-list");
   const calendarFooter = document.getElementById("calendar-footer");
   const projectList = document.getElementById("project-list");
-  const projectPending = document.getElementById("project-pending");
   const projectFooter = document.getElementById("project-footer");
   const yearChip = document.getElementById("year-chip");
   const myAlerts = document.getElementById("my-alerts");
@@ -294,36 +291,19 @@
 
   let isApprover = false;
 
-  function renderPendingBadge(pendingCount) {
-    // ⛔ ไม่ใช่ผู้อนุมัติ = ไม่เห็นบรรทัดนี้เลย · ครูกดอะไรไม่ได้อยู่แล้ว
-    // ✅ คิวว่างก็ซ่อนทั้งบรรทัด ไม่แสดงเลข 0 (UI-STANDARD ข้อ 8)
-    if (!isApprover || !pendingCount) {
-      projectPending.hidden = true;
-      projectPending.innerHTML = "";
-      return;
-    }
-    // เขียนคำว่า "ทั้งปี" ให้ชัด เพราะการ์ดนี้พาดหัวว่า "เดือนนี้" — ไม่งั้น ผอ. จะงงว่าเลขมาจากไหน
-    projectPending.hidden = false;
-    projectPending.innerHTML =
-      `<span class="pending-flag">รออนุมัติทั้งปี ${pendingCount} รายการ</span>` +
-      `<a class="panel-link" href="academic/project-approval.html">เปิดหน้าอนุมัติ</a>`;
-  }
-
   function hideMyAlerts() {
     myAlerts.hidden = true;
     myAlertsList.innerHTML = "";
   }
 
-  function renderMyAlerts(alertsResult, dailyResult, today) {
+  function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver) {
     try {
-      const loaded = resultValue(alertsResult);
-      if (!loaded) {
-        hideMyAlerts();
-        return;
-      }
+      const loaded = resultValue(alertsResult) || {};
       let daily = null;
       try { daily = resultValue(dailyResult); } catch { daily = null; }
-      const rows = pickMyDashboardAlerts({ ...loaded, daily, today });
+      const rows = pickMyDashboardAlerts({
+        ...loaded, daily, today, pendingApprovals, isApprover:approver
+      });
       if (!rows.length) {
         hideMyAlerts();
         return;
@@ -456,8 +436,7 @@
 
   function renderProjectPanel(result) {
     try {
-      const { rows, pendingCount } = resultValue(result);
-      renderPendingBadge(pendingCount);
+      const { rows } = resultValue(result);
       const budget = rows.reduce((sum, row) => sum + Number(row.budget_planned || 0), 0);
       projectFooter.textContent = `เดือนนี้ ${rows.length} รายการ · งบตั้งไว้รวม ${formatMoney(budget, { minimumFractionDigits:0 })}`;
       if (!rows.length) {
@@ -482,7 +461,6 @@
         </div>`;
       }).join("");
     } catch (error) {
-      renderPendingBadge(0);
       projectFooter.textContent = "อัปเดตโครงการไม่สำเร็จ";
       projectList.innerHTML = `<div class="empty" style="color:var(--danger)">${escapeHtml(errorMessage(error))}</div>`;
     }
@@ -616,7 +594,14 @@
     }
     renderStudentMetric(dailySummaryResult);
     renderRoomsMetric(dailySummaryResult);
-    renderMyAlerts(myAlertsResult, dailyResult, today);
+
+    let pendingApprovals = 0;
+    try {
+      pendingApprovals = countPendingProjects(resultValue(projectResult));
+    } catch {
+      pendingApprovals = 0;
+    }
+    renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover);
 
     let upcomingResult;
     try {
@@ -634,8 +619,7 @@
       return {
         rows: filterProjectsInMonth(allProjects, yearMonth)
           .filter(row => row.kind === "กิจกรรม" || !parentIds.has(row.id))
-          .map(row => ({ ...row, parent_name:byId.get(row.parent_id)?.name || "" })),
-        pendingCount: countPendingProjects(allProjects)
+          .map(row => ({ ...row, parent_name:byId.get(row.parent_id)?.name || "" }))
       };
     };
 
@@ -648,7 +632,7 @@
     renderProjectPanel(monthlyProjectsResult);
 
     // ============================================================
-    // 🔔 ผอ. รู้ทันทีเมื่อมีของเข้าคิวอนุมัติ (Realtime)
+    // 🔔 การ์ด “งานของฉัน” และกล่องโครงการอัปเดตจาก Realtime
     // ------------------------------------------------------------
     // หน้านี้โหลดครั้งเดียวตอนเปิด ⟶ ครูกดส่งขออนุมัติตอน ผอ. เปิดจอค้างไว้
     // ผอ. ไม่มีทางรู้จนกว่าจะโหลดหน้าใหม่เอง
@@ -656,16 +640,32 @@
     //    แล้วดึงของจริงผ่าน loadAcademicProjects() ซึ่งผ่าน RLS เหมือนตอนเปิดหน้า
     // 🪤 จงใจ "ไม่" ใส่ filter approval_status=eq.รออนุมัติ — เพราะการอนุมัติคือการ "ออก"
     //    จากสถานะนั้น ถ้ากรองไว้ เลขจะขึ้นตอนมีของเข้าคิว แต่ไม่ยอมลดตอน ผอ. อนุมัติเสร็จ
-    // ⛔ ต่อ channel เฉพาะผู้อนุมัติ — ครูที่เหลือไม่ต้องเปิด WebSocket ทิ้งไว้เปล่า ๆ
-    if (isApprover) {
+    // ⛔ ไม่ subscribe daily_attendance — ตารางใหญ่และมี event พร้อมกันหลายร้อยแถว
+    // ต่อเมื่อมีแถว staff หรือเป็นผู้อนุมัติเท่านั้น คนอื่นไม่มีแถวในการ์ดที่ต้องอัปเดต
+    if (me || isApprover) {
       let syncPending = false;
-      async function syncProjectsFromRemote() {
+      async function syncDashboardAlerts() {
         if (syncPending) return;
         syncPending = true;
         try {
-          renderProjectPanel({ value: buildMonthlyProjectsValue(await loadAcademicProjects(year)) });
-        } catch (error) {
-          // เงียบไว้ — ของเดิมบนจอยังถูกอยู่ ไม่ต้องเปลี่ยนการ์ดที่ใช้ได้ให้กลายเป็นข้อความ error
+          const [freshProjectsResult, freshAlertsResult] = await Promise.all([
+            isApprover ? capture(loadAcademicProjects(year)) : Promise.resolve(null),
+            me
+              ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today }))
+              : Promise.resolve({ value:{} })
+          ]);
+          if (freshProjectsResult) {
+            try {
+              const allProjects = resultValue(freshProjectsResult);
+              pendingApprovals = countPendingProjects(allProjects);
+              renderProjectPanel({ value:buildMonthlyProjectsValue(allProjects) });
+            } catch {
+              // เงียบไว้ — ของเดิมบนจอยังถูกอยู่ ไม่ต้องแทนด้วยสถานะ error ชั่วคราว
+            }
+          }
+          renderMyAlerts(
+            freshAlertsResult, dailyResult, today, pendingApprovals, isApprover
+          );
         } finally {
           syncPending = false;
         }
@@ -673,23 +673,28 @@
 
       let syncTimer = null;
       const scheduleSync = () => {
-        // การอนุมัติ 1 ครั้งยิงหลาย event (แถวโครงการ + แถวประวัติ) จึงรวบเป็นครั้งเดียว
+        // การแก้ต่อเนื่องอาจยิงหลาย event จึงรวบเป็นครั้งเดียว
         clearTimeout(syncTimer);
-        syncTimer = setTimeout(syncProjectsFromRemote, 400);
+        syncTimer = setTimeout(syncDashboardAlerts, 400);
       };
 
-      const approvalChannel = sb.channel("project-approvals-dashboard");
-      approvalChannel.on("postgres_changes", {
+      const alertsChannel = sb.channel("dashboard-alerts");
+      alertsChannel.on("postgres_changes", {
         event: "*", schema: "public", table: "academic_projects"
       }, scheduleSync);
-      approvalChannel.subscribe();
+      if (me) {
+        alertsChannel.on("postgres_changes", {
+          event: "*", schema: "public", table: "duty_swaps"
+        }, scheduleSync);
+      }
+      alertsChannel.subscribe();
 
       // 🛟 กันเหนียวเมื่อ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket)
       //    หรือเครื่องหลับแล้วตื่น — กลับมาที่แท็บเมื่อไหร่ก็ได้ของล่าสุดอยู่ดี
       document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") scheduleSync();
       });
-      window.addEventListener("pagehide", () => { sb.removeChannel(approvalChannel); });
+      window.addEventListener("pagehide", () => { sb.removeChannel(alertsChannel); });
     }
   }
 

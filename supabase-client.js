@@ -2929,9 +2929,18 @@ function dashboardCoverageLabel(row) {
 
 // คำนวณล้วนสำหรับการ์ด “งานของฉัน” — ผู้เรียกต้อง escape ข้อความก่อนใส่ DOM
 export function pickMyDashboardAlerts({
-  homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], today
+  homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], today,
+  pendingApprovals = 0, isApprover = false
 } = {}) {
   const alerts = [];
+
+  if (isApprover && pendingApprovals > 0) {
+    alerts.push({
+      text: `มีโครงการรออนุมัติ ${pendingApprovals} รายการ`,
+      href: "academic/project-approval.html",
+      linkLabel: "เปิดหน้าอนุมัติ"
+    });
+  }
 
   if (!daily?.isHoliday) {
     const activeRoomKeys = new Set((daily?.rooms || []).map(homeroomAuditRoomKey));
