@@ -1064,6 +1064,61 @@ export async function loadLessonLogs({ createdBy, year, term, subjectId, from, t
   );
 }
 
+// นับคาบของเจ้าของวิชา ไม่ขึ้นกับว่าใครเป็นคนเช็คชื่อหรือเขียนบันทึก
+export async function loadLessonLogCoverage({ userId, year, term, subjectId, from, to } = {}) {
+  if (typeof userId !== "string" || !userId.trim()) throw new Error("ไม่พบเจ้าของคาบที่ต้องตรวจสอบ");
+  if (from && to && from > to) throw new Error("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
+  const sessionResult = await fetchAllRows(() => {
+    let query = sb.from("attendance_sessions")
+      .select("id,subject_id,session_date,periods_covered,subject:subjects!inner(id,name,grade_level,year,term),lesson_log_sessions(session_id)")
+      .eq("subject.owner_id", userId);
+    if (year) query = query.eq("subject.year", year);
+    if (term) query = query.eq("subject.term", term);
+    if (subjectId) query = query.eq("subject_id", subjectId);
+    if (from) query = query.gte("session_date", from);
+    if (to) query = query.lte("session_date", to);
+    return query;
+  });
+  if (sessionResult.error) throw new Error("ตรวจสอบคาบในบันทึกไม่สำเร็จ: " + sessionResult.error.message);
+  const sessions = (sessionResult.data || []).map(row => ({
+    ...row, subject:Array.isArray(row.subject) ? row.subject[0] : row.subject
+  }));
+  const linked = row => Array.isArray(row.lesson_log_sessions)
+    ? row.lesson_log_sessions.length > 0 : !!row.lesson_log_sessions;
+  const written = sessions.filter(linked);
+  const missing = sessions.filter(row => !linked(row))
+    .sort((a, b) => String(b.session_date).localeCompare(String(a.session_date)) || String(a.id).localeCompare(String(b.id)));
+  const coverageByDay = new Map();
+  if (missing.length) {
+    const subjectIds = [...new Set(missing.map(row => row.subject_id))];
+    const dates = missing.map(row => row.session_date).sort();
+    // จำกัดวิชาและวันก่อนอ่านบริบท แบ่งทั้งรายวิชาและแถวเพื่อไม่ตกหล่นหรือได้ URL ยาวเกินไป
+    for (let offset = 0; offset < subjectIds.length; offset += 100) {
+      const ids = subjectIds.slice(offset, offset + 100);
+      const result = await fetchAllRows(() => sb.from("coverage_assignments")
+        .select("id,subject_id,cover_date,source,worksheet_note")
+        .eq("kind", "วิชา").in("subject_id", ids)
+        .gte("cover_date", dates[0]).lte("cover_date", dates.at(-1)));
+      if (result.error) throw new Error("โหลดบริบทสอนแทนไม่สำเร็จ: " + result.error.message);
+      for (const row of result.data || []) {
+        coverageByDay.set(row.subject_id + "|" + row.cover_date, { source:row.source, worksheet_note:row.worksheet_note });
+      }
+    }
+  }
+  return {
+    total:summarizeLessonLogSessions(sessions).totalPeriods,
+    written:summarizeLessonLogSessions(written).totalPeriods,
+    missing:missing.map(row => ({
+      session_id:row.id, subject_id:row.subject_id, subject_name:row.subject?.name || "ไม่พบชื่อวิชา",
+      grade_level:row.subject?.grade_level || "", session_date:row.session_date,
+      periods_covered:Number(row.periods_covered) || 0,
+      coverage:coverageByDay.get(row.subject_id + "|" + row.session_date) || null
+    })),
+    // ให้หน้าเติมปี/วิชาได้แม้ยังไม่มีบันทึกสักใบ โดยไม่ต้องโหลดข้อมูลครูอื่น
+    subjects:[...new Map(sessions.filter(row => row.subject).map(row => [row.subject.id, row.subject])).values()]
+  };
+}
+
 export async function loadLessonLogBySession(sessionId) {
   if (!sessionId) return null;
   const linkRes = await sb.from("lesson_log_sessions")

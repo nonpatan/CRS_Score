@@ -37,6 +37,9 @@
   .chip { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 13px; color: var(--teal); background: var(--teal-soft); }
   .chip.warn { color: var(--amber); background: var(--amber-soft); }
   .hint, .meta { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .coverage-row { padding: 12px 0; border-top: 1px solid var(--line); }
+  .coverage-summary { color: var(--amber); }
+  .coverage-note { margin-top: 4px; white-space: pre-wrap; }
   .empty { padding: 26px 10px; color: var(--muted); text-align: center; }
   .toast { position: sticky; bottom: 14px; margin-top: 12px; padding: 11px 16px; border-radius: 10px; background: var(--danger); color: var(--white); }
   [hidden] { display: none !important; }
@@ -103,6 +106,7 @@
         <button type="submit" class="ghost no-print" id="search">ค้นหา</button>
       </form>
     </section>
+    <section class="card no-print" id="coverage-card" aria-live="polite" hidden></section>
     <section class="card no-print">
       <p id="result-count" role="status">กำลังโหลดบันทึกของฉัน…</p>
       <p id="settings-note" class="hint" hidden></p>
@@ -114,7 +118,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?v=20260908-1";
+import { sb, requireAuth, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, loadLessonLogCoverage, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?v=20260909-1";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login
@@ -209,6 +213,46 @@ function renderResults() {
   el("print-area").innerHTML = logs.map(renderDocument).join("");
   syncPrintButtons();
 }
+function selectedFilters() {
+  return { year:el("year").value, term:el("term").value, subjectId:el("subject").value, from:el("from").value, to:el("to").value };
+}
+function renderCoverage(data) {
+  const card = el("coverage-card");
+  card.hidden = selectedCreatedBy() !== session.user.id;
+  card.innerHTML = "";
+  if (card.hidden) return;
+  if (!data.total) {
+    card.innerHTML = '<p class="hint">ยังไม่มีการเช็คชื่อรายวิชาในช่วงที่เลือก</p>';
+    return;
+  }
+  if (!data.missing.length) {
+    card.innerHTML = '<p>บันทึกครบทุกคาบแล้ว</p>';
+    return;
+  }
+  card.innerHTML = `<div class="section-head"><h2>คาบที่ยังไม่อยู่ในบันทึก</h2></div><p class="coverage-summary">${escapeHtml(data.missing.length)} ครั้ง · เขียนแล้ว ${escapeHtml(data.written)} จาก ${escapeHtml(data.total)} คาบ</p>` +
+    data.missing.map(row => {
+      const source = String(row.coverage?.source || "").trim();
+      const note = String(row.coverage?.worksheet_note || "").trim();
+      const context = row.coverage ? `<div class="meta coverage-note">มีครูสอนแทน${source ? ` (${escapeHtml(source)})` : ""}${note ? ` · ฝากไว้: ${escapeHtml(note)}` : ""}</div>` : "";
+      return `<div class="coverage-row"><div class="section-head"><div>${escapeHtml(row.subject_name)} ${escapeHtml(row.grade_level)} · ${escapeHtml(dateText(row.session_date))} (${escapeHtml(row.periods_covered)} คาบ)</div><a class="ghost no-print" href="attendance.html">ไปเขียน →</a></div>${context}</div>`;
+    }).join("") + '<p class="hint">เมื่อไปหน้าเช็คชื่อ กรุณาเลือกวิชาและวันที่ของคาบที่ต้องการอีกครั้ง</p>';
+}
+async function refreshCoverage(filters, seq) {
+  const card = el("coverage-card");
+  card.hidden = selectedCreatedBy() !== session.user.id;
+  card.innerHTML = "";
+  if (card.hidden) return;
+  card.innerHTML = '<p class="hint">กำลังตรวจสอบคาบในบันทึก…</p>';
+  try {
+    const data = await loadLessonLogCoverage({ userId:session.user.id, ...filters });
+    if (seq !== requestSeq || selectedCreatedBy() !== session.user.id) return;
+    rememberFilterOptions((data.subjects || []).map(subject => ({ subject })));
+    renderCoverage(data);
+  } catch (error) {
+    if (seq !== requestSeq || selectedCreatedBy() !== session.user.id) return;
+    card.innerHTML = `<p class="hint">${escapeHtml(error.message)} · กรุณากดค้นหาเพื่อลองอีกครั้ง</p>`;
+  }
+}
 async function search() {
   const seq = ++requestSeq;
   loading = true;
@@ -216,8 +260,13 @@ async function search() {
   renderResults();
   el("result-count").textContent = selectedCreatedBy() === session.user.id ? "กำลังโหลดบันทึกของฉัน…" : "กำลังโหลดบันทึก…";
   el("toast").hidden = true;
+  const filters = selectedFilters();
+  const coverageRequest = refreshCoverage(filters, seq);
   try {
-    const result = await loadLessonLogs({ createdBy:selectedCreatedBy(), year:el("year").value, term:el("term").value, subjectId:el("subject").value, from:el("from").value, to:el("to").value });
+    const [result] = await Promise.all([
+      loadLessonLogs({ createdBy:selectedCreatedBy(), ...filters }),
+      coverageRequest
+    ]);
     if (seq !== requestSeq) return;
     logs = result;
     rememberFilterOptions(result);
@@ -307,7 +356,9 @@ try {
     el("settings-note").textContent = "ยังพิมพ์ไม่ได้ · ให้ผู้ดูแลตั้งชื่อโรงเรียนและที่อยู่ในค่าตั้งใบเสร็จก่อน";
     el("settings-note").hidden = false;
   }
+  await refreshCoverage({}, requestSeq);
   rememberFilterOptions(mine, true);
+  if (el("year").value) await refreshCoverage(selectedFilters(), requestSeq);
   logs = mine.filter(log => !el("year").value || log.subject?.year === el("year").value);
   loading = false;
   el("filters").inert = false;

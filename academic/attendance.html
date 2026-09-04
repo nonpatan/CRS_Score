@@ -167,6 +167,14 @@
   .lesson-log-summary { padding: 9px 11px; border-radius: 8px; background: var(--teal-soft); color: var(--teal); font-weight: 600; }
   .lesson-log-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(130px,.45fr); gap: 12px; }
   .lesson-log-required { color: var(--danger); }
+  #lesson-log-card [hidden] { display: none !important; }
+  .lesson-log-read-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .lesson-log-read-head h3 { margin: 0; font-size: 18px; min-width: 0; }
+  .lesson-log-read-head button { flex-shrink: 0; min-height: 44px; }
+  .lesson-log-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .lesson-log-read-section { margin-top: 16px; }
+  .lesson-log-read-section h4 { margin: 0 0 4px; font-size: 16px; }
+  .lesson-log-read-section p { margin: 0; }
   @media (max-width: 520px) { .lesson-log-grid { grid-template-columns: 1fr; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -267,12 +275,21 @@
   </div>
 
   <div class="card" id="lesson-log-card" style="display:none">
-    <h2 class="lesson-log-title">บันทึกหลังสอน (ไม่บังคับ · เขียนตอนจบแผน)</h2>
+    <h2 class="lesson-log-title">บันทึกหลังสอน</h2>
     <div class="field" id="lesson-log-choice-field" hidden>
       <label for="lesson-log-choice">บันทึกของรอบนี้</label>
       <select id="lesson-log-choice"></select>
     </div>
     <div class="hint" id="lesson-log-author" hidden></div>
+    <div id="lesson-log-read" hidden>
+      <div class="lesson-log-read-head">
+        <h3 class="lesson-log-text" id="lesson-log-read-plan"></h3>
+        <button type="button" class="ghost" id="btn-edit-lesson-log" hidden>แก้ไข</button>
+      </div>
+      <div class="lesson-log-summary" id="lesson-log-read-summary"></div>
+      <div id="lesson-log-read-content"></div>
+    </div>
+    <div id="lesson-log-form">
     <div class="hint">ครั้งที่แผนนี้ครอบคลุม — ติ๊กย้อนหลังได้</div>
     <div class="lesson-log-sessions" id="lesson-log-sessions"></div>
     <div class="lesson-log-summary" id="lesson-log-summary"></div>
@@ -307,6 +324,7 @@
       <textarea id="lesson-assigned-work"></textarea>
     </div>
     <button class="save" id="btn-save-lesson-log" disabled>บันทึกหลังสอน</button>
+    </div>
   </div>
 
   <div class="card hint" id="empty-hint">เลือกวิชาและวันที่ แล้วกด "โหลดรายชื่อ" เพื่อเริ่มเช็คชื่อ</div>
@@ -347,7 +365,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts } from "../supabase-client.js?v=20260908-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts } from "../supabase-client.js?v=20260909-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -431,6 +449,12 @@ const elEmptyHint     = document.getElementById("empty-hint");
 const elToast         = document.getElementById("toast");
 const btnSave         = document.getElementById("btn-save");
 const elLessonLogCard = document.getElementById("lesson-log-card");
+const elLessonLogRead = document.getElementById("lesson-log-read");
+const elLessonLogReadPlan = document.getElementById("lesson-log-read-plan");
+const elLessonLogReadSummary = document.getElementById("lesson-log-read-summary");
+const elLessonLogReadContent = document.getElementById("lesson-log-read-content");
+const elLessonLogForm = document.getElementById("lesson-log-form");
+const btnEditLessonLog = document.getElementById("btn-edit-lesson-log");
 const elLessonLogSessions = document.getElementById("lesson-log-sessions");
 const elLessonLogSummary = document.getElementById("lesson-log-summary");
 const elLessonLogSelectionNote = document.getElementById("lesson-log-selection-note");
@@ -475,6 +499,7 @@ let classroomByValue = new Map();
 let acceptedClassroomValue = "";
 let rosterDirty = false;
 let lessonLog = null;
+let lessonLogEditing = false;
 let lessonLogAvailableSessions = [];
 let lessonLogSelectedIds = new Set();
 let lessonLogSaving = false;
@@ -528,6 +553,7 @@ function lessonLogDateRange(summary) {
 }
 
 function hideLessonLogUI() {
+  lessonLogEditing = false;
   lessonLogRequestSeq++;
   elLessonLogCard.style.display = "none";
   elLessonLogChoiceField.hidden = true;
@@ -606,11 +632,36 @@ function fillLessonLogFields(logRow) {
   elLessonAssignedWork.value = logRow?.assigned_work || "";
 }
 
+// โหมดเป็นเพียงการแสดงผล ใช้บันทึกและสิทธิ์ที่โหลดแล้ว ไม่เปลี่ยนคาบที่เลือกหรือค่าฟอร์ม
+function renderLessonLogMode() {
+  const reading = !!lessonLog && !lessonLogEditing;
+  elLessonLogRead.hidden = !reading;
+  elLessonLogForm.hidden = reading;
+  btnEditLessonLog.hidden = !reading || !lessonLogEditable;
+  if (!reading) return;
+  elLessonLogReadPlan.innerHTML = escapeHtml(lessonLog.plan_name || "บันทึกหลังสอน");
+  const summary = summarizeLessonLogSessions(lessonLog.sessions, lessonLog.planned_periods);
+  elLessonLogReadSummary.textContent = fmtPeriods(summary.totalPeriods) + " คาบ · " +
+    summary.sessionCount + " ครั้ง · " + lessonLogDateRange(summary) +
+    (lessonLog.planned_periods == null ? "" : " · ตามแผน " + fmtPeriods(lessonLog.planned_periods) + " คาบ");
+  const sections = [
+    ["1. ผลการจัดการเรียนรู้", lessonLog.learning_outcome],
+    ["2. ปัญหา/อุปสรรค", lessonLog.problem],
+    ["3. แนวทางปรับปรุง/ช่วยเหลือ", lessonLog.improvement],
+    ["4. งานที่มอบหมาย/ชิ้นงาน", lessonLog.assigned_work]
+  ];
+  elLessonLogReadContent.innerHTML = sections.map(([title, value]) => {
+    const empty = !String(value || "").trim();
+    return `<section class="lesson-log-read-section"><h4>${escapeHtml(title)}</h4><p class="lesson-log-text${empty ? " hint" : ""}">${empty ? "(ไม่ได้กรอก)" : escapeHtml(value)}</p></section>`;
+  }).join("");
+}
+
 function defaultLessonLogSelection(existingLog, currentRows) {
   return new Set((existingLog ? existingLog.sessions : currentRows).map(row => row.id));
 }
 
 async function refreshLessonLogCard(preferredLogId) {
+  lessonLogEditing = false;
   const requestSeq = ++lessonLogRequestSeq;
   elLessonLogCard.style.display = "none";
   lessonLogEditable = false;
@@ -672,12 +723,20 @@ async function refreshLessonLogCard(preferredLogId) {
     applyLessonLogAccess(editable, existingLog);
     fillLessonLogFields(existingLog);
     renderLessonLogSessions();
+    renderLessonLogMode();
     elLessonLogCard.style.display = "block";
   } catch (error) {
     if (requestSeq !== lessonLogRequestSeq) return;
     showToast(error.message || String(error), false);
   }
 }
+
+btnEditLessonLog.addEventListener("click", () => {
+  if (!lessonLog || !lessonLogEditable) return;
+  lessonLogEditing = true;
+  renderLessonLogMode();
+  elLessonPlanName.focus();
+});
 
 elLessonLogChoice.addEventListener("change", () => refreshLessonLogCard(elLessonLogChoice.value));
 elLessonPlannedPeriods.addEventListener("input", renderLessonLogSummary);
