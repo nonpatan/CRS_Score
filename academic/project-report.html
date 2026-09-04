@@ -229,6 +229,19 @@ import {
   bangkokNow, toDateStr
 } from "../supabase-client.js?v=20260909-1";
 
+// 🔵 “ร่าง — ยังไม่ได้ส่ง” คือก้อนที่ใหญ่ที่สุดและเดิมไม่มีใครเห็น
+//    การ์ดอีก 5 ใบนับเฉพาะของที่ "ส่งมาแล้ว" หรือ "เสร็จแล้ว" ⟹ ครูที่ยังไม่กดส่งเลยหลุดหมด
+// 🪤 รวมแถวที่ถูก「ขอแก้ไขแผน」ด้วย เพราะ request_project_revision() ตั้ง approval_status
+//    กลับเป็น 'ร่าง' และล้าง submitted_at ⟹ มันค้างรอครูกดส่งใหม่เหมือนกัน
+// ⚠️ ตัวช่วยของอีก 5 การ์ดอยู่ใน supabase-client.js — ตั้งใจเขียนไว้ในหน้านี้แทน
+//    เพื่อไม่ต้องบัมพ์ cache-buster (ครูจะได้ไม่ต้อง hard refresh ก่อนวันหมดเขต)
+//    รอบหน้าที่มีการบัมพ์อยู่แล้ว ให้ย้ายไปรวมกับ projectsPendingTooLong และเพื่อน ๆ
+function projectsNeverSubmitted(projects) {
+  return (projects || []).filter(project =>
+    project?.status !== "ยกเลิก" && project?.approval_status === "ร่าง"
+  );
+}
+
 function countByStatus(projects, todayIso) {
   const counts = { "วางแผน":0, "กำลังดำเนินการ":0, "เสร็จสิ้น":0, "ยกเลิก":0 };
   for (const project of (projects || [])) {
@@ -308,6 +321,7 @@ if (!session) {
   }
 
   function renderFollowUps(todayIso) {
+    const neverSent = projectsNeverSubmitted(projects);
     const pending = projectsPendingTooLong(projects, todayIso, PROJECT_PENDING_DAYS);
     const returned = projectsReturnedTooLong(projects, todayIso, PROJECT_RETURNED_DAYS);
     const overdue = projectsPastDueNotClosed(projects, todayIso);
@@ -316,6 +330,8 @@ if (!session) {
     const uncovered = okrTree.objectives.flatMap(objective => objective.keyResults)
       .filter(kr => coverageByKr.get(kr.id)?.isUncovered);
     const cards = [
+      followCard("follow-draft", "✏️ ร่าง — ครูยังไม่ได้กดส่งขออนุมัติ", neverSent,
+        followProjectList(neverSent, todayIso, project => project.created_at)),
       followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
       followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => projectLatestReturnedAt(project))),
       followCard("follow-overdue", "📌 เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
