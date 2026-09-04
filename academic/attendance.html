@@ -268,6 +268,11 @@
 
   <div class="card" id="lesson-log-card" style="display:none">
     <h2 class="lesson-log-title">บันทึกหลังสอน (ไม่บังคับ · เขียนตอนจบแผน)</h2>
+    <div class="field" id="lesson-log-choice-field" hidden>
+      <label for="lesson-log-choice">บันทึกของรอบนี้</label>
+      <select id="lesson-log-choice"></select>
+    </div>
+    <div class="hint" id="lesson-log-author" hidden></div>
     <div class="hint">ครั้งที่แผนนี้ครอบคลุม — ติ๊กย้อนหลังได้</div>
     <div class="lesson-log-sessions" id="lesson-log-sessions"></div>
     <div class="lesson-log-summary" id="lesson-log-summary"></div>
@@ -302,9 +307,6 @@
       <textarea id="lesson-assigned-work"></textarea>
     </div>
     <button class="save" id="btn-save-lesson-log" disabled>บันทึกหลังสอน</button>
-  </div>
-  <div class="access-note" id="lesson-log-block-note" style="display:none; margin-bottom:16px">
-    เขียนบันทึกหลังสอนได้ทีละวิชา — ติ๊กวิชาย่อยที่ต้องการทีละตัวแล้วกดโหลดรายชื่อ จะเปิดครั้งเดิมมาเขียนได้
   </div>
 
   <div class="card hint" id="empty-hint">เลือกวิชาและวันที่ แล้วกด "โหลดรายชื่อ" เพื่อเริ่มเช็คชื่อ</div>
@@ -345,7 +347,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog } from "../supabase-client.js?v=20260905-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog } from "../supabase-client.js?v=20260906-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -432,7 +434,9 @@ const elLessonLogCard = document.getElementById("lesson-log-card");
 const elLessonLogSessions = document.getElementById("lesson-log-sessions");
 const elLessonLogSummary = document.getElementById("lesson-log-summary");
 const elLessonLogSelectionNote = document.getElementById("lesson-log-selection-note");
-const elLessonLogBlockNote = document.getElementById("lesson-log-block-note");
+const elLessonLogAuthor = document.getElementById("lesson-log-author");
+const elLessonLogChoiceField = document.getElementById("lesson-log-choice-field");
+const elLessonLogChoice = document.getElementById("lesson-log-choice");
 const elLessonPlanName = document.getElementById("lesson-plan-name");
 const elLessonPlannedPeriods = document.getElementById("lesson-planned-periods");
 const elLessonLearningOutcome = document.getElementById("lesson-learning-outcome");
@@ -475,6 +479,38 @@ let lessonLogAvailableSessions = [];
 let lessonLogSelectedIds = new Set();
 let lessonLogSaving = false;
 let lessonLogRequestSeq = 0;
+let lessonLogEditable = false;
+let lessonLogCurrentIds = new Set();
+
+function lessonLogCurrentSessions() {
+  if (blockMode) {
+    const round = blockEditRound === null ? null : blockRounds[blockEditRound];
+    return round ? [...round.bySubject.values()] : [];
+  }
+  return currentSession ? [currentSession] : [];
+}
+
+function lessonLogSubjectId() {
+  return blockMode ? pickedSubject?.id : currentSubjectId;
+}
+
+// 🔑 เฉพาะวิชาย่อยที่ "ติ๊กในรอบนี้" (blockMembers) ไม่ใช่ทุกวิชาที่ครูเป็นเจ้าของ
+// (memberSubjects) — ครูที่มี 4 วิชาย่อยแต่ติ๊ก 2 ต้องไม่เห็นคาบของอีก 2 วิชาปนมา
+// คาบของบันทึกเดิมยังขึ้นครบ เพราะ refreshLessonLogCard รวม existingLog.sessions มาแยกต่างหาก
+function lessonLogSessionSubjectIds() {
+  return blockMode ? blockMembers.map(m => m.id) : [currentSubjectId].filter(Boolean);
+}
+
+function applyLessonLogAccess(editable, logRow) {
+  lessonLogEditable = editable;
+  btnSaveLessonLog.hidden = !editable;
+  for (const field of [elLessonPlanName, elLessonPlannedPeriods, elLessonLearningOutcome,
+    elLessonProblem, elLessonImprovement, elLessonAssignedWork]) field.disabled = !editable;
+  elLessonLogAuthor.hidden = editable || !logRow;
+  elLessonLogAuthor.textContent = logRow
+    ? "บันทึกนี้เขียนโดย " + (logRow.created_by_name || "ผู้เขียนเดิม") + " · อ่านอย่างเดียว"
+    : "";
+}
 
 // สูตรล้วนสำหรับสรุปหลักฐานตามแผน: บวกคาบจริง (รวมครึ่งคาบ) นับครั้ง และหาวันแรก–วันสุดท้าย
 function summarizeLessonLogSessions(sessions, plannedPeriods = null) {
@@ -513,17 +549,14 @@ function lessonLogDateRange(summary) {
 function hideLessonLogUI() {
   lessonLogRequestSeq++;
   elLessonLogCard.style.display = "none";
-  elLessonLogBlockNote.style.display = "none";
+  elLessonLogChoiceField.hidden = true;
+  elLessonLogAuthor.hidden = true;
   lessonLog = null;
   lessonLogAvailableSessions = [];
   lessonLogSelectedIds = new Set();
   lessonLogSaving = false;
-}
-
-function showLessonLogBlockNote() {
-  lessonLogRequestSeq++;
-  elLessonLogCard.style.display = "none";
-  elLessonLogBlockNote.style.display = "block";
+  lessonLogEditable = false;
+  lessonLogCurrentIds = new Set();
 }
 
 // 🪤 "ลา" ไม่ใช่ "ขาด" — ระบบแยกสองอย่างนี้ทุกที่ (STATUS_OPTIONS มี 5 ค่า · การ์ดหน้าแรก
@@ -562,19 +595,20 @@ function renderLessonLogSummary() {
   elLessonLogSummary.textContent = text;
   const hasSelection = lessonLogSelectedIds.size > 0;
   elLessonLogSelectionNote.style.display = hasSelection ? "none" : "block";
-  btnSaveLessonLog.disabled = lessonLogSaving || !hasSelection;
+  btnSaveLessonLog.disabled = lessonLogSaving || !hasSelection || !lessonLogEditable;
 }
 
 function renderLessonLogSessions() {
   elLessonLogSessions.innerHTML = "";
   for (const sessionRow of lessonLogAvailableSessions) {
     const row = document.createElement("label");
-    row.className = "lesson-log-session" + (sessionRow.id === currentSession?.id ? " current" : "");
+    row.className = "lesson-log-session" + (lessonLogCurrentIds.has(sessionRow.id) ? " current" : "");
 
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.dataset.lessonSessionId = sessionRow.id;
     checkbox.checked = lessonLogSelectedIds.has(sessionRow.id);
+    checkbox.disabled = !lessonLogEditable;
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) lessonLogSelectedIds.add(sessionRow.id);
       else lessonLogSelectedIds.delete(sessionRow.id);
@@ -582,10 +616,12 @@ function renderLessonLogSessions() {
     });
 
     const counts = lessonSessionAttendanceCounts(sessionRow);
+    const subjectName = memberSubjects.find(m => m.id === sessionRow.subject_id)?.name ||
+      allSubjects.find(s => s.id === sessionRow.subject_id)?.name || currentSubject?.name || "ไม่พบชื่อวิชา";
     const text = document.createElement("span");
-    text.textContent = fmtLessonDate(sessionRow.session_date) + " · " +
+    text.textContent = fmtLessonDate(sessionRow.session_date) + " · " + subjectName + " · " +
       fmtPeriods(sessionRow.periods_covered) + " คาบ · " + lessonAttendanceText(counts) +
-      (sessionRow.id === currentSession?.id ? " — ครั้งนี้" : "");
+      (lessonLogCurrentIds.has(sessionRow.id) ? " — ครั้งนี้" : "");
     row.append(checkbox, text);
     elLessonLogSessions.appendChild(row);
   }
@@ -602,36 +638,70 @@ function fillLessonLogFields(logRow) {
   elLessonAssignedWork.value = logRow?.assigned_work || "";
 }
 
-async function refreshLessonLogCard() {
+function defaultLessonLogSelection(existingLog, currentRows) {
+  return new Set((existingLog ? existingLog.sessions : currentRows).map(row => row.id));
+}
+
+async function refreshLessonLogCard(preferredLogId) {
   const requestSeq = ++lessonLogRequestSeq;
   elLessonLogCard.style.display = "none";
-  elLessonLogBlockNote.style.display = "none";
-  if (blockMode && blockMembers.length > 1) {
-    showLessonLogBlockNote();
-    return;
-  }
-  if (!currentSession || !currentSubject || !canEditMakeup(currentSubject)) return;
-
-  const sessionId = currentSession.id;
+  lessonLogEditable = false;
+  const currentRows = lessonLogCurrentSessions();
+  const subjectId = lessonLogSubjectId();
+  if (!currentRows.length || !subjectId) return;
   try {
-    const [existingLog, unlinked] = await Promise.all([
-      loadLessonLogBySession(sessionId),
-      loadUnlinkedSessions(currentSubjectId, { withinDays:60 })
+    const [roundLogs, unlinked] = await Promise.all([
+      Promise.all(currentRows.map(row => loadLessonLogBySession(row.id))),
+      loadUnlinkedSessions(lessonLogSessionSubjectIds(), { withinDays:60 })
     ]);
-    if (requestSeq !== lessonLogRequestSeq || currentSession?.id !== sessionId) return;
+    if (requestSeq !== lessonLogRequestSeq) return;
+    const logs = [...new Map(roundLogs.filter(Boolean).map(log => [log.id, log])).values()];
+    const freeCurrent = currentRows.filter((row, index) => !roundLogs[index]);
+    const existingLog = preferredLogId === "new" ? null :
+      logs.find(log => log.id === preferredLogId) || logs[0] || null;
+    const permission = existingLog
+      ? await sb.rpc("can_modify_lesson_log", { p_log_id:existingLog.id })
+      : await sb.rpc("can_write_lesson_log", { p_subject_id:subjectId });
+    if (requestSeq !== lessonLogRequestSeq) return;
+    if (permission.error) throw permission.error;
+    const editable = permission.data === true;
+    if (!existingLog && !editable) return;
+
+    // ใบเก่าที่เขียนแยกวิชาย่อยยังเปิดได้ ไม่ย้ายวิชา/รวมใบเดิมโดยอัตโนมัติ
+    const acceptsSession = row => !existingLog || existingLog.subject_id === subjectId ||
+      row.subject_id === existingLog.subject_id;
+    elLessonLogChoice.innerHTML = "";
+    for (const log of logs) {
+      const option = document.createElement("option");
+      option.value = log.id;
+      option.textContent = (log.plan_name || "บันทึกหลังสอน") + " · " + (log.created_by_name || "ผู้เขียนเดิม");
+      elLessonLogChoice.appendChild(option);
+    }
+    if (freeCurrent.length) {
+      const option = document.createElement("option");
+      option.value = "new";
+      option.textContent = "สร้างบันทึกสำหรับครั้งที่เหลือในรอบนี้";
+      elLessonLogChoice.appendChild(option);
+    }
+    elLessonLogChoice.value = existingLog?.id || "new";
+    elLessonLogChoiceField.hidden = elLessonLogChoice.options.length < 2;
 
     const byId = new Map();
     for (const row of (existingLog?.sessions || [])) byId.set(row.id, row);
-    for (const row of (unlinked || [])) byId.set(row.id, row);
-    if (!byId.has(sessionId)) byId.set(sessionId, currentSession);
+    if (editable) {
+      for (const row of unlinked.filter(acceptsSession)) byId.set(row.id, row);
+      for (const row of freeCurrent.filter(acceptsSession)) {
+        if (!byId.has(row.id)) byId.set(row.id, row);
+      }
+    }
     lessonLogAvailableSessions = [...byId.values()].sort((a, b) =>
       String(b.session_date || "").localeCompare(String(a.session_date || ""))
     );
     lessonLog = existingLog;
-    // บันทึกใหม่เลือกเฉพาะครั้งปัจจุบันครั้งเดียว ห้ามเดาเลือกครั้งย้อนหลังให้ครู
-    lessonLogSelectedIds = existingLog
-      ? new Set((existingLog.sessions || []).map(row => row.id))
-      : new Set([currentSession.id]);
+    lessonLogCurrentIds = new Set(currentRows.map(row => row.id));
+    // รอบปัจจุบันเท่านั้น ไม่ใช้รายการย้อนหลังหรือ session อื่นที่มีวันเดียวกัน
+    lessonLogSelectedIds = defaultLessonLogSelection(existingLog, freeCurrent);
+    applyLessonLogAccess(editable, existingLog);
     fillLessonLogFields(existingLog);
     renderLessonLogSessions();
     elLessonLogCard.style.display = "block";
@@ -641,10 +711,11 @@ async function refreshLessonLogCard() {
   }
 }
 
+elLessonLogChoice.addEventListener("change", () => refreshLessonLogCard(elLessonLogChoice.value));
 elLessonPlannedPeriods.addEventListener("input", renderLessonLogSummary);
 
 btnSaveLessonLog.addEventListener("click", async () => {
-  if (lessonLogSaving || lessonLogSelectedIds.size === 0) return;
+  if (!lessonLogEditable || lessonLogSaving || lessonLogSelectedIds.size === 0) return;
   const learningOutcome = elLessonLearningOutcome.value.trim();
   const problem = elLessonProblem.value.trim();
   if (!learningOutcome) {
@@ -669,7 +740,7 @@ btnSaveLessonLog.addEventListener("click", async () => {
   try {
     await saveLessonLog({
       logId: lessonLog?.id || null,
-      subjectId: currentSubjectId,
+      subjectId: lessonLog?.subject_id || lessonLogSubjectId(),
       sessionIds: [...lessonLogSelectedIds],
       fields: {
         plan_name: elLessonPlanName.value,
@@ -1270,9 +1341,8 @@ async function loadBlockRoster() {
   const ok = await loadBlockDaySessions();
   if (!ok) return;
   // มีครั้งเดิม → เปิดครั้งแรกให้แก้ (กันเผลอสร้างครั้งซ้ำ) · ไม่มี → ตั้งต้นเพิ่มครั้งใหม่
-  if (blockRounds.length > 0) selectBlockRound(0);
+  if (blockRounds.length > 0) await selectBlockRound(0);
   else startNewBlockRound();
-  showLessonLogBlockNote();
 }
 
 // ---------- โหมดบล็อก: โหลด+จับคู่ครั้งที่เช็คของวันนี้ข้ามทุกวิชาที่ติ๊ก ----------
@@ -1359,13 +1429,15 @@ function renderBlockRoundChips() {
 
 // ลบครั้งที่เช็คชื่อ (โหมดบล็อก) — ลบ session ของทุกวิชาย่อยในครั้งนั้นที่ผู้ใช้มีสิทธิ์ลบ
 // วิชาที่ไม่มีสิทธิ์ต้องบอกในกล่องยืนยันให้เห็น ห้ามลบครึ่ง ๆ กลาง ๆ แบบเงียบ
-async function lessonLogDeleteWarning(sessionRow) {
+async function lessonLogDeleteWarning(sessionRow, removingIds = [sessionRow?.id]) {
   try {
     const linkedLog = await loadLessonLogBySession(sessionRow?.id);
     if (!linkedLog) return "";
     const plan = linkedLog.plan_name ? " “" + linkedLog.plan_name + "”" : "";
     let warning = "ครั้งนี้อยู่ในบันทึกหลังสอน" + plan + " และจะถูกถอดออก";
-    if ((linkedLog.sessions || []).length <= 1) warning += " · บันทึกจะถูกลบทั้งใบ";
+    if ((linkedLog.sessions || []).every(row => removingIds.includes(row.id))) {
+      warning += " · บันทึกจะถูกลบทั้งใบ";
+    }
     return warning;
   } catch (error) {
     showToast("ตรวจสอบผลกระทบบันทึกหลังสอนไม่สำเร็จ: " + (error.message || String(error)), false);
@@ -1383,6 +1455,7 @@ async function deleteBlockRound(r) {
 
   const lines = [];
   const lessonWarnings = [];
+  const removingSessionIds = targets.map(m => round.bySubject.get(m.id).id);
   for (const m of targets) {
     const sess = round.bySubject.get(m.id);
     const { count, error: cErr } = await sb
@@ -1391,7 +1464,7 @@ async function deleteBlockRound(r) {
       .eq("session_id", sess.id);
     if (cErr) { showToast("ตรวจสอบข้อมูลก่อนลบไม่สำเร็จ: " + cErr.message, false); return; }
     lines.push("· " + m.name + " (" + fmtPeriods(sess.periods_covered) + " คาบ · นักเรียน " + (count || 0) + " คน)");
-    const warning = await lessonLogDeleteWarning(sess);
+    const warning = await lessonLogDeleteWarning(sess, removingSessionIds);
     if (warning === null) return;
     if (warning) lessonWarnings.push("· " + m.name + ": " + warning);
   }
@@ -1425,11 +1498,11 @@ async function deleteBlockRound(r) {
   const ok = await loadBlockDaySessions();
   if (!ok) return;
   if (blockRounds.length === 0) startNewBlockRound();
-  else selectBlockRound(Math.min(r, blockRounds.length - 1));
+  else await selectBlockRound(Math.min(r, blockRounds.length - 1));
 }
 
 // เปิดครั้งเดิมมาแก้ — เซ็ตคาบรายวิชา + สถานะเด็ก (ช่องเดียวต่อคน แก้ทีเดียวทุกวิชา)
-function selectBlockRound(r) {
+async function selectBlockRound(r) {
   blockEditRound = r;
   const round = blockRounds[r];
   const scoreMap = {};
@@ -1449,10 +1522,12 @@ function selectBlockRound(r) {
     (roomOnly ? " — กำลังแก้เฉพาะห้อง " + selected.label + " · ข้อมูลห้องอื่นไม่ถูกเปลี่ยน" : " — บันทึกแล้วจะอัปเดตทุกวิชาในครั้งนี้");
   renderStudents(scoreMap, { usePrefill: false });
   renderBlockRoundChips();
+  await refreshLessonLogCard();
 }
 
 // ตั้งต้นเพิ่มครั้งใหม่ (คืนช่องคาบเป็นค่าเริ่มต้นของแต่ละวิชา)
 function startNewBlockRound() {
+  hideLessonLogUI();
   blockEditRound = null;
   for (const m of blockMembers) {
     const num = elMemberList.querySelector(".member-periods[data-id='" + m.id + "']");
@@ -1844,8 +1919,8 @@ async function saveBlock() {
   const ok = await loadBlockDaySessions();
   if (!ok) return;
   if (blockRounds.length === 0) startNewBlockRound();
-  else if (wasEditing) selectBlockRound(Math.min(prevRound, blockRounds.length - 1));
-  else selectBlockRound(blockRounds.length - 1); // ครั้งใหม่ที่เพิ่งสร้าง = ครั้งสุดท้าย
+  else if (wasEditing) await selectBlockRound(Math.min(prevRound, blockRounds.length - 1));
+  else await selectBlockRound(blockRounds.length - 1); // ครั้งใหม่ที่เพิ่งสร้าง = ครั้งสุดท้าย
 }
 
 function hideStudents() {

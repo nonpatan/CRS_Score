@@ -1004,13 +1004,14 @@ export async function loadLessonLogBySession(sessionId) {
   return { ...logRes.data, sessions };
 }
 
-export async function loadUnlinkedSessions(subjectId, { withinDays = 60 } = {}) {
-  if (!subjectId) return [];
+export async function loadUnlinkedSessions(subjectIds, { withinDays = 60 } = {}) {
+  const ids = [...new Set((Array.isArray(subjectIds) ? subjectIds : []).filter(Boolean))];
+  if (!ids.length) return [];
   const days = Math.max(1, Math.floor(Number(withinDays) || 60));
   const fromDate = addDaysStr(toDateStr(bangkokNow()), -(days - 1));
   const sessionsRes = await sb.from("attendance_sessions")
     .select("id,subject_id,session_date,periods_covered,attendance_records(status)")
-    .eq("subject_id", subjectId)
+    .in("subject_id", ids)
     .gte("session_date", fromDate)
     .order("session_date", { ascending:false })
     .order("created_at", { ascending:false });
