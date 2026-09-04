@@ -176,8 +176,8 @@
           <div class="field"><label for="p-kind">ประเภท</label><select id="p-kind"><option>โครงการ</option><option>กิจกรรม</option></select></div>
           <div class="field"><label for="p-status">สถานะ</label><select id="p-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select><div class="hint" id="p-status-hint" hidden>ตอนนี้เลือกได้เฉพาะช่วงวางแผน · สถานะจะเปลี่ยนเป็น “กำลังดำเนินการ” หรือ “เสร็จสิ้น” ได้หลังผ่านการอนุมัติ แล้วกดปุ่ม “รายงานผล”</div></div>
           <div class="field wide" id="parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent"><option value="">— เลือกโครงการแม่ —</option></select><div class="hint">ถ้ายังไม่มีโครงการที่ใช่ ให้สร้างโครงการก่อน</div></div>
-          <div class="field"><label for="p-start">วันเริ่ม</label><input id="p-start" type="date" required></div>
-          <div class="field"><label for="p-end">วันสิ้นสุด</label><input id="p-end" type="date"><div class="hint">เว้นว่างได้ถ้าเป็นงานวันเดียว</div></div>
+          <div class="field"><label for="p-start">วันเริ่ม</label><input id="p-start" type="date" required><div class="hint" id="p-start-hint"></div></div>
+          <div class="field"><label for="p-end">วันสิ้นสุด</label><input id="p-end" type="date"><div class="hint" id="p-end-hint">เว้นว่างได้ถ้าเป็นงานวันเดียว</div></div>
           <div class="field wide" id="responsible-select-field"><label for="p-responsible">ผู้รับผิดชอบ</label><select id="p-responsible"><option value="">กำลังโหลดรายชื่อ…</option></select><div class="hint" id="responsible-note"></div></div>
           <div class="field wide" id="responsible-own-field" hidden><label>ผู้รับผิดชอบ</label><div class="banner info" id="responsible-own-name"></div></div>
           <div class="field"><label for="p-budget-planned">งบตั้งไว้ (บาท)</label><input id="p-budget-planned" type="number" min="0" step="0.01" inputmode="decimal"></div>
@@ -244,6 +244,33 @@ if (!session) {
   const fmtMoney = value => Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits:2 }) + " บาท";
   const fmtMoneyOrMissing = value => value == null ? "ยังไม่ได้กรอก" : fmtMoney(value);
   const numberOrNull = id => el(id).value.trim() === "" ? null : Number(el(id).value);
+  // ครู 3 คนกรอกปี พ.ศ. ลงช่องวันที่ ได้ 9 แถวที่เก็บเป็น ค.ศ. 2569 แล้วแสดงออกมาเป็น 3112
+  // เพราะ fmtDate() บวก 543 ให้อีกรอบ ⟹ แถวพวกนี้หลุดจากทุกรายงานที่กรองตามวันที่ โดยไม่มี error
+  // ต้นเหตุ: input type="date" ตามสเปกเป็น ค.ศ. เสมอ Chrome ภาษาไทยจึงขึ้น 18/05/2026
+  // ทั้งที่หน้าจอรอบ ๆ เป็น พ.ศ. หมด ครูเลยคิดว่าช่องผิดแล้วพิมพ์แก้เอง
+  const DATE_PICK_ONLY_NOTE = "เลือกจากปฏิทินเท่านั้น พิมพ์เองไม่ได้ · ปีในช่องนี้เป็น ค.ศ. (2026) ถูกต้องแล้ว ระบบจะแปลงเป็น พ.ศ. ให้เองตอนแสดงผล";
+  // แป้นที่ยังต้องผ่าน ไม่งั้นแท็บออกจากช่องไม่ได้ ปิดปฏิทินไม่ได้ และส่งฟอร์มด้วยคีย์บอร์ดไม่ได้
+  const DATE_ALLOWED_KEYS = ["Tab", "Escape", "Enter"];
+  // ⛔ ห้ามเปลี่ยนไปใช้ readonly/disabled — ทดสอบบนเบราว์เซอร์จริงแล้วพังทั้ง 2 ทาง:
+  //    showPicker() โยน InvalidStateError (ครูเปิดปฏิทินไม่ได้เลย) และ willValidate เป็น false
+  //    ⟹ required ตายสนิท ครูเว้นว่างแล้วบันทึกผ่านไปโดน not null ของ DB เด้ง error ดิบใส่หน้า
+  function bindDatePickOnly(input) {
+    input.addEventListener("keydown", event => {
+      if (DATE_ALLOWED_KEYS.includes(event.key)) return;
+      event.preventDefault();
+      // p-end เว้นว่างได้ตามดีไซน์เดิม ถ้าล้างไม่ได้ครูที่เผลอใส่วันสิ้นสุดจะติดกับถาวร
+      if (event.key === "Backspace" || event.key === "Delete") {
+        input.value = "";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    // เดิมต้องคลิกไอคอนปฏิทินเล็ก ๆ ทางขวาเท่านั้น พอพิมพ์ไม่ได้แล้ว
+    // คลิกกลางช่องแล้วเงียบจะดูเหมือนหน้าเว็บเสีย · try/catch เพราะ showPicker โยนได้
+    // ทั้งตอนเบราว์เซอร์ไม่รองรับและตอนปฏิทินเปิดค้างอยู่แล้ว
+    input.addEventListener("click", () => {
+      try { input.showPicker(); } catch { /* ปฏิทินเปิดอยู่แล้วหรือเบราว์เซอร์ไม่รองรับ — ปล่อยผ่าน */ }
+    });
+  }
   // RLS บังคับว่าแถวใหม่ต้องเป็น "วางแผน"/"ยกเลิก" เท่านั้น (schema.sql:4806-4822)
   // และแถวที่ยังไม่เคยอนุมัติ ครูเจ้าของก็ถูกล็อกแค่ 2 ตัวนั้นเหมือนกัน
   // ⛔ เช็ก approvedAt ไม่ใช่ approval_status — แถวที่ถูกส่งกลับให้แก้ approved_at ยังค้างอยู่
@@ -892,6 +919,12 @@ if (!session) {
       if (!el(id).value.trim()) el(id).setCustomValidity(message);
     });
   }
+  // 🪤 ผูกที่นี่ครั้งเดียว ห้ามย้ายไปใน openProjectForm() ซึ่งถูกเรียกใหม่ทุกครั้งที่เปิดฟอร์ม
+  //    แต่ไม่ได้สร้าง element ใหม่ (แค่เซ็ต .value) ⟹ listener จะซ้อนกันเพิ่มขึ้นเรื่อย ๆ
+  bindDatePickOnly(el("p-start"));
+  bindDatePickOnly(el("p-end"));
+  el("p-start-hint").textContent = DATE_PICK_ONLY_NOTE;
+  el("p-end-hint").textContent = "เว้นว่างได้ถ้าเป็นงานวันเดียว · " + DATE_PICK_ONLY_NOTE;
   el("add-project").addEventListener("click", () => openProjectForm());
   el("cancel-project").addEventListener("click", closeProjectForm);
   el("cancel-revision").addEventListener("click", closeRevisionForm);
