@@ -89,6 +89,7 @@
   <main class="academic-content">
     <section class="card no-print" id="filter-card">
       <form id="filters" class="no-print" inert>
+        <div class="field no-print" id="teacher-field" hidden><label for="teacher">ครูผู้สอน</label><select id="teacher"></select></div>
         <div class="filters">
           <div class="field"><label for="year">ปีการศึกษา</label><select id="year"><option value="">ทุกปี</option></select></div>
           <div class="field"><label for="subject">วิชา</label><select id="subject"><option value="">ทุกวิชา</option></select></div>
@@ -113,12 +114,14 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, getActiveYear, setActiveYear, distinctYears, loadMyLessonLogs, summarizeLessonLogForPrint } from "../supabase-client.js?v=20260907-1";
+import { sb, requireAuth, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?v=20260908-1";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login
 } else {
 const el = id => document.getElementById(id);
+let canViewTeachers = false;
+const teacherNames = new Map();
 let logs = [], subjects = [], settings = new Map(), requestSeq = 0, loading = true, printing = false;
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
@@ -135,6 +138,44 @@ function hasPrintSettings() { return ["receipt_school_name", "receipt_address"].
 function syncPrintButtons() {
   el("print-all").disabled = loading || printing || !logs.length || !hasPrintSettings();
   document.querySelectorAll("[data-print]").forEach(button => { button.disabled = loading || printing || !hasPrintSettings(); });
+}
+// ตัวกรองใน DOM ไม่ใช่ด่านสิทธิ์: ครูทั่วไปส่ง id ตัวเองเสมอแม้แก้ค่า select
+function selectedCreatedBy() {
+  return canViewTeachers ? (el("teacher").value || session.user.id) : session.user.id;
+}
+async function initializeTeacherFilter() {
+  const [approver, academic] = await Promise.all([
+    isProjectApprover(),
+    checkDepartment("วิชาการ")
+  ]);
+  canViewTeachers = approver || academic;
+  fillTeachers([]);
+  el("teacher-field").hidden = !canViewTeachers;
+}
+function fillTeachers(rows) {
+  if (!canViewTeachers) return;
+  const selected = el("teacher").value || session.user.id;
+  // ผลลัพธ์เรียงวันล่าสุดก่อน เลือกชื่อสำเนาจากบันทึกแรกของแต่ละคนในชุดนี้
+  const seen = new Set();
+  for (const row of rows) {
+    if (!row.created_by || seen.has(row.created_by)) continue;
+    seen.add(row.created_by);
+    teacherNames.set(row.created_by, row.created_by_name || "ไม่ระบุชื่อครู");
+  }
+  const teachers = [...teacherNames].filter(([id]) => id !== session.user.id)
+    .sort((a, b) => a[1].localeCompare(b[1], "th") || a[0].localeCompare(b[0]));
+  el("teacher").innerHTML = `<option value="${escapeHtml(session.user.id)}">ของฉัน</option><option value="all">ทุกคน</option>` +
+    teachers.map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join("");
+  el("teacher").value = selected;
+}
+function rememberFilterOptions(rows, initial = false) {
+  const selectedYear = initial ? getActiveYear() : el("year").value;
+  subjects = [...new Map([...subjects, ...rows.map(log => log.subject).filter(Boolean)].map(subject => [subject.id, subject])).values()];
+  const years = distinctYears(subjects);
+  el("year").innerHTML = '<option value="">ทุกปี</option>' + years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
+  el("year").value = years.includes(selectedYear) ? selectedYear : "";
+  fillSubjects();
+  fillTeachers(rows);
 }
 function fillSubjects() {
   const old = el("subject").value;
@@ -157,13 +198,13 @@ function renderDocument(log) {
   </div></article>`;
 }
 function renderResults() {
-  el("result-count").textContent = `พบบันทึกของฉัน ${logs.length} รายการ`;
+  el("result-count").textContent = `${selectedCreatedBy() === session.user.id ? "พบบันทึกของฉัน" : "พบบันทึก"} ${logs.length} รายการ`;
   el("print-all").textContent = `พิมพ์ทั้งหมดที่ค้นเจอ (${logs.length} แผ่น)`;
   el("results").innerHTML = logs.length ? logs.map(log => {
     const summary = summarizeLessonLogForPrint(log), subject = log.subject || {};
     const target = log.sessions.at(-1);
     const editUrl = target ? "attendance.html?" + new URLSearchParams({ lesson_session:target.id }) : "attendance.html";
-    return `<article class="card"><div class="section-head"><div><h2>${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}</h2><div class="meta">${escapeHtml(subject.name)} · ${escapeHtml(subject.grade_level)} · ${escapeHtml(dateRange(summary))}</div></div><div class="actions no-print"><a class="ghost no-print" href="${escapeHtml(editUrl)}">แก้ไข</a><button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์</button></div></div><div class="chips"><span class="chip">สอนจริง ${summary.totalPeriods} คาบ</span><span class="chip">${summary.sessionCount} ครั้ง</span>${summary.plannedPeriods !== null ? `<span class="chip">แผน ${summary.plannedPeriods} คาบ</span>` : ""}${summary.weeks > 1 ? `<span class="chip warn">ใช้เวลา ${summary.weeks} สัปดาห์</span>` : ""}${!log.plan_name?.trim() ? '<span class="chip warn">ยังไม่ระบุแผน</span>' : ""}</div></article>`;
+    return `<article class="card"><div class="section-head"><div><h2>${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}</h2><div class="meta">${escapeHtml(subject.name)} · ${escapeHtml(subject.grade_level)} · ${escapeHtml(dateRange(summary))}</div>${canViewTeachers && selectedCreatedBy() !== session.user.id ? `<div class="meta">ครูผู้สอน: ${escapeHtml(log.created_by_name || "—")}</div>` : ""}</div><div class="actions no-print"><a class="ghost no-print" href="${escapeHtml(editUrl)}">แก้ไข</a><button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์</button></div></div><div class="chips"><span class="chip">สอนจริง ${summary.totalPeriods} คาบ</span><span class="chip">${summary.sessionCount} ครั้ง</span>${summary.plannedPeriods !== null ? `<span class="chip">แผน ${summary.plannedPeriods} คาบ</span>` : ""}${summary.weeks > 1 ? `<span class="chip warn">ใช้เวลา ${summary.weeks} สัปดาห์</span>` : ""}${!log.plan_name?.trim() ? '<span class="chip warn">ยังไม่ระบุแผน</span>' : ""}</div></article>`;
   }).join("") : '<div class="card empty">ไม่พบบันทึกในช่วงที่เลือก · ลองเปลี่ยนตัวกรอง หรือเขียนบันทึกจากหน้าเช็คชื่อ</div>';
   el("print-area").innerHTML = logs.map(renderDocument).join("");
   syncPrintButtons();
@@ -173,12 +214,13 @@ async function search() {
   loading = true;
   logs = [];
   renderResults();
-  el("result-count").textContent = "กำลังโหลดบันทึกของฉัน…";
+  el("result-count").textContent = selectedCreatedBy() === session.user.id ? "กำลังโหลดบันทึกของฉัน…" : "กำลังโหลดบันทึก…";
   el("toast").hidden = true;
   try {
-    const result = await loadMyLessonLogs({ userId:session.user.id, year:el("year").value, term:el("term").value, subjectId:el("subject").value, from:el("from").value, to:el("to").value });
+    const result = await loadLessonLogs({ createdBy:selectedCreatedBy(), year:el("year").value, term:el("term").value, subjectId:el("subject").value, from:el("from").value, to:el("to").value });
     if (seq !== requestSeq) return;
     logs = result;
+    rememberFilterOptions(result);
     renderResults();
   } catch (error) {
     if (seq !== requestSeq) return;
@@ -247,14 +289,16 @@ async function printLogs(id = null) {
   }
 }
 el("filters").addEventListener("submit", event => { event.preventDefault(); if (!printing) search(); });
+el("teacher").addEventListener("change", () => { el("subject").value = ""; search(); });
 el("year").addEventListener("change", () => { setActiveYear(el("year").value); fillSubjects(); search(); });
 el("term").addEventListener("change", () => { fillSubjects(); search(); });
 for (const id of ["subject", "from", "to"]) el(id).addEventListener("change", search);
 el("print-all").addEventListener("click", () => printLogs());
 el("results").addEventListener("click", event => { const button = event.target.closest("[data-print]"); if (button) printLogs(button.dataset.print); });
 try {
+  await initializeTeacherFilter();
   const [mine, settingsResult] = await Promise.all([
-    loadMyLessonLogs({ userId:session.user.id }),
+    loadLessonLogs({ createdBy:selectedCreatedBy() }),
     sb.from("app_settings").select("key,value").in("key", ["receipt_school_name", "receipt_address"])
   ]);
   if (settingsResult.error) throw new Error("โหลดหัวกระดาษไม่สำเร็จ: " + settingsResult.error.message);
@@ -263,11 +307,7 @@ try {
     el("settings-note").textContent = "ยังพิมพ์ไม่ได้ · ให้ผู้ดูแลตั้งชื่อโรงเรียนและที่อยู่ในค่าตั้งใบเสร็จก่อน";
     el("settings-note").hidden = false;
   }
-  subjects = [...new Map(mine.filter(log => log.subject).map(log => [log.subject.id, log.subject])).values()];
-  const years = distinctYears(subjects);
-  el("year").innerHTML = '<option value="">ทุกปี</option>' + years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
-  el("year").value = years.includes(getActiveYear()) ? getActiveYear() : "";
-  fillSubjects();
+  rememberFilterOptions(mine, true);
   logs = mine.filter(log => !el("year").value || log.subject?.year === el("year").value);
   loading = false;
   el("filters").inert = false;

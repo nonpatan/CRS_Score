@@ -1028,16 +1028,17 @@ export function summarizeLessonLogForPrint(log) {
   return { ...summary, weeks:Math.ceil(days / 7), ...counts };
 }
 
-export async function loadMyLessonLogs({ userId, year, term, subjectId, from, to } = {}) {
-  if (!userId) throw new Error("ไม่พบผู้ใช้ของบันทึกหลังสอน กรุณาเข้าสู่ระบบใหม่");
+export async function loadLessonLogs({ createdBy, year, term, subjectId, from, to } = {}) {
+  if (typeof createdBy !== "string" || !createdBy.trim()) throw new Error("ต้องระบุครูผู้สอนของบันทึกหลังสอน");
+  createdBy = createdBy.trim();
   if (from && to && from > to) throw new Error("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
   const rows = [];
   // แบ่งหน้าเพื่อให้ปุ่มพิมพ์ทั้งหมดไม่ตกหล่นเมื่อเกินเพดานต่อคำขอ
   const pageSize = 200;
   for (let offset = 0; ; offset += pageSize) {
     let query = sb.from("lesson_logs")
-      .select("*,subject:subjects!inner(id,name,code,grade_level,year,term),lesson_log_sessions(attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status)))")
-      .eq("created_by", userId);
+      .select("*,subject:subjects!inner(id,name,code,grade_level,year,term),lesson_log_sessions(attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status)))");
+    if (createdBy !== "all") query = query.eq("created_by", createdBy);
     if (year) query = query.eq("subject.year", year);
     if (term) query = query.eq("subject.term", term);
     if (subjectId) query = query.eq("subject_id", subjectId);
