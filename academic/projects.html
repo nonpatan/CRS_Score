@@ -251,6 +251,12 @@ if (!session) {
   const DATE_PICK_ONLY_NOTE = "เลือกจากปฏิทินเท่านั้น พิมพ์เองไม่ได้ · ปีในช่องนี้เป็น ค.ศ. (2026) ถูกต้องแล้ว ระบบจะแปลงเป็น พ.ศ. ให้เองตอนแสดงผล";
   // แป้นที่ยังต้องผ่าน ไม่งั้นแท็บออกจากช่องไม่ได้ ปิดปฏิทินไม่ได้ และส่งฟอร์มด้วยคีย์บอร์ดไม่ได้
   const DATE_ALLOWED_KEYS = ["Tab", "Escape", "Enter"];
+  // hint ของช่องวันสิ้นสุดมี 2 ท่อน — ท่อนหน้าเปลี่ยนตามว่าบังคับไหม ท่อนหลังคงที่
+  // 🔴 ต้องต่อ DATE_PICK_ONLY_NOTE ทุกครั้ง ห้ามเขียนทับ ไม่งั้นครูจะไม่รู้ว่าปี ค.ศ. ในช่องถูกแล้ว
+  const END_HINT_OPTIONAL = "เว้นว่างได้ถ้าเป็นงานวันเดียว";
+  const END_HINT_REQUIRED = "โครงการที่มีกิจกรรมต้องระบุวันสิ้นสุด";
+  const setEndDateHint = required =>
+    el("p-end-hint").textContent = (required ? END_HINT_REQUIRED : END_HINT_OPTIONAL) + " · " + DATE_PICK_ONLY_NOTE;
   // ⛔ ห้ามเปลี่ยนไปใช้ readonly/disabled — ทดสอบบนเบราว์เซอร์จริงแล้วพังทั้ง 2 ทาง:
   //    showPicker() โยน InvalidStateError (ครูเปิดปฏิทินไม่ได้เลย) และ willValidate เป็น false
   //    ⟹ required ตายสนิท ครูเว้นว่างแล้วบันทึกผ่านไปโดน not null ของ DB เด้ง error ดิบใส่หน้า
@@ -443,6 +449,38 @@ if (!session) {
       ok:affected.size === 0,
       affected:[...affected].map(([okrId, projectNames]) => ({ okrId, projectNames }))
     };
+  }
+
+  // 🪤 end_date ว่าง = งานวันเดียว ⟹ ต้องถอยไปใช้ start_date ทุกจุดที่เทียบ ทั้งฝั่งลูกและฝั่งแม่
+  //    เทียบกับ null ตรง ๆ จะได้ผลเงียบ ๆ ที่ผิด (ตระกูลเดียวกับ RLS ที่กรองแล้วไม่ฟ้อง)
+  const projectEndOf = project => project?.end_date || project?.start_date || null;
+
+  // วันสิ้นสุดของโครงการมีหน้าที่เดียวคือเป็นกรอบให้กิจกรรมลูก ⟹ ไม่มีลูกก็ไม่ต้องมีกรอบ
+  // ⟹ บังคับเฉพาะโครงการที่มีลูกอยู่แล้ว และห้ามเพิ่มลูกใต้โครงการที่ยังไม่มีวันสิ้นสุด
+  function activityDateGuard(rows, parentId, start, end) {
+    const parent = (rows || []).find(row => row.id === parentId);
+    if (!parent) return { ok:true, reason:null, parent:null };
+    // ครึ่ง B — ขาดข้อนี้ ครูจะเพิ่มลูกใต้แม่ที่ไม่มีวันจบได้ แล้ววนกลับมาที่รูเดิม
+    if (!parent.end_date) return { ok:false, reason:"parent-no-end", parent };
+    if (!start) return { ok:true, reason:null, parent };
+    const childEnd = end || start;
+    const parentEnd = projectEndOf(parent);
+    if (start < parent.start_date || childEnd > parentEnd) {
+      return { ok:false, reason:"outside-parent", parent };
+    }
+    return { ok:true, reason:null, parent };
+  }
+
+  function parentDateGuard(rows, projectId, start, end) {
+    const children = (rows || []).filter(row => row.parent_id === projectId);
+    if (!children.length) return { ok:true, reason:null, outside:[], childCount:0 };
+    // ครึ่ง A — required บนช่องกันได้แค่ฝั่งหน้าจอ ต้องกันตอนบันทึกด้วย
+    if (!end) return { ok:false, reason:"needs-end", outside:[], childCount:children.length };
+    const outside = children.filter(child => {
+      const childEnd = projectEndOf(child);
+      return child.start_date < start || (childEnd && childEnd > end);
+    });
+    return { ok:outside.length === 0, reason:outside.length ? "children-outside" : null, outside, childCount:children.length };
   }
 
   function approvalSubmissionBlockers(project) {
@@ -732,6 +770,14 @@ if (!session) {
     el("parent-field").hidden = !activity;
     el("p-parent").required = activity;
     if (!activity) el("p-parent").value = "";
+    // 🪤 เงื่อนไขขึ้นกับ "ข้อมูล" ไม่ใช่แค่ kind ⟹ ต้องคิดใหม่ทุกครั้งที่ sync (เปิดฟอร์ม/สลับประเภท/สลับแม่)
+    //    และต้องล้าง required เมื่อเงื่อนไขไม่เข้า ไม่งั้นครูติดค้างบันทึกไม่ได้ทั้งที่ช่องดูปกติ
+    const childCount = editingProjectId
+      ? projects.filter(row => row.parent_id === editingProjectId).length
+      : 0;
+    const endRequired = !activity && childCount > 0;
+    el("p-end").required = endRequired;
+    setEndDateHint(endRequired);
     let kept = selectedIds;
     if (activity) {
       const guard = activityKrGuard(projects, el("p-parent").value, selectedIds);
@@ -924,7 +970,7 @@ if (!session) {
   bindDatePickOnly(el("p-start"));
   bindDatePickOnly(el("p-end"));
   el("p-start-hint").textContent = DATE_PICK_ONLY_NOTE;
-  el("p-end-hint").textContent = "เว้นว่างได้ถ้าเป็นงานวันเดียว · " + DATE_PICK_ONLY_NOTE;
+  setEndDateHint(false);
   el("add-project").addEventListener("click", () => openProjectForm());
   el("cancel-project").addEventListener("click", closeProjectForm);
   el("cancel-revision").addEventListener("click", closeRevisionForm);
@@ -1074,6 +1120,15 @@ if (!session) {
         const codes = okrCodes(krGuard.invalidIds).join(", ");
         return toast(`${codes} ไม่ได้อยู่ในโครงการ “${krGuard.parent?.name || "ไม่พบชื่อ"}” · ถ้ากิจกรรมนี้ทำเพื่อ ${codes} จริง ให้ฝ่ายวิชาการเพิ่ม KR ที่โครงการก่อน`, true);
       }
+      const dateGuard = activityDateGuard(projects, parentId, start, end);
+      // ⚠️ ข้อความต้องครอบคลุม 2 ทาง — เคสจริง 2026-09-04 คือครูเลือกโครงการแม่ผิด
+      //    ไม่ใช่แม่ลืมใส่วันสิ้นสุด ถ้าบอกทางเดียวจะชี้ให้ครูไปแก้ผิดจุด
+      if (!dateGuard.ok && dateGuard.reason === "parent-no-end") {
+        return toast(`โครงการ “${dateGuard.parent.name}” ยังไม่ได้ระบุวันสิ้นสุด (${fmtDate(dateGuard.parent.start_date)} วันเดียว) · ถ้ากิจกรรมนี้อยู่ใต้โครงการนี้จริง ให้ไประบุวันสิ้นสุดที่โครงการแม่ก่อน · ถ้าเลือกโครงการแม่ผิด ให้เปลี่ยนเป็นโครงการที่ถูกต้อง`, true);
+      }
+      if (!dateGuard.ok) {
+        return toast(`กิจกรรมนี้ต้องอยู่ในช่วงของโครงการ “${dateGuard.parent.name}” (${fmtDate(dateGuard.parent.start_date)} – ${fmtDate(projectEndOf(dateGuard.parent))}) · ถ้าช่วงของโครงการแม่ผิด ให้แก้ที่โครงการแม่ก่อน · ถ้าเลือกโครงการแม่ผิด ให้เปลี่ยนเป็นโครงการที่ถูกต้อง`, true);
+      }
     } else if (editingProjectId) {
       const budgetGuard = parentBudgetGuard(projects, editingProjectId, planned);
       if (!budgetGuard.ok) {
@@ -1083,6 +1138,16 @@ if (!session) {
       if (!krGuard.ok) {
         const detail = krGuard.affected.map(item => `${okrCodes([item.okrId])[0]}: ${item.projectNames.join(", ")}`).join("; ");
         return toast(`เอา KR ออกจากโครงการนี้ไม่ได้ เพราะยังมีกิจกรรมผูกอยู่ — ${detail} · ถ้าจะเอาออก ให้แก้ที่กิจกรรมเหล่านั้นก่อน`, true);
+      }
+      const dateGuard = parentDateGuard(projects, editingProjectId, start, end);
+      if (!dateGuard.ok && dateGuard.reason === "needs-end") {
+        el("p-end").focus();
+        return toast(`โครงการนี้มีกิจกรรมอยู่ ${dateGuard.childCount} รายการ จึงต้องระบุวันสิ้นสุดเพื่อเป็นกรอบให้กิจกรรม · ถ้าเป็นงานวันเดียวจริง ให้ย้ายกิจกรรมเหล่านั้นออกไปโครงการอื่นก่อน`, true);
+      }
+      if (!dateGuard.ok) {
+        const detail = dateGuard.outside
+          .map(child => `${child.name} (${fmtDate(child.start_date)} – ${fmtDate(projectEndOf(child))})`).join(" · ");
+        return toast(`ย่อช่วงโครงการไม่ได้ เพราะยังมีกิจกรรมอยู่นอกกรอบใหม่ — ${detail} · ถ้าจะย่อ ให้แก้วันที่ของกิจกรรมเหล่านั้นก่อน`, true);
       }
     }
     const responsibleOption = el("p-responsible").selectedOptions[0];
