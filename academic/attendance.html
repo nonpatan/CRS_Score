@@ -190,7 +190,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260902-1"></script>
+    <script src="../app-shell.js?v=20260907-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -347,7 +347,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog } from "../supabase-client.js?v=20260906-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts } from "../supabase-client.js?v=20260907-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -512,25 +512,6 @@ function applyLessonLogAccess(editable, logRow) {
     : "";
 }
 
-// สูตรล้วนสำหรับสรุปหลักฐานตามแผน: บวกคาบจริง (รวมครึ่งคาบ) นับครั้ง และหาวันแรก–วันสุดท้าย
-function summarizeLessonLogSessions(sessions, plannedPeriods = null) {
-  const rows = Array.isArray(sessions) ? sessions.filter(Boolean) : [];
-  const dates = rows.map(row => String(row.session_date || "")).filter(Boolean).sort();
-  const totalPeriods = rows.reduce((sum, row) => sum + (Number(row.periods_covered) || 0), 0);
-  const plannedText = String(plannedPeriods ?? "").trim();
-  const planned = plannedText ? Number(plannedText) : null;
-  const difference = Number.isFinite(planned) ? totalPeriods - planned : null;
-  return {
-    totalPeriods,
-    sessionCount: rows.length,
-    firstDate: dates[0] || null,
-    lastDate: dates[dates.length - 1] || null,
-    plannedPeriods: Number.isFinite(planned) ? planned : null,
-    difference,
-    matchesPlanned: difference === null ? null : Math.abs(difference) < 0.0001
-  };
-}
-
 function fmtLessonDate(iso, includeYear = false) {
   const [y, m, d] = String(iso || "").split("-").map(Number);
   if (!y || !m || !d) return String(iso || "");
@@ -557,19 +538,6 @@ function hideLessonLogUI() {
   lessonLogSaving = false;
   lessonLogEditable = false;
   lessonLogCurrentIds = new Set();
-}
-
-// 🪤 "ลา" ไม่ใช่ "ขาด" — ระบบแยกสองอย่างนี้ทุกที่ (STATUS_OPTIONS มี 5 ค่า · การ์ดหน้าแรก
-// แสดง "ขาด 15 · ลา 34" แยกกัน) ⟹ ห้ามเหมารวมเป็นขาด บรรทัดนี้ไปอยู่บนหลักฐานนิเทศ
-function lessonSessionAttendanceCounts(sessionRow) {
-  const records = sessionRow?.attendance_records || [];
-  let present = 0, leave = 0, absent = 0;
-  for (const row of records) {
-    if (row.status === "มา" || row.status === "มาสาย") present++;
-    else if (row.status === "ลาป่วย" || row.status === "ลากิจ") leave++;
-    else absent++;
-  }
-  return { present, leave, absent };
 }
 
 // ซ่อนตัวที่เป็น 0 เพื่อไม่ให้แถวยาวเกินจำเป็นบนมือถือ แต่ถ้าไม่มีใครมาเลยต้องยังบอก "มา 0"
@@ -995,7 +963,8 @@ elFilterGrade.addEventListener("change", async () => {
 });
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.dispatchEvent(new Event("change")); });
 
-elSubject.addEventListener("change", async () => {
+elSubject.addEventListener("change", selectSubject);
+async function selectSubject() {
   hideStudents();
   clearAccessNote();
   clearPlacementNote();
@@ -1040,7 +1009,7 @@ elSubject.addEventListener("change", async () => {
     autoSelectSingleRosterRoom(roster);
     await refreshMakeup();
   }
-});
+}
 
 // ---------- เติมรายการวิชาย่อยของวิชาบูรณาการ (โชว์เฉพาะที่ครูเป็นเจ้าของ + คาบว่าง) ----------
 async function loadMemberOptions(integratedId) {
@@ -2099,6 +2068,51 @@ async function populateGradeOptions() {
   elFilterGrade.innerHTML = "<option value=''>— ทุกชั้น —</option>" + optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
 }
 
+// ลิงก์จากหน้ารวม เปิดคาบเดิมและใช้ฟอร์มบันทึกหลังสอนตัวเดิมเท่านั้น
+async function openLinkedLessonLog() {
+  const sessionId = new URLSearchParams(window.location.search).get("lesson_session");
+  if (!sessionId) return;
+  try {
+    const log = await loadLessonLogBySession(sessionId);
+    if (!log || log.created_by !== session.user.id) throw new Error("ไม่พบบันทึกหลังสอนของคุณจากลิงก์นี้");
+    const target = log.sessions.find(row => row.id === sessionId);
+    const subject = allSubjects.find(row => row.id === log.subject_id);
+    if (!target || !subject) throw new Error("ไม่พบวิชาหรือครั้งที่เช็คชื่อของบันทึกนี้");
+    elFilterYear.value = subject.year || "";
+    elFilterGrade.value = "";
+    elFilterTerm.value = "";
+    applySubjectFilter();
+    // บันทึกเก่าก่อนรองรับแม่บูรณาการอาจผูกวิชาย่อยที่ dropdown ปกติซ่อนไว้
+    if (![...elSubject.options].some(option => option.value === subject.id)) {
+      elSubject.add(new Option(subjectLabel(subject), subject.id));
+    }
+    elSubject.value = subject.id;
+    elDate.value = target.session_date;
+    coveredSubjectIds = (await getMyCoverageFor(elDate.value)).subjectIds;
+    await selectSubject();
+    if (btnLoad.disabled) return;
+    elPeriods.value = target.periods_covered;
+    if (subject.subject_type === "บูรณาการ") {
+      // เลือกเฉพาะวิชาย่อยของคาบเป้าหมาย คาบอื่นในบันทึกเดิมโหลดคืนโดย refreshLessonLogCard
+      for (const cb of elMemberList.querySelectorAll(".member-cb")) {
+        cb.checked = !cb.disabled && cb.dataset.id === target.subject_id;
+      }
+      for (const input of elMemberList.querySelectorAll(".member-periods")) {
+        if (input.dataset.id === target.subject_id) input.value = target.periods_covered;
+      }
+    }
+    if ([...elClassroom.options].some(option => option.value === ALL_ROOMS_VALUE)) {
+      elClassroom.value = ALL_ROOMS_VALUE;
+      acceptedClassroomValue = ALL_ROOMS_VALUE;
+    }
+    await loadRosterFromSelection();
+    const existing = daySessions.find(row => row.id === sessionId);
+    if (!existing) throw new Error("เปิดคาบจากลิงก์ไม่ได้ กรุณาเลือกวิชา วันที่ และครั้งที่เช็คชื่ออีกครั้ง");
+    await selectDaySession(existing);
+    elLessonLogCard.scrollIntoView({ block:"start" });
+  } catch (error) { showToast(error.message, false); }
+}
+
 // เริ่มทำงาน
 await populateGradeOptions();
 try {
@@ -2107,7 +2121,8 @@ try {
 } catch (error) {
   showToast(error.message, false);
 }
-loadSubjects();
+await loadSubjects();
+await openLinkedLessonLog();
 }
 </script>
 </body>

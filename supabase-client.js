@@ -980,6 +980,89 @@ function lessonSessionFromLink(row) {
   return { ...session, attendance_records:session.attendance_records || [] };
 }
 
+// สูตรเดียวสำหรับหน้าเช็คชื่อและหลักฐานพิมพ์ รวมครึ่งคาบโดยไม่ปัด
+export function summarizeLessonLogSessions(sessions, plannedPeriods = null) {
+  const rows = Array.isArray(sessions) ? sessions.filter(Boolean) : [];
+  const dates = rows.map(row => String(row.session_date || "")).filter(Boolean).sort();
+  const totalPeriods = rows.reduce((sum, row) => sum + (Number(row.periods_covered) || 0), 0);
+  const plannedText = String(plannedPeriods ?? "").trim();
+  const planned = plannedText ? Number(plannedText) : null;
+  const difference = Number.isFinite(planned) ? totalPeriods - planned : null;
+  return {
+    totalPeriods,
+    sessionCount: rows.length,
+    firstDate: dates[0] || null,
+    lastDate: dates[dates.length - 1] || null,
+    plannedPeriods: Number.isFinite(planned) ? planned : null,
+    difference,
+    matchesPlanned: difference === null ? null : Math.abs(difference) < 0.0001
+  };
+}
+
+// “ลา” ไม่ใช่ “ขาด” — หลักฐานนิเทศต้องแยกสองสถานะนี้
+export function lessonSessionAttendanceCounts(sessionRow) {
+  const records = sessionRow?.attendance_records || [];
+  let present = 0, leave = 0, absent = 0;
+  for (const row of records) {
+    if (row.status === "มา" || row.status === "มาสาย") present++;
+    else if (row.status === "ลาป่วย" || row.status === "ลากิจ") leave++;
+    else absent++;
+  }
+  return { present, leave, absent };
+}
+
+// หลักฐานทุกคาบของบันทึก ไม่ตัดคาบนอกช่วงค้นหาออกจากยอดบนกระดาษ
+export function summarizeLessonLogForPrint(log) {
+  const sessions = log?.sessions || [];
+  const summary = summarizeLessonLogSessions(sessions, log?.planned_periods);
+  const days = summary.firstDate && summary.lastDate
+    ? Math.round((Date.parse(summary.lastDate + "T00:00:00Z") - Date.parse(summary.firstDate + "T00:00:00Z")) / 86400000) + 1
+    : 0;
+  const counts = sessions.reduce((total, row) => {
+    const count = lessonSessionAttendanceCounts(row);
+    total.present += count.present;
+    total.leave += count.leave;
+    total.absent += count.absent;
+    return total;
+  }, { present:0, leave:0, absent:0 });
+  return { ...summary, weeks:Math.ceil(days / 7), ...counts };
+}
+
+export async function loadMyLessonLogs({ userId, year, term, subjectId, from, to } = {}) {
+  if (!userId) throw new Error("ไม่พบผู้ใช้ของบันทึกหลังสอน กรุณาเข้าสู่ระบบใหม่");
+  if (from && to && from > to) throw new Error("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
+  const rows = [];
+  // แบ่งหน้าเพื่อให้ปุ่มพิมพ์ทั้งหมดไม่ตกหล่นเมื่อเกินเพดานต่อคำขอ
+  const pageSize = 200;
+  for (let offset = 0; ; offset += pageSize) {
+    let query = sb.from("lesson_logs")
+      .select("*,subject:subjects!inner(id,name,code,grade_level,year,term),lesson_log_sessions(attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status)))")
+      .eq("created_by", userId);
+    if (year) query = query.eq("subject.year", year);
+    if (term) query = query.eq("subject.term", term);
+    if (subjectId) query = query.eq("subject_id", subjectId);
+    const { data, error } = await query.order("created_at", { ascending:false })
+      .order("id", { ascending:false }).range(offset, offset + pageSize - 1);
+    if (error) throw new Error("โหลดบันทึกหลังสอนไม่สำเร็จ: " + error.message);
+    rows.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+  }
+  return rows.map(row => {
+    const { lesson_log_sessions, ...log } = row;
+    return {
+      ...log,
+      subject:Array.isArray(row.subject) ? row.subject[0] : row.subject,
+      sessions:(lesson_log_sessions || []).map(lessonSessionFromLink).filter(Boolean)
+        .sort((a, b) => String(a.session_date).localeCompare(String(b.session_date)))
+    };
+  }).filter(log => (!from && !to) || log.sessions.some(row =>
+    (!from || row.session_date >= from) && (!to || row.session_date <= to)
+  )).sort((a, b) =>
+    String(summarizeLessonLogSessions(b.sessions).lastDate || "")
+      .localeCompare(String(summarizeLessonLogSessions(a.sessions).lastDate || ""))
+  );
+}
+
 export async function loadLessonLogBySession(sessionId) {
   if (!sessionId) return null;
   const linkRes = await sb.from("lesson_log_sessions")

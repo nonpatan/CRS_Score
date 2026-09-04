@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บันทึกหลังสอน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+<style>
+  :root {
+    --ink: #1f2a2e; --muted: #5f6b70; --line: #dfe4e3; --teal: #0f6e56;
+    --teal-soft: #e1f5ee; --bg: #f7f8f7; --white: #ffffff; --danger: #a32d2d;
+    --danger-soft: #fceaea; --amber: #93690f; --amber-soft: #faf1dd;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; font-family: "Sarabun", sans-serif; font-size: 16px; line-height: 1.6; color: var(--ink); background: var(--bg); }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header h1 { margin: 4px 0; font-size: 23px; }
+  header p { margin: 0 0 8px; color: var(--muted); }
+  .card { margin-bottom: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
+  .field { min-width: 0; margin-bottom: 14px; }
+  label { display: block; margin-bottom: 5px; font-weight: 600; }
+  select, input[type="date"] { width: 100%; padding: 10px 12px; font: inherit; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); color: var(--ink); }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  button, a.ghost { display: inline-block; min-height: 44px; padding: 9px 14px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+  button:disabled { opacity: .55; cursor: default; }
+  .primary { width: 100%; color: var(--white); background: var(--teal); }
+  .ghost { color: var(--teal); background: var(--teal-soft); }
+  .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .section-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .section-head h2 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
+  .actions, .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips { margin-top: 12px; }
+  .chip { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 13px; color: var(--teal); background: var(--teal-soft); }
+  .chip.warn { color: var(--amber); background: var(--amber-soft); }
+  .hint, .meta { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .empty { padding: 26px 10px; color: var(--muted); text-align: center; }
+  .toast { position: sticky; bottom: 14px; margin-top: 12px; padding: 11px 16px; border-radius: 10px; background: var(--danger); color: var(--white); }
+  [hidden] { display: none !important; }
+  /* วัดเอกสารเต็มความกว้าง A4 นอกจอ เพื่อย่อเฉพาะใบที่ยาวโดยไม่ตัดข้อความทิ้ง */
+  #print-area { position: fixed; left: -100000px; top: 0; width: 186mm; height: 0; overflow: hidden; }
+  .print-doc { width: 186mm; height: 272mm; overflow: hidden; color: var(--ink); background: var(--white); }
+  /* ใบที่ยาวเกินกว่าจะย่อลงหน้าเดียวโดยยังอ่านออก — ปล่อยให้ไหลไปหน้าถัดไปแทนการย่อจนเล็ก
+     🔑 เอกสารนิเทศที่อ่านไม่ออก แย่พอ ๆ กับข้อความหาย (ผู้ใช้เคาะ 2026-09-04) */
+  .print-doc.print-doc-grow { height: auto; overflow: visible; }
+  .print-content { width: 186mm; padding: 1mm; transform-origin: top left; font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+  .school-heading { display: flex; justify-content: center; align-items: center; gap: 5mm; border-bottom: 1px solid var(--ink); padding-bottom: 4mm; text-align: center; }
+  .school-logo { width: 18mm; height: 18mm; object-fit: contain; }
+  .school-name { font-size: 19px; font-weight: 700; }
+  .school-address { white-space: pre-line; }
+  .document-title { margin: 5mm 0; font-size: 21px; text-align: center; }
+  .document-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 2mm 5mm; }
+  .plan-name { margin: 3mm 0; }
+  .evidence { margin: 4mm 0; padding: 3mm; border: 1px solid var(--ink); }
+  .lesson-section { margin-top: 5mm; }
+  .lesson-section h3 { margin: 0 0 2mm; font-size: 15px; }
+  .lesson-text { white-space: pre-wrap; min-height: 12mm; }
+  .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; text-align: center; margin-top: 13mm; }
+  @media (max-width: 620px) { .filters, .row2 { grid-template-columns: 1fr; gap: 0; } }
+  @media print {
+    @page { size: A4 portrait; margin: 12mm; }
+    .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print { display: none !important; }
+    html body { display: block !important; padding: 0 !important; margin: 0; background: #fff !important; font-size: 14px; }
+    body::before, body::after, .workspace-card-heading { display: none !important; }
+    html body .wrap, .academic-content { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
+    .card { box-shadow: none; border: 0; padding: 0; }
+    #print-area { position: static; width: 100%; height: auto; overflow: visible; }
+    .print-doc { break-after: page; break-inside: avoid; }
+    .print-doc.print-doc-grow { break-inside: auto; }
+    .print-doc:last-child { break-after: auto; }
+    body.print-single .print-doc:not(.print-target) { display: none !important; }
+    body.print-single .print-target { break-after: auto; }
+    tr, .avoid-break { break-inside: avoid; }
+    a[href]::after { content: ""; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="no-print">
+    <h1>บันทึกหลังสอน</h1>
+    <p>บันทึกหลังสอนของฉัน · ค้นหาและพิมพ์หลักฐานการจัดการเรียนรู้</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260907-1"></script>
+  </header>
+  <main class="academic-content">
+    <section class="card no-print" id="filter-card">
+      <form id="filters" class="no-print" inert>
+        <div class="filters">
+          <div class="field"><label for="year">ปีการศึกษา</label><select id="year"><option value="">ทุกปี</option></select></div>
+          <div class="field"><label for="subject">วิชา</label><select id="subject"><option value="">ทุกวิชา</option></select></div>
+          <div class="field"><label for="term">ภาคเรียน</label><select id="term"><option value="">ทุกภาคเรียน</option><option value="1">1</option><option value="2">2</option></select></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="from">ตั้งแต่วันที่</label><input id="from" type="date"></div>
+          <div class="field"><label for="to">ถึงวันที่</label><input id="to" type="date"></div>
+        </div>
+        <p class="hint">ค้นหาจากวันที่สอนจริงอย่างน้อยหนึ่งครั้งในช่วงที่เลือก · เอกสารยังแสดงคาบทั้งหมดที่ผูกกับบันทึก</p>
+        <button type="submit" class="ghost no-print" id="search">ค้นหา</button>
+      </form>
+    </section>
+    <section class="card no-print">
+      <p id="result-count" role="status">กำลังโหลดบันทึกของฉัน…</p>
+      <p id="settings-note" class="hint" hidden></p>
+      <button type="button" id="print-all" class="primary no-print" disabled>พิมพ์ทั้งหมดที่ค้นเจอ (0 แผ่น)</button>
+    </section>
+    <div id="results" class="no-print"></div>
+    <div id="print-area" aria-hidden="true"></div>
+    <div id="toast" class="toast err no-print" role="alert" hidden></div>
+  </main>
+</div>
+<script type="module">
+import { sb, requireAuth, getActiveYear, setActiveYear, distinctYears, loadMyLessonLogs, summarizeLessonLogForPrint } from "../supabase-client.js?v=20260907-1";
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login
+} else {
+const el = id => document.getElementById(id);
+let logs = [], subjects = [], settings = new Map(), requestSeq = 0, loading = true, printing = false;
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
+}
+function dateText(iso) {
+  if (!iso) return "—";
+  return new Date(iso + "T00:00:00").toLocaleDateString("th-TH", { day:"numeric", month:"short", year:"numeric" });
+}
+function dateRange(summary) {
+  return summary.firstDate === summary.lastDate ? dateText(summary.firstDate)
+    : dateText(summary.firstDate) + " – " + dateText(summary.lastDate);
+}
+function hasPrintSettings() { return ["receipt_school_name", "receipt_address"].every(key => String(settings.get(key) || "").trim()); }
+function syncPrintButtons() {
+  el("print-all").disabled = loading || printing || !logs.length || !hasPrintSettings();
+  document.querySelectorAll("[data-print]").forEach(button => { button.disabled = loading || printing || !hasPrintSettings(); });
+}
+function fillSubjects() {
+  const old = el("subject").value;
+  const available = subjects.filter(subject => (!el("year").value || subject.year === el("year").value) && (!el("term").value || subject.term === el("term").value));
+  el("subject").innerHTML = '<option value="">ทุกวิชา</option>' + available.map(subject => `<option value="${escapeHtml(subject.id)}">${escapeHtml(subject.name)} · ${escapeHtml(subject.grade_level)} · ${escapeHtml(subject.year)} / ${escapeHtml(subject.term)}</option>`).join("");
+  if (available.some(subject => subject.id === old)) el("subject").value = old;
+}
+function renderDocument(log) {
+  const summary = summarizeLessonLogForPrint(log), subject = log.subject || {};
+  const evidence = log.sessions.map(row => `${dateText(row.session_date)} (${Number(row.periods_covered) || 0} คาบ)`).join(" · ");
+  const sections = [["1. ผลการจัดการเรียนรู้", log.learning_outcome], ["2. ปัญหา/อุปสรรค", log.problem], ["3. แนวทางปรับปรุง/ช่วยเหลือ", log.improvement], ["4. งานที่มอบหมาย/ชิ้นงาน", log.assigned_work]];
+  return `<article class="print-doc" data-log-id="${escapeHtml(log.id)}"><div class="print-content">
+    <div class="school-heading"><img class="school-logo" src="../logo.png" alt="ตราโรงเรียน"><div><div class="school-name">${escapeHtml(settings.get("receipt_school_name"))}</div><div class="school-address">${escapeHtml(settings.get("receipt_address"))}</div></div></div>
+    <h2 class="document-title">บันทึกหลังการจัดการเรียนรู้</h2>
+    <div class="document-meta"><div>กลุ่มสาระ/รายวิชา: ${escapeHtml(subject.name)} (${escapeHtml(subject.code || "—")})</div><div>ชั้น: ${escapeHtml(subject.grade_level || "—")}</div><div>ครูผู้สอน: ${escapeHtml(log.created_by_name || "—")}</div><div>ภาคเรียนที่ ${escapeHtml(subject.term || "—")} ปีการศึกษา ${escapeHtml(subject.year || "—")}</div></div>
+    <div class="plan-name">ชื่อแผน/หน่วยการเรียนรู้: ${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}</div>
+    <div class="evidence"><div>คาบที่สอนจริง: ${escapeHtml(evidence || "—")}</div><div>รวม: ${summary.totalPeriods} คาบ · ${summary.sessionCount} ครั้ง · ใช้เวลา ${summary.weeks} สัปดาห์ | ตามแผน: ${summary.plannedPeriods === null ? "ยังไม่ระบุ" : summary.plannedPeriods + " คาบ"}</div><div>นักเรียน: มา ${summary.present} · ลา ${summary.leave} · ขาด ${summary.absent} (รวมทุกคาบ)</div></div>
+    ${sections.map(([title, value]) => `<section class="lesson-section"><h3>${title}</h3><div class="lesson-text">${escapeHtml(value || "—")}</div></section>`).join("")}
+    <div class="signatures"><div>ลงชื่อ …………………………………<br>(ครูผู้สอน)</div><div>ลงชื่อ …………………………………<br>(ผู้นิเทศ)</div></div>
+  </div></article>`;
+}
+function renderResults() {
+  el("result-count").textContent = `พบบันทึกของฉัน ${logs.length} รายการ`;
+  el("print-all").textContent = `พิมพ์ทั้งหมดที่ค้นเจอ (${logs.length} แผ่น)`;
+  el("results").innerHTML = logs.length ? logs.map(log => {
+    const summary = summarizeLessonLogForPrint(log), subject = log.subject || {};
+    const target = log.sessions.at(-1);
+    const editUrl = target ? "attendance.html?" + new URLSearchParams({ lesson_session:target.id }) : "attendance.html";
+    return `<article class="card"><div class="section-head"><div><h2>${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}</h2><div class="meta">${escapeHtml(subject.name)} · ${escapeHtml(subject.grade_level)} · ${escapeHtml(dateRange(summary))}</div></div><div class="actions no-print"><a class="ghost no-print" href="${escapeHtml(editUrl)}">แก้ไข</a><button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์</button></div></div><div class="chips"><span class="chip">สอนจริง ${summary.totalPeriods} คาบ</span><span class="chip">${summary.sessionCount} ครั้ง</span>${summary.plannedPeriods !== null ? `<span class="chip">แผน ${summary.plannedPeriods} คาบ</span>` : ""}${summary.weeks > 1 ? `<span class="chip warn">ใช้เวลา ${summary.weeks} สัปดาห์</span>` : ""}${!log.plan_name?.trim() ? '<span class="chip warn">ยังไม่ระบุแผน</span>' : ""}</div></article>`;
+  }).join("") : '<div class="card empty">ไม่พบบันทึกในช่วงที่เลือก · ลองเปลี่ยนตัวกรอง หรือเขียนบันทึกจากหน้าเช็คชื่อ</div>';
+  el("print-area").innerHTML = logs.map(renderDocument).join("");
+  syncPrintButtons();
+}
+async function search() {
+  const seq = ++requestSeq;
+  loading = true;
+  logs = [];
+  renderResults();
+  el("result-count").textContent = "กำลังโหลดบันทึกของฉัน…";
+  el("toast").hidden = true;
+  try {
+    const result = await loadMyLessonLogs({ userId:session.user.id, year:el("year").value, term:el("term").value, subjectId:el("subject").value, from:el("from").value, to:el("to").value });
+    if (seq !== requestSeq) return;
+    logs = result;
+    renderResults();
+  } catch (error) {
+    if (seq !== requestSeq) return;
+    el("result-count").textContent = "โหลดไม่สำเร็จ · ตรวจตัวกรองแล้วกดค้นหาอีกครั้ง";
+    el("results").innerHTML = "";
+    el("toast").textContent = error.message;
+    el("toast").hidden = false;
+  } finally {
+    if (seq === requestSeq) { loading = false; syncPrintButtons(); }
+  }
+}
+function clearPrintTarget() {
+  document.body.classList.remove("print-single");
+  document.querySelectorAll(".print-target").forEach(doc => doc.classList.remove("print-target"));
+}
+// ย่อได้ต่ำสุด 75% — ต่ำกว่านี้ตัวหนังสือเล็กจนอ่านไม่ออกบนกระดาษจริง
+// ⛔ ห้ามลดเพดานนี้เพื่อบีบให้เหลือหน้าเดียว · ผู้ใช้เคาะแล้วว่า 2 แผ่นที่อ่านออก
+//    มีค่ากว่า 1 แผ่นที่อ่านไม่ออก (2026-09-04)
+const MIN_PRINT_SCALE = 0.75;
+function fitPrintDocuments() {
+  for (const doc of document.querySelectorAll(".print-doc")) {
+    if (document.body.classList.contains("print-single") && !doc.classList.contains("print-target")) continue;
+    const content = doc.querySelector(".print-content");
+    content.style.transform = "none";
+    doc.classList.remove("print-doc-grow");
+    doc.style.height = "";
+    const fit = doc.clientHeight / content.scrollHeight;
+    const scale = Math.min(1, fit);
+    if (scale < MIN_PRINT_SCALE) {
+      // transform ไม่ลดกล่องในผังหน้า จึงต้องตั้งความสูงเท่าที่ย่อแล้วเอง ไม่งั้นเหลือหน้าว่างต่อท้าย
+      doc.classList.add("print-doc-grow");
+      doc.style.height = Math.ceil(content.scrollHeight * MIN_PRINT_SCALE) + "px";
+      content.style.transform = `scale(${MIN_PRINT_SCALE})`;
+    } else {
+      content.style.transform = `scale(${scale})`;
+    }
+  }
+}
+window.addEventListener("beforeprint", fitPrintDocuments);
+window.addEventListener("afterprint", clearPrintTarget);
+async function printLogs(id = null) {
+  if (loading || printing || !logs.length || !hasPrintSettings()) return;
+  if (id && !logs.some(log => log.id === id)) return;
+  printing = true;
+  syncPrintButtons();
+  // เตรียมสำเนาที่จะพิมพ์ให้คงที่ แม้คำขอค้นหารอบใหม่กำลังเริ่ม
+  el("filters").inert = true;
+  try {
+    clearPrintTarget();
+    if (id) {
+      document.body.classList.add("print-single");
+      [...document.querySelectorAll(".print-doc")].find(doc => doc.dataset.logId === id)?.classList.add("print-target");
+    }
+    await document.fonts.ready;
+    await Promise.all([...el("print-area").querySelectorAll("img")].map(img => img.decode()));
+    fitPrintDocuments();
+    window.print();
+  } catch (error) {
+    el("toast").textContent = "เตรียมพิมพ์ไม่สำเร็จ กรุณาลองอีกครั้ง: " + error.message;
+    el("toast").hidden = false;
+  } finally {
+    clearPrintTarget();
+    printing = false;
+    el("filters").inert = false;
+    syncPrintButtons();
+  }
+}
+el("filters").addEventListener("submit", event => { event.preventDefault(); if (!printing) search(); });
+el("year").addEventListener("change", () => { setActiveYear(el("year").value); fillSubjects(); search(); });
+el("term").addEventListener("change", () => { fillSubjects(); search(); });
+for (const id of ["subject", "from", "to"]) el(id).addEventListener("change", search);
+el("print-all").addEventListener("click", () => printLogs());
+el("results").addEventListener("click", event => { const button = event.target.closest("[data-print]"); if (button) printLogs(button.dataset.print); });
+try {
+  const [mine, settingsResult] = await Promise.all([
+    loadMyLessonLogs({ userId:session.user.id }),
+    sb.from("app_settings").select("key,value").in("key", ["receipt_school_name", "receipt_address"])
+  ]);
+  if (settingsResult.error) throw new Error("โหลดหัวกระดาษไม่สำเร็จ: " + settingsResult.error.message);
+  settings = new Map((settingsResult.data || []).map(row => [row.key, row.value]));
+  if (!hasPrintSettings()) {
+    el("settings-note").textContent = "ยังพิมพ์ไม่ได้ · ให้ผู้ดูแลตั้งชื่อโรงเรียนและที่อยู่ในค่าตั้งใบเสร็จก่อน";
+    el("settings-note").hidden = false;
+  }
+  subjects = [...new Map(mine.filter(log => log.subject).map(log => [log.subject.id, log.subject])).values()];
+  const years = distinctYears(subjects);
+  el("year").innerHTML = '<option value="">ทุกปี</option>' + years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
+  el("year").value = years.includes(getActiveYear()) ? getActiveYear() : "";
+  fillSubjects();
+  logs = mine.filter(log => !el("year").value || log.subject?.year === el("year").value);
+  loading = false;
+  el("filters").inert = false;
+  renderResults();
+} catch (error) {
+  loading = false;
+  el("result-count").textContent = "โหลดไม่สำเร็จ · กรุณาโหลดหน้าใหม่เพื่อลองอีกครั้ง";
+  el("toast").textContent = error.message;
+  el("toast").hidden = false;
+}
+}
+</script>
+</body>
+</html>
