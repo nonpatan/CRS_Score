@@ -220,7 +220,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, getActiveYear, setActiveYear, getAcademicYears,
-  isProjectApprover, checkDepartment, loadAcademicProjects, loadSchoolOkrs,
+  isProjectApprover, checkDepartment, loadAcademicProjects, loadSchoolOkrs, listStaffPicker,
   buildProjectTree, summarizeProjectBudget, buildOkrTree, okrCoverage,
   projectResponsibleName, projectApprovalBadge, projectLatestReturnedAt, okrChipLabel,
   PROJECT_PENDING_DAYS, PROJECT_RETURNED_DAYS, projectDaysSince,
@@ -240,6 +240,12 @@ function projectsNeverSubmitted(projects) {
   return (projects || []).filter(project =>
     project?.status !== "ยกเลิก" && project?.approval_status === "ร่าง"
   );
+}
+
+// นับเฉพาะผู้รับผิดชอบที่ผูกไว้จริงในรายการของปีที่เลือก ไม่เดาชื่อจากรายละเอียด
+function staffWithoutProjects(people, projects) {
+  const responsibleIds = new Set((projects || []).map(project => project?.responsible_staff_id).filter(Boolean));
+  return (people || []).filter(person => person?.id && !responsibleIds.has(person.id));
 }
 
 function countByStatus(projects, todayIso) {
@@ -279,6 +285,7 @@ if (!session) {
 
   let years = [];
   let projects = [];
+  let staff = [];
   let okrs = [];
   let okrTree = { objectives:[], orphans:[] };
   let coverageByKr = new Map();
@@ -322,6 +329,7 @@ if (!session) {
 
   function renderFollowUps(todayIso) {
     const neverSent = projectsNeverSubmitted(projects);
+    const missingStaff = staffWithoutProjects(staff, projects);
     const pending = projectsPendingTooLong(projects, todayIso, PROJECT_PENDING_DAYS);
     const returned = projectsReturnedTooLong(projects, todayIso, PROJECT_RETURNED_DAYS);
     const overdue = projectsPastDueNotClosed(projects, todayIso);
@@ -332,6 +340,8 @@ if (!session) {
     const cards = [
       followCard("follow-draft", "✏️ ร่าง — ครูยังไม่ได้กดส่งขออนุมัติ", neverSent,
         followProjectList(neverSent, todayIso, project => project.created_at)),
+      followCard("follow-nostaff", "🚫 ยังไม่มีโครงการ/กิจกรรมในระบบเลย", missingStaff,
+        `<ul class="follow-list">${missingStaff.map(person => `<li><b>${esc(person.full_name)}</b><div class="meta">${esc(person.staff_position || "ยังไม่ระบุตำแหน่ง")}</div>${person.has_login === false ? '<div class="meta">⚠️ ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</div>' : ""}</li>`).join("")}</ul>`),
       followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
       followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => projectLatestReturnedAt(project))),
       followCard("follow-overdue", "📌 เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
@@ -490,11 +500,12 @@ if (!session) {
     if (!year) return;
     el("project-rows").innerHTML = '<tr><td colspan="9" class="empty">กำลังโหลด…</td></tr>';
     try {
-      const [projectRows, okrRows] = await Promise.all([
-        loadAcademicProjects(year), loadSchoolOkrs(year)
+      const [projectRows, okrRows, staffRows] = await Promise.all([
+        loadAcademicProjects(year), loadSchoolOkrs(year), listStaffPicker().catch(() => [])
       ]);
       projects = await loadApprovalRows(projectRows);
       okrs = okrRows;
+      staff = staffRows;
       okrTree = buildOkrTree(okrs);
       okrById = new Map(okrs.map(okr => [okr.id, okr]));
       coverageByKr = okrCoverage(okrTree, projects);
