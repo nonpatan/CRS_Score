@@ -3806,15 +3806,30 @@ export async function loadProjectPlan(year) {
   if (error) throw new Error("โหลดทะเบียนโครงการไม่สำเร็จ: " + error.message);
   const rows = data || [];
   if (!rows.length) return [];
-  const { data:okrLinks, error:okrError } = await sb.from("school_project_plan_okrs")
-    .select("plan_id,okr_id").in("plan_id", rows.map(row => row.id));
-  if (okrError) throw new Error("โหลด KR ของทะเบียนไม่สำเร็จ: " + okrError.message);
+  const planIds = rows.map(row => row.id);
+  const [okrResult, memberResult] = await Promise.all([
+    sb.from("school_project_plan_okrs")
+      .select("plan_id,okr_id").in("plan_id", planIds),
+    sb.from("school_project_plan_members")
+      .select("plan_id,staff_id,staff_name,sort_order").in("plan_id", planIds).order("sort_order")
+  ]);
+  if (okrResult.error) throw new Error("โหลด KR ของทะเบียนไม่สำเร็จ: " + okrResult.error.message);
+  if (memberResult.error) throw new Error("โหลดผู้ร่วมรับผิดชอบไม่สำเร็จ: " + memberResult.error.message);
   const okrsByPlan = new Map();
-  for (const link of okrLinks || []) {
+  for (const link of okrResult.data || []) {
     if (!okrsByPlan.has(link.plan_id)) okrsByPlan.set(link.plan_id, []);
     okrsByPlan.get(link.plan_id).push({ okr_id:link.okr_id });
   }
-  return rows.map(row => ({ ...row, okrs:okrsByPlan.get(row.id) || [] }));
+  const membersByPlan = new Map();
+  for (const member of memberResult.data || []) {
+    if (!membersByPlan.has(member.plan_id)) membersByPlan.set(member.plan_id, []);
+    membersByPlan.get(member.plan_id).push(member);
+  }
+  return rows.map(row => ({
+    ...row,
+    okrs:okrsByPlan.get(row.id) || [],
+    members:membersByPlan.get(row.id) || []
+  }));
 }
 
 export async function replaceProjectPlanOkrs(planId, okrIds) {
@@ -3825,6 +3840,27 @@ export async function replaceProjectPlanOkrs(planId, okrIds) {
   const inserted = await sb.from("school_project_plan_okrs")
     .insert(ids.map(okrId => ({ plan_id:planId, okr_id:okrId })));
   if (inserted.error) throw new Error("บันทึก KR ของทะเบียนไม่สำเร็จ: " + inserted.error.message);
+}
+
+export async function replaceProjectPlanMembers(planId, members) {
+  const rows = (members || []).map(member => ({
+    staff_id:member?.staff_id || null,
+    staff_name:String(member?.staff_name || "").trim()
+  }));
+  const ids = rows.map(member => member.staff_id);
+  if (ids.some(id => !id) || rows.some(member => !member.staff_name)) {
+    throw new Error("ผู้ร่วมรับผิดชอบทุกคนต้องมีรหัสและชื่อบุคลากร");
+  }
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("มีผู้ร่วมรับผิดชอบซ้ำกัน · กรุณาเลือกแต่ละคนเพียงครั้งเดียว");
+  }
+  const removed = await sb.from("school_project_plan_members").delete().eq("plan_id", planId);
+  if (removed.error) throw new Error("ล้างผู้ร่วมรับผิดชอบเดิมไม่สำเร็จ: " + removed.error.message);
+  if (!rows.length) return;
+  const inserted = await sb.from("school_project_plan_members").insert(rows.map((member, sort_order) => ({
+    plan_id:planId, ...member, sort_order
+  })));
+  if (inserted.error) throw new Error("บันทึกผู้ร่วมรับผิดชอบไม่สำเร็จ: " + inserted.error.message);
 }
 
 export function projectPlanKrCoverage(okrTree, planRows) {
