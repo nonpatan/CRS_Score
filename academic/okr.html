@@ -294,10 +294,14 @@ if (!session) {
       : '<span class="chip warn">ยังไม่ผูก KR</span>';
     const members = row.members || [];
     const memberNames = members.map(member => member.staff_name).filter(Boolean);
-    const ownerName = row.responsible_name || "ยังไม่ระบุผู้รับผิดชอบ";
+    const responsibleName = String(row.responsible_name || "").trim();
+    const hasLead = Boolean(row.responsible_staff_id && responsibleName);
+    const ownerLabel = hasLead
+      ? esc(responsibleName)
+      : `<span class="chip warn"${responsibleName ? ` title="ชื่อเดิม: ${esc(responsibleName)}"` : ""}>ยังไม่ระบุหัวหน้า</span>`;
     const ownerHtml = members.length
-      ? `<details class="plan-team"><summary title="ผู้ร่วม: ${esc(memberNames.join(", "))}">${esc(ownerName)} <span class="chip">+${members.length}</span></summary><div class="hint">ผู้ร่วม: ${memberNames.map(esc).join(" · ")}</div></details>`
-      : `<div class="meta">${esc(ownerName)}</div>`;
+      ? `<details class="plan-team"><summary title="ผู้ร่วม: ${esc(memberNames.join(", "))}">${ownerLabel} <span class="chip">+${members.length}</span></summary><div class="hint">ผู้ร่วม: ${memberNames.map(esc).join(" · ")}</div></details>`
+      : `<div class="meta">${ownerLabel}</div>`;
     return `<div class="plan-row${row.parent_id ? " plan-child" : ""}${row.active === false ? " plan-retired" : ""}">
       <div class="okr-heading"><div><b>${row.parent_id ? "└ " : "▸ "}${esc(row.name)}</b>
       ${row.active === false ? '<span class="chip retired">ปลดระวางแล้ว</span>' : ""}
@@ -372,15 +376,24 @@ if (!session) {
   function renderPlanCoverage() {
     const tree = planYearOkrTree();
     const summary = projectPlanKrCoverage(tree, planRows);
+    const leadGap = projectPlanLeadGap(planRows);
     const krCount = tree.objectives.reduce((sum, objective) => sum + objective.keyResults.length, 0) + tree.orphans.length;
     const gap = !krCount
       ? "ปีนี้ยังไม่มี KR ให้ตรวจ"
       : summary.uncoveredKrs.length
         ? `KR ที่ยังไม่มีรายการในแผนรองรับ: ${summary.uncoveredKrs.map(kr => esc(kr.code || "KR")).join(" · ")}`
         : "ทุก KR มีรายการในแผนรองรับแล้ว";
-    el("plan-coverage").innerHTML = `<div><b>แผนปีนี้ ${summary.total} รายการ</b> · ผูก KR แล้ว ${summary.linked} · ยังไม่ผูก ${summary.unlinked}</div><div>${gap}</div>`;
-    el("plan-coverage").classList.toggle("warn", summary.uncoveredKrs.length > 0 || summary.unlinked > 0);
-    el("plan-coverage").classList.toggle("info", summary.uncoveredKrs.length === 0 && summary.unlinked === 0);
+    el("plan-coverage").innerHTML = `<div><b>แผนปีนี้ ${summary.total} รายการ</b> · ผูก KR แล้ว ${summary.linked} · ยังไม่ผูก ${summary.unlinked} · ยังไม่ระบุหัวหน้า ${leadGap.noLead}</div><div>${gap}</div>`;
+    el("plan-coverage").classList.toggle("warn", summary.uncoveredKrs.length > 0 || summary.unlinked > 0 || leadGap.noLead > 0);
+    el("plan-coverage").classList.toggle("info", summary.uncoveredKrs.length === 0 && summary.unlinked === 0 && leadGap.noLead === 0);
+  }
+
+  function projectPlanLeadGap(planRows) {
+    const rows = (planRows || []).filter(row => row?.active !== false);
+    const noLead = rows.filter(row =>
+      !row?.responsible_staff_id || !String(row?.responsible_name || "").trim()
+    ).length;
+    return { total:rows.length, noLead };
   }
 
   async function loadPlanData() {
