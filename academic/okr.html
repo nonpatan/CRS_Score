@@ -66,6 +66,8 @@
   .plan-retired { color: var(--muted); }
   .chip.retired { color: var(--muted); background: var(--bg); }
   .plan-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .plan-okr-group { display: flex; width: 100%; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px; }
+  .plan-okr-group-label { display: inline-flex; flex: 0 0 auto; padding: 3px 7px; border-radius: 6px; color: var(--muted); background: var(--bg); font-size: 13px; font-weight: 700; }
   .plan-team { color: var(--muted); font-size: 14px; }
   .plan-team summary { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; }
   .plan-team summary::-webkit-details-marker { display: none; }
@@ -288,15 +290,28 @@ if (!session) {
 
   function planRowHtml(row) {
     const krRows = typeof okrs === "undefined" ? [] : okrs;
+    const tree = typeof okrTree === "undefined" ? { objectives:[], orphans:[] } : okrTree;
     const krIds = (row.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean);
-    const krChips = krIds.length
-      ? krIds.map(id => {
-          const kr = krRows.find(row => row.id === id);
-          return kr?.code
-            ? `<span class="chip">${esc(kr.code)}</span>`
-            : '<span class="chip warn">KR ที่ถูกลบแล้ว</span>';
-        }).join("")
-      : '<span class="chip warn">ยังไม่ผูก KR</span>';
+    let krChips = '<span class="chip warn">ยังไม่ผูก KR</span>';
+    if (krIds.length && !krRows.length) {
+      krChips = '<span class="chip">กำลังโหลด KR…</span>';
+    } else if (krIds.length) {
+      const linkedIds = new Set(krIds);
+      const objectiveGroups = (tree.objectives || []).map(objective => {
+        const linkedKrs = (objective.keyResults || []).filter(kr => linkedIds.has(kr.id));
+        if (!linkedKrs.length) return "";
+        return `<div class="plan-okr-group"><span class="plan-okr-group-label" title="${esc(objective.objective || "")}">${esc(objective.code || "O")}</span>${linkedKrs.map(kr => `<span class="chip">${esc(kr.code || "KR")}</span>`).join("")}</div>`;
+      }).filter(Boolean);
+      const missingIds = krIds.filter(id => !krRows.some(kr => kr.id === id));
+      const missing = missingIds.length
+        ? `<div class="plan-okr-group">${missingIds.map(() => '<span class="chip warn">KR ที่ถูกลบแล้ว</span>').join("")}</div>`
+        : "";
+      const orphanKrs = (tree.orphans || []).filter(kr => linkedIds.has(kr.id));
+      const orphans = orphanKrs.length
+        ? `<div class="plan-okr-group"><span class="plan-okr-group-label" title="ยังไม่ได้จัดกลุ่ม">ยังไม่ได้จัดกลุ่ม</span>${orphanKrs.map(kr => `<span class="chip">${esc(kr.code || "KR")}</span>`).join("")}</div>`
+        : "";
+      krChips = objectiveGroups.join("") + missing + orphans;
+    }
     const members = row.members || [];
     const memberNames = members.map(member => member.staff_name).filter(Boolean);
     const responsibleName = String(row.responsible_name || "").trim();
