@@ -61,6 +61,19 @@
   .chip { display: inline-flex; max-width: 100%; padding: 3px 9px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 13px; font-weight: 700; }
   .chip.warn { color: var(--amber); background: var(--amber-soft); }
   .chip.fail, .chip.cancel { color: var(--danger); background: var(--danger-soft); }
+  .plan-row { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  .plan-child { margin-left: 20px; padding-left: 12px; border-left: 3px solid var(--line); }
+  .plan-retired { color: var(--muted); }
+  .chip.retired { color: var(--muted); background: var(--bg); }
+  .plan-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .plan-coverage { margin-bottom: 12px; }
+  .plan-coverage > div + div { margin-top: 3px; }
+  #plan-card .section-head { flex-wrap: wrap; }
+  .okr-group { margin-bottom: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; }
+  .okr-group-title { margin-bottom: 7px; font-weight: 700; }
+  .check-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; min-height: 44px; padding: 8px; }
+  .check-row input { width: 20px; height: 20px; margin-top: 3px; }
+  .check-row label { margin: 0; font-weight: 500; }
   .okr-objective { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
   .okr-objective-score { margin-top: 7px; color: var(--muted); font-size: 14px; }
   .okr-kr { margin: 12px 0 0 12px; padding: 12px 0 0 16px; border-top: 1px solid var(--line); border-left: 4px solid var(--teal-soft); }
@@ -158,6 +171,30 @@
         </form>
       </div>
     </section>
+    <section class="card" id="plan-card">
+      <div class="section-head"><div><h2>ทะเบียนโครงการ/กิจกรรมตามแผนปฏิบัติการ</h2><p>รายชื่อกลางของปีนี้ · ฝ่ายวิชาการเป็นผู้กรอก · รอบหน้าครูจะเลือกจากรายการนี้แทนการพิมพ์เอง</p></div><button class="ghost" id="add-plan" type="button" disabled hidden>เพิ่มรายการ</button></div>
+      <div id="plan-admin-tools" hidden>
+        <div class="copy-row"><div class="field"><label for="plan-source-year">ก๊อปทะเบียนจากปี</label><select id="plan-source-year"><option value="">— เลือกปีต้นทาง —</option></select></div><button class="ghost" id="carry-plan" type="button" disabled>ก๊อปมาเป็นร่าง</button></div>
+      </div>
+      <div id="plan-coverage" class="banner info plan-coverage"><div>กำลังตรวจช่องโหว่ของแผน…</div></div>
+      <div id="plan-list"><div class="empty">กำลังโหลด…</div></div>
+      <div class="subform" id="plan-form-box" hidden>
+        <h3 id="plan-form-title">เพิ่มรายการในทะเบียน</h3>
+        <form id="plan-form">
+          <div class="form-grid">
+            <div class="field"><label for="p-kind">ประเภท</label><select id="p-kind"><option>โครงการ</option><option>กิจกรรม</option></select></div>
+            <div class="field" id="p-parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent"><option value="">— เลือกโครงการแม่ —</option></select></div>
+            <div class="field wide"><label for="p-name">ชื่อ</label><input id="p-name" type="text" required></div>
+            <div class="field wide"><label for="p-owner">ผู้รับผิดชอบ</label><select id="p-owner" aria-describedby="plan-owner-warning"><option value="">— ยังไม่ระบุ —</option></select><div class="banner warn" id="plan-owner-warning" role="status" hidden></div></div>
+            <div class="field wide"><label>KR ที่ตอบสนอง</label><div id="plan-okr-pick"></div></div>
+            <div class="field"><label for="p-sort">ลำดับ</label><input id="p-sort" type="number" min="-32768" max="32767" step="1" value="0" required></div>
+            <div class="field wide"><label for="p-note">หมายเหตุ</label><textarea id="p-note"></textarea></div>
+            <div class="field wide"><label><input id="p-active" type="checkbox" checked> ใช้งานอยู่</label></div>
+          </div>
+          <div class="toolbar"><button class="primary" id="save-plan" type="submit">บันทึกทะเบียน</button><button class="ghost" id="cancel-plan" type="button">ยกเลิก</button></div>
+        </form>
+      </div>
+    </section>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
 </div>
@@ -167,10 +204,11 @@ import {
   sb, requireAuth, signOut, getProfile, checkDepartment,
   getActiveYear, setActiveYear, getAcademicYears, academicYearRange,
   loadAcademicProjects, listStaffPicker,
+  loadProjectPlan, saveProjectPlan, deleteProjectPlan, carryProjectPlan, replaceProjectPlanOkrs,
   loadSchoolOkrs, loadOkrCheckins, loadOkrLineage, loadOkrThresholds,
   buildOkrTree, okrProgress, okrScore, okrObjectiveScore,
-  indexCheckinsByOkr, okrCoverage, buildOkrTrend, suggestOkrValue, setSetting
-} from "../supabase-client.js?v=20260909-1";
+  indexCheckinsByOkr, okrCoverage, projectPlanKrCoverage, buildOkrTrend, suggestOkrValue, setSetting
+} from "../supabase-client.js?v=20260909-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -203,6 +241,10 @@ if (!session) {
 
   let years = [];
   let projects = [];
+  let planRows = [];
+  let editingPlanId = null;
+  let planLoadVersion = 0;
+  let planBusy = false;
   let okrs = [];
   let okrTree = { objectives:[], orphans:[] };
   let staff = [];
@@ -218,9 +260,266 @@ if (!session) {
   let currentSuggestion = null;
 
   if (canEditAll) {
+    el("add-plan").hidden = false;
+    el("plan-admin-tools").hidden = false;
     el("add-objective").hidden = false;
     el("okr-admin-tools").hidden = false;
   }
+
+  // ---------- ทะเบียนตามแผน: แสดงแม่ก่อนลูก โดยไม่ซ่อนรายการปลดระวาง ----------
+  function projectPlanTree(rows) {
+    const ordered = [...rows].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.created_at || "").localeCompare(String(b.created_at || "")));
+    const parents = ordered.filter(row => row.kind === "โครงการ" && !row.parent_id);
+    const parentIds = new Set(parents.map(row => row.id));
+    return [...parents.flatMap(row => [row, ...ordered.filter(child => child.parent_id === row.id)]),
+      ...ordered.filter(row => !parentIds.has(row.id) && !parentIds.has(row.parent_id))];
+  }
+
+  function planRowHtml(row) {
+    const krRows = typeof okrs === "undefined" ? [] : okrs;
+    const krIds = (row.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean);
+    const krChips = krIds.length
+      ? krIds.map(id => `<span class="chip">${esc(krRows.find(kr => kr.id === id)?.code || id)}</span>`).join("")
+      : '<span class="chip warn">ยังไม่ผูก KR</span>';
+    return `<div class="plan-row${row.parent_id ? " plan-child" : ""}${row.active === false ? " plan-retired" : ""}">
+      <div class="okr-heading"><div><b>${row.parent_id ? "└ " : "▸ "}${esc(row.name)}</b>
+      ${row.active === false ? '<span class="chip retired">ปลดระวางแล้ว</span>' : ""}
+      <div class="meta">${esc(row.responsible_name || "ยังไม่ระบุผู้รับผิดชอบ")}</div>
+      ${row.note ? `<div class="hint">${esc(row.note)}</div>` : ""}<div class="plan-chips">${krChips}</div></div>
+      ${canEditAll ? `<div class="actions"><button class="ghost" data-edit-plan="${esc(row.id)}">แก้ไข</button>${isAdmin ? `<button class="danger" data-delete-plan="${esc(row.id)}">ลบ</button>` : ""}</div>` : ""}</div></div>`;
+  }
+
+  function planOkrIds(row) {
+    return (row?.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean);
+  }
+
+  function activityPlanKrGuard(rows, parentId, selectedIds) {
+    const selected = [...new Set(selectedIds || [])];
+    if (!selected.length) return { ok:true, invalidIds:[], parent:(rows || []).find(row => row.id === parentId) };
+    const parent = (rows || []).find(row => row.id === parentId);
+    const allowed = new Set(planOkrIds(parent));
+    const invalidIds = selected.filter(id => !allowed.has(id));
+    return { ok:invalidIds.length === 0, invalidIds, parent };
+  }
+
+  function parentPlanKrGuard(rows, planId, selectedIds) {
+    const selected = new Set(selectedIds || []);
+    const affected = new Map();
+    for (const child of (rows || []).filter(row => row.parent_id === planId)) {
+      for (const okrId of planOkrIds(child)) {
+        if (selected.has(okrId)) continue;
+        if (!affected.has(okrId)) affected.set(okrId, []);
+        affected.get(okrId).push(child.name);
+      }
+    }
+    return {
+      ok:affected.size === 0,
+      affected:[...affected].map(([okrId, projectNames]) => ({ okrId, projectNames }))
+    };
+  }
+
+  function planYearOkrTree() {
+    const year = el("filter-year").value;
+    return buildOkrTree(okrs.filter(row => String(row.year) === String(year)));
+  }
+
+  function renderPlanOkrPicker(selectedIds = []) {
+    const selected = new Set(selectedIds);
+    const activity = el("p-kind").value === "กิจกรรม";
+    const parentId = el("p-parent").value;
+    if (activity && !parentId) {
+      el("plan-okr-pick").innerHTML = '<div class="banner warn">เลือกโครงการแม่ก่อน แล้วจะแสดง KR ของโครงการนั้นให้เลือก</div>';
+      return;
+    }
+    const parent = activity ? planRows.find(row => row.id === parentId) : null;
+    const allowed = activity ? new Set(planOkrIds(parent)) : null;
+    if (activity && allowed.size === 0) {
+      el("plan-okr-pick").innerHTML = `<div class="banner warn">โครงการ “${esc(parent?.name || "ไม่พบชื่อ")}” ยังไม่ได้ผูก KR — ให้ฝ่ายวิชาการผูก KR ที่โครงการแม่ก่อน</div>`;
+      return;
+    }
+    const groups = planYearOkrTree().objectives.map(objective => {
+      const krs = objective.keyResults.filter(kr =>
+        (!activity || allowed.has(kr.id)) && (kr.active || selected.has(kr.id))
+      );
+      if (!krs.length) return "";
+      return `<div class="okr-group"><div class="okr-group-title">${esc(objective.code || "O")} · ${esc(objective.objective)}</div>${krs.map(kr => `<div class="check-row"><input id="plan-pick-${kr.id}" type="checkbox" value="${kr.id}" ${selected.has(kr.id) ? "checked" : ""}><label for="plan-pick-${kr.id}"><b>${esc(kr.code || "KR")}</b> · ${esc(kr.key_result)}${kr.active ? "" : " · ปิดใช้งานแล้ว"}</label></div>`).join("")}</div>`;
+    }).join("");
+    el("plan-okr-pick").innerHTML = groups || '<div class="banner warn">ปีนี้ยังไม่มี KR ให้เลือก กรุณาให้ฝ่ายวิชาการเพิ่ม KR ก่อน</div>';
+  }
+
+  function selectedPlanOkrIds() {
+    return [...el("plan-okr-pick").querySelectorAll('input[type="checkbox"]:checked')]
+      .map(input => input.value);
+  }
+
+  function renderPlanCoverage() {
+    const tree = planYearOkrTree();
+    const summary = projectPlanKrCoverage(tree, planRows);
+    const krCount = tree.objectives.reduce((sum, objective) => sum + objective.keyResults.length, 0) + tree.orphans.length;
+    const gap = !krCount
+      ? "ปีนี้ยังไม่มี KR ให้ตรวจ"
+      : summary.uncoveredKrs.length
+        ? `KR ที่ยังไม่มีรายการในแผนรองรับ: ${summary.uncoveredKrs.map(kr => esc(kr.code || "KR")).join(" · ")}`
+        : "ทุก KR มีรายการในแผนรองรับแล้ว";
+    el("plan-coverage").innerHTML = `<div><b>แผนปีนี้ ${summary.total} รายการ</b> · ผูก KR แล้ว ${summary.linked} · ยังไม่ผูก ${summary.unlinked}</div><div>${gap}</div>`;
+    el("plan-coverage").classList.toggle("warn", summary.uncoveredKrs.length > 0 || summary.unlinked > 0);
+    el("plan-coverage").classList.toggle("info", summary.uncoveredKrs.length === 0 && summary.unlinked === 0);
+  }
+
+  async function loadPlanData() {
+    const version = ++planLoadVersion;
+    const year = el("filter-year").value;
+    planRows = [];
+    el("add-plan").disabled = true;
+    el("carry-plan").disabled = true;
+    el("plan-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    try {
+      const rows = year ? await loadProjectPlan(year) : [];
+      if (version !== planLoadVersion) return;
+      planRows = rows;
+      el("plan-list").innerHTML = rows.length ? projectPlanTree(rows).map(planRowHtml).join("") : '<div class="empty">ยังไม่มีทะเบียนในปีนี้ · ฝ่ายวิชาการเพิ่มรายการหรือก๊อปจากปีก่อนได้</div>';
+      renderPlanCoverage();
+      el("add-plan").disabled = !year;
+      el("carry-plan").disabled = !year;
+    } catch (error) {
+      if (version === planLoadVersion) el("plan-list").innerHTML = `<div class="empty">${esc(error.message)} · กรุณาโหลดหน้าใหม่เพื่อลองอีกครั้ง</div>`;
+    }
+  }
+
+  function planSourceYears() {
+    const target = el("filter-year").value;
+    const previous = years.map(row => row.year).filter(year => Number(year) < Number(target)).sort((a, b) => Number(b) - Number(a));
+    el("plan-source-year").innerHTML = '<option value="">— เลือกปีต้นทาง —</option>' + previous.map(year => `<option value="${esc(year)}">ปีการศึกษา ${esc(year)}</option>`).join("");
+    el("plan-source-year").value = previous.includes(String(Number(target) - 1)) ? String(Number(target) - 1) : "";
+  }
+
+  function planOwnerWarning() {
+    const person = staff.find(row => row.id === el("p-owner").value);
+    const warning = el("plan-owner-warning");
+    warning.hidden = person?.has_login !== false;
+    warning.textContent = person?.has_login === false ? "ยังไม่มีบัญชีล็อกอิน — กำหนดได้ แต่เจ้าตัวจะสร้างโครงการเองไม่ได้ ต้องให้ฝ่ายวิชาการกรอกแทน" : "";
+  }
+
+  function syncPlanKind(selectedIds = selectedPlanOkrIds()) {
+    const activity = el("p-kind").value === "กิจกรรม";
+    el("p-parent-field").hidden = !activity;
+    el("p-parent").required = activity;
+    if (!activity) el("p-parent").value = "";
+    renderPlanOkrPicker(selectedIds);
+  }
+
+  function openPlanForm(row = null) {
+    if (!canEditAll || planBusy) return;
+    editingPlanId = row?.id || null;
+    el("plan-form").reset();
+    el("plan-form-title").textContent = row ? "แก้ไขรายการในทะเบียน" : "เพิ่มรายการในทะเบียน";
+    el("p-kind").value = row?.kind || "โครงการ";
+    el("p-parent").innerHTML = '<option value="">— เลือกโครงการแม่ —</option>' + projectPlanTree(planRows).filter(item => item.kind === "โครงการ" && !item.parent_id && item.id !== row?.id).map(item => `<option value="${esc(item.id)}">${esc(item.name)}${item.active === false ? " · ปลดระวางแล้ว" : ""}</option>`).join("");
+    el("p-parent").value = row?.parent_id || "";
+    el("p-owner").innerHTML = '<option value="">— ยังไม่ระบุ —</option>' + staff.map(person => `<option value="${esc(person.id)}">${esc(person.full_name)}${person.has_login === false ? " · ยังไม่มีบัญชีล็อกอิน" : ""}</option>`).join("");
+    if (row?.responsible_staff_id && !staff.some(person => person.id === row.responsible_staff_id)) {
+      el("p-owner").innerHTML += `<option value="${esc(row.responsible_staff_id)}">${esc(row.responsible_name)} · ผู้รับผิดชอบเดิม</option>`;
+    }
+    el("p-owner").value = row?.responsible_staff_id || "";
+    el("p-name").value = row?.name || "";
+    el("p-sort").value = row?.sort_order ?? 0;
+    el("p-note").value = row?.note || "";
+    el("p-active").checked = row?.active !== false;
+    syncPlanKind(planOkrIds(row)); planOwnerWarning();
+    el("plan-form-box").hidden = false;
+    el("plan-form-box").scrollIntoView({ behavior:"smooth", block:"start" });
+  }
+
+  function closePlanForm() {
+    editingPlanId = null;
+    el("plan-form").reset();
+    el("plan-okr-pick").innerHTML = "";
+    el("plan-form-box").hidden = true;
+  }
+
+  function setPlanBusy(busy) {
+    planBusy = busy;
+    el("filter-year").disabled = busy;
+    el("plan-card").querySelectorAll("button, input, select, textarea").forEach(control => { control.disabled = busy; });
+  }
+
+  el("add-plan").addEventListener("click", () => openPlanForm());
+  el("cancel-plan").addEventListener("click", closePlanForm);
+  el("p-kind").addEventListener("change", () => syncPlanKind(selectedPlanOkrIds()));
+  el("p-parent").addEventListener("change", () => syncPlanKind(selectedPlanOkrIds()));
+  el("p-owner").addEventListener("change", planOwnerWarning);
+  el("plan-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!canEditAll || planBusy) return;
+    const kind = el("p-kind").value;
+    const parentId = kind === "กิจกรรม" ? el("p-parent").value : null;
+    if (kind === "กิจกรรม" && !planRows.some(row => row.id === parentId && row.kind === "โครงการ" && !row.parent_id && row.id !== editingPlanId)) return toast("กรุณาเลือกโครงการแม่ในปีเดียวกัน", true);
+    if (kind === "กิจกรรม" && editingPlanId && planRows.some(row => row.parent_id === editingPlanId)) return toast("เปลี่ยนเป็นกิจกรรมไม่ได้ เพราะยังมีกิจกรรมลูก · กรุณาย้ายกิจกรรมลูกก่อน", true);
+    const name = el("p-name").value.trim();
+    if (!name) return toast("กรุณากรอกชื่อรายการในทะเบียน", true);
+    const sort = Number(el("p-sort").value);
+    if (!Number.isInteger(sort) || sort < -32768 || sort > 32767) return toast("ลำดับต้องเป็นจำนวนเต็มในช่วงที่กำหนด", true);
+    const ownerId = el("p-owner").value || null;
+    const previous = planRows.find(row => row.id === editingPlanId);
+    const ownerName = staff.find(person => person.id === ownerId)?.full_name || (previous?.responsible_staff_id === ownerId ? previous?.responsible_name : null);
+    const selectedOkrs = el("plan-okr-pick") ? selectedPlanOkrIds() : [];
+    if (kind === "กิจกรรม" && selectedOkrs.length) {
+      const guard = activityPlanKrGuard(planRows, parentId, selectedOkrs);
+      if (!guard.ok) return toast(`กิจกรรมเลือกได้เฉพาะ KR ที่โครงการแม่ผูกไว้ · กรุณาเลือกใหม่ (${guard.invalidIds.map(id => okrs.find(kr => kr.id === id)?.code || id).join(", ")})`, true);
+    } else if (editingPlanId) {
+      const guard = parentPlanKrGuard(planRows, editingPlanId, selectedOkrs);
+      if (!guard.ok) {
+        const details = guard.affected.map(item => `${okrs.find(kr => kr.id === item.okrId)?.code || item.okrId}: ${item.projectNames.join(", ")}`).join(" · ");
+        return toast(`เอา KR ออกจากโครงการแม่ไม่ได้ เพราะกิจกรรมยังผูกอยู่ — ${details}`, true);
+      }
+    }
+    const payload = { id:editingPlanId, year:el("filter-year").value, kind, parent_id:parentId, name,
+      responsible_staff_id:ownerId, responsible_name:ownerName, sort_order:sort, note:el("p-note").value.trim() || null, active:el("p-active").checked };
+    setPlanBusy(true);
+    try {
+      const saved = await saveProjectPlan(payload);
+      await replaceProjectPlanOkrs(saved.id, selectedOkrs);
+      toast("บันทึกทะเบียนแล้ว"); closePlanForm();
+    } catch (error) { toast(error.message, true); }
+    finally { setPlanBusy(false); await loadPlanData(); }
+  });
+
+  el("plan-list").addEventListener("click", async event => {
+    if (!canEditAll || planBusy) return;
+    const edit = event.target.closest("[data-edit-plan]");
+    if (edit) return openPlanForm(planRows.find(row => row.id === edit.dataset.editPlan));
+    const remove = event.target.closest("[data-delete-plan]");
+    if (!remove || !isAdmin) return;
+    const row = planRows.find(item => item.id === remove.dataset.deletePlan);
+    if (!row) return;
+    const children = planRows.filter(item => item.parent_id === row.id).length;
+    if (children) return toast(`ลบไม่ได้ เพราะยังมีกิจกรรมในทะเบียนอยู่ใต้รายการนี้ ${children} รายการ · ถ้าจะเลิกใช้ ให้เอาติ๊ก ‘ใช้งานอยู่’ ออกแทน`, true);
+    setPlanBusy(true);
+    try {
+      if (!await window.crsAskConfirm({ title:"ลบรายการในทะเบียน", message:`ลบ “${row.name}” ออกจากทะเบียนหรือไม่? การลบกู้คืนไม่ได้ · หากต้องการเลิกใช้ให้ปลดระวางแทน`, okLabel:"ลบรายการ", danger:true })) return;
+      await deleteProjectPlan(row.id);
+      toast("ลบรายการในทะเบียนแล้ว"); closePlanForm();
+    } catch (error) { toast(error.message, true); }
+    finally { setPlanBusy(false); await loadPlanData(); }
+  });
+
+  el("carry-plan").addEventListener("click", async () => {
+    if (!canEditAll || planBusy) return;
+    const sourceYear = el("plan-source-year").value;
+    const targetYear = el("filter-year").value;
+    if (!sourceYear) return toast("กรุณาเลือกปีต้นทาง", true);
+    setPlanBusy(true);
+    try {
+      const source = await loadProjectPlan(sourceYear);
+      const count = source.filter(row => row.active !== false).length;
+      if (!count) return toast(`ปี ${sourceYear} ไม่มีรายการที่ใช้งานอยู่ให้ก๊อป`, true);
+      if (!await window.crsAskConfirm({ title:"ก๊อปทะเบียนมาเป็นร่าง", message:`ก๊อปจากปี ${sourceYear} ไปปี ${targetYear} · ต้นทางมีรายการใช้งาน ${count} รายการ · ข้ามชื่อที่มีแล้วและรายการปลดระวาง รวมถึงลูกของแม่ที่ปลดระวาง · ไม่ยก KR ตามมา ต้องติ๊ก KR ใหม่ที่ปีปลายทาง`, okLabel:"ก๊อปทะเบียน", danger:false })) return;
+      const copied = await carryProjectPlan(sourceYear, targetYear);
+      toast(`ก๊อปทะเบียนแล้ว ${copied} รายการ`); closePlanForm();
+    } catch (error) { toast(error.message, true); }
+    finally { setPlanBusy(false); await loadPlanData(); }
+  });
+  // ---------- จบหน้าทะเบียนตามแผน ----------
 
   function objectiveStatus(summary) {
     if (summary.total === 0) return '<span class="chip warn">ยังไม่มี KR</span>';
@@ -478,6 +777,7 @@ if (!session) {
       el("kr-pass").value = thresholds.krPass;
       el("o-pass").value = thresholds.oPass;
       renderOkrs();
+      renderPlanCoverage();
     } catch (error) {
       el("okr-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
     }
@@ -495,15 +795,16 @@ if (!session) {
     el("filter-year").innerHTML = values.map(year => `<option value="${esc(year)}">ปีการศึกษา ${esc(year)}</option>`).join("");
     el("filter-year").value = selected;
     setActiveYear(selected);
+    planSourceYears();
     el("copy-source-year").innerHTML = '<option value="">— เลือกปีต้นทาง —</option>' + values.filter(year => year !== selected).map(year => `<option value="${esc(year)}">ปีการศึกษา ${esc(year)}</option>`).join("");
     return selected;
   }
 
   el("filter-year").addEventListener("change", async () => {
-    setActiveYear(el("filter-year").value); closeOkrForm(); closeCheckinForm();
+    setActiveYear(el("filter-year").value); closeOkrForm(); closeCheckinForm(); closePlanForm(); planSourceYears();
     const target = el("filter-year").value;
     el("copy-source-year").innerHTML = '<option value="">— เลือกปีต้นทาง —</option>' + years.filter(row => row.year !== target).sort((a,b) => b.year.localeCompare(a.year, "th", {numeric:true})).map(row => `<option value="${esc(row.year)}">ปีการศึกษา ${esc(row.year)}</option>`).join("");
-    await loadData();
+    await Promise.all([loadData(), loadPlanData()]);
   });
   el("o-mode").addEventListener("change", () => syncOkrMode(true));
   el("o-parent").addEventListener("change", () => { if (!editingOkrId) el("o-code").value = nextKrCode(el("o-parent").value); });
@@ -653,8 +954,10 @@ if (!session) {
   try {
     await loadYears();
     if (canEditAll) { staff = await listStaffPicker(); staffOptions(); }
-    await loadData();
+    await Promise.all([loadData(), loadPlanData()]);
   } catch (error) {
+    el("plan-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+    el("add-plan").disabled = true; el("carry-plan").disabled = true;
     el("okr-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
   }
 }

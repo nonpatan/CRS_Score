@@ -3799,6 +3799,142 @@ export async function loadSchoolOkrs(year) {
   return data || [];
 }
 
+// ---------- ทะเบียนโครงการตามแผนปฏิบัติการ ----------
+export async function loadProjectPlan(year) {
+  const { data, error } = await sb.from("school_project_plan")
+    .select("*").eq("year", year).order("sort_order").order("created_at");
+  if (error) throw new Error("โหลดทะเบียนโครงการไม่สำเร็จ: " + error.message);
+  const rows = data || [];
+  if (!rows.length) return [];
+  const { data:okrLinks, error:okrError } = await sb.from("school_project_plan_okrs")
+    .select("plan_id,okr_id").in("plan_id", rows.map(row => row.id));
+  if (okrError) throw new Error("โหลด KR ของทะเบียนไม่สำเร็จ: " + okrError.message);
+  const okrsByPlan = new Map();
+  for (const link of okrLinks || []) {
+    if (!okrsByPlan.has(link.plan_id)) okrsByPlan.set(link.plan_id, []);
+    okrsByPlan.get(link.plan_id).push({ okr_id:link.okr_id });
+  }
+  return rows.map(row => ({ ...row, okrs:okrsByPlan.get(row.id) || [] }));
+}
+
+export async function replaceProjectPlanOkrs(planId, okrIds) {
+  const removed = await sb.from("school_project_plan_okrs").delete().eq("plan_id", planId);
+  if (removed.error) throw new Error("ล้าง KR เดิมของทะเบียนไม่สำเร็จ: " + removed.error.message);
+  const ids = [...new Set((okrIds || []).filter(Boolean))];
+  if (!ids.length) return;
+  const inserted = await sb.from("school_project_plan_okrs")
+    .insert(ids.map(okrId => ({ plan_id:planId, okr_id:okrId })));
+  if (inserted.error) throw new Error("บันทึก KR ของทะเบียนไม่สำเร็จ: " + inserted.error.message);
+}
+
+export function projectPlanKrCoverage(okrTree, planRows) {
+  const rows = (planRows || []).filter(row => row?.active !== false);
+  const krRows = [
+    ...(okrTree?.objectives || []).flatMap(objective => objective.keyResults || []),
+    ...(okrTree?.orphans || [])
+  ];
+  const linkedKrIds = new Set(rows.flatMap(row =>
+    (row?.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean)
+  ));
+  const linked = rows.filter(row => (row?.okrs || []).length > 0).length;
+  return {
+    total:rows.length,
+    linked,
+    unlinked:rows.length - linked,
+    uncoveredKrs:krRows.filter(kr => !linkedKrIds.has(kr.id))
+  };
+}
+
+function projectPlanNameKey(name) {
+  // ตรงกับ lower(btrim(regexp_replace(name, '\\s+', ' ', 'g'))) ในฐานข้อมูล
+  return String(name ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function projectPlanError(action, error) {
+  const message = error.code === "23505"
+    ? "ปีนี้มีชื่อนี้อยู่แล้วในทะเบียน · กรุณาแก้รายการเดิมหรือใช้ชื่ออื่น (กิจกรรมต้องไม่ซ้ำใต้โครงการแม่เดียวกัน)"
+    : error.code === "23503" && action === "ลบทะเบียนไม่สำเร็จ"
+      ? "ลบไม่ได้ เพราะยังมีรายการอ้างอิงอยู่ · ย้ายหรือลบกิจกรรมลูกก่อน หรือเอาติ๊ก ‘ใช้งานอยู่’ ออกเพื่อปลดระวางแทน"
+      : error.message;
+  return Object.assign(new Error(action + ": " + message), { code:error.code });
+}
+
+export async function saveProjectPlan(row) {
+  const parentId = row.parent_id || null;
+  if (!((row.kind === "โครงการ" && parentId === null) || (row.kind === "กิจกรรม" && parentId !== null))) {
+    throw new Error("โครงการต้องไม่มีแม่ · กิจกรรมต้องเลือกโครงการแม่ก่อนบันทึก");
+  }
+  if (!projectPlanNameKey(row.name)) throw new Error("กรุณากรอกชื่อรายการในทะเบียน");
+  if (row.responsible_staff_id && !String(row.responsible_name || "").trim()) {
+    throw new Error("กรุณาเลือกผู้รับผิดชอบใหม่เพื่อบันทึกชื่อคู่กับบัญชีบุคลากร");
+  }
+  const payload = {
+    year:row.year, kind:row.kind, parent_id:parentId, name:row.name.trim(),
+    responsible_staff_id:row.responsible_staff_id || null,
+    responsible_name:row.responsible_staff_id ? row.responsible_name.trim() : null,
+    note:row.note || null, sort_order:row.sort_order ?? 0, active:row.active !== false,
+    updated_at:new Date().toISOString()
+  };
+  if (Object.hasOwn(row, "carried_from_id")) payload.carried_from_id = row.carried_from_id || null;
+  let query;
+  if (row.id) {
+    query = sb.from("school_project_plan").update(payload).eq("id", row.id);
+  } else {
+    const { data:{ session }, error } = await sb.auth.getSession();
+    if (error) throw new Error("ตรวจบัญชีผู้บันทึกไม่สำเร็จ: " + error.message);
+    if (!session) throw new Error("กรุณาเข้าสู่ระบบใหม่ก่อนบันทึกทะเบียน");
+    query = sb.from("school_project_plan").insert({ ...payload, created_by:session.user.id });
+  }
+  const { data, error } = await query.select("*").single();
+  if (error) throw projectPlanError("บันทึกทะเบียนไม่สำเร็จ", error);
+  return data;
+}
+
+export async function deleteProjectPlan(id) {
+  const { data, error } = await sb.from("school_project_plan").delete().eq("id", id).select("id");
+  if (error) throw projectPlanError("ลบทะเบียนไม่สำเร็จ", error);
+  if (!data?.length) throw new Error("ลบไม่ได้ · รายการอาจถูกลบแล้ว หรือบัญชีนี้ไม่มีสิทธิ์ลบ กรุณาโหลดใหม่");
+}
+
+export async function carryProjectPlan(fromYear, toYear) {
+  if (!fromYear || !toYear || fromYear === toYear) throw new Error("กรุณาเลือกปีต้นทางและปลายทางที่ต่างกัน");
+  const [source, target] = await Promise.all([loadProjectPlan(fromYear), loadProjectPlan(toYear)]);
+  const key = (parentId, name) => JSON.stringify([parentId || null, projectPlanNameKey(name)]);
+  const existing = new Map(target.map(row => [key(row.parent_id, row.name), row]));
+  const parents = new Map();
+  let copied = 0;
+  async function carry(row, parentId) {
+    const rowKey = key(parentId, row.name);
+    if (existing.has(rowKey)) return existing.get(rowKey);
+    let saved;
+    try {
+      const { id, created_by, created_at, ...values } = row;
+      saved = await saveProjectPlan({ ...values, year:toYear, parent_id:parentId, carried_from_id:id });
+      copied += 1;
+    } catch (error) {
+      // อีกคนอาจยกยอดพร้อมกัน: อ่านแถวที่ชนกลับมาเพื่อ map แม่ให้ลูกได้
+      if (error.code !== "23505") throw error;
+      saved = (await loadProjectPlan(toYear)).find(item => key(item.parent_id, item.name) === rowKey);
+      if (!saved) throw error;
+    }
+    existing.set(rowKey, saved);
+    return saved;
+  }
+  try {
+    for (const row of source.filter(row => row.active !== false && row.kind === "โครงการ" && !row.parent_id)) {
+      parents.set(row.id, await carry(row, null));
+    }
+    for (const row of source.filter(row => row.active !== false && row.kind === "กิจกรรม")) {
+      const parent = parents.get(row.parent_id);
+      if (parent && parent.active !== false) await carry(row, parent.id);
+    }
+    return copied;
+  } catch (error) {
+    throw new Error(`ก๊อปไม่ครบ · สร้างแล้ว ${copied} รายการ · โหลดตรวจแล้วกดก๊อปซ้ำได้ ระบบจะข้ามชื่อที่มีแล้ว: ${error.message}`);
+  }
+}
+// ---------- จบทะเบียนโครงการตามแผนปฏิบัติการ ----------
+
 export async function loadOkrCheckins(okrIds) {
   const ids = [...new Set((okrIds || []).filter(Boolean))];
   if (ids.length === 0) return [];
