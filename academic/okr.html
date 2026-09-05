@@ -290,7 +290,12 @@ if (!session) {
     const krRows = typeof okrs === "undefined" ? [] : okrs;
     const krIds = (row.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean);
     const krChips = krIds.length
-      ? krIds.map(id => `<span class="chip">${esc(krRows.find(kr => kr.id === id)?.code || id)}</span>`).join("")
+      ? krIds.map(id => {
+          const kr = krRows.find(row => row.id === id);
+          return kr?.code
+            ? `<span class="chip">${esc(kr.code)}</span>`
+            : '<span class="chip warn">KR ที่ถูกลบแล้ว</span>';
+        }).join("")
       : '<span class="chip warn">ยังไม่ผูก KR</span>';
     const members = row.members || [];
     const memberNames = members.map(member => member.staff_name).filter(Boolean);
@@ -312,6 +317,11 @@ if (!session) {
 
   function planOkrIds(row) {
     return (row?.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean);
+  }
+
+  function renderPlanList(version = planLoadVersion) {
+    if (version !== planLoadVersion || !planRows.length) return;
+    el("plan-list").innerHTML = projectPlanTree(planRows).map(planRowHtml).join("");
   }
 
   function activityPlanKrGuard(rows, parentId, selectedIds) {
@@ -407,7 +417,8 @@ if (!session) {
       const rows = year ? await loadProjectPlan(year) : [];
       if (version !== planLoadVersion) return;
       planRows = rows;
-      el("plan-list").innerHTML = rows.length ? projectPlanTree(rows).map(planRowHtml).join("") : '<div class="empty">ยังไม่มีทะเบียนในปีนี้ · ฝ่ายวิชาการเพิ่มรายการหรือก๊อปจากปีก่อนได้</div>';
+      if (rows.length) renderPlanList(version);
+      else el("plan-list").innerHTML = '<div class="empty">ยังไม่มีทะเบียนในปีนี้ · ฝ่ายวิชาการเพิ่มรายการหรือก๊อปจากปีก่อนได้</div>';
       renderPlanCoverage();
       el("add-plan").disabled = !year;
       el("carry-plan").disabled = !year;
@@ -839,8 +850,10 @@ if (!session) {
       const [projectRows, okrRows, thresholdRows] = await Promise.all([
         loadAcademicProjects(year), loadSchoolOkrs(year), loadOkrThresholds()
       ]);
+      if (year !== el("filter-year").value) return;
       projects = projectRows;
       okrs = okrRows;
+      const planVersion = planLoadVersion;
       thresholds = thresholdRows;
       okrTree = buildOkrTree(okrs);
       lineageByKr = await loadOkrLineage([...okrTree.objectives.flatMap(row => row.keyResults), ...okrTree.orphans]);
@@ -861,6 +874,7 @@ if (!session) {
       el("kr-pass").value = thresholds.krPass;
       el("o-pass").value = thresholds.oPass;
       renderOkrs();
+      renderPlanList(planVersion);
       renderPlanCoverage();
     } catch (error) {
       el("okr-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
