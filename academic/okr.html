@@ -72,6 +72,16 @@
   .plan-team summary { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; }
   .plan-team summary::-webkit-details-marker { display: none; }
   .plan-team summary::marker { content: ""; }
+  .plan-children > summary, .coverage-details > summary { display: flex; align-items: center; min-height: 44px; color: var(--teal); font-weight: 700; cursor: pointer; list-style: none; }
+  .plan-children > summary::-webkit-details-marker, .coverage-details > summary::-webkit-details-marker { display: none; }
+  .plan-children > summary::marker, .coverage-details > summary::marker { content: ""; }
+  .plan-children { margin-left: 20px; }
+  .plan-parent-status, .coverage-statuses { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .coverage-project-list { margin-top: 4px; padding-left: 10px; border-left: 3px solid var(--line); }
+  .coverage-project-row { padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .coverage-project-row:last-child { border-bottom: 0; }
+  .coverage-project-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .coverage-parent { margin: 3px 0 0 32px; color: var(--muted); font-size: 13px; }
   .member-picker-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
   .member-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
   .member-chip { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding-left: 11px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 14px; font-weight: 600; }
@@ -218,7 +228,7 @@ import {
   loadAcademicProjects, listStaffPicker,
   loadProjectPlan, saveProjectPlan, deleteProjectPlan, carryProjectPlan, replaceProjectPlanOkrs, replaceProjectPlanMembers,
   loadSchoolOkrs, loadOkrCheckins, loadOkrLineage, loadOkrThresholds,
-  buildOkrTree, okrProgress, okrScore, okrObjectiveScore,
+  buildOkrTree, okrProgress, okrScore, okrObjectiveScore, projectApprovalBadge,
   indexCheckinsByOkr, okrCoverage, projectPlanKrCoverage, buildOkrTrend, suggestOkrValue, setSetting
 } from "../supabase-client.js?v=20260909-5";
 
@@ -289,7 +299,7 @@ if (!session) {
       ...ordered.filter(row => !parentIds.has(row.id) && !parentIds.has(row.parent_id))];
   }
 
-  function planRowHtml(row) {
+  function planRowHtml(row, groupSummaryHtml = "") {
     const krRows = typeof okrs === "undefined" ? [] : okrs;
     const tree = typeof okrTree === "undefined" ? { objectives:[], orphans:[] } : okrTree;
     const projectRowsDefined = typeof projects !== "undefined";
@@ -332,8 +342,50 @@ if (!session) {
       ${row.active === false ? '<span class="chip retired">ปลดระวางแล้ว</span>' : ""}
       ${row.active !== false && projectRowsReady && !hasProject ? '<span class="chip warn">ยังไม่มีใครสร้าง</span>' : ""}
       ${ownerHtml}
+      ${groupSummaryHtml}
       ${row.note ? `<div class="hint">${esc(row.note)}</div>` : ""}<div class="plan-chips">${krChips}</div></div>
       ${canEditAll ? `<div class="actions"><button class="ghost" data-edit-plan="${esc(row.id)}">แก้ไข</button>${isAdmin ? `<button class="danger" data-delete-plan="${esc(row.id)}">ลบ</button>` : ""}</div>` : ""}</div></div>`;
+  }
+
+  function projectPlanPendingSummary(rows, projectRows, projectRowsReady = true) {
+    const activeRows = (rows || []).filter(row => row?.active !== false);
+    const createdPlanIds = new Set((projectRows || []).map(row => row?.plan_id).filter(Boolean));
+    return {
+      total:activeRows.length,
+      uncreated:projectRowsReady ? activeRows.filter(row => !createdPlanIds.has(row.id)).length : null,
+      unlinked:activeRows.filter(row => !(row?.okrs || []).length).length,
+      noLead:activeRows.filter(row => !row?.responsible_staff_id || !String(row?.responsible_name || "").trim()).length
+    };
+  }
+
+  function planParentStatusHtml(childCount, pending) {
+    const chips = [`<span class="chip">กิจกรรม ${childCount}</span>`];
+    if (pending.uncreated == null) chips.push('<span class="chip">กำลังตรวจสถานะ…</span>');
+    else if (pending.uncreated > 0) chips.push(`<span class="chip warn">⚠ ${pending.uncreated} ยังไม่มีใครสร้าง</span>`);
+    if (pending.unlinked > 0) chips.push(`<span class="chip warn">⚠ ${pending.unlinked} ยังไม่ผูก KR</span>`);
+    if (pending.noLead > 0) chips.push(`<span class="chip warn">⚠ ${pending.noLead} ยังไม่ระบุหัวหน้า</span>`);
+    if (pending.uncreated === 0 && pending.unlinked === 0 && pending.noLead === 0) {
+      chips.push('<span class="chip">ครบแล้ว</span>');
+    }
+    return `<div class="plan-parent-status">${chips.join("")}</div>`;
+  }
+
+  function projectPlanListHtml(rows, projectRows, projectRowsReady = true) {
+    const ordered = projectPlanTree(rows || []);
+    const parents = ordered.filter(row => row.kind === "โครงการ" && !row.parent_id);
+    const groupedIds = new Set();
+    const groups = parents.map(parent => {
+      const children = ordered.filter(row => row.parent_id === parent.id);
+      groupedIds.add(parent.id);
+      children.forEach(row => groupedIds.add(row.id));
+      if (!children.length) return planRowHtml(parent);
+      const pending = projectPlanPendingSummary([parent, ...children], projectRows, projectRowsReady);
+      const parentHtml = planRowHtml(parent, planParentStatusHtml(children.length, pending));
+      const childHtml = children.map(child => planRowHtml(child)).join("");
+      return `<div class="plan-group">${parentHtml}<details class="plan-children"><summary>▸ ดูกิจกรรม (${children.length})</summary>${childHtml}</details></div>`;
+    });
+    const orphans = ordered.filter(row => !groupedIds.has(row.id)).map(row => planRowHtml(row));
+    return [...groups, ...orphans].join("");
   }
 
   function planOkrIds(row) {
@@ -342,7 +394,7 @@ if (!session) {
 
   function renderPlanList(version = planLoadVersion) {
     if (version !== planLoadVersion || !planRows.length) return;
-    el("plan-list").innerHTML = projectPlanTree(planRows).map(planRowHtml).join("");
+    el("plan-list").innerHTML = projectPlanListHtml(planRows, projects, projectsLoaded);
   }
 
   function activityPlanKrGuard(rows, parentId, selectedIds) {
@@ -663,6 +715,47 @@ if (!session) {
     return `<div class="trend">แนวโน้ม ${points.join(" → ")}</div>`;
   }
 
+  function coverageApprovalSummary(projectRows) {
+    const statuses = ["อนุมัติ", "รออนุมัติ", "ส่งกลับให้แก้", "ไม่อนุมัติ", "ร่าง"];
+    const counts = new Map(statuses.map(status => [status, 0]));
+    for (const project of projectRows || []) {
+      const status = project?.approval_status || "ร่าง";
+      if (counts.has(status)) counts.set(status, counts.get(status) + 1);
+    }
+    return {
+      total:(projectRows || []).length,
+      approved:counts.get("อนุมัติ"),
+      statuses:statuses.map(status => ({ status, count:counts.get(status) })).filter(item => item.count > 0)
+    };
+  }
+
+  function sortedCoverageProjects(projectRows) {
+    return [...(projectRows || [])].sort((a, b) => {
+      const kindOrder = (a.kind === "โครงการ" ? 0 : 1) - (b.kind === "โครงการ" ? 0 : 1);
+      return kindOrder || String(a.name || "").localeCompare(String(b.name || ""), "th");
+    });
+  }
+
+  function coverageProjectsHtml(coverageProjects, allProjects) {
+    if (!(coverageProjects || []).length) return "";
+    const summary = coverageApprovalSummary(coverageProjects);
+    const statusChips = summary.statuses.map(item =>
+      `<span class="chip${item.status === "ไม่อนุมัติ" ? " fail" : item.status === "อนุมัติ" ? "" : " warn"}">${esc(item.status)} ${item.count}</span>`
+    ).join("");
+    const warning = summary.approved === 0
+      ? `<div class="banner warn">⚠ ทั้ง ${summary.total} รายการยังไม่ผ่านการอนุมัติ — KR นี้ยังไม่ถูกรองรับจริง</div>`
+      : "";
+    const rows = sortedCoverageProjects(coverageProjects).map(project => {
+      const badge = projectApprovalBadge(project);
+      const responsible = String(project.responsible_display_name || "").trim() || "ยังไม่ระบุ";
+      const parent = project.kind === "กิจกรรม"
+        ? (allProjects || []).find(row => row.id === project.parent_id)
+        : null;
+      return `<div class="coverage-project-row"><div class="coverage-project-head"><span class="chip">${esc(project.kind || "รายการ")}</span><b>${esc(project.name || "ไม่พบชื่อ")}</b><span class="meta">— ผู้รับผิดชอบ: ${esc(responsible)}</span><span class="chip${badge.tone ? ` ${esc(badge.tone)}` : ""}">${esc(badge.label)}</span></div>${parent ? `<div class="coverage-parent">└ โครงการแม่: ${esc(parent.name)}</div>` : ""}</div>`;
+    }).join("");
+    return `<div class="coverage-statuses">${statusChips}</div>${warning}<details class="coverage-details"><summary>▸ ดูรายชื่อ (${summary.total})</summary><div class="coverage-project-list">${rows}</div></details>`;
+  }
+
   function renderKr(kr) {
     const checkin = checkinsByOkr.get(kr.id);
     const progress = okrProgress(kr, checkin);
@@ -681,10 +774,11 @@ if (!session) {
       result = '<div class="banner warn">ยังไม่ได้ตั้งเป้า</div>';
     }
     const warnings = `${!checkin ? '<span>⚠ ยังไม่ได้วัดผลปีนี้</span>' : ""}${coverage.isUncovered ? '<span>⚠ ยังไม่มีโครงการรองรับ</span>' : ""}`;
+    const coverageList = coverageProjectsHtml(coverage.projects, projects);
     return `<div class="okr-kr"><div class="okr-heading"><div><span class="okr-code">${esc(kr.code || "KR")}</span> ${esc(kr.key_result)}${kr.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</div><div class="actions">
       ${canEditAll ? `<button class="ghost" data-edit-okr="${kr.id}">แก้ไข</button><button class="ghost" data-checkin="${kr.id}">บันทึกผลวัด</button>` : ""}
       ${isAdmin ? `<button class="danger" data-delete-okr="${kr.id}">ลบ</button>` : ""}
-    </div></div>${result}<div class="meta">รองรับด้วย ${coverage.projects.length} รายการ · งบ ${fmtMoney(coverage.plannedBudget)}</div>${trendHtml(kr)}${warnings ? `<div class="okr-warnings">${warnings}</div>` : ""}</div>`;
+    </div></div>${result}<div class="meta">รองรับด้วย ${coverage.projects.length} รายการ · งบ ${fmtMoney(coverage.plannedBudget)}</div>${coverageList}${trendHtml(kr)}${warnings ? `<div class="okr-warnings">${warnings}</div>` : ""}</div>`;
   }
 
   function renderOkrs() {
