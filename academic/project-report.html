@@ -346,10 +346,16 @@ function projectPlanCreationSummary(planRows, projects) {
   return { total:activeRows.length, created, missing:activeRows.length - created };
 }
 
-// นับเฉพาะผู้รับผิดชอบที่ผูกไว้จริงในรายการของปีที่เลือก ไม่เดาชื่อจากรายละเอียด
-function staffWithoutProjects(people, projects) {
-  const responsibleIds = new Set((projects || []).map(project => project?.responsible_staff_id).filter(Boolean));
-  return (people || []).filter(person => person?.id && !responsibleIds.has(person.id));
+// นับทั้งหัวหน้าและคณะทำงานในทะเบียนที่ยังใช้งาน ไม่เดาชื่อจากรายละเอียด
+function staffNotInPlan(people, planRows) {
+  const assignedIds = new Set((planRows || [])
+    .filter(row => row?.active !== false)
+    .flatMap(row => [
+      row?.responsible_staff_id,
+      ...(row?.members || []).map(member => member?.staff_id)
+    ])
+    .filter(Boolean));
+  return (people || []).filter(person => person?.id && !assignedIds.has(person.id));
 }
 
 function countByStatus(projects) {
@@ -437,12 +443,14 @@ if (!session) {
     }).join("")}</ul>`;
   }
 
-  function followCard(id, title, rows, content) {
+  // 🪤 `note` ต้องอยู่นอก <details> เสมอ — หลักของรอบ 57: ซ่อนรายชื่อ ไม่ซ่อนคำตอบ
+  //    ถ้าส่งไปรวมกับ content มันจะถูกพับหายไปพร้อมรายชื่อเมื่อเกิน 3 แถว
+  function followCard(id, title, rows, content, note = "") {
     if (!rows.length) return "";
     const body = rows.length > 3
       ? `<details><summary>▸ ดูรายชื่อ (${rows.length})</summary>${content}</details>`
       : content;
-    return `<article class="follow-card" id="${id}"><div class="section-head"><div><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div></div><button class="ghost no-print" type="button" data-print-section data-print-label="${title}">🖨️ พิมพ์ใบนี้</button></div>${body}</article>`;
+    return `<article class="follow-card" id="${id}"><div class="section-head"><div><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div>${note}</div><button class="ghost no-print" type="button" data-print-section data-print-label="${title}">🖨️ พิมพ์ใบนี้</button></div>${body}</article>`;
   }
 
   function planGapListHtml(groups) {
@@ -487,7 +495,7 @@ if (!session) {
     const planGaps = planGapByLeader(planRows, projects);
     const blockedPlans = planBlockedParents(planRows, projects);
     const neverSent = projectsNeverSubmitted(projects);
-    const missingStaff = staffWithoutProjects(staff, projects);
+    const unassignedStaff = staffNotInPlan(staff, planRows);
     const pending = projectsPendingTooLong(projects, todayIso, PROJECT_PENDING_DAYS);
     const returned = projectsReturnedTooLong(projects, todayIso, PROJECT_RETURNED_DAYS);
     const overdue = projectsPastDueNotClosed(projects, todayIso);
@@ -503,8 +511,6 @@ if (!session) {
         blockedPlanListHtml(blockedPlans)),
       followCard("follow-draft", "✏️ ร่าง — ครูยังไม่ได้กดส่งขออนุมัติ", neverSent,
         followProjectList(neverSent, todayIso, project => project.created_at)),
-      followCard("follow-nostaff", "🚫 บุคลากรที่ยังไม่มีโครงการ/กิจกรรมสักรายการ", missingStaff,
-        `<ul class="follow-list">${missingStaff.map(person => `<li><b>${esc(person.full_name)}</b><div class="meta">${esc(person.staff_position || "ยังไม่ระบุตำแหน่ง")}</div>${person.has_login === false ? '<div class="meta">⚠️ ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</div>' : ""}</li>`).join("")}</ul>`),
       followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
       followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => projectLatestReturnedAt(project))),
       followCard("follow-overdue", "📌 เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
@@ -513,7 +519,10 @@ if (!session) {
       followCard("follow-okr", "⚠️ KR ที่ไม่มีโครงการรองรับ", uncovered,
         `<ul class="follow-list">${uncovered.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}${planFollowupForKr(kr)}</li>`).join("")}</ul>`),
       followCard("follow-okr-unapproved", "⚠️ KR ที่มีรายการแล้ว แต่ยังไม่มีใบไหนอนุมัติ", unapprovedKrs,
-        `<ul class="follow-list">${unapprovedKrs.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}<div class="meta">มี ${(coverageByKr.get(kr.id)?.projects || []).length} รายการ แต่ยังไม่มีใบอนุมัติ</div></li>`).join("")}</ul>`)
+        `<ul class="follow-list">${unapprovedKrs.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}<div class="meta">มี ${(coverageByKr.get(kr.id)?.projects || []).length} รายการ แต่ยังไม่มีใบอนุมัติ</div></li>`).join("")}</ul>`),
+      planRows.length ? followCard("follow-unassigned", "🙋 บุคลากรที่แผนปีนี้ยังไม่ได้มอบหมายงานให้", unassignedStaff,
+        `<ul class="follow-list">${unassignedStaff.map(person => `<li><b>${esc(person.full_name)}</b><div class="meta">${esc(person.staff_position || "ยังไม่ระบุตำแหน่ง")}</div></li>`).join("")}</ul>`,
+        '<div class="meta">ไม่ใช่รายการค้างส่ง — ใช้ตรวจว่าแผนปีนี้ครอบคนครบไหม</div>') : ""
     ].filter(Boolean);
     el("follow-grid").innerHTML = cards.join("");
     el("follow-empty").hidden = cards.length > 0;
