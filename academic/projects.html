@@ -456,11 +456,34 @@ if (!session) {
     return (project?.okrs || []).map(row => typeof row === "object" ? row.id : row).filter(Boolean);
   }
 
-  function activityKrGuard(rows, parentId, selectedIds) {
+  function planOkrIds(plan) {
+    return [...new Set((plan?.okrs || []).map(row => typeof row === "object" ? row.okr_id : row).filter(Boolean))];
+  }
+
+  function mergeProjectPlanOkrs(planRows, links) {
+    const okrsByPlan = new Map();
+    for (const link of links || []) {
+      if (!link?.plan_id || !link?.okr_id) continue;
+      if (!okrsByPlan.has(link.plan_id)) okrsByPlan.set(link.plan_id, []);
+      okrsByPlan.get(link.plan_id).push({ okr_id:link.okr_id });
+    }
+    return (planRows || []).map(row => ({ ...row, okrs:okrsByPlan.get(row.id) || [] }));
+  }
+
+  function projectGuardOkrIds(project, planRows = null) {
+    if (!project?.plan_id) return linkedOkrIds(project);
+    const registry = planRows ?? (typeof projectPlanRows === "undefined" ? [] : projectPlanRows);
+    const plan = registry.find(row => row.id === project.plan_id) || null;
+    // 🪤 ทะเบียนที่ "ปลดระวาง" ถูกกรองออกจาก loadProjectPlanPicker() ⟹ หาไม่เจอได้จริง
+    //    ถ้าคืน [] ตรงนี้ ครูจะบันทึกกิจกรรมลูกไม่ได้เลยและข้อความจะชี้ผิดจุด
+    return plan ? planOkrIds(plan) : linkedOkrIds(project);
+  }
+
+  function activityKrGuard(rows, parentId, selectedIds, planRows = null) {
     const selected = [...new Set(selectedIds || [])];
     if (!selected.length) return { ok:true, invalidIds:[], parent:(rows || []).find(row => row.id === parentId) };
     const parent = (rows || []).find(row => row.id === parentId);
-    const allowed = new Set(linkedOkrIds(parent));
+    const allowed = new Set(projectGuardOkrIds(parent, planRows));
     const invalidIds = selected.filter(id => !allowed.has(id));
     return { ok:invalidIds.length === 0, invalidIds, parent };
   }
@@ -658,6 +681,23 @@ if (!session) {
 
   function renderOkrPicker(selectedIds = []) {
     const selected = new Set(selectedIds);
+    const planChoice = resolveProjectPlanChoice(projectPlanRows, projects, el("p-plan").value);
+    if (planChoice.plan) {
+      const plannedIds = planOkrIds(planChoice.plan);
+      if (!plannedIds.length) {
+        el("project-okr-pick").innerHTML = '<div class="banner warn">ทะเบียนยังไม่ได้ผูก KR ให้รายการนี้ · บันทึกได้ตามปกติ ฝ่ายวิชาการเพิ่มให้ภายหลังที่หน้า OKR แล้วจะขึ้นเอง</div>';
+        return;
+      }
+      const byId = new Map(okrs.map(row => [row.id, row]));
+      const rows = plannedIds.map(id => {
+        const kr = byId.get(id);
+        return kr
+          ? `<div class="check-row"><span class="chip">${esc(kr.code || "KR")}</span><span>${esc(kr.key_result || "")}${kr.active ? "" : " · ปิดใช้งานแล้ว"}</span></div>`
+          : '<div class="check-row"><span class="chip warn">KR ที่ถูกลบแล้ว</span></div>';
+      }).join("");
+      el("project-okr-pick").innerHTML = `${rows}<div class="hint">มาจากทะเบียนแผนปฏิบัติการ · แก้ที่ทะเบียน</div>`;
+      return;
+    }
     const activity = el("p-kind").value === "กิจกรรม";
     const parentId = el("p-parent").value;
     if (activity && !parentId) {
@@ -681,6 +721,8 @@ if (!session) {
   }
 
   function selectedProjectOkrIds() {
+    const planChoice = resolveProjectPlanChoice(projectPlanRows, projects, el("p-plan").value);
+    if (planChoice.plan) return planOkrIds(planChoice.plan);
     return [...el("project-okr-pick").querySelectorAll('input[type="checkbox"]:checked')]
       .map(input => input.value);
   }
@@ -868,6 +910,7 @@ if (!session) {
     linkingLegacyProject = false;
     el("project-plan-picker-field").hidden = true;
     el("project-legacy-name-field").hidden = false;
+    el("p-plan").value = "";
     el("p-plan").required = false;
     el("p-name").required = true;
     el("p-name").value = project?.name || "";
@@ -1037,9 +1080,17 @@ if (!session) {
       const [projectRows, okrRows, planRows] = await Promise.all([
         loadAcademicProjects(year), loadSchoolOkrs(year), loadProjectPlanPicker(year)
       ]);
+      let planOkrLinks = [];
+      if (planRows.length) {
+        const result = await sb.from("school_project_plan_okrs")
+          .select("plan_id,okr_id")
+          .in("plan_id", planRows.map(row => row.id));
+        if (result.error) throw new Error("โหลด KR ของทะเบียนไม่สำเร็จ: " + result.error.message);
+        planOkrLinks = result.data || [];
+      }
       projects = projectRows;
       okrs = okrRows;
-      projectPlanRows = planRows;
+      projectPlanRows = mergeProjectPlanOkrs(planRows, planOkrLinks);
       okrTree = buildOkrTree(okrs);
       coverageByKr = okrCoverage(okrTree, projects);
       renderProjects(); renderOkrPicker();
@@ -1080,7 +1131,7 @@ if (!session) {
   });
   el("cancel-plan-link").addEventListener("click", () => {
     const project = projects.find(row => row.id === editingProjectId);
-    if (project && !project.plan_id) showLegacyProjectFields(project, selectedProjectOkrIds());
+    if (project && !project.plan_id) showLegacyProjectFields(project, linkedOkrIds(project));
   });
   el("p-responsible").addEventListener("change", updateResponsibleNote);
   for (const [id, message] of [
@@ -1277,7 +1328,7 @@ if (!session) {
       const krGuard = parentKrGuard(projects, editingProjectId, selected);
       if (!krGuard.ok) {
         const detail = krGuard.affected.map(item => `${okrCodes([item.okrId])[0]}: ${item.projectNames.join(", ")}`).join("; ");
-        return toast(`เอา KR ออกจากโครงการนี้ไม่ได้ เพราะยังมีกิจกรรมผูกอยู่ — ${detail} · ถ้าจะเอาออก ให้แก้ที่กิจกรรมเหล่านั้นก่อน`, true);
+        return toast(`ทะเบียนของกิจกรรมลูกยังผูก KR นี้อยู่ — ${detail} · ให้ฝ่ายวิชาการแก้ที่ทะเบียนก่อน`, true);
       }
       const dateGuard = parentDateGuard(projects, editingProjectId, start, end);
       if (!dateGuard.ok && dateGuard.reason === "needs-end") {
