@@ -220,7 +220,7 @@ import {
   loadSchoolOkrs, loadOkrCheckins, loadOkrLineage, loadOkrThresholds,
   buildOkrTree, okrProgress, okrScore, okrObjectiveScore,
   indexCheckinsByOkr, okrCoverage, projectPlanKrCoverage, buildOkrTrend, suggestOkrValue, setSetting
-} from "../supabase-client.js?v=20260909-4";
+} from "../supabase-client.js?v=20260909-5";
 
 const session = await requireAuth();
 if (!session) {
@@ -253,6 +253,7 @@ if (!session) {
 
   let years = [];
   let projects = [];
+  let projectsLoaded = false;
   let planRows = [];
   let planMembers = [];
   let editingPlanId = null;
@@ -291,6 +292,10 @@ if (!session) {
   function planRowHtml(row) {
     const krRows = typeof okrs === "undefined" ? [] : okrs;
     const tree = typeof okrTree === "undefined" ? { objectives:[], orphans:[] } : okrTree;
+    const projectRowsDefined = typeof projects !== "undefined";
+    const projectRows = projectRowsDefined ? projects : [];
+    const projectRowsReady = projectRowsDefined && (typeof projectsLoaded === "undefined" ? true : projectsLoaded);
+    const hasProject = projectRows.some(project => project.plan_id === row.id);
     const krIds = (row.okrs || []).map(link => typeof link === "object" ? (link.okr_id || link.id) : link).filter(Boolean);
     let krChips = '<span class="chip warn">ยังไม่ผูก KR</span>';
     if (krIds.length && !krRows.length) {
@@ -325,6 +330,7 @@ if (!session) {
     return `<div class="plan-row${row.parent_id ? " plan-child" : ""}${row.active === false ? " plan-retired" : ""}">
       <div class="okr-heading"><div><b>${row.parent_id ? "└ " : "▸ "}${esc(row.name)}</b>
       ${row.active === false ? '<span class="chip retired">ปลดระวางแล้ว</span>' : ""}
+      ${row.active !== false && projectRowsReady && !hasProject ? '<span class="chip warn">ยังไม่มีใครสร้าง</span>' : ""}
       ${ownerHtml}
       ${row.note ? `<div class="hint">${esc(row.note)}</div>` : ""}<div class="plan-chips">${krChips}</div></div>
       ${canEditAll ? `<div class="actions"><button class="ghost" data-edit-plan="${esc(row.id)}">แก้ไข</button>${isAdmin ? `<button class="danger" data-delete-plan="${esc(row.id)}">ลบ</button>` : ""}</div>` : ""}</div></div>`;
@@ -402,15 +408,21 @@ if (!session) {
     const tree = planYearOkrTree();
     const summary = projectPlanKrCoverage(tree, planRows);
     const leadGap = projectPlanLeadGap(planRows);
+    const projectRowsDefined = typeof projects !== "undefined";
+    const projectRows = projectRowsDefined ? projects : [];
+    const projectRowsReady = projectRowsDefined && (typeof projectsLoaded === "undefined" ? true : projectsLoaded);
+    const creationGap = projectRowsReady && typeof projectPlanCreationGap === "function"
+      ? projectPlanCreationGap(planRows, projectRows)
+      : { uncreated:projectRowsReady ? (planRows || []).filter(row => row?.active !== false && !projectRows.some(project => project?.plan_id === row.id)).length : 0 };
     const krCount = tree.objectives.reduce((sum, objective) => sum + objective.keyResults.length, 0) + tree.orphans.length;
     const gap = !krCount
       ? "ปีนี้ยังไม่มี KR ให้ตรวจ"
       : summary.uncoveredKrs.length
         ? `KR ที่ยังไม่มีรายการในแผนรองรับ: ${summary.uncoveredKrs.map(kr => esc(kr.code || "KR")).join(" · ")}`
         : "ทุก KR มีรายการในแผนรองรับแล้ว";
-    el("plan-coverage").innerHTML = `<div><b>แผนปีนี้ ${summary.total} รายการ</b> · ผูก KR แล้ว ${summary.linked} · ยังไม่ผูก ${summary.unlinked} · ยังไม่ระบุหัวหน้า ${leadGap.noLead}</div><div>${gap}</div>`;
-    el("plan-coverage").classList.toggle("warn", summary.uncoveredKrs.length > 0 || summary.unlinked > 0 || leadGap.noLead > 0);
-    el("plan-coverage").classList.toggle("info", summary.uncoveredKrs.length === 0 && summary.unlinked === 0 && leadGap.noLead === 0);
+    el("plan-coverage").innerHTML = `<div><b>แผนปีนี้ ${summary.total} รายการ</b> · ผูก KR แล้ว ${summary.linked} · ยังไม่ผูก ${summary.unlinked} · ยังไม่ระบุหัวหน้า ${leadGap.noLead} · ยังไม่มีใครสร้าง ${creationGap.uncreated}</div><div>${gap}</div>`;
+    el("plan-coverage").classList.toggle("warn", summary.uncoveredKrs.length > 0 || summary.unlinked > 0 || leadGap.noLead > 0 || creationGap.uncreated > 0);
+    el("plan-coverage").classList.toggle("info", summary.uncoveredKrs.length === 0 && summary.unlinked === 0 && leadGap.noLead === 0 && creationGap.uncreated === 0);
   }
 
   function projectPlanLeadGap(planRows) {
@@ -419,6 +431,13 @@ if (!session) {
       !row?.responsible_staff_id || !String(row?.responsible_name || "").trim()
     ).length;
     return { total:rows.length, noLead };
+  }
+
+  function projectPlanCreationGap(planRows, projectRows) {
+    const rows = (planRows || []).filter(row => row?.active !== false);
+    const createdPlanIds = new Set((projectRows || []).map(row => row?.plan_id).filter(Boolean));
+    const uncreatedRows = rows.filter(row => !createdPlanIds.has(row.id));
+    return { total:rows.length, uncreated:uncreatedRows.length, uncreatedRows };
   }
 
   async function loadPlanData() {
@@ -860,6 +879,7 @@ if (!session) {
   async function loadData() {
     const year = el("filter-year").value;
     if (!year) return;
+    projectsLoaded = false;
     el("okr-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
     try {
       const [projectRows, okrRows, thresholdRows] = await Promise.all([
@@ -867,6 +887,7 @@ if (!session) {
       ]);
       if (year !== el("filter-year").value) return;
       projects = projectRows;
+      projectsLoaded = true;
       okrs = okrRows;
       const planVersion = planLoadVersion;
       thresholds = thresholdRows;

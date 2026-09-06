@@ -3832,6 +3832,26 @@ export async function loadProjectPlan(year) {
   }));
 }
 
+export async function loadProjectPlanPicker(year) {
+  const { data, error } = await sb.from("school_project_plan")
+    .select("id,year,name,kind,parent_id,responsible_staff_id,responsible_name,sort_order,created_at,active")
+    .eq("year", year)
+    .neq("active", false)
+    .order("sort_order")
+    .order("created_at");
+  if (error) throw new Error("โหลดตัวเลือกจากทะเบียนโครงการไม่สำเร็จ: " + error.message);
+  const rows = data || [];
+  if (!rows.length) return [];
+  const planIds = rows.map(row => row.id);
+  const used = await sb.from("academic_projects")
+    .select("plan_id")
+    .eq("year", year)
+    .in("plan_id", planIds);
+  if (used.error) throw new Error("ตรวจรายการทะเบียนที่ถูกใช้แล้วไม่สำเร็จ: " + used.error.message);
+  const takenIds = new Set((used.data || []).map(row => row.plan_id).filter(Boolean));
+  return rows.map(row => ({ ...row, taken:takenIds.has(row.id) }));
+}
+
 export async function replaceProjectPlanOkrs(planId, okrIds) {
   const removed = await sb.from("school_project_plan_okrs").delete().eq("plan_id", planId);
   if (removed.error) throw new Error("ล้าง KR เดิมของทะเบียนไม่สำเร็จ: " + removed.error.message);

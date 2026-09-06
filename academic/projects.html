@@ -172,10 +172,11 @@
         <div class="banner warn" id="project-lock-note" hidden>แผนถูกล็อกหลังอนุมัติ · กด ขอแก้ไขแผน เพื่อปลดล็อก</div>
         <fieldset class="plan-fields" id="project-plan-fields">
         <div class="form-grid">
-          <div class="field wide"><label for="p-name">ชื่อ</label><input id="p-name" type="text" maxlength="300" required></div>
-          <div class="field"><label for="p-kind">ประเภท</label><select id="p-kind"><option>โครงการ</option><option>กิจกรรม</option></select></div>
+          <div class="field wide" id="project-plan-picker-field"><label for="p-plan">ชื่อจากทะเบียน</label><select id="p-plan"><option value="">— เลือกรายการจากทะเบียน —</option></select><div class="hint">ชื่อและประเภทจะอ้างอิงจากทะเบียนโครงการตามแผนปฏิบัติการ</div><div class="banner warn" id="p-plan-empty" hidden></div><div class="toolbar" id="cancel-plan-link-toolbar" hidden><button class="ghost" id="cancel-plan-link" type="button">แก้แบบงานนอกแผนต่อ</button></div></div>
+          <div class="field wide" id="project-legacy-name-field" hidden><label for="p-name">ชื่อ</label><input id="p-name" type="text" maxlength="300"><div class="hint">งานนอกแผนเดิมยังแก้ชื่อได้ตามปกติ หรือเลือกผูกกับทะเบียนภายหลัง</div><div class="toolbar"><button class="ghost" id="bind-project-plan" type="button">ผูกกับทะเบียน</button></div></div>
+          <div class="field"><label for="p-kind">ประเภท</label><select id="p-kind" disabled><option>โครงการ</option><option>กิจกรรม</option></select><div class="hint" id="p-kind-hint">เติมจากทะเบียนอัตโนมัติ</div></div>
           <div class="field"><label for="p-status">สถานะ</label><select id="p-status"><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select><div class="hint" id="p-status-hint" hidden>ตอนนี้เลือกได้เฉพาะช่วงวางแผน · สถานะจะเปลี่ยนเป็น “กำลังดำเนินการ” หรือ “เสร็จสิ้น” ได้หลังผ่านการอนุมัติ แล้วกดปุ่ม “รายงานผล”</div></div>
-          <div class="field wide" id="parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent"><option value="">— เลือกโครงการแม่ —</option></select><div class="hint">ถ้ายังไม่มีโครงการที่ใช่ ให้สร้างโครงการก่อน</div></div>
+          <div class="field wide" id="parent-field" hidden><label for="p-parent">โครงการแม่</label><select id="p-parent" disabled><option value="">— เลือกโครงการแม่ —</option></select><div class="hint" id="p-parent-hint">เติมจากทะเบียนอัตโนมัติ</div><div class="banner warn" id="p-parent-missing" hidden></div></div>
           <div class="field"><label for="p-start">วันเริ่ม</label><input id="p-start" type="date" required><div class="hint" id="p-start-hint"></div></div>
           <div class="field"><label for="p-end">วันสิ้นสุด</label><input id="p-end" type="date"><div class="hint" id="p-end-hint">เว้นว่างได้ถ้าเป็นงานวันเดียว</div></div>
           <div class="field wide" id="responsible-select-field"><label for="p-responsible">ผู้รับผิดชอบ</label><select id="p-responsible"><option value="">กำลังโหลดรายชื่อ…</option></select><div class="hint" id="responsible-note"></div></div>
@@ -224,10 +225,10 @@ import {
   loadAcademicProjects, listStaffPicker, projectResponsibleName,
   projectApprovalBadge, submitProjectForApproval, withdrawProjectApproval,
   requestProjectRevision, reportProjectProgress, appendProjectLinks,
-  loadSchoolOkrs,
+  loadSchoolOkrs, loadProjectPlanPicker,
   buildOkrTree, buildProjectTree, projectBudgetOf, summarizeProjectBudget,
   okrChipLabel, okrCoverage
-} from "../supabase-client.js?v=20260909-4";
+} from "../supabase-client.js?v=20260909-5";
 
 const session = await requireAuth();
 if (!session) {
@@ -330,12 +331,14 @@ if (!session) {
 
   let years = [];
   let projects = [];
+  let projectPlanRows = [];
   let okrs = [];
   let okrTree = { objectives:[], orphans:[] };
   let staff = [];
   let coverageByKr = new Map();
   let editingProjectId = null;
   let editingProjectMode = "plan";
+  let linkingLegacyProject = false;
   let revisionProjectId = null;
 
   const canEditProject = project => canEditAll || (
@@ -349,6 +352,34 @@ if (!session) {
     el("access-note").hidden = false;
     el("access-note").innerHTML = '<div class="readonly"><b>คุณมีสิทธิ์ดูอย่างเดียว</b><br>บัญชีนี้ยังไม่ผูกกับรายชื่อบุคลากร จึงยังเพิ่มโครงการหรือกิจกรรมไม่ได้ กรุณาให้ผู้ดูแลผูกบัญชีกับรายชื่อบุคลากรก่อน</div>';
   }
+
+  function projectPlanPickerChoices(rows, options = {}) {
+    const { canEditAll = false, myStaffId = null, currentPlanId = null } = options;
+    return (rows || []).filter(row =>
+      row?.active !== false && (
+        row.id === currentPlanId || (
+          row.taken !== true && (canEditAll || row.responsible_staff_id === myStaffId)
+        )
+      )
+    );
+  }
+
+  function resolveProjectPlanChoice(planRows, projectRows, planId) {
+    const plan = (planRows || []).find(row => row.id === planId) || null;
+    const parentPlan = plan?.kind === "กิจกรรม"
+      ? (planRows || []).find(row => row.id === plan.parent_id) || null
+      : null;
+    const parentProject = parentPlan
+      ? (projectRows || []).find(row => row.plan_id === parentPlan.id) || null
+      : null;
+    return {
+      plan,
+      parentPlan,
+      parentProject,
+      parentMissing:Boolean(plan?.kind === "กิจกรรม" && !parentProject)
+    };
+  }
+
   function overlapsMonth(project, yearMonth) {
     if (!yearMonth) return true;
     const [year, month] = yearMonth.split("-").map(Number);
@@ -794,6 +825,86 @@ if (!session) {
     if (currentParentId) el("p-parent").value = currentParentId;
   }
 
+  function setProjectPlanBlocked(blocked) {
+    const button = el("save-project");
+    button.dataset.planBlocked = blocked ? "true" : "false";
+    if (editingProjectMode !== "progress") button.disabled = blocked;
+  }
+
+  function syncSelectedProjectPlan(selectedIds = selectedProjectOkrIds(), notifyRemoved = false) {
+    const selectedId = el("p-plan").value;
+    const resolved = resolveProjectPlanChoice(projectPlanRows, projects, selectedId);
+    el("p-parent-missing").hidden = true;
+    if (!resolved.plan) {
+      el("p-name").value = "";
+      el("p-kind").value = "โครงการ";
+      el("p-parent").innerHTML = '<option value="">— เลือกรายการจากทะเบียนก่อน —</option>';
+      el("p-parent").value = "";
+      setProjectPlanBlocked(true);
+      syncProjectKind(selectedIds, notifyRemoved);
+      return resolved;
+    }
+    el("p-name").value = resolved.plan.name || "";
+    el("p-kind").value = resolved.plan.kind || "โครงการ";
+    if (resolved.plan.kind === "กิจกรรม" && resolved.parentProject) {
+      el("p-parent").innerHTML = `<option value="${esc(resolved.parentProject.id)}">${esc(resolved.parentProject.name)}</option>`;
+      el("p-parent").value = resolved.parentProject.id;
+    } else if (resolved.plan.kind === "กิจกรรม") {
+      const parentName = resolved.parentPlan?.name || "ไม่พบรายการโครงการแม่ในทะเบียน";
+      el("p-parent").innerHTML = `<option value="">${esc(parentName)} · ยังไม่มีใครสร้าง</option>`;
+      el("p-parent").value = "";
+      el("p-parent-missing").textContent = `ยังสร้างกิจกรรมนี้ไม่ได้ · โครงการแม่ “${parentName}” ยังไม่มีใครสร้าง กรุณาให้หัวหน้าโครงการสร้างโครงการแม่ก่อน`;
+      el("p-parent-missing").hidden = false;
+    } else {
+      el("p-parent").innerHTML = '<option value="">— ไม่มีโครงการแม่ —</option>';
+      el("p-parent").value = "";
+    }
+    setProjectPlanBlocked(resolved.parentMissing);
+    syncProjectKind(selectedIds, notifyRemoved);
+    return resolved;
+  }
+
+  function showLegacyProjectFields(project, selectedIds = selectedProjectOkrIds()) {
+    linkingLegacyProject = false;
+    el("project-plan-picker-field").hidden = true;
+    el("project-legacy-name-field").hidden = false;
+    el("p-plan").required = false;
+    el("p-name").required = true;
+    el("p-name").value = project?.name || "";
+    el("p-kind").value = project?.kind || "โครงการ";
+    el("p-kind").disabled = false;
+    el("p-kind-hint").textContent = "งานนอกแผนเดิมยังแก้ประเภทได้ตามปกติ";
+    el("p-parent").disabled = false;
+    el("p-parent-hint").textContent = "งานนอกแผนเดิมยังเลือกโครงการแม่ได้ตามปกติ";
+    el("p-parent-missing").hidden = true;
+    el("p-plan-empty").hidden = true;
+    parentOptions(project?.parent_id);
+    setProjectPlanBlocked(false);
+    syncProjectKind(selectedIds);
+  }
+
+  function renderProjectPlanPicker(project, selectedIds = selectedProjectOkrIds()) {
+    const currentPlanId = project?.plan_id || null;
+    const choices = projectPlanPickerChoices(projectPlanRows, { canEditAll, myStaffId, currentPlanId });
+    el("project-plan-picker-field").hidden = false;
+    el("project-legacy-name-field").hidden = true;
+    el("cancel-plan-link-toolbar").hidden = !(linkingLegacyProject && project && !project.plan_id);
+    el("p-plan").required = true;
+    el("p-name").required = false;
+    el("p-kind").disabled = true;
+    el("p-kind-hint").textContent = "เติมจากทะเบียนอัตโนมัติ";
+    el("p-parent").disabled = true;
+    el("p-parent-hint").textContent = "เติมจากทะเบียนอัตโนมัติ";
+    el("p-plan").innerHTML = '<option value="">— เลือกรายการจากทะเบียน —</option>' + choices.map(row =>
+      `<option value="${esc(row.id)}">${row.kind === "กิจกรรม" ? "└ " : ""}${esc(row.name)}</option>`
+    ).join("");
+    if (currentPlanId && choices.some(row => row.id === currentPlanId)) el("p-plan").value = currentPlanId;
+    const noChoices = choices.length === 0;
+    el("p-plan-empty").textContent = "ไม่มีรายการในทะเบียนที่คุณเป็นหัวหน้าและยังไม่ได้สร้าง · ติดต่อฝ่ายวิชาการ";
+    el("p-plan-empty").hidden = !noChoices;
+    syncSelectedProjectPlan(selectedIds);
+  }
+
   function openProjectForm(project = null, mode = "plan") {
     if (project ? !canEditProject(project) : !(canEditAll || canEditOwn)) return;
     const approvedLocked = project?.approval_status === "อนุมัติ";
@@ -803,13 +914,13 @@ if (!session) {
     if (approvedLocked) mode = "progress";
     editingProjectId = project?.id || null;
     editingProjectMode = mode;
+    linkingLegacyProject = false;
     el("project-plan-fields").disabled = false;
     el("project-form-title").textContent = mode === "progress"
       ? `รายงานผล: ${project?.name || "โครงการ/กิจกรรม"}`
       : project ? "แก้โครงการ/กิจกรรม" : (canEditAll ? "เพิ่มโครงการ/กิจกรรม" : "เพิ่มโครงการ/กิจกรรมของฉัน");
     el("p-name").value = project?.name || "";
     el("p-kind").value = project?.kind || "โครงการ";
-    el("p-kind").disabled = false;
     const allowedStatuses = statusOptionsFor({
       isNew: !project,
       canEditAll,
@@ -826,7 +937,6 @@ if (!session) {
     el("p-standard").value = project?.standard_note || "";
     el("p-detail").value = project?.detail || "";
     el("p-detail").setCustomValidity("");
-    parentOptions(project?.parent_id);
     if (canEditAll) {
       el("responsible-select-field").hidden = false;
       el("responsible-own-field").hidden = true;
@@ -837,6 +947,8 @@ if (!session) {
       el("responsible-own-name").textContent = myStaff.full_name;
     }
     const selectedIds = (project?.okrs || []).map(okr => okr.id);
+    if (project && !project.plan_id) showLegacyProjectFields(project, selectedIds);
+    else renderProjectPlanPicker(project, selectedIds);
     const progressMode = project?.approval_status === "อนุมัติ";
     el("project-link-list").innerHTML = "";
     (project?.links || []).forEach(link => addLinkRow("project-link-list", "project-link", link, {
@@ -844,7 +956,6 @@ if (!session) {
       fixedKind:progressMode,
       readonly:progressMode && link.kind !== "สรุปโครงการ"
     }));
-    syncProjectKind(selectedIds);
     el("project-plan-fields").disabled = progressMode;
     el("project-lock-note").hidden = !progressMode;
     el("project-progress-fields").hidden = !progressMode;
@@ -865,18 +976,23 @@ if (!session) {
     el("save-project").textContent = progressMode ? "บันทึกรายงานผล" : "บันทึก";
     el("project-form-card").hidden = false;
     el("project-form-card").scrollIntoView({ behavior:"smooth", block:"start" });
-    (progressMode ? el("p-report-status") : el("p-name")).focus({ preventScroll:true });
+    const firstField = progressMode ? el("p-report-status") : (project && !project.plan_id ? el("p-name") : el("p-plan"));
+    firstField.focus({ preventScroll:true });
   }
 
   function closeProjectForm() {
     editingProjectId = null;
     editingProjectMode = "plan";
+    linkingLegacyProject = false;
     el("project-form").reset();
     el("project-plan-fields").disabled = false;
     el("project-lock-note").hidden = true;
     el("project-progress-fields").hidden = true;
     el("save-project").textContent = "บันทึก";
+    el("save-project").disabled = false;
+    el("save-project").dataset.planBlocked = "false";
     el("p-kind").disabled = false;
+    el("p-parent").disabled = false;
     el("project-link-list").innerHTML = "";
     el("project-form-card").hidden = true;
   }
@@ -918,11 +1034,12 @@ if (!session) {
     if (!year) return;
     el("project-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
     try {
-      const [projectRows, okrRows] = await Promise.all([
-        loadAcademicProjects(year), loadSchoolOkrs(year)
+      const [projectRows, okrRows, planRows] = await Promise.all([
+        loadAcademicProjects(year), loadSchoolOkrs(year), loadProjectPlanPicker(year)
       ]);
       projects = projectRows;
       okrs = okrRows;
+      projectPlanRows = planRows;
       okrTree = buildOkrTree(okrs);
       coverageByKr = okrCoverage(okrTree, projects);
       renderProjects(); renderOkrPicker();
@@ -953,6 +1070,18 @@ if (!session) {
   });
   el("p-kind").addEventListener("change", () => syncProjectKind(selectedProjectOkrIds(), true));
   el("p-parent").addEventListener("change", () => syncProjectKind(selectedProjectOkrIds(), true));
+  el("p-plan").addEventListener("change", () => syncSelectedProjectPlan(selectedProjectOkrIds(), true));
+  el("bind-project-plan").addEventListener("click", () => {
+    const project = projects.find(row => row.id === editingProjectId);
+    if (!project || project.plan_id) return;
+    linkingLegacyProject = true;
+    renderProjectPlanPicker(project, selectedProjectOkrIds());
+    el("p-plan").focus();
+  });
+  el("cancel-plan-link").addEventListener("click", () => {
+    const project = projects.find(row => row.id === editingProjectId);
+    if (project && !project.plan_id) showLegacyProjectFields(project, selectedProjectOkrIds());
+  });
   el("p-responsible").addEventListener("change", updateResponsibleNote);
   for (const [id, message] of [
     ["p-detail", "กรุณากรอกรายละเอียดว่าโครงการหรือกิจกรรมนี้ทำอะไร แล้วกดบันทึกอีกครั้ง"],
@@ -1079,8 +1208,22 @@ if (!session) {
       return;
     }
 
-    const kind = el("p-kind").value;
-    const parentId = kind === "กิจกรรม" ? el("p-parent").value : null;
+    const existingProject = projects.find(row => row.id === editingProjectId) || null;
+    const editingLegacyUnlinked = Boolean(existingProject && !existingProject.plan_id && !linkingLegacyProject);
+    const planChoice = editingLegacyUnlinked
+      ? { plan:null, parentProject:null, parentMissing:false }
+      : resolveProjectPlanChoice(projectPlanRows, projects, el("p-plan").value);
+    if (!editingLegacyUnlinked && !planChoice.plan) {
+      return toast("กรุณาเลือกรายการจากทะเบียนก่อนบันทึก · ถ้าไม่มีรายการให้ติดต่อฝ่ายวิชาการ", true);
+    }
+    if (planChoice.parentMissing) {
+      const parentName = planChoice.parentPlan?.name || "รายการที่ระบุในทะเบียน";
+      return toast(`ยังสร้างกิจกรรมนี้ไม่ได้ · โครงการแม่ “${parentName}” ยังไม่มีใครสร้าง กรุณาให้หัวหน้าโครงการสร้างโครงการแม่ก่อน`, true);
+    }
+    const kind = planChoice.plan?.kind || el("p-kind").value;
+    const parentId = kind === "กิจกรรม"
+      ? (planChoice.plan ? planChoice.parentProject?.id || null : el("p-parent").value)
+      : null;
     const kindGuard = projectKindChangeGuard(projects, editingProjectId, kind);
     if (!kindGuard.ok) {
       return toast(`โครงการนี้มีกิจกรรม ${kindGuard.childCount} รายการ กรุณาย้ายหรือลบกิจกรรมลูกก่อน`, true);
@@ -1151,7 +1294,9 @@ if (!session) {
     const responsibleId = canEditAll ? (responsibleOption?.value || null) : myStaffId;
     const responsibleName = canEditAll ? (responsibleOption?.value ? (responsibleOption.dataset.name || responsibleOption.textContent.trim()) : null) : myStaff.full_name;
     const payload = {
-      year:el("filter-year").value, name:el("p-name").value.trim(), kind, parent_id:parentId,
+      year:el("filter-year").value,
+      plan_id:planChoice.plan?.id || null,
+      name:(planChoice.plan?.name || el("p-name").value).trim(), kind, parent_id:parentId,
       status:el("p-status").value, start_date:start, end_date:end,
       responsible_staff_id:responsibleId, responsible_name:responsibleName,
       budget_planned:planned,
@@ -1176,7 +1321,7 @@ if (!session) {
       toast(editingProjectId ? "แก้โครงการ/กิจกรรมแล้ว" : "เพิ่มโครงการ/กิจกรรมแล้ว");
       closeProjectForm(); await loadData();
     } catch (error) { toast(friendlyProjectError(error.message), true); }
-    finally { button.disabled = false; }
+    finally { button.disabled = button.dataset.planBlocked === "true"; }
   });
 
   el("project-list").addEventListener("click", async event => {
