@@ -43,6 +43,7 @@
   select:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   button { min-height: 44px; padding: 9px 14px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
   button.primary { color: var(--white); background: var(--teal); }
+  button.ghost { color: var(--teal); background: var(--teal-soft); }
   .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
   .readonly, .banner { margin-bottom: 14px; padding: 11px 13px; border-radius: 10px; font-size: 14px; }
   .readonly { color: var(--danger); background: var(--danger-soft); }
@@ -115,6 +116,8 @@
     .wrap { display: block !important; width: 100%; max-width: none !important; }
     header, header .nav, #year-card, #filter-card, button, #toast, #detail-overlay, .workspace-card-heading { display: none !important; }
     details > summary { display: none !important; }
+    body.print-single .print-hide { display: none !important; }
+    body.print-single .print-target { break-before: auto !important; }
     .academic-content { display: block !important; width: 100%; }
     .print-header { display: block !important; margin-bottom: 10mm; border-bottom: 2px solid #000; padding-bottom: 4mm; }
     .school-heading { display: flex; justify-content: center; align-items: center; gap: 5mm; text-align: center; }
@@ -133,6 +136,7 @@
     .metric, .follow-card { border: 1px solid #999; padding: 3mm; }
     .metric, .follow-card, tbody tr { break-inside: avoid !important; page-break-inside: avoid !important; }
     .follow-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 3mm; }
+    .meta { color: #333; }
     .table-wrap { overflow: visible; }
     table { min-width: 0; table-layout: fixed; border: 1px solid #000; font-size: 10px; }
     th, td { padding: 5px 4px; border: 1px solid #000; }
@@ -179,6 +183,7 @@
         </div>
         <!-- ชื่อเอกสารเต็มเมื่อพิมพ์: รายงานสรุปโครงการ/กิจกรรม ปีการศึกษา … (แยกชื่อกับปีคนละบรรทัด) -->
         <h1 id="print-title">รายงานสรุปโครงการ/กิจกรรม</h1>
+        <p id="print-scope" hidden></p>
         <p id="print-year"></p>
         <p id="print-plan-count" hidden></p>
         <p id="print-date"></p>
@@ -193,7 +198,7 @@
       </section>
 
       <section class="card" id="summary-card">
-        <div class="section-head"><div><h2>ภาพรวมทั้งปี</h2><p id="project-count">—</p></div></div>
+        <div class="section-head"><div><h2>ภาพรวมทั้งปี</h2><p id="project-count">—</p></div><button class="ghost no-print" type="button" data-print-section data-print-label="ภาพรวมทั้งปี">🖨️ พิมพ์เฉพาะส่วนนี้</button></div>
         <div class="metrics">
           <div class="metric"><div class="label">สร้างแล้วในระบบ</div><div class="value" id="count-all">—</div></div>
           <div class="metric"><div class="label">วางแผน</div><div class="value" id="count-planned">—</div></div>
@@ -208,7 +213,7 @@
       </section>
 
       <section class="card" id="follow-section">
-        <div class="section-head"><div><h2>ต้องตามงาน</h2><p>แสดงเฉพาะเรื่องที่ยังต้องดำเนินการต่อ</p></div></div>
+        <div class="section-head"><div><h2>ต้องตามงาน</h2><p>แสดงเฉพาะเรื่องที่ยังต้องดำเนินการต่อ</p></div><button class="ghost no-print" type="button" data-print-section data-print-label="ต้องตามงาน">🖨️ พิมพ์เฉพาะส่วนนี้</button></div>
         <div class="follow-grid" id="follow-grid"></div>
         <div class="empty" id="follow-empty" hidden>ไม่มีรายการที่ต้องตามในขณะนี้</div>
       </section>
@@ -225,7 +230,7 @@
       </section>
 
       <section class="card" id="all-projects-card">
-        <div class="section-head"><div><h2>รายการทั้งหมด</h2><p>กิจกรรมแสดงเยื้องใต้โครงการแม่</p></div></div>
+        <div class="section-head"><div><h2>รายการทั้งหมด</h2><p>กิจกรรมแสดงเยื้องใต้โครงการแม่</p></div><button class="ghost no-print" type="button" data-print-section data-print-label="รายการทั้งหมด">🖨️ พิมพ์เฉพาะส่วนนี้</button></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>ชื่อ</th><th>ประเภท</th><th>ผู้รับผิดชอบ</th><th>KR ที่สนับสนุน</th><th>สถานะ</th><th>สถานะอนุมัติ</th><th>งบตั้งไว้</th><th>งบใช้จริง</th><th>เอกสาร</th></tr></thead>
@@ -420,7 +425,13 @@ if (!session) {
   function followProjectList(rows, todayIso, dateOf) {
     return `<ul class="follow-list">${rows.map(project => {
       const days = projectDaysSince(dateOf(project), todayIso);
-      return `<li><b>${esc(project.name)}</b><div class="meta">ผู้รับผิดชอบ: ${esc(responsibleName(project))}${days == null ? "" : ` · ค้าง ${days} วัน`}</div></li>`;
+      const parent = project.kind === "กิจกรรม"
+        ? projects.find(row => row.id === project.parent_id)
+        : null;
+      const kindLabel = project.kind === "กิจกรรม"
+        ? (parent ? `กิจกรรม ใต้ “${esc(parent.name || "ไม่พบชื่อ")}”` : "กิจกรรม ใต้โครงการที่ไม่พบในระบบ")
+        : "โครงการ";
+      return `<li><b>${esc(project.name)}</b><div class="meta">${kindLabel} · ผู้รับผิดชอบ: ${esc(responsibleName(project))}${days == null ? "" : ` · ค้าง ${days} วัน`}</div></li>`;
     }).join("")}</ul>`;
   }
 
@@ -429,7 +440,7 @@ if (!session) {
     const body = rows.length > 3
       ? `<details><summary>▸ ดูรายชื่อ (${rows.length})</summary>${content}</details>`
       : content;
-    return `<article class="follow-card" id="${id}"><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div>${body}</article>`;
+    return `<article class="follow-card" id="${id}"><div class="section-head"><div><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div></div><button class="ghost no-print" type="button" data-print-section data-print-label="${title}">🖨️ พิมพ์ใบนี้</button></div>${body}</article>`;
   }
 
   function planGapListHtml(groups) {
@@ -438,12 +449,20 @@ if (!session) {
       const loginWarning = person?.has_login === false
         ? '<div class="meta">⚠️ ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</div>'
         : "";
-      return `<li><b>${esc(group.name)}</b><div class="meta">สร้างแล้ว ${group.created}/${group.total}</div>${loginWarning}<ul>${group.missing.map(row => `<li>${esc(row.name || "ไม่พบชื่อ")}</li>`).join("")}</ul></li>`;
+      return `<li><b>${esc(group.name)}</b><div class="meta">สร้างแล้ว ${group.created}/${group.total}</div>${loginWarning}<ul>${group.missing.map(row => {
+        const parent = row.kind === "กิจกรรม"
+          ? planRows.find(item => item.id === row.parent_id)
+          : null;
+        const kindLabel = row.kind === "กิจกรรม"
+          ? (parent ? `กิจกรรม ใต้ “${esc(parent.name || "ไม่พบชื่อ")}”` : "กิจกรรม ใต้โครงการที่ไม่พบในระบบ")
+          : "โครงการ";
+        return `<li>${esc(row.name || "ไม่พบชื่อ")} <span class="meta">— ${kindLabel}</span></li>`;
+      }).join("")}</ul></li>`;
     }).join("")}</ul>`;
   }
 
   function blockedPlanListHtml(rows) {
-    return `<ul class="follow-list">${rows.map(item => `<li><b>${esc(item.plan.name || "ไม่พบชื่อ")}</b><div class="meta">ผู้รับผิดชอบ: ${esc(item.leaderName)} · บล็อกกิจกรรมลูก ${item.blockedChildren.length} รายการ</div><ul>${item.blockedChildren.map(child => `<li>${esc(child.name || "ไม่พบชื่อ")}</li>`).join("")}</ul></li>`).join("")}</ul>`;
+    return `<ul class="follow-list">${rows.map(item => `<li><b>${esc(item.plan.name || "ไม่พบชื่อ")}</b><div class="meta">โครงการ · ผู้รับผิดชอบ: ${esc(item.leaderName)} · บล็อกกิจกรรมลูก ${item.blockedChildren.length} รายการ</div><ul>${item.blockedChildren.map(child => `<li>${esc(child.name || "ไม่พบชื่อ")} <span class="meta">— กิจกรรม</span></li>`).join("")}</ul></li>`).join("")}</ul>`;
   }
 
   function planFollowupForKr(kr) {
@@ -793,6 +812,19 @@ if (!session) {
     if (event.key === "Escape" && !el("detail-overlay").hidden) closeDetail();
   });
   el("print-report")?.addEventListener("click", () => {
+    clearPrintScope();
+    syncPrintHeader();
+    window.print();
+  });
+  document.querySelector(".academic-content")?.addEventListener("click", event => {
+    const button = event.target.closest("[data-print-section]");
+    if (!button) return;
+    const target = button.closest("section.card, article.follow-card");
+    if (!target) return;
+    clearPrintScope();
+    markPrintScope(target);
+    el("print-scope").textContent = `เฉพาะส่วน: ${button.dataset.printLabel}`;
+    el("print-scope").hidden = false;
     syncPrintHeader();
     window.print();
   });
@@ -818,12 +850,33 @@ if (!session) {
     });
   }
   function restoreDetailsAfterPrint() {
+    if (typeof clearPrintScope === "function") clearPrintScope();
     if (!printDetailsOpened) return;
     printDetailsOpened = false;
     printClosedDetails.forEach(detail => {
       if (detail.isConnected) detail.open = false;
     });
     printClosedDetails.clear();
+  }
+  function markPrintScope(target) {
+    let node = target;
+    while (node && node !== el("content")) {
+      for (const sibling of node.parentElement.children) {
+        if (sibling === node) continue;
+        if (sibling.classList.contains("print-header")) continue;
+        if (sibling.classList.contains("print-footer")) continue;
+        sibling.classList.add("print-hide");
+      }
+      node = node.parentElement;
+    }
+    target.classList.add("print-target");
+    document.body.classList.add("print-single");
+  }
+  function clearPrintScope() {
+    document.body.classList.remove("print-single");
+    el("content").querySelectorAll(".print-hide, .print-target")
+      .forEach(node => node.classList.remove("print-hide", "print-target"));
+    el("print-scope").hidden = true;
   }
 }
 </script>
