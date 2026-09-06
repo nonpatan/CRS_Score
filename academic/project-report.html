@@ -56,10 +56,13 @@
   .follow-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
   .follow-card h3 { margin: 0; font-size: 17px; }
   .follow-count { color: var(--amber); font-size: 14px; font-weight: 700; }
+  .follow-card details > summary { display: flex; align-items: center; min-height: 44px; color: var(--teal); font-weight: 700; cursor: pointer; list-style: none; }
+  .follow-card details > summary::-webkit-details-marker { display: none; }
+  .follow-card details > summary::marker { content: ""; }
   .follow-list { margin: 10px 0 0; padding-left: 20px; }
   .follow-list li { margin-top: 8px; overflow-wrap: anywhere; }
   .meta { color: var(--muted); font-size: 14px; }
-  .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
   .table-wrap { width: 100%; overflow-x: auto; }
   table { width: 100%; min-width: 1120px; border-collapse: collapse; }
   th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -109,6 +112,7 @@
     html body::before, html body::after { display: none !important; }
     .wrap { display: block !important; width: 100%; max-width: none !important; }
     header, header .nav, #year-card, #filter-card, button, #toast, #detail-overlay, .workspace-card-heading { display: none !important; }
+    details > summary { display: none !important; }
     .academic-content { display: block !important; width: 100%; }
     .print-header { display: block !important; margin-bottom: 10mm; border-bottom: 2px solid #000; padding-bottom: 4mm; }
     .print-header h1 { margin: 0; font-size: 18px; }
@@ -154,6 +158,7 @@
       <div class="print-header" id="print-header">
         <h1 id="print-title">รายงานสรุปโครงการ/กิจกรรม</h1>
         <p id="print-date"></p>
+        <p id="print-plan-count" hidden></p>
       </div>
 
       <section class="card" id="year-card">
@@ -167,7 +172,7 @@
       <section class="card" id="summary-card">
         <div class="section-head"><div><h2>ภาพรวมทั้งปี</h2><p id="project-count">—</p></div></div>
         <div class="metrics">
-          <div class="metric"><div class="label">ทั้งหมด</div><div class="value" id="count-all">—</div></div>
+          <div class="metric"><div class="label">สร้างแล้วในระบบ</div><div class="value" id="count-all">—</div></div>
           <div class="metric"><div class="label">วางแผน</div><div class="value" id="count-planned">—</div></div>
           <div class="metric"><div class="label">กำลังดำเนินการ</div><div class="value" id="count-active">—</div></div>
           <div class="metric"><div class="label">เสร็จสิ้น</div><div class="value" id="count-finished">—</div></div>
@@ -176,6 +181,7 @@
           <div class="metric"><div class="label">ใช้จริง</div><div class="value" id="budget-actual">—</div></div>
           <div class="metric"><div class="label">คงเหลือ</div><div class="value" id="budget-left">—</div></div>
         </div>
+        <div class="meta">ยอดงบรวมทุกใบในระบบ รวมใบที่ยกเลิกและใบที่ยังเป็นร่าง</div>
       </section>
 
       <section class="card" id="follow-section">
@@ -191,6 +197,7 @@
           <div class="field"><label for="filter-objective">Objective</label><select id="filter-objective"><option value="">ทั้งหมด</option></select></div>
           <div class="field"><label for="filter-status">สถานะ</label><select id="filter-status"><option value="">ทั้งหมด</option><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
           <div class="field"><label for="filter-kind">ประเภท</label><select id="filter-kind"><option value="">ทั้งหมด</option><option>โครงการ</option><option>กิจกรรม</option></select></div>
+          <div class="field"><label for="filter-source">ที่มา</label><select id="filter-source"><option value="">ทั้งหมด</option><option value="plan">ตามแผน</option><option value="outside">นอกแผน</option></select></div>
         </div>
       </section>
 
@@ -220,7 +227,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, getActiveYear, setActiveYear, getAcademicYears,
-  isProjectApprover, checkDepartment, loadAcademicProjects, loadSchoolOkrs, listStaffPicker,
+  isProjectApprover, checkDepartment, loadAcademicProjects, loadSchoolOkrs, listStaffPicker, loadProjectPlan,
   buildProjectTree, summarizeProjectBudget, buildOkrTree, okrCoverage,
   projectResponsibleName, projectApprovalBadge, projectLatestReturnedAt, okrChipLabel,
   PROJECT_PENDING_DAYS, PROJECT_RETURNED_DAYS, projectDaysSince,
@@ -242,13 +249,79 @@ function projectsNeverSubmitted(projects) {
   );
 }
 
+function planRowsNotCreated(planRows, projects) {
+  const created = new Set((projects || []).map(row => row?.plan_id).filter(Boolean));
+  return (planRows || []).filter(row => row?.id && row.active !== false && !created.has(row.id));
+}
+
+function planGapByLeader(planRows, projects) {
+  const activeRows = (planRows || []).filter(row => row?.id && row.active !== false);
+  const missingIds = new Set(planRowsNotCreated(activeRows, projects).map(row => row.id));
+  const groups = new Map();
+  for (const row of activeRows) {
+    const staffId = row.responsible_staff_id || "__unassigned_plan";
+    if (!groups.has(staffId)) {
+      groups.set(staffId, {
+        staffId:row.responsible_staff_id || null,
+        name:row.responsible_staff_id
+          ? (String(row.responsible_name || "").trim() || "ยังไม่ระบุชื่อ")
+          : "ยังไม่ระบุหัวหน้า — งานของฝ่ายวิชาการ",
+        missing:[], total:0, created:0
+      });
+    }
+    const group = groups.get(staffId);
+    group.total += 1;
+    if (missingIds.has(row.id)) group.missing.push(row);
+    else group.created += 1;
+  }
+  return [...groups.values()].filter(group => group.missing.length).sort((a, b) => {
+    if (a.staffId == null) return b.staffId == null ? 0 : 1;
+    if (b.staffId == null) return -1;
+    return b.missing.length - a.missing.length || a.name.localeCompare(b.name, "th");
+  });
+}
+
+function planBlockedParents(planRows, projects) {
+  const activeRows = (planRows || []).filter(row => row?.id && row.active !== false);
+  const missingIds = new Set(planRowsNotCreated(activeRows, projects).map(row => row.id));
+  return activeRows.filter(row => row.kind === "โครงการ" && !row.parent_id && missingIds.has(row.id))
+    .map(plan => ({
+      plan,
+      leaderName:String(plan.responsible_name || "").trim() || "ยังไม่ระบุหัวหน้า",
+      blockedChildren:activeRows.filter(row => row.parent_id === plan.id && missingIds.has(row.id))
+    }))
+    .filter(item => item.blockedChildren.length)
+    .sort((a, b) => b.blockedChildren.length - a.blockedChildren.length ||
+      String(a.plan.name || "").localeCompare(String(b.plan.name || ""), "th"));
+}
+
+function krWithoutApprovedProject(okrTree, coverageByKr) {
+  const keyResults = [
+    ...(okrTree?.objectives || []).flatMap(objective => objective.keyResults || []),
+    ...(okrTree?.orphans || [])
+  ];
+  return keyResults.filter(kr => {
+    const projectRows = coverageByKr?.get(kr.id)?.projects || [];
+    return projectRows.length > 0 && !projectRows.some(project =>
+      project?.approval_status === "อนุมัติ" || Boolean(project?.approved_at)
+    );
+  });
+}
+
+function projectPlanCreationSummary(planRows, projects) {
+  const activeRows = (planRows || []).filter(row => row?.id && row.active !== false);
+  const createdIds = new Set((projects || []).map(row => row?.plan_id).filter(Boolean));
+  const created = activeRows.filter(row => createdIds.has(row.id)).length;
+  return { total:activeRows.length, created, missing:activeRows.length - created };
+}
+
 // นับเฉพาะผู้รับผิดชอบที่ผูกไว้จริงในรายการของปีที่เลือก ไม่เดาชื่อจากรายละเอียด
 function staffWithoutProjects(people, projects) {
   const responsibleIds = new Set((projects || []).map(project => project?.responsible_staff_id).filter(Boolean));
   return (people || []).filter(person => person?.id && !responsibleIds.has(person.id));
 }
 
-function countByStatus(projects, todayIso) {
+function countByStatus(projects) {
   const counts = { "วางแผน":0, "กำลังดำเนินการ":0, "เสร็จสิ้น":0, "ยกเลิก":0 };
   for (const project of (projects || [])) {
     if (Object.prototype.hasOwnProperty.call(counts, project?.status)) counts[project.status] += 1;
@@ -286,11 +359,13 @@ if (!session) {
   let years = [];
   let projects = [];
   let staff = [];
+  let planRows = [];
   let okrs = [];
   let okrTree = { objectives:[], orphans:[] };
   let coverageByKr = new Map();
   let okrById = new Map();
   let detailTrigger = null;
+  const printClosedDetails = new Set();
 
   const [approver, academic] = await Promise.all([
     isProjectApprover(),
@@ -324,10 +399,45 @@ if (!session) {
 
   function followCard(id, title, rows, content) {
     if (!rows.length) return "";
-    return `<article class="follow-card" id="${id}"><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div>${content}</article>`;
+    const body = rows.length > 3
+      ? `<details><summary>▸ ดูรายชื่อ (${rows.length})</summary>${content}</details>`
+      : content;
+    return `<article class="follow-card" id="${id}"><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div>${body}</article>`;
+  }
+
+  function planGapListHtml(groups) {
+    return `<ul class="follow-list">${groups.map(group => {
+      const person = group.staffId ? staff.find(row => row.id === group.staffId) : null;
+      const loginWarning = person?.has_login === false
+        ? '<div class="meta">⚠️ ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</div>'
+        : "";
+      return `<li><b>${esc(group.name)}</b><div class="meta">สร้างแล้ว ${group.created}/${group.total}</div>${loginWarning}<ul>${group.missing.map(row => `<li>${esc(row.name || "ไม่พบชื่อ")}</li>`).join("")}</ul></li>`;
+    }).join("")}</ul>`;
+  }
+
+  function blockedPlanListHtml(rows) {
+    return `<ul class="follow-list">${rows.map(item => `<li><b>${esc(item.plan.name || "ไม่พบชื่อ")}</b><div class="meta">ผู้รับผิดชอบ: ${esc(item.leaderName)} · บล็อกกิจกรรมลูก ${item.blockedChildren.length} รายการ</div><ul>${item.blockedChildren.map(child => `<li>${esc(child.name || "ไม่พบชื่อ")}</li>`).join("")}</ul></li>`).join("")}</ul>`;
+  }
+
+  function planFollowupForKr(kr) {
+    if (!planRows.length) return "";
+    const linked = planRows.filter(row => row?.id && row.active !== false &&
+      (row.okrs || []).some(link => (link?.okr_id || link?.id) === kr.id));
+    if (!linked.length) return '<div class="meta"><span class="chip warn">แผนยังไม่ครอบ — งานของฝ่ายวิชาการ</span></div>';
+    const createdIds = new Set(projects.map(row => row?.plan_id).filter(Boolean));
+    if (linked.some(row => createdIds.has(row.id))) return "";
+    const leaders = new Map();
+    for (const row of linked) {
+      const key = row.responsible_staff_id || "__unassigned_plan";
+      if (!leaders.has(key)) leaders.set(key, String(row.responsible_name || "").trim() || "ยังไม่ระบุหัวหน้า");
+    }
+    return `<div class="meta"><span class="chip warn">ตามแผนมี ${linked.length} รายการ · ยังไม่มีใครสร้าง — ตาม: ${esc([...leaders.values()].join(" · "))}</span></div>`;
   }
 
   function renderFollowUps(todayIso) {
+    const uncreatedPlans = planRowsNotCreated(planRows, projects);
+    const planGaps = planGapByLeader(planRows, projects);
+    const blockedPlans = planBlockedParents(planRows, projects);
     const neverSent = projectsNeverSubmitted(projects);
     const missingStaff = staffWithoutProjects(staff, projects);
     const pending = projectsPendingTooLong(projects, todayIso, PROJECT_PENDING_DAYS);
@@ -337,10 +447,15 @@ if (!session) {
     const noBudget = projectsFinishedWithoutActualBudget(projects);
     const uncovered = okrTree.objectives.flatMap(objective => objective.keyResults)
       .filter(kr => coverageByKr.get(kr.id)?.isUncovered);
+    const unapprovedKrs = krWithoutApprovedProject(okrTree, coverageByKr);
     const cards = [
+      followCard("follow-plan-uncreated", "📋 รายการตามแผนที่ยังไม่มีใครสร้าง", uncreatedPlans,
+        planGapListHtml(planGaps)),
+      followCard("follow-plan-blocked", "🧱 โครงการแม่ค้าง ทำให้กิจกรรมลูกสร้างไม่ได้", blockedPlans,
+        blockedPlanListHtml(blockedPlans)),
       followCard("follow-draft", "✏️ ร่าง — ครูยังไม่ได้กดส่งขออนุมัติ", neverSent,
         followProjectList(neverSent, todayIso, project => project.created_at)),
-      followCard("follow-nostaff", "🚫 ยังไม่มีโครงการ/กิจกรรมในระบบเลย", missingStaff,
+      followCard("follow-nostaff", "🚫 บุคลากรที่ยังไม่มีโครงการ/กิจกรรมสักรายการ", missingStaff,
         `<ul class="follow-list">${missingStaff.map(person => `<li><b>${esc(person.full_name)}</b><div class="meta">${esc(person.staff_position || "ยังไม่ระบุตำแหน่ง")}</div>${person.has_login === false ? '<div class="meta">⚠️ ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</div>' : ""}</li>`).join("")}</ul>`),
       followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
       followCard("follow-returned", "🔁 ส่งกลับให้แก้เกิน 14 วัน", returned, followProjectList(returned, todayIso, project => projectLatestReturnedAt(project))),
@@ -348,14 +463,16 @@ if (!session) {
       followCard("follow-summary", "📝 เสร็จแล้วแต่ไม่มีผลสรุป", noSummary, followProjectList(noSummary, todayIso, project => project.end_date ?? project.start_date)),
       followCard("follow-budget", "💸 เสร็จแล้วแต่ไม่กรอกงบใช้จริง", noBudget, followProjectList(noBudget, todayIso, project => project.end_date ?? project.start_date)),
       followCard("follow-okr", "⚠️ KR ที่ไม่มีโครงการรองรับ", uncovered,
-        `<ul class="follow-list">${uncovered.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}</li>`).join("")}</ul>`)
+        `<ul class="follow-list">${uncovered.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}${planFollowupForKr(kr)}</li>`).join("")}</ul>`),
+      followCard("follow-okr-unapproved", "⚠️ KR ที่มีรายการแล้ว แต่ยังไม่มีใบไหนอนุมัติ", unapprovedKrs,
+        `<ul class="follow-list">${unapprovedKrs.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}<div class="meta">มี ${(coverageByKr.get(kr.id)?.projects || []).length} รายการ แต่ยังไม่มีใบอนุมัติ</div></li>`).join("")}</ul>`)
     ].filter(Boolean);
     el("follow-grid").innerHTML = cards.join("");
     el("follow-empty").hidden = cards.length > 0;
   }
 
   function renderSummary(todayIso) {
-    const counts = countByStatus(projects, todayIso);
+    const counts = countByStatus(projects);
     const budget = summarizeProjectBudget(buildProjectTree(projects));
     el("count-all").textContent = projects.length.toLocaleString("th-TH");
     el("count-planned").textContent = counts["วางแผน"].toLocaleString("th-TH");
@@ -365,18 +482,33 @@ if (!session) {
     el("budget-planned").textContent = fmtMoney(budget.planned);
     el("budget-actual").textContent = fmtMoney(budget.actual);
     el("budget-left").textContent = fmtMoney(budget.planned - budget.actual);
-    el("project-count").textContent = `${projects.length.toLocaleString("th-TH")} รายการ`;
+    if (planRows.length) {
+      const planSummary = projectPlanCreationSummary(planRows, projects);
+      el("project-count").textContent = `ตามแผน ${planSummary.total.toLocaleString("th-TH")} รายการ · สร้างแล้ว ${planSummary.created.toLocaleString("th-TH")} · ยังไม่มีใครสร้าง ${planSummary.missing.toLocaleString("th-TH")}`;
+    } else {
+      el("project-count").textContent = `${projects.length.toLocaleString("th-TH")} รายการ`;
+    }
   }
 
   function ownerOptions() {
     const owners = new Map();
+    const responsibleIds = new Set(projects.map(project => project?.responsible_staff_id).filter(Boolean));
+    const addOwner = (id, name) => {
+      if (!id) return;
+      const cleanName = String(name || "").trim() || "ยังไม่ระบุ";
+      if (!owners.has(id) || owners.get(id) === "ยังไม่ระบุ") owners.set(id, cleanName);
+    };
     for (const project of projects) {
       const key = project.responsible_staff_id || "__unassigned";
-      if (!owners.has(key)) owners.set(key, responsibleName(project));
+      addOwner(key, responsibleName(project));
+    }
+    for (const plan of planRows) {
+      addOwner(plan.responsible_staff_id, plan.responsible_name);
+      for (const member of (plan.members || [])) addOwner(member.staff_id, member.staff_name);
     }
     el("filter-owner").innerHTML = '<option value="">ทั้งหมด</option>' + [...owners]
       .sort((a, b) => a[1].localeCompare(b[1], "th"))
-      .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
+      .map(([id, name]) => `<option value="${esc(id)}">${esc(name)}${id !== "__unassigned" && !responsibleIds.has(id) ? " · ยังไม่มีรายการ" : ""}</option>`).join("");
   }
 
   function objectiveOptions() {
@@ -389,11 +521,13 @@ if (!session) {
     const objective = el("filter-objective").value;
     const status = el("filter-status").value;
     const kind = el("filter-kind").value;
+    const source = el("filter-source").value;
     return projects.filter(project =>
       (!owner || (project.responsible_staff_id || "__unassigned") === owner) &&
       (!objective || projectObjectiveIds(project).includes(objective)) &&
       (!status || project.status === status) &&
-      (!kind || project.kind === kind)
+      (!kind || project.kind === kind) &&
+      (!source || (source === "plan" ? Boolean(project.plan_id) : !project.plan_id))
     );
   }
 
@@ -405,6 +539,35 @@ if (!session) {
   function documentHtml(project) {
     const rows = (project.links || []).filter(link => ["เอกสารนำเสนอเพื่ออนุมัติ", "สรุปโครงการ"].includes(link.kind));
     return rows.length ? `<div class="documents">${rows.map(link => `<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.kind)}: ${esc(link.label)}</a>`).join("")}</div>` : "—";
+  }
+
+  function planRowForProject(project) {
+    return project?.plan_id ? planRows.find(row => row.id === project.plan_id) || null : null;
+  }
+
+  function krIdOf(link) {
+    return link?.okr_id || link?.id || null;
+  }
+
+  function krLabelById(id) {
+    const kr = okrById.get(id);
+    return kr ? (okrChipLabel(kr, okrById) || kr.code || "KR") : "KR ที่ถูกลบแล้ว";
+  }
+
+  function projectPlanDetailHtml(project) {
+    if (!planRows.length) return "";
+    const plan = planRowForProject(project);
+    if (!plan) {
+      return '<div class="long-box"><span class="long-label">ตามทะเบียนแผนปฏิบัติการ</span><div class="long-text">งานนอกแผน — ไม่ได้อยู่ในทะเบียนปีนี้</div></div>';
+    }
+    const memberNames = (plan.members || []).map(member => String(member.staff_name || "").trim()).filter(Boolean);
+    const plannedIds = [...new Set((plan.okrs || []).map(krIdOf).filter(Boolean))].sort();
+    const actualIds = [...new Set((project.okrs || []).map(krIdOf).filter(Boolean))].sort();
+    const matches = plannedIds.length === actualIds.length && plannedIds.every((id, index) => id === actualIds[index]);
+    const plannedLabels = plannedIds.map(krLabelById);
+    const actualLabels = actualIds.map(krLabelById);
+    const mismatch = matches ? "" : `<div class="banner warn">⚠ KR ไม่ตรงกับแผน · ตามแผน: ${esc(plannedLabels.join(" · ") || "ไม่มี")} · ที่ผูกไว้จริง: ${esc(actualLabels.join(" · ") || "ไม่มี")}</div>`;
+    return `<div class="long-box"><span class="long-label">ตามทะเบียนแผนปฏิบัติการ</span><dl class="fact-list"><dt>หัวหน้าตามแผน</dt><dd>${esc(String(plan.responsible_name || "").trim() || "ยังไม่ระบุ")}</dd><dt>คณะทำงาน</dt><dd>${esc(memberNames.join(" · ") || "ไม่มี")}</dd><dt>KR ตามแผน</dt><dd>${esc(plannedLabels.join(" · ") || "ไม่มี")}</dd></dl>${mismatch}</div>`;
   }
 
   function detailHtml(project) {
@@ -446,15 +609,22 @@ if (!session) {
     const approval = latest
       ? `<div class="long-box"><span class="long-label">ผลการพิจารณาล่าสุด</span><dl class="fact-list"><dt>ผล</dt><dd>${esc(latest.action || "—")}</dd><dt>ผู้พิจารณา</dt><dd>${esc(latest.acted_by_name || latest.acted_by || "ไม่ระบุ")}</dd><dt>เมื่อ</dt><dd>${esc(fmtDateTime(latest.created_at))}</dd>${String(latest.note ?? "").trim() ? `<dt>หมายเหตุ</dt><dd>${esc(latest.note)}</dd>` : ""}</dl></div>`
       : "";
+    const planDetail = typeof projectPlanDetailHtml === "function" ? projectPlanDetailHtml(project) : "";
     return `<div class="chips"><span class="chip">${esc(project.kind)}</span><span class="chip">${esc(project.status)}</span><span class="chip${tone}">${esc(badge.label)}</span></div>
       ${parent ? `<div class="meta"><b>โครงการแม่:</b> ${esc(parent.name)}</div>` : ""}
-      ${facts}${detail}${result}${documents}${approval}`;
+      ${facts}${planDetail}${detail}${result}${documents}${approval}`;
   }
 
   function projectRow(project, child = false) {
     const badge = projectApprovalBadge(project);
     const tone = badge.tone ? ` ${badge.tone}` : "";
-    return `<tr><td class="project-name${child ? " child" : ""}"><button type="button" class="name-btn" data-detail="${esc(project.id)}">${esc(project.name)}</button></td><td>${esc(project.kind)}</td><td>${esc(responsibleName(project))}</td><td>${krHtml(project)}</td><td>${esc(project.status)}</td><td><span class="chip${tone}">${esc(badge.label)}</span></td><td>${esc(fmtMoneyOrMissing(project.budget_planned))}</td><td>${esc(fmtMoneyOrMissing(project.budget_actual))}</td><td>${documentHtml(project)}</td></tr>`;
+    const plan = planRowForProject(project);
+    const memberNames = (plan?.members || []).map(member => String(member.staff_name || "").trim()).filter(Boolean);
+    const memberChip = plan?.members?.length
+      ? ` <span class="chip" title="ผู้ร่วม: ${esc(memberNames.join(" · ") || "ไม่ระบุชื่อ")}">+${plan.members.length}</span>`
+      : "";
+    const outsidePlan = planRows.length && !project.plan_id ? ' <span class="chip warn">นอกแผน</span>' : "";
+    return `<tr><td class="project-name${child ? " child" : ""}"><button type="button" class="name-btn" data-detail="${esc(project.id)}">${esc(project.name)}</button>${outsidePlan}</td><td>${esc(project.kind)}</td><td>${esc(responsibleName(project))}${memberChip}</td><td>${krHtml(project)}</td><td>${esc(project.status)}</td><td><span class="chip${tone}">${esc(badge.label)}</span></td><td>${esc(fmtMoneyOrMissing(project.budget_planned))}</td><td>${esc(fmtMoneyOrMissing(project.budget_actual))}</td><td>${documentHtml(project)}</td></tr>`;
   }
 
   function renderTable() {
@@ -493,19 +663,31 @@ if (!session) {
     });
     el("print-title").textContent = `รายงานสรุปโครงการ/กิจกรรม ปีการศึกษา ${year} · โรงเรียนเจริญศึกษา`;
     el("print-date").textContent = `วันที่พิมพ์ ${printed}`;
+    const planLine = el("print-plan-count");
+    if (planRows.length) {
+      const planSummary = projectPlanCreationSummary(planRows, projects);
+      planLine.textContent = `ตามแผน ${planSummary.total.toLocaleString("th-TH")} รายการ · สร้างแล้ว ${planSummary.created.toLocaleString("th-TH")} · ยังไม่มีใครสร้าง ${planSummary.missing.toLocaleString("th-TH")}`;
+      planLine.hidden = false;
+    } else {
+      planLine.textContent = "";
+      planLine.hidden = true;
+    }
   }
 
   async function loadData() {
     const year = el("filter-year").value;
     if (!year) return;
+    planRows = [];
     el("project-rows").innerHTML = '<tr><td colspan="9" class="empty">กำลังโหลด…</td></tr>';
     try {
-      const [projectRows, okrRows, staffRows] = await Promise.all([
-        loadAcademicProjects(year), loadSchoolOkrs(year), listStaffPicker().catch(() => [])
+      const [projectRows, okrRows, staffRows, planData] = await Promise.all([
+        loadAcademicProjects(year), loadSchoolOkrs(year), listStaffPicker().catch(() => []),
+        loadProjectPlan(year).catch(() => [])
       ]);
       projects = await loadApprovalRows(projectRows);
       okrs = okrRows;
       staff = staffRows;
+      planRows = planData;
       okrTree = buildOkrTree(okrs);
       okrById = new Map(okrs.map(okr => [okr.id, okr]));
       coverageByKr = okrCoverage(okrTree, projects);
@@ -536,7 +718,7 @@ if (!session) {
     setActiveYear(el("filter-year").value);
     await loadData();
   });
-  for (const id of ["filter-owner", "filter-objective", "filter-status", "filter-kind"]) {
+  for (const id of ["filter-owner", "filter-objective", "filter-status", "filter-kind", "filter-source"]) {
     el(id)?.addEventListener("change", renderTable);
   }
   el("project-rows")?.addEventListener("click", event => {
@@ -568,6 +750,21 @@ if (!session) {
   el("print-report")?.addEventListener("click", () => {
     syncPrintHeader();
     window.print();
+  });
+  window.addEventListener("beforeprint", () => {
+    printClosedDetails.clear();
+    document.querySelectorAll("details").forEach(detail => {
+      if (!detail.open) {
+        printClosedDetails.add(detail);
+        detail.open = true;
+      }
+    });
+  });
+  window.addEventListener("afterprint", () => {
+    printClosedDetails.forEach(detail => {
+      if (detail.isConnected) detail.open = false;
+    });
+    printClosedDetails.clear();
   });
 }
 </script>
