@@ -3188,6 +3188,8 @@ function dashboardCoverageLabel(row) {
   return `ไปทำงานแทน ${row?.subject_label || row?.room_label || row?.duty_type || "ไม่ระบุงาน"}${absent}`;
 }
 
+const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุณ": 2 };
+
 // คำนวณล้วนสำหรับการ์ด “งานของฉัน” — ผู้เรียกต้อง escape ข้อความก่อนใส่ DOM
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
@@ -3199,7 +3201,8 @@ export function pickMyDashboardAlerts({
     alerts.push({
       text: `มีโครงการรออนุมัติ ${pendingApprovals} รายการ`,
       href: "academic/project-approval.html",
-      linkLabel: "เปิดหน้าอนุมัติ"
+      linkLabel: "เปิดหน้าอนุมัติ",
+      kind: "รอคุณ"
     });
   }
 
@@ -3215,7 +3218,8 @@ export function pickMyDashboardAlerts({
       alerts.push({
         text: `ห้อง ${labels.join(", ")} ยังไม่ได้เช็คชื่อวันนี้`,
         href: "general-affairs/daily-attendance.html",
-        linkLabel: "ไปเช็คชื่อ"
+        linkLabel: "ไปเช็คชื่อ",
+        kind: "ค้าง"
       });
     }
   }
@@ -3228,7 +3232,8 @@ export function pickMyDashboardAlerts({
     alerts.push({
       text: `มีคำขอสลับเวรรอคุณตอบ ${waitingSwaps.length} รายการ`,
       href: "personnel/my-work.html",
-      linkLabel: "ดูคำขอ"
+      linkLabel: "ดูคำขอ",
+      kind: "รอคุณ"
     });
   }
 
@@ -3242,7 +3247,8 @@ export function pickMyDashboardAlerts({
     alerts.push({
       text: `วันนี้คุณต้อง${todayTasks.join(" · ")}`,
       href: "personnel/my-work.html",
-      linkLabel: "ดูรายละเอียด"
+      linkLabel: "ดูตารางวันนี้",
+      kind: "วันนี้"
     });
   }
 
@@ -3253,7 +3259,8 @@ export function pickMyDashboardAlerts({
     alerts.push({
       text: `ต้องสอนชด · ${label || "ไม่ระบุวิชา"} · ${Number(row.remaining)} คาบ`,
       href: "personnel/my-work.html",
-      linkLabel: "ดูรายละเอียด"
+      linkLabel: "ส่งคำขอสอนชด",
+      kind: "ค้าง"
     });
   }
 
@@ -3275,11 +3282,12 @@ export function pickMyDashboardAlerts({
     alerts.push({
       text: `โครงการของคุณต้องทำต่อ ${projectByKey.size} รายการ`,
       href: "academic/projects.html",
-      linkLabel: "ไปแก้ไข"
+      linkLabel: "ไปแก้ไข",
+      kind: "ค้าง"
     });
   }
 
-  return alerts;
+  return alerts.sort((a, b) => ALERT_ORDER[a.kind] - ALERT_ORDER[b.kind]);
 }
 
 export async function loadPendingApprovals(year) {
