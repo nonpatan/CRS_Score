@@ -312,7 +312,7 @@
       // หน้าที่เป็นงานของฝ่ายบุคคลโดยเฉพาะ — ครูทั่วไปเห็นตารางเวรรวมและข้อมูลของตัวเอง
       // ซ่อนไว้ก่อนเสมอ (fail-closed) แล้วให้หน้าเว็บเรียก applyPersonnelMenuAccess() เปิดให้
       // ถ้าลืมเรียก คนมีสิทธิ์จะเห็นเมนูไม่ครบ (สังเกตได้ทันที) ดีกว่าเผลอเปิดให้คนไม่มีสิทธิ์
-      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "coverage.html", "duty.html", "staff.html", "hr-settings.html", "work-summary.html"],
+      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "coverage.html", "duty.html", "staff.html", "hr-settings.html", "teaching-gap.html", "work-summary.html"],
       groups: [
         {
           label: "บันทึก",
@@ -334,6 +334,7 @@
         {
           label: "รายงาน",
           items: [
+            ["teaching-gap.html", "คาบที่ครูไม่ได้สอน"],
             ["work-summary.html", "สรุปเวลาทำงาน"],
             ["duty-board.html", "ตารางเวรของทุกคน"],
             ["my-work.html", "ข้อมูลการทำงานของฉัน"]
@@ -375,6 +376,11 @@
           title: "ตั้งค่างานบุคคล",
           description: "กำหนดช่วงผ่อนผันเข้าสาย ปีการศึกษา และโควตาวันลา",
           steps: ["เวลาทำงาน", "ปีการศึกษา", "โควตาวันลา"]
+        },
+        "teaching-gap.html": {
+          title: "คาบที่ครูไม่ได้สอน",
+          description: "ดูว่าครูขาดสอนวิชาไหนไปกี่คาบ เกินเกณฑ์แล้วต้องสอนชดกี่คาบ",
+          steps: ["เลือกปีการศึกษา", "ดูวิชาที่เกินเกณฑ์", "บันทึกการสอนชด"]
         },
         "work-summary.html": {
           title: "เลือกรอบรายงาน",

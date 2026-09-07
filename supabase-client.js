@@ -4987,6 +4987,206 @@ export async function getLeaveTypes(includeInactive = false) {
   return data || [];
 }
 
+// ============================================================
+// รายงานคาบที่ครูไม่ได้สอน + เกณฑ์สอนชด
+// เหตุผลและมติ: personnel/PLAN.md หัวข้อ "คาบที่ครูไม่ได้สอน + เกณฑ์สอนชด"
+// สูตรอยู่ที่นี่ที่เดียว หน้า personnel/teaching-gap.html มีหน้าที่แสดงผลและบันทึกการสอนชด
+// ============================================================
+export async function loadTeachingGap(year) {
+  const selectedYear = String(year ?? "").trim();
+  const [subjectsRes, staffRes, leaveTypes, settingRes, years] = await Promise.all([
+    sb.from("subjects")
+      .select("id,code,name,grade_level,year,term,total_periods,owner_id")
+      .eq("year", selectedYear),
+    sb.from("staff").select("id,full_name,user_id,is_active").order("full_name"),
+    getLeaveTypes(true),
+    sb.from("hr_settings").select("value")
+      .eq("key", "teach_gap_makeup_percent").maybeSingle(),
+    getAcademicYears()
+  ]);
+  if (subjectsRes.error) throw new Error("โหลดวิชาสำหรับรายงานไม่สำเร็จ: " + subjectsRes.error.message);
+  if (staffRes.error) throw new Error("โหลดทะเบียนบุคลากรไม่สำเร็จ: " + staffRes.error.message);
+  if (settingRes.error) throw new Error("โหลดเกณฑ์การสอนชดไม่สำเร็จ: " + settingRes.error.message);
+
+  const range = academicYearRange(selectedYear, years);
+  if (!range) throw new Error("ไม่พบวันเริ่มปีการศึกษาที่เลือก");
+
+  const subjects = subjectsRes.data || [];
+  const subjectIds = subjects.map(subject => subject.id);
+  const chunks = [];
+  for (let i = 0; i < subjectIds.length; i += 100) chunks.push(subjectIds.slice(i, i + 100));
+
+  // coverage_assignments ไม่มีคอลัมน์ year: ตัวตั้งต้องกรองด้วย subject_id เท่านั้น
+  // แบ่งก้อนละ 100 กัน URL ของ PostgREST ยาวเกินเมื่อจำนวนวิชาโตขึ้น
+  const coverageRequests = chunks.map(ids => fetchAllRows(() => sb.from("coverage_assignments")
+    .select("id,subject_id,cover_date,kind,source,leave_id,periods,substitute_staff_id,leave:staff_leaves(leave_type)")
+    .eq("kind", "วิชา")
+    .in("subject_id", ids)));
+  const makeupRequests = chunks.map(ids => fetchAllRows(() => sb.from("teacher_makeups")
+    .select("id,staff_id,subject_id,makeup_date,periods,note,created_by")
+    .in("subject_id", ids)));
+
+  const [coverageResults, makeupResults, leavesRes, coveragePresenceRes,
+    workScheduleRes, holidaysRes] = await Promise.all([
+    Promise.all(coverageRequests),
+    Promise.all(makeupRequests),
+    // ใบลาที่คร่อมช่วงปีต้องเทียบหัวท้าย ห้ามใช้ between
+    fetchAllRows(() => sb.from("staff_leaves")
+      .select("id,staff_id,start_date,end_date,day_portion,leave_type")
+      .lte("start_date", range.end)
+      .gte("end_date", range.start)),
+    // ชุดนี้ใช้หา "ไม่มีรายการคนแทนเลย" เท่านั้น ไม่ได้นำไปคิดเปอร์เซ็นต์
+    fetchAllRows(() => sb.from("coverage_assignments")
+      .select("id,cover_date,absent_staff_id")
+      .eq("kind", "วิชา")
+      .gte("cover_date", range.start)
+      .lte("cover_date", range.end)),
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    fetchAllRows(() => sb.from("work_holidays").select("holiday_date")
+      .gte("holiday_date", range.start)
+      .lte("holiday_date", range.end), "holiday_date")
+  ]);
+
+  const firstError = [...coverageResults, ...makeupResults, leavesRes, coveragePresenceRes,
+    workScheduleRes, holidaysRes]
+    .find(result => result.error)?.error;
+  if (firstError) throw new Error("โหลดข้อมูลคาบที่ครูไม่ได้สอนไม่สำเร็จ: " + firstError.message);
+
+  const coverage = coverageResults.flatMap(result => result.data || []);
+  const makeups = makeupResults.flatMap(result => result.data || []);
+  const staff = staffRes.data || [];
+  const staffById = new Map(staff.map(person => [person.id, person]));
+  const staffByUser = new Map(staff.filter(person => person.user_id)
+    .map(person => [person.user_id, person]));
+  const gapTypes = new Set((leaveTypes || [])
+    .filter(type => type.counts_as_teaching_gap)
+    .map(type => type.code));
+
+  const settingValue = settingRes.data?.value;
+  const parsedPercent = Number(settingValue);
+  const hasPercent = settingValue !== null && settingValue !== undefined && settingValue !== "" &&
+    Number.isInteger(parsedPercent) && parsedPercent >= 1 && parsedPercent <= 100;
+  const percent = hasPercent ? parsedPercent : null;
+
+  const coverageBySubject = new Map();
+  for (const row of coverage) {
+    if (!coverageBySubject.has(row.subject_id)) coverageBySubject.set(row.subject_id, []);
+    coverageBySubject.get(row.subject_id).push(row);
+  }
+  const makeupBySubject = new Map();
+  for (const row of makeups) {
+    if (!makeupBySubject.has(row.subject_id)) makeupBySubject.set(row.subject_id, []);
+    makeupBySubject.get(row.subject_id).push(row);
+  }
+
+  const needsReview = [];
+  const rows = subjects.map(subject => {
+    const owner = staffByUser.get(subject.owner_id) || {
+      id: null,
+      full_name: "(ไม่พบชื่อในทะเบียนบุคลากร)",
+      user_id: subject.owner_id || null,
+      is_active: false,
+      missing: true
+    };
+    const subjectCoverage = coverageBySubject.get(subject.id) || [];
+    const details = [];
+
+    for (const cover of subjectCoverage) {
+      if (cover.source !== "ลา") continue;
+      const leave = Array.isArray(cover.leave) ? cover.leave[0] : cover.leave;
+      if (!cover.leave_id || !leave) {
+        needsReview.push({ subject, staff: owner, coverDate: cover.cover_date,
+          coverageId: cover.id, reason: "ไม่พบใบลาที่ผูกไว้" });
+        continue;
+      }
+      if (!gapTypes.has(leave.leave_type)) continue;
+      if (cover.periods === null || cover.periods === undefined || !(Number(cover.periods) > 0)) {
+        needsReview.push({ subject, staff: owner, coverDate: cover.cover_date,
+          coverageId: cover.id, reason: "ยังไม่ระบุคาบ" });
+        continue;
+      }
+      const substitute = staffById.get(cover.substitute_staff_id);
+      details.push({
+        coverageId: cover.id,
+        coverDate: cover.cover_date,
+        leaveType: leave.leave_type,
+        periods: Number(cover.periods),
+        substituteStaffId: cover.substitute_staff_id,
+        substituteName: substitute?.full_name || "(ไม่พบชื่อคนแทนในทะเบียนบุคลากร)"
+      });
+    }
+
+    const totalPeriods = Number(subject.total_periods);
+    const validTotal = Number.isFinite(totalPeriods) && totalPeriods > 0;
+    if (!validTotal) {
+      needsReview.push({ subject, staff: owner, coverDate: details[0]?.coverDate || null,
+        coverageId: null, reason: "วิชายังไม่ตั้งจำนวนคาบ" });
+    }
+
+    const missed = details.reduce((sum, detail) => sum + detail.periods, 0);
+    const subjectMakeups = (makeupBySubject.get(subject.id) || []).map(makeup => ({
+      ...makeup,
+      periods: Number(makeup.periods) || 0
+    })).sort((a, b) => String(b.makeup_date).localeCompare(String(a.makeup_date)));
+    const madeUp = subjectMakeups.reduce((sum, makeup) => sum + makeup.periods, 0);
+    const canDecide = hasPercent && validTotal;
+    const cap = canDecide ? totalPeriods * percent / 100 : null;
+    const percentUsed = validTotal ? missed * 100 / totalPeriods : null;
+    const required = canDecide ? Math.max(0, missed - cap) : null;
+    const remaining = canDecide ? Math.max(0, required - madeUp) : null;
+    const overCap = canDecide ? missed > cap : null;
+    const nearCap = canDecide ? !overCap && missed > cap * 0.8 : null;
+
+    return { subject, staff: owner, missed, cap, percentUsed, required, madeUp, remaining,
+      overCap, nearCap, details, makeups: subjectMakeups };
+  }).sort((a, b) => {
+    if (a.percentUsed === null) return b.percentUsed === null ? 0 : 1;
+    if (b.percentUsed === null) return -1;
+    return b.percentUsed - a.percentUsed ||
+      String(a.subject.code || a.subject.name).localeCompare(String(b.subject.code || b.subject.name), "th");
+  });
+
+  const coveragePresence = new Set((coveragePresenceRes.data || [])
+    .map(row => row.absent_staff_id + "|" + row.cover_date));
+  const teachingStaffIds = new Set(subjects
+    .map(subject => staffByUser.get(subject.owner_id)?.id)
+    .filter(Boolean));
+  const scheduleRows = workScheduleRes.data || [];
+  // ยังไม่เคยซิงก์ Jibble ต้องไม่ทำให้คำเตือนหายทั้งใบ: fallback เป็นวันจันทร์–ศุกร์
+  const workingWeekdays = new Set(scheduleRows.length
+    ? scheduleRows.filter(row => row.is_working_day).map(row => Number(row.weekday))
+    : [1, 2, 3, 4, 5]);
+  const holidayDates = new Set((holidaysRes.data || []).map(row => row.holiday_date));
+  const uncoveredByKey = new Map();
+  for (const leave of leavesRes.data || []) {
+    if (!gapTypes.has(leave.leave_type)) continue;
+    if (!teachingStaffIds.has(leave.staff_id)) continue;
+    const from = leave.start_date < range.start ? range.start : leave.start_date;
+    const to = leave.end_date > range.end ? range.end : leave.end_date;
+    if (!from || !to || from > to) continue;
+    for (const date of eachDate(from, to)) {
+      if (!workingWeekdays.has(isoWeekday(date)) || holidayDates.has(date)) continue;
+      const key = leave.staff_id + "|" + date;
+      if (coveragePresence.has(key) || uncoveredByKey.has(key)) continue;
+      uncoveredByKey.set(key, {
+        leaveId: leave.id,
+        staff: staffById.get(leave.staff_id) || {
+          id: leave.staff_id,
+          full_name: "(ไม่พบชื่อในทะเบียนบุคลากร)",
+          missing: true
+        },
+        date,
+        leaveType: leave.leave_type,
+        dayPortion: leave.day_portion
+      });
+    }
+  }
+  const uncoveredLeaves = [...uncoveredByKey.values()].sort((a, b) =>
+    a.date.localeCompare(b.date) || a.staff.full_name.localeCompare(b.staff.full_name, "th"));
+
+  return { year: selectedYear, percent, hasPercent, rows, needsReview, uncoveredLeaves };
+}
+
 // รายการตำแหน่งควบคุมกลาง — หน้าแก้ทะเบียนต้องขอรวมรายการที่ปิดใช้แล้วด้วย
 // เพื่อให้ยังเห็นและถอดตำแหน่งเดิมของคนที่ถืออยู่ได้
 export async function getStaffPositions(includeInactive = false) {
@@ -5122,6 +5322,52 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
     if (res.error) throw new Error("โหลดวิชาที่สอนไม่สำเร็จ: " + res.error.message);
     subjects = res.data || [];
   }
+
+  // ---------- คาบที่จะเติมให้ล่วงหน้า ----------
+  // 🔑 ต้องรวมเป็น "คาบต่อวัน" ก่อน แล้วค่อยหาค่าที่พบบ่อยที่สุด
+  //    ⛔ ห้ามหา mode จาก periods_covered รายครั้งตรง ๆ — ครูที่เช็คชื่อแยกคาบ
+  //       (2 ครั้ง × 1 คาบ ในวันเดียว) จะได้คำแนะนำ 1 คาบ ทั้งที่วันนั้นไม่ได้สอน 2 คาบ
+  //       และช่องนี้ถามว่า "วันนั้นไม่ได้สอนกี่คาบ" ⟹ หน่วยต้องเป็นคาบต่อวันเสมอ
+  // 🔑 ใช้ mode ไม่ใช่ค่าเฉลี่ย — วิชาที่สอนวันละ 2 คาบเสมอต้องได้ 2 ไม่ใช่ 1.8
+  //    ซึ่งเป็นเลขที่กรอกกลับไม่ได้ (ต้องเป็นครึ่งคาบ)
+  // 🪤 เสมอกันให้เอาค่าของวันที่ใหม่กว่า — ตารางสอนเปลี่ยนกลางปีได้
+  const periodHint = new Map();
+  if (subjects.length) {
+    const res = await fetchAllRows(() => sb.from("attendance_sessions")
+      .select("subject_id,periods_covered,session_date")
+      .in("subject_id", subjects.map(s => s.id)));
+    // ⚠ ไม่ throw โดยตั้งใจ — นี่เป็นแค่ตัวช่วยกรอก ถ้าพังต้องไม่ล้มทั้งหน้า
+    //   เพราะหน้านี้ถูกใช้ตอนเช้าวันที่ครูหายกะทันหัน = เวลาที่ห้ามใช้งานไม่ได้ที่สุด
+    //   ฝ่ายบุคคลยังกรอกคาบเองได้ และช่องจะขึ้นชิปเหลืองว่ายังไม่ระบุ
+    if (res.error) console.warn("โหลดคาบที่เคยเช็คชื่อไม่สำเร็จ:", res.error.message);
+
+    // ① ยุบเป็นคาบรวมต่อ (วิชา, วัน)
+    const perDay = new Map();                       // "subjectId|date" -> คาบรวมของวันนั้น
+    for (const row of res.data || []) {
+      const p = Number(row.periods_covered) || 0;
+      if (!(p > 0)) continue;
+      const key = row.subject_id + "|" + row.session_date;
+      perDay.set(key, (perDay.get(key) || 0) + p);
+    }
+    // ② หาค่าที่พบบ่อยที่สุดของแต่ละวิชา
+    const bySubject = new Map();
+    for (const [key, dayPeriods] of perDay) {
+      const [subjectId, date] = key.split("|");
+      if (!bySubject.has(subjectId)) bySubject.set(subjectId, new Map());
+      const counts = bySubject.get(subjectId);
+      const prev = counts.get(dayPeriods) || { n: 0, last: "" };
+      counts.set(dayPeriods, { n: prev.n + 1, last: date > prev.last ? date : prev.last });
+    }
+    for (const [subjectId, counts] of bySubject) {
+      const best = [...counts.entries()].sort((a, b) =>
+        (b[1].n - a[1].n) || String(b[1].last).localeCompare(String(a[1].last)))[0];
+      // ⛔ ค่าที่ไม่ใช่ครึ่งคาบต้องไม่ถูกแนะนำ — ผลรวมของวันอาจได้ 1.5+1 = 2.5 (ผ่าน)
+      //    แต่ข้อมูลเพี้ยนอาจให้ 0.3+0.4 ซึ่งกรอกลง DB ไม่ผ่าน constraint แล้วปุ่มจะพัง
+      if (best && best[0] > 0 && best[0] <= 12 && (best[0] * 2) % 1 === 0) {
+        periodHint.set(subjectId, best[0]);
+      }
+    }
+  }
   if (absentIds.length && year) {
     const res = await sb.from("homeroom_teachers")
       .select("id,year,grade_level,classroom,staff_id")
@@ -5140,7 +5386,8 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
     entry.items.push({
       kind: "วิชา", key: coverageItemKey("วิชา", s.id), refId: s.id,
       label: subjectLabel(s),
-      sub: [s.grade_level, s.term && ("ภาคเรียนที่ " + s.term)].filter(Boolean).join(" · ")
+      sub: [s.grade_level, s.term && ("ภาคเรียนที่ " + s.term)].filter(Boolean).join(" · "),
+      suggestedPeriods: periodHint.get(s.id) ?? null
     });
   }
   for (const h of homerooms) {
@@ -5202,7 +5449,8 @@ export function isCoverageDutyRow(row) {
 // ---------- บันทึก/ลบรายการจัดคนแทน ----------
 // ประกอบแถวจาก item + คนแทน ที่นี่ที่เดียว เพื่อให้ check constraint ฝั่ง DB
 // (kind ไหนต้องมีคอลัมน์ไหน) กับฝั่งเว็บพูดตรงกันเสมอ
-export function buildCoverageRow({ date, item, absentee, substituteStaffId, worksheetNote, createdBy }) {
+export function buildCoverageRow({ date, item, absentee, substituteStaffId,
+                                   worksheetNote, periods, createdBy }) {
   const row = {
     cover_date: date,
     kind: item.kind,
@@ -5213,6 +5461,7 @@ export function buildCoverageRow({ date, item, absentee, substituteStaffId, work
     leave_id: absentee.source === "ลา" ? (absentee.leave?.id || null) : null,
     field_duty_id: absentee.source === "ออกปฏิบัติหน้าที่" ? (absentee.fieldDuty?.id || null) : null,
     worksheet_note: item.kind === "วิชา" ? (worksheetNote || null) : null,
+    periods: item.kind === "วิชา" ? (periods ?? null) : null,
     created_by: createdBy || null
   };
   if (item.kind === "วิชา") row.subject_id = item.refId;

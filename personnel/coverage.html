@@ -29,7 +29,7 @@
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:16px; margin-bottom:16px; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
-  input[type="text"], input[type="date"], select {
+  input[type="text"], input[type="number"], input[type="date"], select {
     width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
   input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
@@ -70,6 +70,10 @@
   .item-body { margin-top:8px; }
   .item.covered { background:#f7fcfa; margin:0 -8px; padding:11px 8px; border-radius:8px; }
   .item-foot { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .periods-row { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .periods-row label { display:flex; gap:7px; align-items:center; margin:0; }
+  .periods-row input.periods { width:82px; min-height:44px; }
+  .periods-row .use-hint { min-height:44px; }
 
   /* บล็อกของ "คน" ต้องหนักกว่าบล็อกของ "งาน" อย่างเห็นได้ชัด */
   .person { padding:18px 0 6px; border-top:2px solid var(--line); }
@@ -101,7 +105,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260907-1"></script>
+    <script src="../app-shell.js?v=20260907-2"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -162,7 +166,7 @@ import {
   loadCoverageDay, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260909-5";
+} from "../supabase-client.js?v=20260909-9";
 
 const session = await requireAuth();
 if (session) {
@@ -278,7 +282,21 @@ if (session) {
                   substituteOptions(entry.staff.id, saved?.substitute_staff_id || "") +
                 "</select>" +
                 (item.kind === "วิชา" && saved
-                  ? "<input type='text' class='worksheet' data-id='" + esc(saved.id) + "' " +
+                  ? "<div class='periods-row'>" +
+                      "<label>ไม่ได้สอนวันนี้ " +
+                        "<input type='number' class='periods' data-id='" + esc(saved.id) + "' " +
+                          "min='0.5' max='12' step='0.5' value='" +
+                          (saved.periods == null ? "" : esc(saved.periods)) + "'> คาบ</label>" +
+                      (saved.periods == null
+                        ? "<span class='chip urgent'>ยังไม่ระบุคาบ</span>" +
+                          (item.suggestedPeriods
+                            ? "<button type='button' class='ghost use-hint' data-id='" + esc(saved.id) +
+                              "' data-periods='" + esc(item.suggestedPeriods) + "'>ใช้ " +
+                              esc(item.suggestedPeriods) + " คาบ</button>"
+                            : "")
+                        : "") +
+                    "</div>" +
+                    "<input type='text' class='worksheet' data-id='" + esc(saved.id) + "' " +
                     "placeholder='ใบงานที่ครูฝากไว้ (ไม่บังคับ)' value='" +
                     esc(saved.worksheet_note || "") + "' style='margin-top:8px'>"
                   : "") +
@@ -305,6 +323,10 @@ if (session) {
         sel.addEventListener("change", () => onPick(sel)));
       box.querySelectorAll("input.worksheet").forEach(input =>
         input.addEventListener("change", () => onWorksheet(input)));
+      box.querySelectorAll("input.periods").forEach(input =>
+        input.addEventListener("change", () => onPeriods(input)));
+      box.querySelectorAll("button.use-hint").forEach(button =>
+        button.addEventListener("click", () => onUseHint(button)));
     };
 
     const findItem = key => {
@@ -344,7 +366,8 @@ if (session) {
           } else {
             await createCoverageAssignment(buildCoverageRow({
               date: day.date, item, absentee: entry,
-              substituteStaffId: newId, createdBy: session.user.id
+              substituteStaffId: newId, periods: item.suggestedPeriods,
+              createdBy: session.user.id
             }));
           }
           // ⚠ ไม่ลบออกจาก pendingUrgent — ถ้าลบ พอฝ่ายบุคคลยกเลิกรายการสุดท้ายของคนนี้
@@ -387,6 +410,56 @@ if (session) {
         await reload();
       } catch (e) {
         toast(e.message || String(e), true);
+      }
+    }
+
+    // ใช้กติกาครึ่งคาบเดียวกับหน้าเช็คชื่อวิชา แต่คัดมาไว้ที่นี่เพื่อไม่ import ข้ามหน้า HTML
+    const PERIODS_HINT = "กรอกจำนวนคาบให้ถูกต้อง (มากกว่า 0 ไม่เกิน 12 และเป็นครึ่งคาบ เช่น 0.5, 1, 2.5)";
+    const isValidPeriods = v => !isNaN(v) && v > 0 && v <= 12 && (v * 2) % 1 === 0;
+
+    async function onPeriods(input) {
+      if (busy) return;
+      const saved = day.assignments.find(row => row.id === input.dataset.id);
+      const oldValue = saved?.periods == null ? "" : String(saved.periods);
+      const raw = input.value.trim();
+      const periods = raw === "" ? null : Number(raw);
+      if (periods !== null && !isValidPeriods(periods)) {
+        toast(PERIODS_HINT, true);
+        input.value = oldValue;
+        return;
+      }
+
+      busy = true;
+      input.disabled = true;
+      try {
+        await updateCoverageAssignment(input.dataset.id, { periods });
+        toast(periods == null ? "ล้างจำนวนคาบแล้ว" : "บันทึกจำนวนคาบแล้ว");
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+        input.value = oldValue;
+        await reload();
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function onUseHint(button) {
+      if (busy) return;
+      const periods = Number(button.dataset.periods);
+      if (!isValidPeriods(periods)) { toast(PERIODS_HINT, true); return; }
+
+      busy = true;
+      button.disabled = true;
+      try {
+        await updateCoverageAssignment(button.dataset.id, { periods });
+        toast("บันทึก " + periods + " คาบแล้ว");
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+        await reload();
+      } finally {
+        busy = false;
       }
     }
 

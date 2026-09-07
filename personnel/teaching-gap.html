@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คาบที่ครูไม่ได้สอน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+          --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea;
+          --amber:#93690f; --amber-soft:#faf1dd; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+         margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { font-size:20px; font-weight:600; margin:4px 0; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; }
+  header .nav { display:flex; gap:8px; flex-wrap:wrap; background:var(--white); padding:8px;
+                border-radius:99px; border:1px solid var(--line); margin:0 0 24px; align-items:center; }
+  header .nav a { color:var(--muted); text-decoration:none; font-weight:500;
+                  padding:8px 16px; border-radius:99px; font-size:14px; }
+  header .nav a.active { background:var(--teal); color:var(--white); }
+  header .nav #btn-signout { margin-left:auto; }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px; }
+  .section-title { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase;
+                   letter-spacing:.03em; margin:4px 0 10px; }
+  .field { margin-bottom:14px; }
+  label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width:100%; min-height:44px; font-family:inherit; font-size:16px; padding:10px 12px;
+    border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
+  textarea { min-height:84px; resize:vertical; }
+  select:focus, input:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  button { min-height:44px; font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
+           border:0; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); width:100%; }
+  button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.small { min-height:36px; font-size:13px; padding:6px 10px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .hint, .meta { color:var(--muted); font-size:14px; }
+  .hint { margin:8px 0 0; }
+  .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  .banner.info { background:var(--teal-soft); color:var(--teal); }
+  .summary { display:flex; gap:10px; flex-wrap:wrap; align-items:stretch; }
+  .metric { flex:1 1 180px; padding:11px 13px; border:1px solid var(--line); border-radius:10px; }
+  .metric span { display:block; color:var(--muted); font-size:13px; }
+  .metric b { display:block; font-size:20px; font-weight:600; }
+  .settings-link { color:var(--teal); font-weight:600; }
+  .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; min-width:980px; }
+  th, td { padding:10px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-size:13px; font-weight:600; background:var(--bg); white-space:nowrap; }
+  td.num { text-align:right; white-space:nowrap; }
+  tr[data-subject-row] { cursor:pointer; }
+  tr[data-subject-row]:hover { background:var(--teal-soft); }
+  tr:last-child td { border-bottom:0; }
+  .subject-name { font-weight:600; }
+  .status { display:inline-block; padding:3px 9px; border-radius:99px; font-size:12px;
+            font-weight:600; white-space:nowrap; }
+  .status.teal { background:var(--teal-soft); color:var(--teal); }
+  .status.amber { background:var(--amber-soft); color:var(--amber); }
+  .detail-cell { padding:0 12px 12px; background:var(--bg); }
+  .detail-cell details { border-left:3px solid var(--line); padding:9px 12px; }
+  .detail-cell summary { color:var(--teal); font-weight:600; cursor:pointer; }
+  .detail-list { margin:8px 0 0; padding:0; list-style:none; }
+  .detail-list li { padding:7px 0; border-top:1px solid var(--line); }
+  .detail-list li:first-child { border-top:0; }
+  .review-list { margin:0; padding:0; list-style:none; }
+  .review-list li { padding:9px 0; border-bottom:1px solid var(--line); }
+  .review-list li:last-child { border-bottom:0; }
+  .review-list a { color:var(--teal); font-weight:600; }
+  .empty { color:var(--muted); text-align:center; padding:18px; }
+  .form-actions { display:flex; gap:10px; align-items:center; }
+  .form-actions .primary { flex:1; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
+           border-radius:10px; background:var(--ink); color:var(--white); font-weight:600; opacity:0;
+           pointer-events:none; transition:opacity .18s; z-index:60; }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
+  @media (max-width:620px) {
+    .row2 { grid-template-columns:1fr; gap:0; }
+    .summary { display:block; }
+    .metric { margin-bottom:8px; }
+    .form-actions { display:block; }
+    .form-actions .ghost { width:100%; margin-top:8px; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>คาบที่ครูไม่ได้สอน</h1>
+    <p>ดูคาบที่ขาดสอน เทียบเกณฑ์ และบันทึกการสอนชด</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="coverage.html">จัดคนแทนประจำวัน</a>
+      <a href="teaching-gap.html">คาบที่ครูไม่ได้สอน</a>
+      <a href="hr-settings.html">ตั้งค่างานบุคคล</a>
+      <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20260907-2"></script>
+  </header>
+
+  <main class="academic-content">
+    <div id="gate" class="card" hidden></div>
+    <div id="content" hidden>
+      <div class="card">
+        <div class="field">
+          <label for="report-year">ปีการศึกษา</label>
+          <select id="report-year"></select>
+        </div>
+        <div id="criteria-warning" class="banner warn" hidden></div>
+        <div id="summary" class="summary"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">รายวิชา</div>
+        <div id="report-table"><div class="empty">กำลังโหลด…</div></div>
+        <p class="hint">นับเฉพาะวันที่มีการบันทึกคนสอนแทน — วันที่หาคนแทนไม่ได้จะไม่ปรากฏ ตัวเลขนี้จึงเป็นอย่างน้อยที่สุด</p>
+        <p class="hint">นับเฉพาะวิชาที่ครูเป็นเจ้าของวิชาในระบบ</p>
+      </div>
+
+      <div id="review-card" class="card" hidden>
+        <div class="section-title">ต้องตรวจสอบ</div>
+        <div id="review-list"></div>
+      </div>
+
+      <div id="uncovered-card" class="card" hidden>
+        <div class="section-title">วันลาที่ยังไม่มีบันทึกคนแทน</div>
+        <div class="banner warn">รายการนี้ไม่ถูกนำไปคิดเปอร์เซ็นต์ เพราะระบบยังไม่รู้ว่าวันนั้นขาดสอนวิชาใดกี่คาบ</div>
+        <div id="uncovered-list"></div>
+        <p class="hint">ตรวจได้แค่ว่าวันนั้นมีบันทึกคนแทนวิชาแล้วหรือยัง ไม่ได้ตรวจว่าครบทุกวิชา</p>
+      </div>
+
+      <div class="card">
+        <div class="section-title">บันทึกการสอนชด</div>
+        <div id="editing-note" class="banner info" hidden></div>
+        <div class="field">
+          <label for="makeup-subject">วิชาที่ต้องสอนชด</label>
+          <select id="makeup-subject"></select>
+          <div class="hint">ชื่อครูมาจากเจ้าของวิชาในระบบโดยอัตโนมัติ</div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="makeup-date">วันที่สอนชด</label>
+            <input id="makeup-date" type="date">
+          </div>
+          <div class="field">
+            <label for="makeup-periods">จำนวนคาบ</label>
+            <input id="makeup-periods" type="number" min="0.5" max="12" step="0.5" placeholder="เช่น 1 หรือ 1.5">
+          </div>
+        </div>
+        <div class="field">
+          <label for="makeup-note">หมายเหตุ</label>
+          <textarea id="makeup-note" placeholder="ถ้ามี"></textarea>
+        </div>
+        <div class="form-actions">
+          <button id="btn-save-makeup" class="primary">บันทึกการสอนชด</button>
+          <button id="btn-cancel-edit" class="ghost" type="button" hidden>ยกเลิกการแก้ไข</button>
+        </div>
+      </div>
+    </div>
+    <div id="toast"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
+  personnelAccessDeniedHtml, getAcademicYears, academicYearOf,
+  bangkokNow, toDateStr, loadTeachingGap
+} from "../supabase-client.js?v=20260909-9";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
+  const toastEl = el("toast");
+  let toastTimer;
+  const toast = (message, error = false) => {
+    toastEl.textContent = message;
+    toastEl.classList.toggle("err", error);
+    toastEl.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 3500);
+  };
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+
+  const canManage = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canManage);
+  if (!canManage) {
+    el("gate").hidden = false;
+    el("gate").innerHTML = personnelAccessDeniedHtml();
+  } else {
+    el("content").hidden = false;
+    const today = toDateStr(bangkokNow());
+    let report = null;
+    let editingId = null;
+
+    // คัดลอกจาก academic/attendance.html:415 — numeric "2.0" ต้องแสดงเป็น "2"
+    function fmtPeriods(value) {
+      const number = Number(value);
+      return isNaN(number) ? String(value) : String(number);
+    }
+    const fmtDate = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+      day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+    });
+    const subjectName = subject => [subject.code, subject.name, subject.grade_level,
+      subject.term && `ภาคเรียนที่ ${subject.term}`].filter(Boolean).join(" · ");
+    const isValidPeriods = value => Number.isFinite(value) && value > 0 && value <= 12 &&
+      (value * 2) % 1 === 0;
+
+    function statusOf(row) {
+      if (row.overCap === null) return { css:"amber", text:"ยังตัดสินไม่ได้" };
+      if (row.overCap && row.remaining > 0) {
+        return { css:"amber", text:`ต้องสอนชด ${fmtPeriods(row.remaining)} คาบ` };
+      }
+      if (row.overCap) return { css:"teal", text:"สอนชดครบแล้ว" };
+      if (row.nearCap) return { css:"amber", text:"ใกล้เกณฑ์" };
+      return { css:"teal", text:"ยังไม่ถึงเกณฑ์" };
+    }
+
+    function renderSummary() {
+      const requiredCount = report.rows.filter(row => row.overCap && row.remaining > 0).length;
+      const nearCount = report.rows.filter(row => row.nearCap).length;
+      el("criteria-warning").hidden = report.hasPercent;
+      el("criteria-warning").innerHTML = report.hasPercent ? "" :
+        'ยังไม่ได้ตั้งเกณฑ์การสอนชด จึงยังไม่ตัดสินสถานะวิชาใด · ' +
+        '<a class="settings-link" href="hr-settings.html">ไปหน้าตั้งค่า</a>';
+      el("summary").innerHTML = `
+        <div class="metric"><span>เกณฑ์ปัจจุบัน</span><b>${report.hasPercent ? `เกิน ${esc(report.percent)}%` : "ยังไม่ได้ตั้ง"}</b></div>
+        <div class="metric"><span>ต้องสอนชด</span><b>${report.hasPercent ? requiredCount + " วิชา" : "—"}</b></div>
+        <div class="metric"><span>ใกล้เกณฑ์</span><b>${report.hasPercent ? nearCount + " วิชา" : "—"}</b></div>
+        <div class="metric"><span>ปรับเกณฑ์</span><a class="settings-link" href="hr-settings.html">ตั้งค่างานบุคคล</a></div>`;
+    }
+
+    function renderDetails(row) {
+      const absenceItems = row.details.length ? row.details.map(detail => `<li>
+        ${esc(fmtDate(detail.coverDate))} · ${esc(detail.leaveType)} ·
+        ${esc(fmtPeriods(detail.periods))} คาบ · คนแทน: ${esc(detail.substituteName)}
+      </li>`).join("") : '<li class="meta">ยังไม่มีวันที่ขาดสอนที่นับได้</li>';
+      const makeupItems = row.makeups.length ? row.makeups.map(makeup => `<li>
+        ${esc(fmtDate(makeup.makeup_date))} · ${esc(fmtPeriods(makeup.periods))} คาบ${makeup.note ? ` · ${esc(makeup.note)}` : ""}
+        <button class="ghost small" type="button" data-edit-makeup="${esc(makeup.id)}"
+                data-subject-id="${esc(row.subject.id)}">แก้ไข</button>
+      </li>`).join("") : '<li class="meta">ยังไม่มีรายการสอนชด</li>';
+      return `<details>
+        <summary>รายการรายวันที่ขาดสอน ${row.details.length} วัน · สอนชด ${row.makeups.length} ครั้ง</summary>
+        <div class="section-title" style="margin-top:10px">วันที่ขาดสอน</div>
+        <ul class="detail-list">${absenceItems}</ul>
+        <div class="section-title" style="margin-top:12px">ประวัติการสอนชด</div>
+        <ul class="detail-list">${makeupItems}</ul>
+      </details>`;
+    }
+
+    function renderTable() {
+      if (!report.rows.length) {
+        el("report-table").innerHTML = '<div class="empty">ยังไม่มีวิชาในปีการศึกษานี้</div>';
+        return;
+      }
+      const body = report.rows.map((row, index) => {
+        const status = statusOf(row);
+        const noTotal = row.percentUsed === null;
+        return `<tbody>
+          <tr data-subject-row="${index}" tabindex="0" aria-expanded="false">
+            <td>${esc(row.staff.full_name)}</td>
+            <td><div class="subject-name">${esc(row.subject.code || "—")} · ${esc(row.subject.name)}</div>
+                <div class="meta">${esc(row.subject.grade_level || "—")} · ภาคเรียนที่ ${esc(row.subject.term || "—")}</div></td>
+            <td class="num">${esc(fmtPeriods(row.missed))}</td>
+            <td class="num">${row.cap !== null ? esc(fmtPeriods(row.cap))
+              : !report.hasPercent ? "ยังไม่ได้ตั้งเกณฑ์"
+              : "วิชายังไม่ตั้งจำนวนคาบ"}</td>
+            <td class="num">${noTotal ? "—" : esc(row.percentUsed.toFixed(1)) + "%"}</td>
+            <td class="num">${row.required === null ? "—" : esc(fmtPeriods(row.required))}</td>
+            <td class="num">${esc(fmtPeriods(row.madeUp))}</td>
+            <td class="num">${row.remaining === null ? "—" : esc(fmtPeriods(row.remaining))}</td>
+            <td><span class="status ${status.css}">${esc(status.text)}</span></td>
+          </tr>
+          <tr data-detail-for="${index}" hidden><td class="detail-cell" colspan="9">${renderDetails(row)}</td></tr>
+        </tbody>`;
+      }).join("");
+      el("report-table").innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>ครู</th><th>วิชา</th><th>ขาดสอน</th><th>เพดาน</th><th>%</th>
+          <th>ต้องชด</th><th>ชดแล้ว</th><th>คงเหลือ</th><th>สถานะ</th></tr></thead>${body}
+      </table></div>`;
+    }
+
+    function renderReview() {
+      el("review-card").hidden = !report.needsReview.length;
+      el("review-list").innerHTML = report.needsReview.length ? `<ul class="review-list">${report.needsReview.map(item => `<li>
+        <b>${esc(item.reason)}</b> · ${esc(item.staff.full_name)} · ${esc(subjectName(item.subject))}
+        ${item.coverDate ? `· ${esc(fmtDate(item.coverDate))} · <a href="coverage.html?date=${encodeURIComponent(item.coverDate)}">ไปตรวจรายการคนแทน</a>` : ""}
+      </li>`).join("")}</ul>` : "";
+    }
+
+    function renderUncovered() {
+      el("uncovered-card").hidden = !report.uncoveredLeaves.length;
+      el("uncovered-list").innerHTML = report.uncoveredLeaves.length ? `<details>
+        <summary>พบ ${report.uncoveredLeaves.length} วัน — กดเพื่อดูรายการ</summary>
+        <ul class="review-list">${report.uncoveredLeaves.map(item => `<li>
+          <b>${esc(fmtDate(item.date))}</b> · ${esc(item.staff.full_name)} · ${esc(item.leaveType)} ·
+          <a href="coverage.html?date=${encodeURIComponent(item.date)}">ไปบันทึกคนแทน</a>
+        </li>`).join("")}</ul>
+      </details>` : "";
+    }
+
+    function renderMakeupOptions(selectedId = "") {
+      const eligible = report.rows.filter(row => row.required > 0);
+      el("makeup-subject").innerHTML = ['<option value="">— เลือกวิชา —</option>'].concat(
+        eligible.map(row => `<option value="${esc(row.subject.id)}"${row.subject.id === selectedId ? " selected" : ""}${row.staff.id ? "" : " disabled"}>
+          ${esc(row.staff.full_name)} · ${esc(subjectName(row.subject))}${row.staff.id ? "" : " · ไม่พบบุคลากร"}
+        </option>`)
+      ).join("");
+      el("btn-save-makeup").disabled = !eligible.some(row => row.staff.id);
+    }
+
+    function render() {
+      renderSummary();
+      renderTable();
+      renderReview();
+      renderUncovered();
+      renderMakeupOptions();
+    }
+
+    async function loadReport() {
+      const year = el("report-year").value;
+      if (!year) return;
+      el("report-table").innerHTML = '<div class="empty">กำลังโหลด…</div>';
+      try {
+        report = await loadTeachingGap(year);
+        render();
+      } catch (error) {
+        report = null;
+        el("report-table").innerHTML = '<div class="banner warn">โหลดรายงานไม่สำเร็จ กรุณาลองใหม่</div>';
+        toast(error.message || String(error), true);
+      }
+    }
+
+    function resetMakeupForm() {
+      editingId = null;
+      el("editing-note").hidden = true;
+      el("editing-note").textContent = "";
+      el("makeup-subject").disabled = false;
+      el("makeup-date").value = today;
+      el("makeup-periods").value = "";
+      el("makeup-note").value = "";
+      el("btn-save-makeup").textContent = "บันทึกการสอนชด";
+      el("btn-cancel-edit").hidden = true;
+      if (report) renderMakeupOptions();
+    }
+
+    el("report-table").addEventListener("click", event => {
+      const editButton = event.target.closest("[data-edit-makeup]");
+      if (editButton) {
+        const row = report.rows.find(item => item.subject.id === editButton.dataset.subjectId);
+        const makeup = row?.makeups.find(item => item.id === editButton.dataset.editMakeup);
+        if (!row || !makeup) return;
+        editingId = makeup.id;
+        renderMakeupOptions(row.subject.id);
+        el("makeup-subject").disabled = true;
+        el("makeup-date").value = makeup.makeup_date;
+        el("makeup-periods").value = fmtPeriods(makeup.periods);
+        el("makeup-note").value = makeup.note || "";
+        el("editing-note").hidden = false;
+        el("editing-note").textContent = "กำลังแก้รายการสอนชดของ " + subjectName(row.subject);
+        el("btn-save-makeup").textContent = "บันทึกการแก้ไข";
+        el("btn-cancel-edit").hidden = false;
+        el("makeup-date").scrollIntoView({ behavior:"smooth", block:"center" });
+        return;
+      }
+      const row = event.target.closest("tr[data-subject-row]");
+      if (!row) return;
+      const detail = el("report-table").querySelector(`[data-detail-for="${row.dataset.subjectRow}"]`);
+      const details = detail?.querySelector("details");
+      if (!detail || !details) return;
+      detail.hidden = !detail.hidden;
+      details.open = !detail.hidden;
+      row.setAttribute("aria-expanded", String(!detail.hidden));
+    });
+    el("report-table").addEventListener("keydown", event => {
+      if ((event.key === "Enter" || event.key === " ") && event.target.matches("tr[data-subject-row]")) {
+        event.preventDefault();
+        event.target.click();
+      }
+    });
+
+    el("btn-cancel-edit").addEventListener("click", resetMakeupForm);
+    el("btn-save-makeup").addEventListener("click", async () => {
+      if (!report) return;
+      const row = report.rows.find(item => item.subject.id === el("makeup-subject").value);
+      const date = el("makeup-date").value;
+      const periods = Number(el("makeup-periods").value);
+      const note = el("makeup-note").value.trim();
+      if (!row) return toast("กรุณาเลือกวิชา", true);
+      if (!row.staff.id) return toast("วิชานี้ยังไม่ผูกกับทะเบียนบุคลากร จึงบันทึกการสอนชดไม่ได้", true);
+      if (!date) return toast("กรุณาเลือกวันที่สอนชด", true);
+      if (!isValidPeriods(periods)) {
+        return toast("จำนวนคาบต้องมากกว่า 0 ไม่เกิน 12 และเป็นครึ่งคาบ เช่น 0.5, 1 หรือ 2.5", true);
+      }
+      const action = editingId ? "บันทึกการแก้ไข" : "บันทึกการสอนชด";
+      if (!await window.crsAskConfirm({
+        title: action,
+        message: `${row.staff.full_name} · ${subjectName(row.subject)} · ${fmtDate(date)} · ${fmtPeriods(periods)} คาบ`,
+        okLabel: action,
+        requireText: null,
+        danger: false
+      })) return;
+
+      const payload = { makeup_date:date, periods, note:note || null };
+      if (editingId) payload.updated_at = new Date().toISOString();
+      const result = editingId
+        ? await sb.from("teacher_makeups").update(payload).eq("id", editingId)
+        : await sb.from("teacher_makeups").insert({
+            ...payload,
+            staff_id:row.staff.id,
+            subject_id:row.subject.id,
+            created_by:session.user.id
+          });
+      if (result.error) return toast((editingId ? "แก้ไข" : "บันทึก") + "การสอนชดไม่สำเร็จ: " + result.error.message, true);
+      toast(editingId ? "แก้ไขการสอนชดแล้ว" : "บันทึกการสอนชดแล้ว");
+      resetMakeupForm();
+      await loadReport();
+    });
+
+    const years = await getAcademicYears();
+    const sortedYears = [...years].sort((a, b) => String(b.year).localeCompare(String(a.year), "th", { numeric:true }));
+    el("report-year").innerHTML = sortedYears.map(item =>
+      `<option value="${esc(item.year)}">${esc(item.year)}</option>`).join("");
+    const currentYear = academicYearOf(today, years);
+    el("report-year").value = years.some(item => item.year === currentYear)
+      ? currentYear
+      : (sortedYears[0]?.year || "");
+    el("makeup-date").value = today;
+    el("report-year").addEventListener("change", () => { resetMakeupForm(); loadReport(); });
+    await loadReport();
+  }
+}
+</script>
+</body>
+</html>

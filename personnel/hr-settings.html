@@ -49,6 +49,8 @@
   .schedule-sync.stale { color:var(--amber); background:var(--amber-soft); padding:8px 10px;
                          border-radius:8px; margin-top:8px; }
   .row2 { display:flex; gap:12px; } .row2 > * { flex:1; }
+  .threshold-row { display:flex; gap:10px; align-items:center; }
+  .threshold-row input { width:110px; flex:0 0 110px; }
   button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
            border:none; border-radius:8px; cursor:pointer; }
   button.primary { background:var(--teal); color:var(--white); width:100%; margin-top:8px; }
@@ -120,7 +122,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260907-1"></script>
+    <script src="../app-shell.js?v=20260907-2"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -160,6 +162,19 @@
   </div>
 
   <div class="card single-card">
+    <div class="section-title">เกณฑ์การสอนชด</div>
+    <div class="field">
+      <label for="teach-gap-percent">ต้องสอนชดเมื่อครูขาดสอน เกิน</label>
+      <div class="threshold-row">
+        <input id="teach-gap-percent" type="number" min="1" max="100" step="1">
+        <span>% ของคาบทั้งหมดในวิชานั้น</span>
+      </div>
+      <div class="field-note hint">เปลี่ยนแล้วมีผลกับรายงานทันที ไม่ย้อนแก้ข้อมูลเดิม</div>
+    </div>
+    <button id="btn-save-teach-gap" class="primary">บันทึกเกณฑ์การสอนชด</button>
+  </div>
+
+  <div class="card single-card">
     <div class="section-title">รอบปีทำงานของฝ่ายบุคคล</div>
     <div class="banner info">
       ครูเริ่มทำงานก่อนนักเรียนเปิดเรียนเพื่อเตรียมการ รอบปีของฝ่ายบุคคลจึงตั้งแยกได้ ·
@@ -189,6 +204,10 @@
             <input id="new-type-order" type="number" min="0" max="32767" step="1" value="10">
           </div>
         </div>
+        <label class="check-label" style="margin-bottom:10px">
+          <input id="new-type-gap" type="checkbox">
+          นับเป็นขาดสอน
+        </label>
         <button id="btn-add-type" class="ghost small">เพิ่มประเภทการลา</button>
       </div>
     </div>
@@ -261,7 +280,7 @@ import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getWorkYears, saveHrYearStart, clearHrYearStart, academicYearRange,
          getLeaveTypes, getLeaveQuotas,
-         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260909-5";
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20260909-9";
 
 const session = await requireAuth();
 if (session) {
@@ -376,6 +395,27 @@ if (session) {
     if (error) return toast("บันทึกการตั้งค่าเวลาไม่สำเร็จ กรุณาลองใหม่", true);
     toast("บันทึกการตั้งค่าเวลาแล้ว");
     await loadWorkTime();
+  });
+
+  // ---------- เกณฑ์การสอนชด ----------
+  async function loadTeachGapPercent() {
+    const { data, error } = await sb.from("hr_settings")
+      .select("value").eq("key", "teach_gap_makeup_percent").maybeSingle();
+    if (error) return toast("โหลดเกณฑ์การสอนชดไม่สำเร็จ กรุณาลองใหม่", true);
+    el("teach-gap-percent").value = data?.value ?? "";
+  }
+
+  el("btn-save-teach-gap").addEventListener("click", async () => {
+    const raw = el("teach-gap-percent").value.trim();
+    const percent = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isInteger(percent) || percent < 1 || percent > 100) {
+      return toast("เกณฑ์การสอนชดต้องเป็นจำนวนเต็มตั้งแต่ 1 ถึง 100 เปอร์เซ็นต์", true);
+    }
+    const { error } = await sb.from("hr_settings")
+      .upsert({ key:"teach_gap_makeup_percent", value:String(percent) }, { onConflict:"key" });
+    if (error) return toast("บันทึกเกณฑ์การสอนชดไม่สำเร็จ กรุณาลองใหม่", true);
+    toast("บันทึกเกณฑ์การสอนชดแล้ว");
+    await loadTeachGapPercent();
   });
 
   const fmtDate = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
@@ -528,6 +568,10 @@ if (session) {
                 <input type="checkbox" data-leave-active${type.active ? " checked" : ""}>
                 ใช้งานอยู่
               </label>
+              <label class="check-label">
+                <input type="checkbox" data-leave-gap${type.counts_as_teaching_gap ? " checked" : ""}>
+                นับเป็นขาดสอน
+              </label>
               <span class="usage">ชื่อเดิมแก้ไม่ได้ เพื่อรักษาใบลาเก่า</span>
               <button class="ghost small" type="button" data-save-leave>บันทึก</button>
             </div>
@@ -549,10 +593,12 @@ if (session) {
     if (!code) return toast("กรุณากรอกชื่อประเภทการลา", true);
     if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
     const { error } = await sb.from("leave_types")
-      .insert({ code, sort_order: sortOrder, active: true });
+      .insert({ code, sort_order: sortOrder, active: true,
+                counts_as_teaching_gap: el("new-type-gap").checked });
     if (error?.code === "23505") return toast("มีประเภทการลาชื่อนี้อยู่แล้ว", true);
     if (error) return toast("เพิ่มไม่สำเร็จ: " + error.message, true);
     el("new-type").value = "";
+    el("new-type-gap").checked = false;
     toast("เพิ่มประเภทการลาแล้ว");
     await loadLeaveTypes();
     await loadQuotas();
@@ -563,9 +609,10 @@ if (session) {
     if (!row || !event.target.closest("[data-save-leave]")) return;
     const sortOrder = validSortOrder(row.querySelector("[data-leave-order]").value);
     const active = row.querySelector("[data-leave-active]").checked;
+    const gap = row.querySelector("[data-leave-gap]").checked;
     if (sortOrder === null) return toast("ลำดับต้องเป็นจำนวนเต็มตั้งแต่ 0 ถึง 32767", true);
     const { error } = await sb.from("leave_types")
-      .update({ sort_order: sortOrder, active })
+      .update({ sort_order: sortOrder, active, counts_as_teaching_gap: gap })
       .eq("code", row.dataset.leaveType);
     if (error) return toast("บันทึกประเภทการลาไม่สำเร็จ กรุณาลองใหม่", true);
     toast("บันทึกประเภทการลาแล้ว");
@@ -891,6 +938,7 @@ if (session) {
   });
 
   await loadWorkTime();
+  await loadTeachGapPercent();
   await loadYears();
   await loadLeaveTypes();
   await loadPositions();
