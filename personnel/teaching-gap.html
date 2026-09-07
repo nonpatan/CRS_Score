@@ -29,7 +29,7 @@
                    letter-spacing:.03em; margin:4px 0 10px; }
   .field { margin-bottom:14px; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
-  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  input[type="text"], input[type="number"], input[type="date"], input[type="time"], select, textarea {
     width:100%; min-height:44px; font-family:inherit; font-size:16px; padding:10px 12px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
   textarea { min-height:84px; resize:vertical; }
@@ -38,6 +38,7 @@
            border:0; border-radius:8px; cursor:pointer; }
   button.primary { background:var(--teal); color:var(--white); width:100%; }
   button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
   button.small { min-height:36px; font-size:13px; padding:6px 10px; }
   button:disabled { opacity:.5; cursor:default; }
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -77,6 +78,14 @@
   .empty { color:var(--muted); text-align:center; padding:18px; }
   .form-actions { display:flex; gap:10px; align-items:center; }
   .form-actions .primary { flex:1; }
+  .approval-request { padding:13px 0; border-bottom:1px solid var(--line); }
+  .approval-request:last-child { border-bottom:0; }
+  .approval-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .approval-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:9px; }
+  .approval-actions button { width:auto; }
+  .reject-form { margin-top:10px; padding:11px; border-radius:9px; background:var(--amber-soft); }
+  .status-note { margin-top:7px; padding:7px 9px; border-radius:8px;
+                 background:var(--amber-soft); color:var(--amber); white-space:pre-wrap; }
   #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
            border-radius:10px; background:var(--ink); color:var(--white); font-weight:600; opacity:0;
            pointer-events:none; transition:opacity .18s; z-index:60; }
@@ -120,6 +129,11 @@
         <div id="summary" class="summary"></div>
       </div>
 
+      <div id="approval-card" class="card" hidden>
+        <div class="section-title">คำขอสอนชดที่รออนุมัติ</div>
+        <div id="approval-list"></div>
+      </div>
+
       <div class="card">
         <div class="section-title">รายวิชา</div>
         <div id="report-table"><div class="empty">กำลังโหลด…</div></div>
@@ -157,6 +171,16 @@
             <input id="makeup-periods" type="number" min="0.5" max="12" step="0.5" placeholder="เช่น 1 หรือ 1.5">
           </div>
         </div>
+        <div class="row2">
+          <div class="field">
+            <label for="makeup-start">เวลาเริ่ม (ไม่บังคับ)</label>
+            <input id="makeup-start" type="time">
+          </div>
+          <div class="field">
+            <label for="makeup-end">เวลาจบ (ไม่บังคับ)</label>
+            <input id="makeup-end" type="time">
+          </div>
+        </div>
         <div class="field">
           <label for="makeup-note">หมายเหตุ</label>
           <textarea id="makeup-note" placeholder="ถ้ามี"></textarea>
@@ -176,7 +200,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
   personnelAccessDeniedHtml, getAcademicYears, academicYearOf,
   bangkokNow, toDateStr, loadTeachingGap
-} from "../supabase-client.js?v=20260909-9";
+} from "../supabase-client.js?v=20260909-10";
 
 const session = await requireAuth();
 if (session) {
@@ -205,6 +229,8 @@ if (session) {
     const today = toDateStr(bangkokNow());
     let report = null;
     let editingId = null;
+    let rejectingId = null;
+    let approvalBusy = false;
 
     // คัดลอกจาก academic/attendance.html:415 — numeric "2.0" ต้องแสดงเป็น "2"
     function fmtPeriods(value) {
@@ -216,6 +242,9 @@ if (session) {
     });
     const subjectName = subject => [subject.code, subject.name, subject.grade_level,
       subject.term && `ภาคเรียนที่ ${subject.term}`].filter(Boolean).join(" · ");
+    const timeLabel = makeup => makeup.start_time && makeup.end_time
+      ? `${String(makeup.start_time).slice(0, 5)}–${String(makeup.end_time).slice(0, 5)} น.`
+      : "ไม่ระบุเวลา";
     const isValidPeriods = value => Number.isFinite(value) && value > 0 && value <= 12 &&
       (value * 2) % 1 === 0;
 
@@ -249,7 +278,10 @@ if (session) {
         ${esc(fmtPeriods(detail.periods))} คาบ · คนแทน: ${esc(detail.substituteName)}
       </li>`).join("") : '<li class="meta">ยังไม่มีวันที่ขาดสอนที่นับได้</li>';
       const makeupItems = row.makeups.length ? row.makeups.map(makeup => `<li>
-        ${esc(fmtDate(makeup.makeup_date))} · ${esc(fmtPeriods(makeup.periods))} คาบ${makeup.note ? ` · ${esc(makeup.note)}` : ""}
+        <span class="status ${makeup.approval_status === "อนุมัติ" ? "teal" : "amber"}">${esc(makeup.approval_status || "รออนุมัติ")}</span> ·
+        ${esc(fmtDate(makeup.makeup_date))} · ${esc(timeLabel(makeup))} · ${esc(fmtPeriods(makeup.periods))} คาบ${makeup.note ? ` · ${esc(makeup.note)}` : ""}
+        <div class="meta">ผู้ขอ: ${esc(makeup.createdByName || "(ไม่พบชื่อผู้ขอ)")}${makeup.approved_by ? ` · ผู้พิจารณา: ${esc(makeup.approvedByName || "(ไม่พบชื่อผู้อนุมัติ)")}` : ""}</div>
+        ${makeup.approval_status === "ไม่อนุมัติ" ? `<div class="status-note"><b>เหตุผล:</b> ${esc(makeup.approval_note || "ไม่ระบุเหตุผล")}</div>` : ""}
         <button class="ghost small" type="button" data-edit-makeup="${esc(makeup.id)}"
                 data-subject-id="${esc(row.subject.id)}">แก้ไข</button>
       </li>`).join("") : '<li class="meta">ยังไม่มีรายการสอนชด</li>';
@@ -282,16 +314,39 @@ if (session) {
             <td class="num">${noTotal ? "—" : esc(row.percentUsed.toFixed(1)) + "%"}</td>
             <td class="num">${row.required === null ? "—" : esc(fmtPeriods(row.required))}</td>
             <td class="num">${esc(fmtPeriods(row.madeUp))}</td>
+            <td class="num">${esc(fmtPeriods(row.pendingMakeup))}</td>
             <td class="num">${row.remaining === null ? "—" : esc(fmtPeriods(row.remaining))}</td>
             <td><span class="status ${status.css}">${esc(status.text)}</span></td>
           </tr>
-          <tr data-detail-for="${index}" hidden><td class="detail-cell" colspan="9">${renderDetails(row)}</td></tr>
+          <tr data-detail-for="${index}" hidden><td class="detail-cell" colspan="10">${renderDetails(row)}</td></tr>
         </tbody>`;
       }).join("");
       el("report-table").innerHTML = `<div class="table-wrap"><table>
         <thead><tr><th>ครู</th><th>วิชา</th><th>ขาดสอน</th><th>เพดาน</th><th>%</th>
-          <th>ต้องชด</th><th>ชดแล้ว</th><th>คงเหลือ</th><th>สถานะ</th></tr></thead>${body}
+          <th>ต้องชด</th><th>ชดแล้ว</th><th>รออนุมัติ</th><th>คงเหลือ</th><th>สถานะ</th></tr></thead>${body}
       </table></div>`;
+    }
+
+    function renderApprovalQueue() {
+      const pending = (report?.makeups || []).filter(makeup => makeup.approval_status === "รออนุมัติ");
+      const rowBySubject = new Map((report?.rows || []).map(row => [row.subject.id, row]));
+      el("approval-card").hidden = !pending.length;
+      el("approval-list").innerHTML = pending.map(makeup => {
+        const row = rowBySubject.get(makeup.subject_id);
+        const rejecting = rejectingId === makeup.id;
+        return `<div class="approval-request" data-approval-id="${esc(makeup.id)}">
+          <div class="approval-head"><div><b>${esc(row?.staff?.full_name || "(ไม่พบชื่อครู)")} · ${esc(subjectName(row?.subject || {}))}</b>
+            <div class="meta">${esc(fmtDate(makeup.makeup_date))} · ${esc(timeLabel(makeup))} · ${esc(fmtPeriods(makeup.periods))} คาบ</div>
+            ${makeup.note ? `<div class="meta">หมายเหตุ: ${esc(makeup.note)}</div>` : ""}</div>
+            <span class="status amber">รออนุมัติ</span></div>
+          <div class="approval-actions">
+            <button class="ghost" type="button" data-approve-makeup>อนุมัติ</button>
+            <button class="danger" type="button" data-reject-makeup>${rejecting ? "ยืนยันไม่อนุมัติ" : "ไม่อนุมัติ"}</button>
+          </div>
+          ${rejecting ? `<div class="reject-form"><label for="reject-reason-${esc(makeup.id)}">เหตุผลที่ไม่อนุมัติ (บังคับ)</label>
+            <textarea id="reject-reason-${esc(makeup.id)}" data-reject-reason placeholder="บอกครูว่าต้องแก้อะไร"></textarea></div>` : ""}
+        </div>`;
+      }).join("");
     }
 
     function renderReview() {
@@ -325,6 +380,7 @@ if (session) {
 
     function render() {
       renderSummary();
+      renderApprovalQueue();
       renderTable();
       renderReview();
       renderUncovered();
@@ -352,6 +408,8 @@ if (session) {
       el("makeup-subject").disabled = false;
       el("makeup-date").value = today;
       el("makeup-periods").value = "";
+      el("makeup-start").value = "";
+      el("makeup-end").value = "";
       el("makeup-note").value = "";
       el("btn-save-makeup").textContent = "บันทึกการสอนชด";
       el("btn-cancel-edit").hidden = true;
@@ -369,6 +427,8 @@ if (session) {
         el("makeup-subject").disabled = true;
         el("makeup-date").value = makeup.makeup_date;
         el("makeup-periods").value = fmtPeriods(makeup.periods);
+        el("makeup-start").value = String(makeup.start_time || "").slice(0, 5);
+        el("makeup-end").value = String(makeup.end_time || "").slice(0, 5);
         el("makeup-note").value = makeup.note || "";
         el("editing-note").hidden = false;
         el("editing-note").textContent = "กำลังแก้รายการสอนชดของ " + subjectName(row.subject);
@@ -386,6 +446,66 @@ if (session) {
       details.open = !detail.hidden;
       row.setAttribute("aria-expanded", String(!detail.hidden));
     });
+
+    el("approval-list").addEventListener("click", async event => {
+      if (approvalBusy || !report) return;
+      const item = event.target.closest("[data-approval-id]");
+      const makeup = report.makeups.find(row => row.id === item?.dataset.approvalId);
+      if (!makeup || makeup.approval_status !== "รออนุมัติ") return;
+      const row = report.rows.find(entry => entry.subject.id === makeup.subject_id);
+      const now = new Date().toISOString();
+
+      if (event.target.closest("[data-approve-makeup]")) {
+        if (!await window.crsAskConfirm({
+          title:"อนุมัติคำขอสอนชด",
+          message:`${row?.staff?.full_name || "ครู"} · ${subjectName(row?.subject || {})} · ${fmtDate(makeup.makeup_date)} · ${fmtPeriods(makeup.periods)} คาบ\nรายการนี้จะถูกนับเป็นสอนชดแล้วทันที`,
+          okLabel:"อนุมัติ",
+          danger:false
+        })) return;
+        approvalBusy = true;
+        const { error } = await sb.from("teacher_makeups").update({
+          approval_status:"อนุมัติ",
+          approval_note:null,
+          approved_by:session.user.id,
+          approved_at:now,
+          updated_at:now
+        }).eq("id", makeup.id);
+        approvalBusy = false;
+        if (error) return toast("อนุมัติคำขอไม่สำเร็จ: " + error.message, true);
+        toast("อนุมัติคำขอสอนชดแล้ว");
+        await loadReport();
+        return;
+      }
+
+      if (!event.target.closest("[data-reject-makeup]")) return;
+      if (rejectingId !== makeup.id) {
+        rejectingId = makeup.id;
+        renderApprovalQueue();
+        el("approval-list").querySelector(`[data-approval-id="${CSS.escape(makeup.id)}"] [data-reject-reason]`)?.focus();
+        return;
+      }
+      const reason = item.querySelector("[data-reject-reason]")?.value.trim() || "";
+      if (!reason) return toast("กรุณาระบุเหตุผลที่ไม่อนุมัติ", true);
+      if (!await window.crsAskConfirm({
+        title:"ไม่อนุมัติคำขอสอนชด",
+        message:`${row?.staff?.full_name || "ครู"} · ${subjectName(row?.subject || {})}\nเหตุผล: ${reason}`,
+        okLabel:"ไม่อนุมัติ",
+        danger:true
+      })) return;
+      approvalBusy = true;
+      const { error } = await sb.from("teacher_makeups").update({
+        approval_status:"ไม่อนุมัติ",
+        approval_note:reason,
+        approved_by:session.user.id,
+        approved_at:now,
+        updated_at:now
+      }).eq("id", makeup.id);
+      approvalBusy = false;
+      if (error) return toast("บันทึกผลไม่อนุมัติไม่สำเร็จ: " + error.message, true);
+      rejectingId = null;
+      toast("ส่งเหตุผลกลับให้ครูแล้ว");
+      await loadReport();
+    });
     el("report-table").addEventListener("keydown", event => {
       if ((event.key === "Enter" || event.key === " ") && event.target.matches("tr[data-subject-row]")) {
         event.preventDefault();
@@ -399,12 +519,20 @@ if (session) {
       const row = report.rows.find(item => item.subject.id === el("makeup-subject").value);
       const date = el("makeup-date").value;
       const periods = Number(el("makeup-periods").value);
+      const startTime = el("makeup-start").value;
+      const endTime = el("makeup-end").value;
       const note = el("makeup-note").value.trim();
       if (!row) return toast("กรุณาเลือกวิชา", true);
       if (!row.staff.id) return toast("วิชานี้ยังไม่ผูกกับทะเบียนบุคลากร จึงบันทึกการสอนชดไม่ได้", true);
       if (!date) return toast("กรุณาเลือกวันที่สอนชด", true);
       if (!isValidPeriods(periods)) {
         return toast("จำนวนคาบต้องมากกว่า 0 ไม่เกิน 12 และเป็นครึ่งคาบ เช่น 0.5, 1 หรือ 2.5", true);
+      }
+      if ((startTime && !endTime) || (!startTime && endTime)) {
+        return toast("ถ้าระบุเวลา ต้องกรอกทั้งเวลาเริ่มและเวลาจบ", true);
+      }
+      if (startTime && endTime && endTime <= startTime) {
+        return toast("เวลาจบต้องอยู่หลังเวลาเริ่ม", true);
       }
       const action = editingId ? "บันทึกการแก้ไข" : "บันทึกการสอนชด";
       if (!await window.crsAskConfirm({
@@ -415,7 +543,8 @@ if (session) {
         danger: false
       })) return;
 
-      const payload = { makeup_date:date, periods, note:note || null };
+      const payload = { makeup_date:date, start_time:startTime || null, end_time:endTime || null,
+        periods, note:note || null };
       if (editingId) payload.updated_at = new Date().toISOString();
       const result = editingId
         ? await sb.from("teacher_makeups").update(payload).eq("id", editingId)
@@ -442,6 +571,24 @@ if (session) {
     el("makeup-date").value = today;
     el("report-year").addEventListener("change", () => { resetMakeupForm(); loadReport(); });
     await loadReport();
+
+    let approvalSyncTimer = null;
+    const scheduleApprovalSync = () => {
+      clearTimeout(approvalSyncTimer);
+      approvalSyncTimer = setTimeout(() => { if (!approvalBusy) loadReport(); }, 400);
+    };
+    const approvalChannel = sb.channel("teaching-gap-approvals");
+    approvalChannel.on("postgres_changes", {
+      event:"*", schema:"public", table:"teacher_makeups"
+    }, scheduleApprovalSync);
+    approvalChannel.on("postgres_changes", {
+      event:"*", schema:"public", table:"coverage_assignments"
+    }, scheduleApprovalSync);
+    approvalChannel.subscribe();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleApprovalSync();
+    });
+    window.addEventListener("pagehide", () => { sb.removeChannel(approvalChannel); });
   }
 }
 </script>

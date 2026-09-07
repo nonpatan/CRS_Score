@@ -3131,13 +3131,13 @@ export async function loadMyProjects(year, staffId) {
   return enrichApprovalProjects(data || []);
 }
 
-// โหลดเฉพาะงานส่วนตัวที่หน้าแรกต้องใช้ — ทั้งห้าทางยิงพร้อมกันและไม่ดึงประวัติเช็คชื่อทั้งเดือน
+// โหลดเฉพาะงานส่วนตัวที่หน้าแรกต้องใช้ — ยิงพร้อมกันและไม่ดึงประวัติเช็คชื่อทั้งเดือน
 export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
   if (!staffId || !year || !today) {
-    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [] };
+    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null };
   }
 
-  const [swaps, coverageRes, dutyRes, projects, homeroomRes] = await Promise.all([
+  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap] = await Promise.all([
     listMyDutySwaps(),
     sb.rpc("my_coverage_from", { p_from: today }),
     sb.from("duty_roster")
@@ -3151,7 +3151,8 @@ export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
       .eq("year", year)
       .eq("staff_id", staffId)
       .order("grade_level")
-      .order("classroom")
+      .order("classroom"),
+    loadMyTeachingGap({ staffId, year })
   ]);
 
   if (coverageRes.error) {
@@ -3167,7 +3168,8 @@ export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
     coverage: coverageRes.data || [],
     duty: dutyRes.data || [],
     projects,
-    homerooms: homeroomRes.data || []
+    homerooms: homeroomRes.data || [],
+    teachingGap
   };
 }
 
@@ -3188,7 +3190,7 @@ function dashboardCoverageLabel(row) {
 
 // คำนวณล้วนสำหรับการ์ด “งานของฉัน” — ผู้เรียกต้อง escape ข้อความก่อนใส่ DOM
 export function pickMyDashboardAlerts({
-  homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], today,
+  homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
   pendingApprovals = 0, isApprover = false
 } = {}) {
   const alerts = [];
@@ -3239,6 +3241,17 @@ export function pickMyDashboardAlerts({
   if (todayTasks.length) {
     alerts.push({
       text: `วันนี้คุณต้อง${todayTasks.join(" · ")}`,
+      href: "personnel/my-work.html",
+      linkLabel: "ดูรายละเอียด"
+    });
+  }
+
+  for (const row of teachingGap?.rows || []) {
+    if (!(row?.remaining > 0)) continue;
+    const subject = row.subject || {};
+    const label = [subject.code, subject.name, subject.grade_level].filter(Boolean).join(" ");
+    alerts.push({
+      text: `ต้องสอนชด · ${label || "ไม่ระบุวิชา"} · ${Number(row.remaining)} คาบ`,
       href: "personnel/my-work.html",
       linkLabel: "ดูรายละเอียด"
     });
@@ -5023,7 +5036,7 @@ export async function loadTeachingGap(year) {
     .eq("kind", "วิชา")
     .in("subject_id", ids)));
   const makeupRequests = chunks.map(ids => fetchAllRows(() => sb.from("teacher_makeups")
-    .select("id,staff_id,subject_id,makeup_date,periods,note,created_by")
+    .select("id,staff_id,subject_id,makeup_date,start_time,end_time,periods,note,approval_status,approval_note,approved_by,approved_at,created_by,created_at,updated_at")
     .in("subject_id", ids)));
 
   const [coverageResults, makeupResults, leavesRes, coveragePresenceRes,
@@ -5053,11 +5066,20 @@ export async function loadTeachingGap(year) {
   if (firstError) throw new Error("โหลดข้อมูลคาบที่ครูไม่ได้สอนไม่สำเร็จ: " + firstError.message);
 
   const coverage = coverageResults.flatMap(result => result.data || []);
-  const makeups = makeupResults.flatMap(result => result.data || []);
+  const rawMakeups = makeupResults.flatMap(result => result.data || []);
   const staff = staffRes.data || [];
   const staffById = new Map(staff.map(person => [person.id, person]));
   const staffByUser = new Map(staff.filter(person => person.user_id)
     .map(person => [person.user_id, person]));
+  const makeups = rawMakeups.map(makeup => ({
+    // รองรับผลลัพธ์เก่าที่ถูก cache ก่อนเพิ่มคอลัมน์สถานะ; แถวจากฐานข้อมูลปัจจุบันมีค่านี้เสมอ
+    approval_status: Object.hasOwn(makeup, "approval_status") ? makeup.approval_status : "อนุมัติ",
+    ...makeup,
+    createdByName: staffByUser.get(makeup.created_by)?.full_name || "(ไม่พบชื่อผู้ขอ)",
+    approvedByName: makeup.approved_by
+      ? staffByUser.get(makeup.approved_by)?.full_name || "(ไม่พบชื่อผู้อนุมัติ)"
+      : ""
+  }));
   const gapTypes = new Set((leaveTypes || [])
     .filter(type => type.counts_as_teaching_gap)
     .map(type => type.code));
@@ -5088,57 +5110,18 @@ export async function loadTeachingGap(year) {
       is_active: false,
       missing: true
     };
-    const subjectCoverage = coverageBySubject.get(subject.id) || [];
-    const details = [];
-
-    for (const cover of subjectCoverage) {
-      if (cover.source !== "ลา") continue;
-      const leave = Array.isArray(cover.leave) ? cover.leave[0] : cover.leave;
-      if (!cover.leave_id || !leave) {
-        needsReview.push({ subject, staff: owner, coverDate: cover.cover_date,
-          coverageId: cover.id, reason: "ไม่พบใบลาที่ผูกไว้" });
-        continue;
-      }
-      if (!gapTypes.has(leave.leave_type)) continue;
-      if (cover.periods === null || cover.periods === undefined || !(Number(cover.periods) > 0)) {
-        needsReview.push({ subject, staff: owner, coverDate: cover.cover_date,
-          coverageId: cover.id, reason: "ยังไม่ระบุคาบ" });
-        continue;
-      }
-      const substitute = staffById.get(cover.substitute_staff_id);
-      details.push({
-        coverageId: cover.id,
-        coverDate: cover.cover_date,
-        leaveType: leave.leave_type,
-        periods: Number(cover.periods),
-        substituteStaffId: cover.substitute_staff_id,
-        substituteName: substitute?.full_name || "(ไม่พบชื่อคนแทนในทะเบียนบุคลากร)"
-      });
-    }
-
-    const totalPeriods = Number(subject.total_periods);
-    const validTotal = Number.isFinite(totalPeriods) && totalPeriods > 0;
-    if (!validTotal) {
-      needsReview.push({ subject, staff: owner, coverDate: details[0]?.coverDate || null,
-        coverageId: null, reason: "วิชายังไม่ตั้งจำนวนคาบ" });
-    }
-
-    const missed = details.reduce((sum, detail) => sum + detail.periods, 0);
-    const subjectMakeups = (makeupBySubject.get(subject.id) || []).map(makeup => ({
-      ...makeup,
-      periods: Number(makeup.periods) || 0
-    })).sort((a, b) => String(b.makeup_date).localeCompare(String(a.makeup_date)));
-    const madeUp = subjectMakeups.reduce((sum, makeup) => sum + makeup.periods, 0);
-    const canDecide = hasPercent && validTotal;
-    const cap = canDecide ? totalPeriods * percent / 100 : null;
-    const percentUsed = validTotal ? missed * 100 / totalPeriods : null;
-    const required = canDecide ? Math.max(0, missed - cap) : null;
-    const remaining = canDecide ? Math.max(0, required - madeUp) : null;
-    const overCap = canDecide ? missed > cap : null;
-    const nearCap = canDecide ? !overCap && missed > cap * 0.8 : null;
-
-    return { subject, staff: owner, missed, cap, percentUsed, required, madeUp, remaining,
-      overCap, nearCap, details, makeups: subjectMakeups };
+    const computed = computeTeachingGapRow({
+      subject,
+      staff: owner,
+      coverRows: coverageBySubject.get(subject.id) || [],
+      makeupRows: makeupBySubject.get(subject.id) || [],
+      gapTypes,
+      percent,
+      hasPercent,
+      staffById
+    });
+    needsReview.push(...computed.needsReview);
+    return computed;
   }).sort((a, b) => {
     if (a.percentUsed === null) return b.percentUsed === null ? 0 : 1;
     if (b.percentUsed === null) return -1;
@@ -5184,10 +5167,167 @@ export async function loadTeachingGap(year) {
   const uncoveredLeaves = [...uncoveredByKey.values()].sort((a, b) =>
     a.date.localeCompare(b.date) || a.staff.full_name.localeCompare(b.staff.full_name, "th"));
 
-  return { year: selectedYear, percent, hasPercent, rows, needsReview, uncoveredLeaves };
+  return { year: selectedYear, percent, hasPercent, rows, makeups, needsReview, uncoveredLeaves };
+}
+
+// สูตรบริสุทธิ์ร่วมกันของหน้าฝ่ายบุคลากรและหน้าครู — ห้ามแยกสูตรไปไว้ในหน้า HTML
+function computeTeachingGapRow({
+  subject,
+  staff = null,
+  coverRows = [],
+  makeupRows = [],
+  gapTypes = new Set(),
+  percent = null,
+  hasPercent = percent !== null,
+  staffById = new Map()
+} = {}) {
+  const needsReview = [];
+  const details = [];
+
+  for (const cover of coverRows || []) {
+    if (cover.source !== "ลา") continue;
+    const leave = Array.isArray(cover.leave) ? cover.leave[0] : cover.leave;
+    if (!cover.leave_id || !leave) {
+      needsReview.push({ subject, staff, coverDate: cover.cover_date,
+        coverageId: cover.id, reason: "ไม่พบใบลาที่ผูกไว้" });
+      continue;
+    }
+    if (!gapTypes.has(leave.leave_type)) continue;
+    if (cover.periods === null || cover.periods === undefined || !(Number(cover.periods) > 0)) {
+      needsReview.push({ subject, staff, coverDate: cover.cover_date,
+        coverageId: cover.id, reason: "ยังไม่ระบุคาบ" });
+      continue;
+    }
+    const embeddedSubstitute = Array.isArray(cover.substitute)
+      ? cover.substitute[0]
+      : cover.substitute;
+    const substitute = embeddedSubstitute || staffById.get(cover.substitute_staff_id);
+    details.push({
+      coverageId: cover.id,
+      coverDate: cover.cover_date,
+      leaveType: leave.leave_type,
+      periods: Number(cover.periods),
+      substituteStaffId: cover.substitute_staff_id,
+      substituteName: substitute?.full_name || "(ไม่พบชื่อคนแทนในทะเบียนบุคลากร)"
+    });
+  }
+
+  const totalPeriods = Number(subject?.total_periods);
+  const validTotal = Number.isFinite(totalPeriods) && totalPeriods > 0;
+  if (!validTotal) {
+    needsReview.push({ subject, staff, coverDate: details[0]?.coverDate || null,
+      coverageId: null, reason: "วิชายังไม่ตั้งจำนวนคาบ" });
+  }
+
+  const missed = details.reduce((sum, detail) => sum + detail.periods, 0);
+  const makeups = (makeupRows || []).map(makeup => ({
+    ...makeup,
+    periods: Number(makeup.periods) || 0
+  })).sort((a, b) => String(b.makeup_date).localeCompare(String(a.makeup_date)));
+  const madeUp = makeups
+    .filter(makeup => makeup.approval_status === "อนุมัติ")
+    .reduce((sum, makeup) => sum + makeup.periods, 0);
+  const pendingMakeup = makeups
+    .filter(makeup => makeup.approval_status === "รออนุมัติ")
+    .reduce((sum, makeup) => sum + makeup.periods, 0);
+  const canDecide = hasPercent && validTotal;
+  const cap = canDecide ? totalPeriods * percent / 100 : null;
+  const percentUsed = validTotal ? missed * 100 / totalPeriods : null;
+  const required = canDecide ? Math.max(0, missed - cap) : null;
+  const remaining = canDecide ? Math.max(0, required - madeUp) : null;
+  const overCap = canDecide ? missed > cap : null;
+  const nearCap = canDecide ? !overCap && missed > cap * 0.8 : null;
+
+  return { subject, staff, missed, cap, percentUsed, required, madeUp, pendingMakeup,
+    remaining, overCap, nearCap, details, makeups, needsReview };
+}
+
+async function loadMyTeachingGap({ staffId, year } = {}) {
+  const empty = { year:String(year ?? "").trim(), percent:null, hasPercent:false, rows:[], makeups:[] };
+  if (!staffId) return empty;
+
+  const [staffRes, leaveTypes, settingRes] = await Promise.all([
+    sb.from("staff").select("id,full_name,user_id,is_active").eq("id", staffId).maybeSingle(),
+    getLeaveTypes(true),
+    sb.from("hr_settings").select("value")
+      .eq("key", "teach_gap_makeup_percent").maybeSingle()
+  ]);
+  if (staffRes.error) throw new Error("โหลดข้อมูลบุคลากรของคุณไม่สำเร็จ: " + staffRes.error.message);
+  if (settingRes.error) throw new Error("โหลดเกณฑ์การสอนชดไม่สำเร็จ: " + settingRes.error.message);
+
+  const settingValue = settingRes.data?.value;
+  const parsedPercent = Number(settingValue);
+  const hasPercent = settingValue !== null && settingValue !== undefined && settingValue !== "" &&
+    Number.isInteger(parsedPercent) && parsedPercent >= 1 && parsedPercent <= 100;
+  const percent = hasPercent ? parsedPercent : null;
+  const selectedYear = String(year ?? "").trim();
+  const staff = staffRes.data;
+  if (!staff?.user_id || !selectedYear) {
+    return { year:selectedYear, percent, hasPercent, rows:[], makeups:[] };
+  }
+
+  const subjectsRes = await sb.from("subjects")
+    .select("id,code,name,grade_level,year,term,total_periods,owner_id")
+    .eq("year", selectedYear)
+    .eq("owner_id", staff.user_id);
+  if (subjectsRes.error) throw new Error("โหลดวิชาของคุณไม่สำเร็จ: " + subjectsRes.error.message);
+  const subjects = subjectsRes.data || [];
+  if (!subjects.length) return { year:selectedYear, percent, hasPercent, rows:[], makeups:[] };
+
+  const subjectIds = subjects.map(subject => subject.id);
+  const [coverageRes, makeupRes] = await Promise.all([
+    fetchAllRows(() => sb.from("coverage_assignments")
+      .select("id,subject_id,cover_date,kind,source,leave_id,periods,substitute_staff_id,leave:staff_leaves(leave_type),substitute:staff!coverage_assignments_substitute_staff_id_fkey(full_name)")
+      .eq("kind", "วิชา")
+      .eq("absent_staff_id", staffId)
+      .in("subject_id", subjectIds)),
+    fetchAllRows(() => sb.from("teacher_makeups")
+      .select("id,staff_id,subject_id,makeup_date,start_time,end_time,periods,note,approval_status,approval_note,approved_by,approved_at,created_by,created_at,updated_at")
+      .eq("staff_id", staffId)
+      .in("subject_id", subjectIds))
+  ]);
+  if (coverageRes.error) {
+    throw new Error("โหลดคาบที่คุณไม่ได้สอนไม่สำเร็จ: " + coverageRes.error.message);
+  }
+  if (makeupRes.error) throw new Error("โหลดคำขอสอนชดของคุณไม่สำเร็จ: " + makeupRes.error.message);
+
+  const gapTypes = new Set((leaveTypes || [])
+    .filter(type => type.counts_as_teaching_gap)
+    .map(type => type.code));
+  const coverageBySubject = new Map();
+  for (const row of coverageRes.data || []) {
+    if (!coverageBySubject.has(row.subject_id)) coverageBySubject.set(row.subject_id, []);
+    coverageBySubject.get(row.subject_id).push(row);
+  }
+  const makeups = [...(makeupRes.data || [])]
+    .sort((a, b) => String(b.makeup_date).localeCompare(String(a.makeup_date)));
+  const makeupBySubject = new Map();
+  for (const row of makeups) {
+    if (!makeupBySubject.has(row.subject_id)) makeupBySubject.set(row.subject_id, []);
+    makeupBySubject.get(row.subject_id).push(row);
+  }
+
+  const rows = subjects.map(subject => computeTeachingGapRow({
+    subject,
+    staff,
+    coverRows: coverageBySubject.get(subject.id) || [],
+    makeupRows: makeupBySubject.get(subject.id) || [],
+    gapTypes,
+    percent,
+    hasPercent
+  })).sort((a, b) => {
+    if (a.percentUsed === null) return b.percentUsed === null ? 0 : 1;
+    if (b.percentUsed === null) return -1;
+    return b.percentUsed - a.percentUsed ||
+      String(a.subject.code || a.subject.name).localeCompare(String(b.subject.code || b.subject.name), "th");
+  });
+
+  return { year:selectedYear, percent, hasPercent, rows, makeups };
 }
 
 // รายการตำแหน่งควบคุมกลาง — หน้าแก้ทะเบียนต้องขอรวมรายการที่ปิดใช้แล้วด้วย
+export { computeTeachingGapRow, loadMyTeachingGap };
+
 // เพื่อให้ยังเห็นและถอดตำแหน่งเดิมของคนที่ถืออยู่ได้
 export async function getStaffPositions(includeInactive = false) {
   let query = sb.from("staff_positions").select("*").order("sort_order").order("code");

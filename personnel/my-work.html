@@ -27,9 +27,11 @@
 
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:16px; margin-bottom:16px; }
-  select, input[type="month"], input[type="text"], input[type="url"] { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
+  select, input[type="month"], input[type="text"], input[type="url"], input[type="date"],
+  input[type="time"], input[type="number"], textarea { width:100%; font-family:inherit; font-size:16px; padding:10px 12px;
     border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); }
-  input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  textarea { min-height:84px; resize:vertical; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--teal); outline-offset:1px; }
   input:disabled { background:#f4f6f6; color:var(--muted); }
   button { width:100%; font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
            border:none; border-radius:8px; cursor:pointer; }
@@ -111,9 +113,39 @@
   .report-status.err { color:var(--danger); }
   .report-status.ok { color:var(--teal); }
   .report-link { color:var(--teal); font-weight:600; text-decoration:none; }
+  .gap-subject, .makeup-request { padding:12px 0; border-bottom:1px solid var(--line); }
+  .gap-subject:last-child, .makeup-request:last-child { border-bottom:0; }
+  .gap-title { font-weight:600; }
+  .gap-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin-top:9px; }
+  .gap-metric { padding:7px 9px; border-radius:8px; background:var(--bg); }
+  .gap-metric b { display:block; color:var(--amber); }
+  .gap-detail { margin-top:8px; }
+  .gap-detail summary { color:var(--teal); font-weight:600; cursor:pointer; }
+  .gap-detail ul { margin:7px 0 0; padding-left:20px; }
+  .makeup-head { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  .status-chip { display:inline-flex; padding:2px 8px; border-radius:99px; font-size:12px;
+                 font-weight:600; white-space:nowrap; background:var(--amber-soft); color:var(--amber); }
+  .status-chip.approved { background:var(--teal-soft); color:var(--teal); }
+  .makeup-actions { margin-top:8px; }
+  .makeup-actions button { width:auto; }
+  .reject-note { margin-top:7px; padding:8px 10px; border-radius:8px;
+                 background:var(--amber-soft); color:var(--amber); white-space:pre-wrap; }
+  .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .form-actions { display:flex; gap:8px; }
+  .form-actions .primary { flex:1; }
+  .form-actions .ghost { width:auto; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); padding:11px 18px;
+           border-radius:10px; background:var(--ink); color:var(--white); font-weight:600; opacity:0;
+           pointer-events:none; transition:opacity .18s; z-index:60; }
+  #toast.show { opacity:1; }
+  #toast.err { background:var(--danger); }
   @media (max-width:500px) {
     .report-entry { grid-template-columns:1fr; }
     .report-entry button { width:100%; }
+    .gap-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .form-grid { grid-template-columns:1fr; gap:0; }
+    .form-actions { display:block; }
+    .form-actions .ghost { width:100%; margin-top:8px; }
   }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -141,6 +173,48 @@
     <div class="card">
       <div class="section-title">งานที่ฉันต้องไปแทน</div>
       <div id="my-coverage-list"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card" id="my-teaching-gap-card">
+      <div class="section-title">การสอนชดของฉัน</div>
+      <div id="my-teaching-gap-list"><div class="field-note">กำลังโหลด…</div></div>
+      <div class="section-title" style="margin-top:18px">คำขอของฉัน</div>
+      <div id="my-makeup-requests"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    <div class="card" id="makeup-request-card" hidden>
+      <div class="section-title">ขออนุมัติสอนชด</div>
+      <div id="makeup-edit-note" class="banner info" hidden></div>
+      <div class="field">
+        <label for="makeup-subject">วิชา</label>
+        <select id="makeup-subject"></select>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label for="makeup-date">วันที่จะสอนชด</label>
+          <input id="makeup-date" type="date">
+        </div>
+        <div class="field">
+          <label for="makeup-periods">จำนวนคาบ</label>
+          <input id="makeup-periods" type="number" min="0.5" max="12" step="0.5" placeholder="เช่น 1 หรือ 1.5">
+        </div>
+        <div class="field">
+          <label for="makeup-start">เวลาเริ่ม (ไม่บังคับ)</label>
+          <input id="makeup-start" type="time">
+        </div>
+        <div class="field">
+          <label for="makeup-end">เวลาจบ (ไม่บังคับ)</label>
+          <input id="makeup-end" type="time">
+        </div>
+      </div>
+      <div class="field">
+        <label for="makeup-note">หมายเหตุ (ไม่บังคับ)</label>
+        <textarea id="makeup-note" placeholder="รายละเอียดที่ฝ่ายบุคลากรควรทราบ"></textarea>
+      </div>
+      <div class="form-actions">
+        <button id="btn-submit-makeup" class="primary" type="button">ขออนุมัติสอนชด</button>
+        <button id="btn-cancel-makeup-edit" class="ghost" type="button" hidden>ยกเลิกการแก้ไข</button>
+      </div>
     </div>
 
     <div class="card" id="homeroom-audit-card" hidden>
@@ -209,6 +283,7 @@
     </div>
   </div>
 </div>
+<div id="toast"></div>
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
@@ -219,8 +294,8 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          respondDutySwap, cancelDutySwap, listMyDutySwaps,
          getSetting, loadMyHomeroomAuditData, buildHomeroomAudit,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
-         loadMyProjects, projectApprovalBadge,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260909-9";
+         loadMyProjects, projectApprovalBadge, loadMyTeachingGap,
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260909-10";
 
 const session = await requireAuth();
 if (session) {
@@ -259,12 +334,22 @@ if (session) {
     let permitBusy = false;
     const reportBusy = new Set();
     let myDutyRows = [], swapState = null, swapRequests = [], swapActionBusy = false;
+    let teachingGapReport = null, editingMakeupId = null, makeupBusy = false;
     let swapReturnRequestSeq = 0;
     const dutyTypeByCode = new Map(dutyTypeCatalog.map(type => [type.code, type]));
 
     const escapeHtml = value => String(value ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    let toastTimer;
+    const toast = (message, error = false) => {
+      const box = el("toast");
+      box.textContent = message;
+      box.classList.toggle("err", error);
+      box.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => box.classList.remove("show"), 3500);
+    };
     function timeToSeconds(value) {
       const match = String(value || "").match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
       if (!match) return null;
@@ -328,6 +413,190 @@ if (session) {
         </div>`;
       }).join("") : '<div class="muted-empty">ยังไม่มีงานที่ต้องไปแทน</div>';
     }
+
+    const fmtPeriods = value => {
+      const number = Number(value);
+      return Number.isFinite(number) ? String(number) : String(value ?? "—");
+    };
+    const teachingSubjectName = subject => [subject?.code, subject?.name, subject?.grade_level]
+      .filter(Boolean).join(" · ");
+    const isValidMakeupPeriods = value => Number.isFinite(value) && value > 0 && value <= 12 &&
+      (value * 2) % 1 === 0;
+    const makeupTimeLabel = makeup => makeup.start_time && makeup.end_time
+      ? `${shortTime(makeup.start_time)}–${shortTime(makeup.end_time)} น.`
+      : "ไม่ระบุเวลา";
+
+    function renderTeachingGapSubjects() {
+      const rows = (teachingGapReport?.rows || []).filter(row => row.required > 0);
+      el("my-teaching-gap-list").innerHTML = rows.length ? rows.map(row => {
+        const details = row.details.length
+          ? `<details class="gap-detail"><summary>ดูวันที่ขาดสอน ${row.details.length} วัน</summary><ul>${row.details.map(detail =>
+              `<li>${escapeHtml(fmt(detail.coverDate))} · ${escapeHtml(detail.leaveType)} · ${escapeHtml(fmtPeriods(detail.periods))} คาบ · คนแทน: ${escapeHtml(detail.substituteName)}</li>`
+            ).join("")}</ul></details>`
+          : "";
+        return `<div class="gap-subject">
+          <div class="gap-title">${escapeHtml(teachingSubjectName(row.subject))}</div>
+          <div class="gap-metrics">
+            <div class="gap-metric"><span class="field-note">ขาดสอน</span><b>${escapeHtml(fmtPeriods(row.missed))}</b></div>
+            <div class="gap-metric"><span class="field-note">เพดาน</span><b>${row.cap === null ? "—" : escapeHtml(fmtPeriods(row.cap))}</b></div>
+            <div class="gap-metric"><span class="field-note">ต้องชด</span><b>${escapeHtml(fmtPeriods(row.required))}</b></div>
+            <div class="gap-metric"><span class="field-note">อนุมัติแล้ว</span><b>${escapeHtml(fmtPeriods(row.madeUp))}</b></div>
+            <div class="gap-metric"><span class="field-note">รออนุมัติ</span><b>${escapeHtml(fmtPeriods(row.pendingMakeup))}</b></div>
+            <div class="gap-metric"><span class="field-note">คงเหลือ</span><b>${escapeHtml(fmtPeriods(row.remaining))}</b></div>
+          </div>${details}
+        </div>`;
+      }).join("") : '<div class="muted-empty">ยังไม่มีวิชาที่ต้องสอนชด</div>';
+    }
+
+    function renderMyMakeupRequests() {
+      const subjectById = new Map((teachingGapReport?.rows || []).map(row => [row.subject.id, row.subject]));
+      const makeups = teachingGapReport?.makeups || [];
+      el("my-makeup-requests").innerHTML = makeups.length ? makeups.map(makeup => {
+        const approved = makeup.approval_status === "อนุมัติ";
+        const rejected = makeup.approval_status === "ไม่อนุมัติ";
+        const edit = approved ? "" : `<div class="makeup-actions"><button type="button" class="ghost" data-edit-makeup="${escapeHtml(makeup.id)}">${rejected ? "แก้แล้วส่งใหม่" : "แก้ไข"}</button></div>`;
+        const reason = rejected
+          ? `<div class="reject-note"><b>เหตุผลที่ไม่อนุมัติ:</b> ${escapeHtml(makeup.approval_note || "ไม่ระบุเหตุผล")}</div>`
+          : "";
+        return `<div class="makeup-request" data-makeup-id="${escapeHtml(makeup.id)}">
+          <div class="makeup-head"><div><b>${escapeHtml(fmt(makeup.makeup_date))} · ${escapeHtml(teachingSubjectName(subjectById.get(makeup.subject_id)))}</b>
+            <div class="my-duty-meta">${escapeHtml(makeupTimeLabel(makeup))} · ${escapeHtml(fmtPeriods(makeup.periods))} คาบ</div></div>
+            <span class="status-chip${approved ? " approved" : ""}">${escapeHtml(makeup.approval_status || "รออนุมัติ")}</span></div>
+          ${makeup.note ? `<div class="field-note">หมายเหตุ: ${escapeHtml(makeup.note)}</div>` : ""}${reason}${edit}
+        </div>`;
+      }).join("") : '<div class="muted-empty">ยังไม่มีคำขอสอนชด</div>';
+    }
+
+    function renderMakeupFormOptions(selectedId = "") {
+      const eligible = (teachingGapReport?.rows || []).filter(row => row.required > 0);
+      el("makeup-request-card").hidden = !eligible.length;
+      el("makeup-subject").innerHTML = ['<option value="">— เลือกวิชา —</option>'].concat(
+        eligible.map(row => `<option value="${escapeHtml(row.subject.id)}"${row.subject.id === selectedId ? " selected" : ""}>${escapeHtml(teachingSubjectName(row.subject))}</option>`)
+      ).join("");
+    }
+
+    function resetMakeupForm() {
+      editingMakeupId = null;
+      el("makeup-edit-note").hidden = true;
+      el("makeup-edit-note").textContent = "";
+      el("makeup-subject").disabled = false;
+      el("makeup-date").value = today;
+      el("makeup-start").value = "";
+      el("makeup-end").value = "";
+      el("makeup-periods").value = "";
+      el("makeup-note").value = "";
+      el("btn-submit-makeup").textContent = "ขออนุมัติสอนชด";
+      el("btn-cancel-makeup-edit").hidden = true;
+      renderMakeupFormOptions();
+    }
+
+    function renderTeachingGap() {
+      renderTeachingGapSubjects();
+      renderMyMakeupRequests();
+      renderMakeupFormOptions(el("makeup-subject").value);
+    }
+
+    async function loadMyTeachingGapReport() {
+      const year = academicYearOf(today, years);
+      if (!year) {
+        teachingGapReport = { rows:[], makeups:[], hasPercent:false };
+        renderTeachingGap();
+        return;
+      }
+      try {
+        teachingGapReport = await loadMyTeachingGap({ staffId:me.id, year });
+        renderTeachingGap();
+      } catch (error) {
+        el("my-teaching-gap-list").innerHTML = '<div class="banner warn">โหลดข้อมูลการสอนชดไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        el("my-makeup-requests").innerHTML = "";
+        el("makeup-request-card").hidden = true;
+        toast(error.message || "โหลดข้อมูลการสอนชดไม่สำเร็จ", true);
+      }
+    }
+
+    el("my-makeup-requests").addEventListener("click", event => {
+      const button = event.target.closest("[data-edit-makeup]");
+      if (!button || !teachingGapReport) return;
+      const makeup = teachingGapReport.makeups.find(row => row.id === button.dataset.editMakeup);
+      if (!makeup || makeup.approval_status === "อนุมัติ") return;
+      editingMakeupId = makeup.id;
+      renderMakeupFormOptions(makeup.subject_id);
+      el("makeup-subject").disabled = true;
+      el("makeup-date").value = makeup.makeup_date || today;
+      el("makeup-start").value = shortTime(makeup.start_time);
+      el("makeup-end").value = shortTime(makeup.end_time);
+      el("makeup-periods").value = fmtPeriods(makeup.periods);
+      el("makeup-note").value = makeup.note || "";
+      el("makeup-edit-note").hidden = false;
+      el("makeup-edit-note").textContent = makeup.approval_status === "ไม่อนุมัติ"
+        ? "แก้ข้อมูลแล้วส่งเข้าคิวอนุมัติใหม่"
+        : "กำลังแก้คำขอที่รออนุมัติ";
+      el("btn-submit-makeup").textContent = "ส่งขออนุมัติใหม่";
+      el("btn-cancel-makeup-edit").hidden = false;
+    });
+    el("btn-cancel-makeup-edit").addEventListener("click", resetMakeupForm);
+    el("btn-submit-makeup").addEventListener("click", async () => {
+      if (makeupBusy || !teachingGapReport) return;
+      const subjectId = el("makeup-subject").value;
+      const subjectRow = teachingGapReport.rows.find(row => row.subject.id === subjectId && row.required > 0);
+      const date = el("makeup-date").value;
+      const startTime = el("makeup-start").value;
+      const endTime = el("makeup-end").value;
+      const periods = Number(el("makeup-periods").value);
+      const note = el("makeup-note").value.trim();
+      if (!subjectRow) return toast("กรุณาเลือกวิชา", true);
+      if (!date) return toast("กรุณาเลือกวันที่จะสอนชด", true);
+      if ((startTime && !endTime) || (!startTime && endTime)) {
+        return toast("ถ้าระบุเวลา ต้องกรอกทั้งเวลาเริ่มและเวลาจบ", true);
+      }
+      if (startTime && endTime && endTime <= startTime) {
+        return toast("เวลาจบต้องอยู่หลังเวลาเริ่ม", true);
+      }
+      if (!isValidMakeupPeriods(periods)) {
+        return toast("จำนวนคาบต้องมากกว่า 0 ไม่เกิน 12 และเป็นครึ่งคาบ เช่น 0.5, 1 หรือ 2.5", true);
+      }
+      const action = editingMakeupId ? "ส่งขออนุมัติใหม่" : "ขออนุมัติสอนชด";
+      if (!await window.crsAskConfirm({
+        title: action,
+        message: `${teachingSubjectName(subjectRow.subject)} · ${fmt(date)} · ${makeupTimeLabel({ start_time:startTime, end_time:endTime })} · ${fmtPeriods(periods)} คาบ`,
+        okLabel: action,
+        danger: false
+      })) return;
+
+      makeupBusy = true;
+      el("btn-submit-makeup").disabled = true;
+      const payload = {
+        subject_id:subjectId,
+        makeup_date:date,
+        start_time:startTime || null,
+        end_time:endTime || null,
+        periods,
+        note:note || null
+      };
+      let result;
+      if (editingMakeupId) {
+        result = await sb.from("teacher_makeups").update({
+          ...payload,
+          approval_status:"รออนุมัติ",
+          approval_note:null,
+          approved_by:null,
+          approved_at:null,
+          updated_at:new Date().toISOString()
+        }).eq("id", editingMakeupId);
+      } else {
+        result = await sb.from("teacher_makeups").insert({
+          ...payload,
+          staff_id:me.id,
+          created_by:session.user.id
+        });
+      }
+      makeupBusy = false;
+      el("btn-submit-makeup").disabled = false;
+      if (result.error) return toast("ส่งคำขอสอนชดไม่สำเร็จ: " + result.error.message, true);
+      toast(editingMakeupId ? "ส่งคำขอที่แก้ไขแล้ว" : "ส่งคำขอสอนชดแล้ว");
+      resetMakeupForm();
+      await loadMyTeachingGapReport();
+    });
 
     async function renderMyHomeroomAudit() {
       const card = el("homeroom-audit-card");
@@ -616,6 +885,14 @@ if (session) {
       swapSyncTimer = setTimeout(syncDutySwapsFromRemote, 400);
     };
 
+    let teachingGapSyncTimer = null;
+    const scheduleTeachingGapSync = () => {
+      clearTimeout(teachingGapSyncTimer);
+      teachingGapSyncTimer = setTimeout(() => {
+        if (!makeupBusy) loadMyTeachingGapReport();
+      }, 400);
+    };
+
     const dutySwapChannel = sb.channel("duty-swaps-of-" + me.id);
     for (const column of ["from_staff_id", "to_staff_id"]) {
       dutySwapChannel.on("postgres_changes", {
@@ -623,12 +900,21 @@ if (session) {
         filter: `${column}=eq.${me.id}`
       }, scheduleDutySwapSync);
     }
+    dutySwapChannel.on("postgres_changes", {
+      event: "*", schema: "public", table: "coverage_assignments"
+    }, scheduleTeachingGapSync);
+    dutySwapChannel.on("postgres_changes", {
+      event: "*", schema: "public", table: "teacher_makeups"
+    }, scheduleTeachingGapSync);
     dutySwapChannel.subscribe();
 
     // 🛟 กันเหนียวสำหรับเคสที่ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket)
     //    หรือเครื่องหลับไปแล้วตื่นมา — กลับมาที่แท็บเมื่อไหร่ก็ดึงของล่าสุดอยู่ดี
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") scheduleDutySwapSync();
+      if (document.visibilityState === "visible") {
+        scheduleDutySwapSync();
+        scheduleTeachingGapSync();
+      }
     });
     window.addEventListener("pagehide", () => { sb.removeChannel(dutySwapChannel); });
 
@@ -1226,6 +1512,7 @@ if (session) {
 
     el("month").addEventListener("change", renderMonth);
     await renderMyCoverage();
+    await loadMyTeachingGapReport();
     await renderMyHomeroomAudit();
     await renderMyDuties();
     await loadDutySwapRequests();
