@@ -85,6 +85,12 @@
   .metric-segment-absent { background: var(--muted); }
   .metric [hidden] { display: none; }
   .metric-note { display: block; margin-top: 8px; color: var(--muted); font-size: 13px; }
+  .metric-spark { margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--line); }
+  .metric-spark svg { display: block; width: 100%; height: 34px; overflow: visible; }
+  .metric-spark-area { fill: var(--teal-soft); }
+  .metric-spark-line { fill: none; stroke: var(--teal); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .metric-spark-latest { fill: var(--teal); }
+  .metric-spark-note { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
   .panels { display: grid; gap: 14px; }
   .panel { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--white); box-shadow: var(--shadow); transition: border-color .2s var(--ease); }
   .panel:hover { border-color: rgba(15,110,86,.24); }
@@ -267,6 +273,7 @@
             <div class="metric-number"><span class="metric-value" id="student-today-value">—</span><span class="metric-total" id="student-today-total" hidden></span></div>
             <div class="metric-progress" id="student-today-progress" hidden><span class="metric-fill" id="student-today-fill"></span></div>
             <span class="metric-note" id="student-today-note">กำลังโหลด…</span>
+            <div class="metric-spark" id="student-trend" hidden></div>
           </a>
           <article class="metric" id="staff-today-card">
             <div class="metric-head"><div class="metric-label" id="staff-today-label">ครูมาวันนี้</div><span class="metric-chip" id="staff-today-chip" hidden></span></div>
@@ -308,14 +315,14 @@
     sb, requireAuth, getProfile,
     getAcademicYears, academicYearOf,
     getSetting, getMyProfilePresentation,
-    loadDailyAttendanceToday, summarizeDailyAttendance,
+    loadDailyAttendanceToday, summarizeDailyAttendance, loadAttendanceTrend,
     loadTodayStaffSummary,
     loadAcademicCalendar, pickCalendarUpcoming,
     loadAcademicProjects, filterProjectsInMonth, countPendingProjects, projectResponsibleName,
     loadMyDashboardAlerts, pickMyDashboardAlerts,
     isProjectApprover,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20260909-11";
+  } from "./supabase-client.js?v=20260909-12";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayCard = document.getElementById("student-today-card");
@@ -324,6 +331,7 @@
   const studentTodayProgress = document.getElementById("student-today-progress");
   const studentTodayFill = document.getElementById("student-today-fill");
   const studentTodayNote = document.getElementById("student-today-note");
+  const studentTrend = document.getElementById("student-trend");
   const staffTodayCard = document.getElementById("staff-today-card");
   const staffTodayLabel = document.getElementById("staff-today-label");
   const staffTodayChip = document.getElementById("staff-today-chip");
@@ -375,6 +383,63 @@
       // การ์ดทางลัดพังต้องไม่รบกวนการ์ดหลักบนหน้าแรก
       hideMyAlerts();
     }
+  }
+
+  function hideAttendanceTrend() {
+    studentTrend.hidden = true;
+    studentTrend.innerHTML = "";
+  }
+
+  function renderAttendanceTrend(points) {
+    const trend = Array.isArray(points) ? points : [];
+    const values = trend.map(point => point?.pct == null ? null : Number(point.pct));
+    const available = values.filter(Number.isFinite);
+    if (available.length < 2) {
+      hideAttendanceTrend();
+      return;
+    }
+
+    const min = Math.min(...available);
+    const max = Math.max(...available);
+    const yMin = Math.max(0, min - 5);
+    const yMax = Math.min(100, max + 5);
+    const yRange = Math.max(1, yMax - yMin);
+    const coordinates = values.map((pct, index) => pct == null ? null : {
+      x: trend.length > 1 ? 100 * index / (trend.length - 1) : 50,
+      y: 3 + 28 * (yMax - pct) / yRange
+    });
+    const segments = [];
+    let segment = [];
+    for (const point of coordinates) {
+      if (point) segment.push(point);
+      else if (segment.length) {
+        segments.push(segment);
+        segment = [];
+      }
+    }
+    if (segment.length) segments.push(segment);
+
+    const pointText = point => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+    const linePaths = segments.map(pointsInSegment => {
+      const commands = pointsInSegment.map((point, index) => `${index ? "L" : "M"} ${pointText(point)}`);
+      if (pointsInSegment.length === 1) commands.push(`L ${pointText(pointsInSegment[0])}`);
+      return `<path class="metric-spark-line" d="${commands.join(" ")}"></path>`;
+    }).join("");
+    const areaPaths = segments.filter(pointsInSegment => pointsInSegment.length > 1).map(pointsInSegment => {
+      const first = pointsInSegment[0];
+      const last = pointsInSegment[pointsInSegment.length - 1];
+      const line = pointsInSegment.map((point, index) => `${index ? "L" : "M"} ${pointText(point)}`).join(" ");
+      return `<path class="metric-spark-area" d="${line} L ${last.x.toFixed(2)} 31 L ${first.x.toFixed(2)} 31 Z"></path>`;
+    }).join("");
+    const latest = coordinates[coordinates.length - 1];
+    const latestPoint = latest
+      ? `<circle class="metric-spark-latest" cx="${latest.x.toFixed(2)}" cy="${latest.y.toFixed(2)}" r="2.5"></circle>`
+      : "";
+    const spokenValues = values.map(value => value == null ? "ไม่มีข้อมูล" : `${value}%`).join(", ");
+    studentTrend.innerHTML = `<svg viewBox="0 0 100 34" role="img" aria-label="การมาเรียน ${trend.length} วันเรียนล่าสุด: ${spokenValues}" focusable="false">
+      ${areaPaths}${linePaths}${latestPoint}
+    </svg><span class="metric-spark-note">${trend.length} วันเรียนล่าสุด · ต่ำสุด ${min}% · สูงสุด ${max}%</span>`;
+    studentTrend.hidden = false;
   }
 
   function escapeHtml(value) {
@@ -698,6 +763,8 @@
       hideMyAlerts();
       return;
     }
+
+    loadAttendanceTrend({ year, endDate:today }).then(renderAttendanceTrend).catch(hideAttendanceTrend);
 
     const yearMonth = today.slice(0, 7);
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว

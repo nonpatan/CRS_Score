@@ -2238,19 +2238,25 @@ export async function loadDailyAttendanceToday(year, dateStr, academicYears = nu
   };
 }
 
-// คำนวณล้วน — options.isHoliday ต้องมาจาก loadDailyAttendanceToday()
-export function summarizeDailyAttendance(rows, rooms, options = {}) {
-  const attendanceRows = Array.isArray(rows) ? rows : [];
-  const roomRows = Array.isArray(rooms) ? rooms : [];
+export function countAttendanceStatuses(rows) {
   const counts = { present: 0, late: 0, leave: 0, absent: 0 };
-  const checkedRooms = new Set();
-
-  for (const row of attendanceRows) {
+  for (const row of rows || []) {
     if (row.status === "มา") counts.present += 1;
     else if (row.status === "มาสาย") counts.late += 1;
     else if (row.status === "ลาป่วย" || row.status === "ลากิจ") counts.leave += 1;
     else if (row.status === "ขาด") counts.absent += 1;
+  }
+  return counts;
+}
 
+// คำนวณล้วน — options.isHoliday ต้องมาจาก loadDailyAttendanceToday()
+export function summarizeDailyAttendance(rows, rooms, options = {}) {
+  const attendanceRows = Array.isArray(rows) ? rows : [];
+  const roomRows = Array.isArray(rooms) ? rooms : [];
+  const counts = countAttendanceStatuses(attendanceRows);
+  const checkedRooms = new Set();
+
+  for (const row of attendanceRows) {
     if (row.grade_level && row.classroom) {
       checkedRooms.add(row.grade_level + "\u0000" + row.classroom);
     }
@@ -2274,6 +2280,59 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
     roomsTotal,
     state
   };
+}
+
+export function pickSchoolDays({ holidays, workdays, endDate, days = 5 }) {
+  const target = Math.max(0, Math.floor(Number(days) || 0));
+  if (!endDate || !target) return [];
+  const picked = [];
+  for (let offset = 0; offset <= 60 && picked.length < target; offset++) {
+    const date = addDaysStr(endDate, -offset);
+    if (workdays?.get(isoWeekday(date)) !== true || holidays?.has(date)) continue;
+    picked.push(date);
+  }
+  return picked.reverse();
+}
+
+export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 5 }) {
+  const dates = pickSchoolDays({ holidays, workdays, endDate, days });
+  const rowsByDate = new Map(dates.map(date => [date, []]));
+  for (const row of rows || []) {
+    if (rowsByDate.has(row.attend_date)) rowsByDate.get(row.attend_date).push(row);
+  }
+  return dates.map(date => {
+    const counts = countAttendanceStatuses(rowsByDate.get(date));
+    const counted = counts.present + counts.late + counts.leave + counts.absent;
+    return {
+      date,
+      pct: counted ? Math.round(100 * (counts.present + counts.late) / counted) : null,
+      counted
+    };
+  });
+}
+
+export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
+  if (!year || !endDate) return [];
+  const [scheduleRes, holidayRes] = await Promise.all([
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    sb.from("work_holidays").select("holiday_date")
+      .gte("holiday_date", addDaysStr(endDate, -60)).lte("holiday_date", endDate)
+  ]);
+  if (scheduleRes.error || holidayRes.error) return [];
+
+  const workdays = new Map((scheduleRes.data || []).map(row => [row.weekday, row.is_working_day]));
+  const holidays = new Set((holidayRes.data || []).map(row => row.holiday_date));
+  const dates = pickSchoolDays({ holidays, workdays, endDate, days });
+  if (!dates.length) return [];
+
+  const rowsRes = await fetchAllRows(() => sb.from("daily_attendance")
+    .select("attend_date,status")
+    .eq("year", year)
+    .in("attend_date", dates), "id");
+  if (rowsRes.error) {
+    throw new Error("โหลดกราฟการมาเรียนไม่สำเร็จ: " + rowsRes.error.message);
+  }
+  return pickAttendanceTrend({ rows:rowsRes.data || [], holidays, workdays, endDate, days });
 }
 
 // ============================================================
