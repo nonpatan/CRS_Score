@@ -75,6 +75,7 @@
 
   .summary-line { font-size: 15px; font-weight: 500; }
   .summary-line b { color: var(--danger); }
+  .summary-line b.trend { color: var(--amber); }
 
   .student-card { padding: 0; overflow: hidden; }
   .student-head {
@@ -185,8 +186,9 @@
 import {
   sb, requireAuth, signOut,
   computeStudentSubjectResults, computeGpa,
+  pickCountableSubjects, retentionCoverage, isSubjectResultDecided,
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting
-} from "../supabase-client.js?v=20260909-12";
+} from "../supabase-client.js?v=20260910-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -268,6 +270,16 @@ async function loadReport() {
 
   showEmpty("กำลังโหลดข้อมูล...");
 
+  // สารบบวิชาทั้งปีของชั้นนี้ — ใช้ดูว่านักเรียนลงทะเบียนครบหรือยัง
+  // วิชาบูรณาการไม่มี enrollments ของตัวเอง จึงต้องกรองด้วยสูตรเดียวกับผลรายคน
+  const { data: catalogRows, error: catalogErr } = await sb
+    .from("subjects").select("id,name,code,term,subject_type").eq("grade_level", grade).eq("year", year);
+  const integratedIds = (catalogRows || []).filter(s => s.subject_type === "บูรณาการ").map(s => s.id);
+  const { data: linkRows } = integratedIds.length
+    ? await sb.from("integration_members").select("member_subject_id").in("integrated_subject_id", integratedIds)
+    : { data: [] };
+  const catalog = catalogErr ? [] : pickCountableSubjects(catalogRows || [], linkRows || []);
+
   // รวมผลทุกวิชาของนักเรียนทุกคนในชั้น+ปี (ตรรกะกลาง ใช้ร่วมกับ summary.html แท็บผลการเรียนรายคน)
   // ไม่ส่ง term = เกณฑ์เรียนซ้ำชั้นคิดรวมทั้งปีเสมอ (พฤติกรรมเดิม)
   let studentResults;
@@ -277,6 +289,11 @@ async function loadReport() {
     showEmpty(e.message); return;
   }
   if (studentResults.size === 0) { showEmpty("ยังไม่มีนักเรียนลงทะเบียนวิชาใดๆ ของชั้น/ปีการศึกษานี้"); return; }
+
+  const unionSubjects = [...new Map(
+    [...studentResults.values()].flatMap(entry => entry.subjects.map(item => [item.subject.id, item.subject]))
+  ).values()];
+  const classCoverage = retentionCoverage(catalog, unionSubjects);
 
   // ---------- ใช้เกณฑ์เรียนซ้ำชั้น 2 ข้อ (ยืนยันกับผู้ใช้แล้ว) ----------
   // ข้อ 1: เกรดเฉลี่ยทั้งปีต่ำกว่า 1.00 — ถ่วงน้ำหนักด้วยหน่วยกิต (ไม่มีหน่วยกิตถือเป็น 1 หน่วย)
@@ -300,16 +317,21 @@ async function loadReport() {
 
     const { gpa, pending, pendingReason, provisionalGpa, countedSubjects } = computeGpa(subjList);
     const cond1 = gpa !== null && gpa < 1.0;
+    const coverage = retentionCoverage(catalog, subjList.map(x => x.subject));
+    const decided = subjList.length > 0 && subjList.every(isSubjectResultDecided);
+    const official = coverage.ready && decided;
 
-    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, flagged: cond1 || cond2 });
+    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, coverage, decided, official, flagged: cond1 || cond2 });
   }
 
   rows.sort((a, b) => {
-    if (a.flagged !== b.flagged) return a.flagged ? -1 : 1;
+    const rankA = a.flagged && a.official ? 0 : (a.flagged ? 1 : 2);
+    const rankB = b.flagged && b.official ? 0 : (b.flagged ? 1 : 2);
+    if (rankA !== rankB) return rankA - rankB;
     return (a.stu.student_no || "").localeCompare(b.stu.student_no || "");
   });
 
-  renderReport(rows, grade, year);
+  renderReport(rows, grade, year, classCoverage);
 }
 
 function subjBadge(result) {
@@ -320,19 +342,39 @@ function subjBadge(result) {
   return "<span class='badge " + cls + "'>" + g + "</span>";
 }
 
-function renderReport(rows, grade, year) {
+function renderReport(rows, grade, year, classCoverage) {
   elEmptyHint.style.display = "none";
-  const flaggedCount = rows.filter(r => r.flagged).length;
+  const officialCount = rows.filter(r => r.flagged && r.official).length;
+  const trendCount = rows.filter(r => r.flagged && !r.official).length;
+  let summaryParts = "ชั้น " + escapeHtml(grade) + " ปีการศึกษา " + escapeHtml(year) +
+    " — นักเรียนทั้งหมด " + rows.length + " คน";
+  if (classCoverage.ready) {
+    summaryParts += " · เข้าเกณฑ์ซ้ำชั้น <b>" + officialCount + "</b> คน";
+  }
+  if (trendCount > 0) {
+    summaryParts += " · แนวโน้มซ้ำชั้น <b class='trend'>" + trendCount + "</b> คน";
+  }
+  const missingNames = classCoverage.missing.slice(0, 3).map(subject =>
+    escapeHtml(subject.name) + (subject.code ? " (" + escapeHtml(subject.code) + ")" : "")
+  );
+  const missingMore = classCoverage.missing.length > 3
+    ? " และอีก " + (classCoverage.missing.length - 3) + " วิชา"
+    : "";
   let html =
-    "<div class='card'><div class='summary-line'>ชั้น " + escapeHtml(grade) + " ปีการศึกษา " + escapeHtml(year) +
-    " — นักเรียนทั้งหมด " + rows.length + " คน · เข้าเกณฑ์ซ้ำชั้น <b>" + flaggedCount + "</b> คน</div></div>";
+    "<div class='card'><div class='summary-line'>" + summaryParts + "</div>" +
+    (!classCoverage.ready
+      ? "<div class='warn-note'>⚠️ " + escapeHtml(classCoverage.reason) +
+        (missingNames.length ? "<br>ยังไม่ได้ลงทะเบียน: " + missingNames.join(" · ") + missingMore : "") +
+        "<br>ตัวเลขนี้เป็นแนวโน้ม ยังใช้ตัดสินเลื่อนชั้น/ซ้ำชั้นไม่ได้</div>"
+      : "") +
+    "</div>";
 
   for (const row of rows) html += renderStudentRow(row);
   elResult.innerHTML = html;
 }
 
 function renderStudentRow(row) {
-  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, flagged } = row;
+  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, coverage, official, flagged } = row;
   const noPeriodSubjects = [...new Set(subjList.flatMap(item => item.noPeriodSubjects || []))];
 
   const subjRows = subjList.map(x => {
@@ -346,13 +388,24 @@ function renderStudentRow(row) {
   }).join("");
 
   let verdictHtml;
-  if (flagged) {
+  if (flagged && official) {
     const reasons = [];
     if (cond1) reasons.push("เกรดเฉลี่ยทั้งปี " + gpa.toFixed(2) + " ต่ำกว่า 1.00");
     if (cond2) reasons.push("ติด 0/ร./มส. " + failCount + " จาก " + total + " วิชา (เกินครึ่ง)");
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge bad'>เข้าเกณฑ์ซ้ำชั้น</span></div>" +
       "<div class='result-note'>" + reasons.join(" · ") + "</div>";
+  } else if (flagged) {
+    const reasons = [];
+    if (cond1) reasons.push("เกรดเฉลี่ยทั้งปี " + gpa.toFixed(2) + " ต่ำกว่า 1.00");
+    if (cond2) reasons.push("ติด 0/ร./มส. " + failCount + " จาก " + total + " วิชา" + coverage.scopeLabel + " (เกินครึ่ง)");
+    const unofficialReason = !coverage.ready
+      ? coverage.reason
+      : "ยังกรอกคะแนนไม่ครบ " + incompleteCount + " วิชา";
+    verdictHtml =
+      "<div class='result-line'><span>สรุป</span><span class='badge mid'>แนวโน้มซ้ำชั้น</span></div>" +
+      "<div class='result-note'>" + reasons.join(" · ") + "</div>" +
+      "<div class='result-note'>ยังไม่ใช่ผลตัดสิน: " + escapeHtml(unofficialReason) + "</div>";
   } else if (pending) {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge mid'>ยังสรุปไม่ได้</span></div>" +

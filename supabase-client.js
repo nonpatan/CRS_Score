@@ -1627,6 +1627,14 @@ export function computeIntegratedResult(studentId, memberDataList) {
   return { memberResults, overall, scoring, totalBase, rawMissed, makeupTotal, noPeriodSubjects };
 }
 
+// ---------- วิชาที่ "นับได้" ในรายงานเกรด/ซ้ำชั้น ----------
+// = วิชาบูรณาการทุกตัว + วิชาพื้นฐานที่ไม่ได้เป็นสมาชิกของบูรณาการตัวไหน
+// (คะแนนวิชาสมาชิกถูกรวมเข้าบูรณาการไปแล้ว นับซ้ำไม่ได้ — ยืนยันกับผู้ใช้ตั้งแต่ 2026-07)
+export function pickCountableSubjects(subjects, memberLinks) {
+  const memberIds = new Set((memberLinks || []).map(link => link.member_subject_id));
+  return (subjects || []).filter(s => s.subject_type === "บูรณาการ" || !memberIds.has(s.id));
+}
+
 // ---------- รวมผลทุกวิชาของนักเรียนทุกคน ในชั้น + ปีการศึกษา (+ เทอม ถ้าส่งมา) ----------
 // ใช้ร่วมกันระหว่าง retention.html (เกณฑ์เรียนซ้ำชั้น — ไม่ส่ง term = รวมทั้งปี) และ
 // summary.html แท็บ "ผลการเรียนรายคน" (มัธยมส่ง term = คิดรายเทอม, ประถมไม่ส่ง = คิดรายปี)
@@ -1654,7 +1662,7 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
     memberLinks = data || [];
   }
   const memberSubjectIds = new Set(memberLinks.map(m => m.member_subject_id));
-  const countableSubjects = scopedSubj.filter(s => s.subject_type === "บูรณาการ" || !memberSubjectIds.has(s.id));
+  const countableSubjects = pickCountableSubjects(scopedSubj, memberLinks);
 
   // โหลดข้อมูลเต็มของวิชาพื้นฐานที่ต้องใช้จริง (นับตรง ๆ + ที่เป็นสมาชิกบูรณาการ)
   const plainIdsToLoad = new Set();
@@ -1759,6 +1767,51 @@ export function computeGpa(subjectResults) {
     countedSubjects,
     total
   };
+}
+
+// ---------- ลงทะเบียนครบทั้งปีหรือยัง — ตัวชี้ว่าผลซ้ำชั้นเป็น "คำตัดสิน" ได้ไหม ----------
+// เกณฑ์ข้อ 2 นับ "เกินครึ่งของรายวิชาที่ลงทะเบียนเรียนทั้งปี" ⟹ ถ้ารายการยังไม่ครบก็ตัดสินไม่ได้
+// 🪤 วิชาบูรณาการไม่มี enrollments ของตัวเอง — ห้ามเช็คจากตาราง enrollments ตรง ๆ
+//    ให้เทียบกับ "วิชาที่นักเรียนคนนั้นถูกนับจริง" ที่ computeStudentSubjectResults() คืนมาแล้ว
+// catalog         = pickCountableSubjects() ของ grade+year นั้น
+// countedSubjects = subjList.map(x => x.subject) ของนักเรียน 1 คน (หรือ union ทั้งห้องสำหรับแถบเตือน)
+export function retentionCoverage(catalog, countedSubjects) {
+  const catalogList = catalog || [];
+  const countedList = countedSubjects || [];
+  const countedIds = new Set(countedList.map(subject => subject.id));
+  const missing = catalogList.filter(subject => !countedIds.has(subject.id));
+  const missingTerms = [...new Set(missing
+    .filter(subject => subject && subject.term !== null && subject.term !== undefined)
+    .map(subject => String(subject.term).trim())
+    .filter(Boolean))].sort();
+  const countedTerms = [...new Set(countedList
+    .filter(subject => subject && subject.term !== null && subject.term !== undefined)
+    .map(subject => String(subject.term).trim())
+    .filter(Boolean))].sort();
+  const ready = catalogList.length > 0 && missing.length === 0;
+  const scopeLabel = countedTerms.length === 1 ? "ของภาคเรียน " + countedTerms[0] : "";
+
+  let reason = "";
+  if (catalogList.length === 0) {
+    reason = "ยังไม่มีวิชาของชั้น/ปีการศึกษานี้";
+  } else if (!ready && missingTerms.length === 1) {
+    reason = "ยังไม่ได้ลงทะเบียนเรียนวิชาภาคเรียน " + missingTerms[0] + " อีก " + missing.length +
+      " วิชา — เกณฑ์เรียนซ้ำชั้นวัดผลทั้งปี";
+  } else if (!ready) {
+    reason = "ยังไม่ได้ลงทะเบียนเรียนอีก " + missing.length +
+      " วิชาของปีนี้ — เกณฑ์เรียนซ้ำชั้นวัดผลทั้งปี";
+  }
+
+  return { ready, missing, missingTerms, reason, scopeLabel };
+}
+
+// ---------- ผลของวิชานี้ "ชี้ขาด" แล้วหรือยัง ----------
+// ใช้ตอบว่าผลซ้ำชั้นของเด็กคนนี้เป็น "ผลตัดสิน" ได้หรือยัง — ไม่ใช่ตัวตัดสินเข้าเกณฑ์
+// ร./มส. ถือว่าชี้ขาด (เกณฑ์ข้อ 2 นับเป็น "ติด" อยู่แล้ว) ส่วนวิชาที่ยังกรอกคะแนนไม่ครบ = ยังไม่ชี้ขาด
+export function isSubjectResultDecided(item) {
+  if (!item || !item.result) return false;
+  if (item.result.type === "มส." || item.result.type === "ร.") return true;
+  return !!(item.scoring && item.scoring.complete);
 }
 
 // ============================================================
