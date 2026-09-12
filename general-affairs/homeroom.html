@@ -29,16 +29,17 @@
   .field { min-width:0; }
   label { display:block; margin-bottom:5px; font-size:14px; font-weight:600; }
   select,
-  input[type="date"] {
+  input[type="date"], input[type="time"], textarea {
     width:100%; min-width:0; padding:10px 12px; border:1px solid var(--line);
     border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
   }
   select:focus, input:focus { outline:2px solid var(--teal); outline-offset:1px; }
   button {
-    min-height:40px; padding:8px 13px; border:0; border-radius:9px;
+    min-height:44px; padding:8px 13px; border:0; border-radius:9px;
     font:inherit; font-weight:600; cursor:pointer;
   }
   button.primary { color:#fff; background:var(--teal); }
+  button.ghost { color:var(--teal); background:var(--teal-soft); }
   button.danger { color:var(--danger); background:var(--danger-soft); }
   button:disabled { opacity:.55; cursor:default; }
   .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
@@ -47,6 +48,9 @@
   .banner.bad { color:var(--danger); background:var(--danger-soft); }
   .banner a { color:inherit; font-weight:700; }
   .summary-line { margin-top:8px; color:var(--muted); font-size:13px; }
+  .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .button-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .hint { color:var(--muted); font-size:14px; }
   .room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
   .room-card {
     min-width:0; padding:14px; border:1px solid var(--line);
@@ -79,7 +83,7 @@
   #toast.show { opacity:1; }
   #toast.err { background:var(--danger); }
   [hidden] { display:none !important; }
-  @media (max-width:700px) { .room-grid { grid-template-columns:1fr; } }
+  @media (max-width:700px) { .room-grid, .row2 { grid-template-columns:1fr; } }
   @media (max-width:420px) {
     .assign-row { grid-template-columns:1fr; }
     .assign-row button { width:100%; }
@@ -122,6 +126,34 @@
         </div>
       </section>
 
+      <section class="card" id="cutoff-card">
+        <div class="section-title">เวลากำหนดเช็คชื่อรายวัน</div>
+        <div id="cutoff-note" class="banner warn">กำลังโหลดค่าตั้ง…</div>
+        <div class="row2">
+          <div class="field">
+            <label for="cutoff-time">ต้องเช็คให้เสร็จก่อน</label>
+            <input id="cutoff-time" type="time">
+          </div>
+          <div class="field">
+            <label for="cutoff-start">เริ่มใช้เกณฑ์ตั้งแต่วันที่</label>
+            <input id="cutoff-start" type="date">
+          </div>
+        </div>
+        <div class="button-row">
+          <button type="button" class="ghost" id="save-cutoff">บันทึกเวลาและวันเริ่ม</button>
+          <button type="button" class="ghost" id="clear-cutoff">ล้างค่า (ปิดเกณฑ์เวลา)</button>
+        </div>
+        <div class="field" style="margin-top:16px">
+          <label for="late-reason-presets">ตัวเลือกเหตุผลเมื่อเช็คหลังเวลา (หนึ่งบรรทัดต่อหนึ่งตัวเลือก)</label>
+          <textarea id="late-reason-presets" rows="4" maxlength="2000"></textarea>
+        </div>
+        <button type="button" class="ghost" id="save-late-reason-presets">บันทึกตัวเลือกเหตุผล</button>
+        <div class="hint" style="margin-top:8px">
+          ครูยังบันทึกได้ตามปกติแม้เลยเวลา — ค่านี้ใช้บอกสถานะและทำรายงานเท่านั้น
+          ไม่ได้ล็อกการบันทึก และไม่ถูกนำไปคิดเงินเดือนหรือการประเมิน
+        </div>
+      </section>
+
       <section id="placement-warning" class="card" hidden></section>
       <section class="card">
         <div class="banner info">
@@ -140,7 +172,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, listStaffPicker, roomsFromPlacements,
   getProfile, getSetting, setSetting, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260910-1";
+} from "../supabase-client.js?v=20260912-1";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -351,6 +383,86 @@ async function setupAuditStart(userId) {
   });
 }
 
+// ---------- เวลากำหนดเช็คชื่อ + ตัวเลือกเหตุผล (เปิดได้เมื่อเวลาและวันเริ่มถูกต้องทั้งคู่) ----------
+const CUTOFF_TIME_KEY = "daily_attendance_cutoff_time";
+const CUTOFF_START_KEY = "daily_attendance_cutoff_start";
+const LATE_REASON_PRESETS_KEY = "daily_attendance_late_reason_presets";
+
+function renderCutoff(time, start, canEdit) {
+  const valid = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time) && /^\d{4}-\d{2}-\d{2}$/.test(start);
+  el("cutoff-note").className = valid ? "banner info" : "banner warn";
+  el("cutoff-note").innerHTML = valid
+    ? `<b>ต้องเช็คให้เสร็จก่อน ${esc(time)} น.</b><br>เริ่มใช้เกณฑ์ตั้งแต่ ${esc(fmtThaiDate(start))}`
+    : "<b>ยังไม่ได้เปิดเกณฑ์เวลา</b><br>ต้องตั้งทั้งเวลาและวันเริ่มให้ครบ ระบบจึงจะแสดงสถานะเวลา";
+  ["cutoff-time", "cutoff-start", "late-reason-presets"].forEach(id => { el(id).disabled = !canEdit; });
+  ["save-cutoff", "clear-cutoff", "save-late-reason-presets"].forEach(id => { el(id).hidden = !canEdit; });
+}
+
+async function setupCutoff(userId) {
+  let canEdit = false;
+  try { canEdit = (await getProfile(userId))?.role === "admin"; } catch { canEdit = false; }
+  const [savedTime, savedStart, savedPresets] = await Promise.all([
+    getSetting(CUTOFF_TIME_KEY), getSetting(CUTOFF_START_KEY), getSetting(LATE_REASON_PRESETS_KEY)
+  ]);
+  el("cutoff-time").value = String(savedTime || "09:15");
+  // ค่าเริ่มต้นแสดงให้ผู้ดูแลเห็นก่อน แต่ยังไม่เขียน DB จนกดบันทึก
+  el("cutoff-start").value = String(savedStart || toDateStr(bangkokNow()));
+  el("late-reason-presets").value = String(savedPresets || "").split("|").join("\n");
+  renderCutoff(String(savedTime || ""), String(savedStart || ""), canEdit);
+
+  el("save-cutoff").addEventListener("click", async () => {
+    const time = el("cutoff-time").value;
+    const start = el("cutoff-start").value;
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time) || !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      return toast("กรุณากรอกเวลาและวันเริ่มให้ครบ", true);
+    }
+    const button = el("save-cutoff");
+    button.disabled = true;
+    // ปิดเกณฑ์ก่อน แล้วค่อยเขียนเวลาและเปิดด้วยวันเริ่มเป็นขั้นสุดท้าย
+    // ถ้าเน็ตหลุดกลางทาง ระบบจึงค้างในสถานะ "ปิด" ไม่ใช่ใช้ค่าคู่เก่ากับค่าใหม่ปนกัน
+    const closedFirst = await setSetting(CUTOFF_START_KEY, "");
+    const timeSaved = closedFirst && await setSetting(CUTOFF_TIME_KEY, time);
+    const startSaved = timeSaved && await setSetting(CUTOFF_START_KEY, start);
+    button.disabled = false;
+    if (!startSaved) {
+      renderCutoff("", "", canEdit);
+      return toast("บันทึกเกณฑ์เวลาไม่สำเร็จ ระบบปิดเกณฑ์ไว้เพื่อกันค่าค้างครึ่งเดียว", true);
+    }
+    renderCutoff(time, start, canEdit);
+    toast("บันทึกเวลากำหนดเช็คชื่อแล้ว");
+  });
+
+  el("clear-cutoff").addEventListener("click", async () => {
+    if (!await window.crsAskConfirm({
+      title:"ปิดเกณฑ์เวลาเช็คชื่อ",
+      message:"สถานะทันเวลา เลยเวลา และเช็คย้อนหลังจะหยุดแสดงจนกว่าจะตั้งค่าใหม่",
+      okLabel:"ล้างค่าและปิดเกณฑ์",
+      danger:false
+    })) return;
+    const button = el("clear-cutoff");
+    button.disabled = true;
+    const cleared = await Promise.all([setSetting(CUTOFF_TIME_KEY, ""), setSetting(CUTOFF_START_KEY, "")]);
+    button.disabled = false;
+    if (!cleared.every(Boolean)) return toast("ล้างเกณฑ์เวลาไม่สำเร็จ", true);
+    el("cutoff-time").value = "";
+    el("cutoff-start").value = toDateStr(bangkokNow());
+    renderCutoff("", "", canEdit);
+    toast("ปิดเกณฑ์เวลาเช็คชื่อแล้ว");
+  });
+
+  el("save-late-reason-presets").addEventListener("click", async () => {
+    const presets = el("late-reason-presets").value.split("\n").map(value => value.trim()).filter(Boolean);
+    if (presets.some(value => value.length < 3)) return toast("ตัวเลือกเหตุผลแต่ละบรรทัดต้องยาวอย่างน้อย 3 ตัวอักษร", true);
+    if (presets.some(value => value.includes("|"))) return toast("ตัวเลือกเหตุผลห้ามมีเครื่องหมาย |", true);
+    const button = el("save-late-reason-presets");
+    button.disabled = true;
+    const ok = await setSetting(LATE_REASON_PRESETS_KEY, presets.join("|"));
+    button.disabled = false;
+    if (!ok) return toast("บันทึกตัวเลือกเหตุผลไม่สำเร็จ", true);
+    toast("บันทึกตัวเลือกเหตุผลแล้ว");
+  });
+}
+
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
@@ -365,7 +477,7 @@ if (session) {
       'การกำหนดหรือถอดครูประจำชั้นต้องเป็นผู้ดูแลระบบ หรือผู้ที่ได้รับสิทธิ์ฝ่ายบริหารทั่วไป</div>';
   } else {
     el("manager-content").hidden = false;
-    await setupAuditStart(session.user.id);
+    await Promise.all([setupAuditStart(session.user.id), setupCutoff(session.user.id)]);
     try {
       [years, staff] = await Promise.all([getAcademicYears(), listStaffPicker()]);
       const todayYear = academicYearOf(toDateStr(bangkokNow()), years);

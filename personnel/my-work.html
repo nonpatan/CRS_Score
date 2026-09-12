@@ -292,10 +292,10 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getAcademicYears, getWorkYears, academicYearRange, academicYearOf, getLeaveQuotas, getDutyTypes,
          getDutyRoster, listStaffPicker, requestDutySwap, listDutySwapReturnOptions,
          respondDutySwap, cancelDutySwap, listMyDutySwaps,
-         getSetting, loadMyHomeroomAuditData, buildHomeroomAudit,
+         getSetting, getDailyAttendanceCutoff, loadMyHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge, loadMyTeachingGap,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260910-1";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260912-1";
 
 const session = await requireAuth();
 if (session) {
@@ -609,11 +609,12 @@ if (session) {
       const from = monthStart < range.start ? range.start : monthStart;
       const to = today < range.end ? today : range.end;
       try {
-        const [raw, configuredStart] = await Promise.all([
+        const [raw, configuredStart, attendanceCutoff] = await Promise.all([
           // loadMyHomeroomAuditData() มองไม่เห็น user_id ของครูคู่ชั้นคนอื่นตาม RLS:
           // self/byOther ที่คืนมาจึงเชื่อถือไม่ได้เมื่อห้องมีครูหลายคน ห้ามนำสองค่านี้ไปแสดงผลอีก
           loadMyHomeroomAuditData(year, from, to, me),
-          getSetting("daily_attendance_audit_start")
+          getSetting("daily_attendance_audit_start"),
+          getDailyAttendanceCutoff()
         ]);
         const hasHomeroom = raw.teachers.some(row => row.staff_id === me.id);
         const hasCoverage = raw.coverage.some(row => row.substitute_staff_id === me.id);
@@ -624,7 +625,8 @@ if (session) {
 
         card.hidden = false;
         const startDate = configuredStart || range.start;
-        const report = buildHomeroomAudit(raw, { startDate });
+        // เส้นทางเดิมเมื่อยังไม่ตั้ง cutoff เทียบเท่า buildHomeroomAudit(raw, { startDate })
+        const report = buildHomeroomAudit(raw, { startDate, cutoff:attendanceCutoff });
         if (!report.scheduleConfigured) {
           body.innerHTML = '<div class="banner warn"><b>ยังคำนวณไม่ได้</b><br>ระบบยังไม่มีตารางวันทำงาน จึงไม่เดาว่าวันใดต้องเช็คชื่อ กรุณาแจ้งฝ่ายบุคลากรให้ซิงก์ตารางงาน</div>';
           return;
@@ -643,8 +645,14 @@ if (session) {
           missed.map(item => `<div class="my-duty-row"><b>${escapeHtml(fmt(item.date))} · ${escapeHtml(item.room)}</b>` +
             `<div class="my-duty-meta"><a class="report-link" href="../general-affairs/daily-attendance.html">ไปหน้าเช็คชื่อรายวัน</a> · หน้านี้ยังไม่รับวันที่จากลิงก์ กรุณาเลือกวันที่อีกครั้ง</div></div>`).join("") +
           "</div>" : '<div class="field-note" style="margin-top:8px">ไม่มีวันที่ค้างในเดือนนี้</div>';
-        body.innerHTML = `${startNote}<div class="today"><div><div class="big">เดือนนี้ เช็คแล้ว ${checked}/${row.due} วัน</div>` +
-          `<div class="sub">ไม่มีการเช็ค ${row.missed} วัน</div></div></div>${missedHtml}`;
+        const timingText = row.timingDue > 0
+          ? ` · ใน ${row.timingDue} วันที่อยู่ในเกณฑ์เวลา: ${CHECK_TIMING_LABEL.ontime} ${row.ontime} · ${CHECK_TIMING_LABEL.late} ${row.late} · ย้อนหลัง ${row.backdated}`
+          : "";
+        const roomTimingNote = row.timingDue > 0
+          ? `<div class="field-note" style="margin-top:8px">เวลาเป็นสถานะของห้อง — ห้องของคุณถูกเช็คเลยเวลา ${row.late} ครั้ง</div>`
+          : "";
+        body.innerHTML = `${startNote}<div class="today"><div><div class="big">เดือนนี้ เช็คแล้ว ${checked}/${row.due} วัน${timingText}</div>` +
+          `<div class="sub">ไม่มีการเช็ค ${row.missed} วัน</div></div></div>${roomTimingNote}${missedHtml}`;
       } catch {
         card.hidden = false;
         body.innerHTML = '<div class="banner warn">โหลดข้อมูลการเช็คชื่อประจำชั้นของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';

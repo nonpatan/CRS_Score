@@ -563,6 +563,23 @@ export async function setSetting(key, value) {
   return !error;
 }
 
+// เกณฑ์เวลาเช็คชื่อรายวันเปิดได้ต่อเมื่อค่าทั้งคู่ถูกต้อง เพื่อให้การล้างค่าใดค่าหนึ่ง
+// เป็นทางถอยที่ปิดฟีเจอร์ได้ทั้งระบบโดยไม่ต้อง deploy ใหม่
+export async function getDailyAttendanceCutoff() {
+  const [time, start] = await Promise.all([
+    getSetting("daily_attendance_cutoff_time"),
+    getSetting("daily_attendance_cutoff_start")
+  ]);
+  const normalizedTime = String(time || "").trim();
+  const normalizedStart = String(start || "").trim();
+  const validTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(normalizedTime);
+  const startTimestamp = Date.parse(normalizedStart + "T00:00:00Z");
+  const validStart = /^\d{4}-\d{2}-\d{2}$/.test(normalizedStart)
+    && Number.isFinite(startTimestamp)
+    && new Date(startTimestamp).toISOString().slice(0, 10) === normalizedStart;
+  return validTime && validStart ? { time: normalizedTime, start: normalizedStart } : null;
+}
+
 // หาชั้นถัดไปตอนเลื่อนชั้น — คืน null ถ้าถึงชั้นสูงสุดที่เปิดสอนแล้ว (= จบการศึกษา)
 // highestGrade มาจากค่าตั้งค่า highest_grade (เช่น 'ม.3' สำหรับโรงเรียนขยายโอกาส)
 export function nextGrade(grade, highestGrade) {
@@ -2302,6 +2319,55 @@ export function countAttendanceStatuses(rows) {
   return counts;
 }
 
+export const CHECK_TIMING_LABEL = {
+  ontime: "ทันเวลา",
+  late: "เลยเวลา",
+  backdated: "เช็คย้อนหลัง"
+};
+
+// เวลาแรกของห้องต้องมาจาก recorded_at (เวลา insert ครั้งแรก) ไม่ใช่ updated_at
+// ซึ่งขยับทุกครั้งที่ครูกลับมาแก้สถานะเด็ก
+export function firstCheckTimeByRoom(rows) {
+  const firstByRoom = new Map();
+  for (const row of rows || []) {
+    if (!row?.grade_level || !row.classroom || !row.recorded_at) continue;
+    const key = homeroomAuditRoomKey(row);
+    const recordedAt = String(row.recorded_at);
+    const previous = firstByRoom.get(key);
+    const timestamp = Date.parse(recordedAt);
+    if (!Number.isFinite(timestamp)) continue;
+    if (!previous || timestamp < Date.parse(previous)) firstByRoom.set(key, recordedAt);
+  }
+  return firstByRoom;
+}
+
+// คำนวณผ่าน UTC เสมอ แล้วบวก 7 ชั่วโมงก่อนตัดวันที่/เวลาไทย เพื่อไม่ขึ้นกับ timezone เครื่อง
+export function classifyCheckTiming(firstRecordedAt, attendDate, cutoff) {
+  const cutoffStart = String(cutoff?.start || "");
+  const cutoffStartTimestamp = Date.parse(cutoffStart + "T00:00:00Z");
+  if (!cutoff || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(cutoff.time || ""))
+    || !/^\d{4}-\d{2}-\d{2}$/.test(cutoffStart)
+    || !Number.isFinite(cutoffStartTimestamp)
+    || new Date(cutoffStartTimestamp).toISOString().slice(0, 10) !== cutoffStart) return "off";
+  if (!attendDate || attendDate < cutoff.start) return "off";
+  if (!firstRecordedAt) return "none";
+  const timestamp = Date.parse(firstRecordedAt);
+  if (!Number.isFinite(timestamp)) return "none";
+  const bangkokIso = new Date(timestamp + 7 * 60 * 60 * 1000).toISOString();
+  const bangkokDate = bangkokIso.slice(0, 10);
+  const bangkokTime = bangkokIso.slice(11, 16);
+  if (bangkokDate > attendDate) return "backdated";
+  if (bangkokDate < attendDate) return "ontime";
+  return bangkokTime <= cutoff.time ? "ontime" : "late";
+}
+
+// ถามเหตุผลเฉพาะการบันทึกครั้งแรกของห้องที่เลยเวลา/ย้อนหลังเท่านั้น
+export function needsLateReason(existingCount, currentRecordedAt, attendDate, cutoff, isHoliday = false) {
+  if (Number(existingCount) > 0 || isHoliday === true) return false;
+  const timing = classifyCheckTiming(currentRecordedAt, attendDate, cutoff);
+  return timing === "late" || timing === "backdated";
+}
+
 // คำนวณล้วน — options.isHoliday ต้องมาจาก loadDailyAttendanceToday()
 export function summarizeDailyAttendance(rows, rooms, options = {}) {
   const attendanceRows = Array.isArray(rows) ? rows : [];
@@ -2327,12 +2393,37 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
   else if (roomsChecked < roomsTotal) state = "partial";
   else state = "complete";
 
-  return {
+  const cutoffOn = options.isHoliday !== true
+    && classifyCheckTiming(null, options.dateStr, options.cutoff) !== "off";
+  let roomsOnTime = 0;
+  let roomsLate = 0;
+  let roomsBackdated = 0;
+  if (cutoffOn) {
+    const firstByRoom = firstCheckTimeByRoom(attendanceRows);
+    for (const room of roomRows) {
+      const timing = classifyCheckTiming(firstByRoom.get(homeroomAuditRoomKey(room)), options.dateStr, options.cutoff);
+      if (timing === "ontime") roomsOnTime += 1;
+      else if (timing === "late") roomsLate += 1;
+      else if (timing === "backdated") roomsBackdated += 1;
+    }
+  }
+
+  const result = {
     ...counts,
     roomsChecked,
     roomsTotal,
     state
   };
+  if (cutoffOn) return { ...result, roomsOnTime, roomsLate, roomsBackdated, cutoffOn };
+  // dashboard และผู้เรียกเดิมต้องได้ enumerable fields ชุดเดิมเป๊ะ แต่ยังอ่าน API ใหม่ได้
+  // เมื่อไม่ส่ง cutoff; ทำฟิลด์ใหม่เป็น non-enumerable เพื่อไม่ทำให้ deepEqual/การ spread เดิมขยับ
+  Object.defineProperties(result, {
+    roomsOnTime: { value:0, enumerable:false },
+    roomsLate: { value:0, enumerable:false },
+    roomsBackdated: { value:0, enumerable:false },
+    cutoffOn: { value:false, enumerable:false }
+  });
+  return result;
 }
 
 export function pickSchoolDays({ holidays, workdays, endDate, days = 5 }) {
@@ -2415,7 +2506,7 @@ function homeroomAuditBangkokDate(value) {
   return new Date(time + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function collapseHomeroomAuditAttendance(rows, profileById = new Map()) {
+export function collapseHomeroomAuditAttendance(rows, profileById = new Map()) {
   const byRoomDate = new Map();
   for (const row of rows || []) {
     if (!row?.attend_date || !row.grade_level || !row.classroom) continue;
@@ -2427,12 +2518,18 @@ function collapseHomeroomAuditAttendance(rows, profileById = new Map()) {
         grade_level: row.grade_level,
         classroom: row.classroom,
         recordedBy: new Set(),
-        recordedAt: ""
+        recordedAt: "",
+        recordedAtFirst: ""
       });
     }
     const entry = byRoomDate.get(key);
     entry.recordedBy.add(row.recorded_by || null);
     if (String(row.recorded_at || "") > entry.recordedAt) entry.recordedAt = row.recorded_at || "";
+    const recordedTimestamp = Date.parse(row.recorded_at);
+    if (Number.isFinite(recordedTimestamp)
+      && (!entry.recordedAtFirst || recordedTimestamp < Date.parse(entry.recordedAtFirst))) {
+      entry.recordedAtFirst = row.recorded_at;
+    }
   }
   return [...byRoomDate.values()].map(entry => ({
     ...entry,
@@ -2449,11 +2546,11 @@ export async function loadHomeroomAuditData(year, from, to) {
   if (!year || !from || !to || from > to) {
     return {
       year, from, to, teachers: [], coverage: [], attendance: [], placements: [],
-      homerooms: [], holidays: [], schedule: [], profiles: []
+      homerooms: [], holidays: [], schedule: [], profiles: [], lateReasons: []
     };
   }
 
-  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes] = await Promise.all([
+  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes, lateReasonRes] = await Promise.all([
     sb.rpc("homeroom_audit_teachers", { p_year: year }),
     sb.rpc("homeroom_audit_coverage", { p_from: from, p_to: to }),
     fetchAllRows(() => sb.from("daily_attendance")
@@ -2464,7 +2561,11 @@ export async function loadHomeroomAuditData(year, from, to) {
     sb.from("homeroom_teachers")
       .select("id,year,grade_level,classroom,created_at").eq("year", year),
     sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to),
-    sb.from("work_schedule").select("weekday,is_working_day")
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    fetchAllRows(() => sb.from("daily_attendance_late_reasons")
+      .select("attend_date,year,grade_level,classroom,reason,cutoff_time,kind,recorded_by,recorded_at,updated_at")
+      .eq("year", year).gte("attend_date", from).lte("attend_date", to),
+      ["attend_date", "grade_level", "classroom"])
   ]);
 
   const failed = [
@@ -2474,7 +2575,8 @@ export async function loadHomeroomAuditData(year, from, to) {
     [placementRes, "โหลดห้องเรียน"],
     [homeroomRes, "ตรวจรายการครูประจำชั้น"],
     [holidayRes, "โหลดวันหยุด"],
-    [scheduleRes, "โหลดตารางวันทำงาน"]
+    [scheduleRes, "โหลดตารางวันทำงาน"],
+    [lateReasonRes, "โหลดเหตุผลการเช็คหลังเวลา"]
   ].find(([result]) => result.error);
   if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
 
@@ -2505,7 +2607,8 @@ export async function loadHomeroomAuditData(year, from, to) {
     homerooms,
     holidays: holidayRes.data || [],
     schedule: scheduleRes.data || [],
-    profiles
+    profiles,
+    lateReasons: lateReasonRes.data || []
   };
 }
 
@@ -2599,7 +2702,7 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
 }
 
 // คำนวณล้วน — ไม่มี query/DOM เพื่อให้รายงานเต็มและการ์ดเจ้าตัวใช้สูตรเดียวกัน
-export function buildHomeroomAudit(raw, { startDate } = {}) {
+export function buildHomeroomAudit(raw, { startDate, cutoff } = {}) {
   const data = raw || {};
   const from = String(data.from || "");
   const to = String(data.to || "");
@@ -2612,6 +2715,19 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
   const schoolDates = (!from || !to || from > to || !scheduleConfigured) ? [] : eachDate(from, to).filter(date =>
     date >= effectiveStart && !holidays.has(date) && schedule.get(isoWeekday(date)) === true
   );
+  const cutoffEnabled = Boolean(cutoff)
+    && classifyCheckTiming(null, cutoff.start, cutoff) !== "off";
+  const cutoffApplies = cutoffEnabled && schoolDates.some(date => date >= cutoff.start);
+  const lateReasonByRoomDate = new Map((data.lateReasons || []).map(row => [
+    String(row.attend_date || "") + "\u0000" + homeroomAuditRoomKey(row),
+    String(row.reason || "").trim()
+  ]));
+  const bangkokTime = value => {
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp)
+      ? new Date(timestamp + 7 * 60 * 60 * 1000).toISOString().slice(11, 16)
+      : "";
+  };
 
   const placements = Array.isArray(data.placements) ? data.placements : [];
   const teachers = (Array.isArray(data.teachers) ? data.teachers : []).map(row => ({
@@ -2671,6 +2787,7 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
 
   const roomStats = new Map(roomList.map(room => [homeroomAuditRoomKey(room), {
     ...room, checked: 0, byOther: 0, missed: 0, missedDates: [], due: 0,
+    timingDue: 0, ontime: 0, late: 0, lateDates: [], backdated: 0, backdatedDates: [],
     teachers: (teachersByRoom.get(homeroomAuditRoomKey(room)) || []).map(teacher => ({
       id: teacher.staff_id,
       full_name: teacher.full_name,
@@ -2692,7 +2809,8 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
           full_name: responsibility.full_name || "ไม่ระบุชื่อ",
           user_id: responsibility.user_id || null
         },
-        rooms: [], due: 0, self: 0, byOther: 0, missed: 0, missedDates: []
+        rooms: [], due: 0, self: 0, byOther: 0, missed: 0, missedDates: [],
+        timingDue: 0, ontime: 0, late: 0, lateDates: [], backdated: 0, backdatedDates: []
       });
     }
     return staffStats.get(id);
@@ -2731,6 +2849,15 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
       const responsibleUserIds = new Set(responsibilities.map(item => item.user_id).filter(Boolean));
       const checkedByResponsible = [...responsibleUserIds].some(userId => recorderIds.has(userId));
       const hasAttendance = Boolean(attendance);
+      const timing = cutoffEnabled && hasAttendance
+        ? classifyCheckTiming(attendance.recordedAtFirst || attendance.recorded_at, date, cutoff)
+        : "off";
+      const timingDetail = hasAttendance ? {
+        date,
+        room: room.room,
+        time: bangkokTime(attendance.recordedAtFirst || attendance.recorded_at),
+        reason: lateReasonByRoomDate.get(date + "\u0000" + roomKey) || ""
+      } : null;
 
       if (!responsibilities.length) {
         if (!withoutTeacher.has(roomKey)) withoutTeacher.set(roomKey, { ...room, days: 0, dates: [] });
@@ -2741,9 +2868,18 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
       }
 
       stat.due += 1;
+      if (cutoffEnabled && date >= cutoff.start) stat.timingDue += 1;
       if (hasAttendance) {
         stat.checked += 1;
         if (!checkedByResponsible) stat.byOther += 1;
+        if (timing === "ontime") stat.ontime += 1;
+        else if (timing === "late") {
+          stat.late += 1;
+          stat.lateDates.push(timingDetail);
+        } else if (timing === "backdated") {
+          stat.backdated += 1;
+          stat.backdatedDates.push(timingDetail);
+        }
       } else {
         stat.missed += 1;
         stat.missedDates.push(date);
@@ -2761,11 +2897,22 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
         if (!staffStat) continue;
         if (!staffStat.rooms.includes(room.room)) staffStat.rooms.push(room.room);
         staffStat.due += 1;
+        if (cutoffEnabled && date >= cutoff.start) staffStat.timingDue += 1;
         if (checkedByResponsible) staffStat.self += 1;
         else if (hasAttendance) staffStat.byOther += 1;
         else {
           staffStat.missed += 1;
           staffStat.missedDates.push({ date, room: room.room });
+        }
+        if (hasAttendance) {
+          if (timing === "ontime") staffStat.ontime += 1;
+          else if (timing === "late") {
+            staffStat.late += 1;
+            staffStat.lateDates.push(timingDetail);
+          } else if (timing === "backdated") {
+            staffStat.backdated += 1;
+            staffStat.backdatedDates.push(timingDetail);
+          }
         }
       }
 
@@ -2805,6 +2952,8 @@ export function buildHomeroomAudit(raw, { startDate } = {}) {
     to,
     startDate: effectiveStart,
     scheduleConfigured,
+    cutoffEnabled,
+    cutoffApplies,
     schoolDays: schoolDates.length,
     schoolDates,
     rooms,

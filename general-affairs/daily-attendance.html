@@ -35,7 +35,7 @@
   }
   input:focus, select:focus { outline:2px solid var(--teal); outline-offset:1px; }
   button {
-    min-height:42px; padding:9px 14px; border:0; border-radius:9px;
+    min-height:44px; padding:9px 14px; border:0; border-radius:9px;
     font:inherit; font-weight:600; cursor:pointer;
   }
   button.primary { color:#fff; background:var(--teal); }
@@ -59,6 +59,9 @@
   }
   .section-head h2 { margin:0; font-size:18px; }
   .section-head p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  .timing-note { margin:8px 0 0; padding:8px 10px; border-radius:9px; font-size:14px; font-weight:600; }
+  .timing-note.info { color:var(--teal); background:var(--teal-soft); }
+  .timing-note.warn { color:var(--amber); background:var(--amber-soft); }
   .student-list { border-top:1px solid var(--line); }
   .student-row {
     display:grid; grid-template-columns:minmax(160px,1fr) minmax(130px,.55fr) minmax(150px,.7fr);
@@ -87,6 +90,21 @@
   }
   #toast.show { opacity:1; }
   #toast.err { background:var(--danger); }
+  .overlay {
+    position:fixed; z-index:90; inset:0; display:grid; place-items:center;
+    padding:16px; background:rgba(31,42,46,.46);
+  }
+  .modal {
+    width:min(520px,100%); max-height:calc(100vh - 32px); overflow:auto;
+    padding:18px; border-radius:14px; background:var(--white); box-shadow:0 20px 60px rgba(31,42,46,.28);
+  }
+  .modal h2 { margin:0 0 5px; font-size:20px; }
+  .modal p { margin:0 0 14px; color:var(--muted); }
+  .reason-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .reason-chip { min-height:44px; color:var(--teal); border:1px solid var(--teal); background:var(--white); }
+  .reason-chip.active { color:var(--white); background:var(--teal); }
+  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .modal-actions .ghost { color:var(--teal); background:var(--teal-soft); }
   [hidden] { display:none !important; }
   @media (max-width:640px) {
     .filters { grid-template-columns:1fr; }
@@ -98,6 +116,8 @@
     .section-head { display:block; }
     .save-bar { align-items:stretch; flex-direction:column; }
     .save-bar button { width:100%; }
+    .modal-actions { align-items:stretch; flex-direction:column-reverse; }
+    .modal-actions button { width:100%; }
   }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -134,6 +154,7 @@
         <div>
           <h2 id="room-title">รายชื่อนักเรียน</h2>
           <p id="checked-note">ยังไม่เคยเช็คห้องนี้ในวันที่เลือก</p>
+          <div id="timing-note" class="timing-note" hidden></div>
         </div>
       </div>
       <div class="summary" aria-label="สรุปสถานะปัจจุบัน">
@@ -151,14 +172,30 @@
   </main>
 </div>
 <div id="toast"></div>
+<div id="late-reason-overlay" class="overlay" hidden>
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="late-reason-title">
+    <h2 id="late-reason-title">บอกเหตุผลการเช็คหลังเวลา</h2>
+    <p>เลือกเหตุผลที่ตรงที่สุด หรือระบุเหตุผลอื่นอย่างน้อย 3 ตัวอักษร</p>
+    <div id="late-reason-chips" class="reason-chips"></div>
+    <div class="field" id="late-reason-other-field" hidden>
+      <label for="late-reason-other">อื่น ๆ (ระบุ)</label>
+      <input id="late-reason-other" type="text" maxlength="500" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="late-reason-cancel">ยกเลิก</button>
+      <button type="button" class="primary" id="late-reason-confirm" disabled>บันทึกเช็คชื่อพร้อมเหตุผล</button>
+    </div>
+  </section>
+</div>
 
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
   getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
   summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
-  getMyCoverageFor
-} from "../supabase-client.js?v=20260910-1";
+  getMyCoverageFor, getSetting, getDailyAttendanceCutoff, firstCheckTimeByRoom,
+  classifyCheckTiming, needsLateReason, CHECK_TIMING_LABEL
+} from "../supabase-client.js?v=20260912-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -175,6 +212,9 @@ const formatTime = iso => iso
       timeZone:"Asia/Bangkok", hour:"2-digit", minute:"2-digit", hour12:false
     }).format(new Date(iso)) + " น."
   : "—";
+const formatRecordedDate = iso => iso ? new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"short", timeZone:"Asia/Bangkok"
+}).format(new Date(iso)) : "—";
 
 let toastTimer = null;
 function toast(message, isError = false) {
@@ -194,6 +234,13 @@ let availableRooms = [];
 let roster = [];
 let stateByStudent = new Map();
 let selectedRoom = null;
+let currentDailyData = null;
+let currentExisting = [];
+let cutoff = null;
+let lateReasonPresets = [];
+let timingTimer = null;
+let reasonResolver = null;
+let selectedReason = "";
 
 function checkablePlacements(list) {
   const todayAcademicYear = academicYearOf(today, years);
@@ -213,11 +260,99 @@ function clearAccess() {
   el("access-message").innerHTML = "";
 }
 function hideAttendance() {
+  clearInterval(timingTimer);
+  timingTimer = null;
   el("attendance-card").hidden = true;
   selectedRoom = null;
+  currentDailyData = null;
+  currentExisting = [];
   roster = [];
   stateByStudent.clear();
 }
+
+function renderTiming(firstRecordedAt = "") {
+  const note = el("timing-note");
+  note.hidden = true;
+  note.textContent = "";
+  if (!selectedRoom || !currentDailyData || currentDailyData.isHoliday) return;
+  const dateStr = el("attend-date").value;
+  const timing = classifyCheckTiming(firstRecordedAt, dateStr, cutoff);
+  if (timing === "off") return;
+  if (firstRecordedAt) return;
+  if (dateStr !== today) return;
+
+  const nowIso = new Date().toISOString();
+  const currentTiming = classifyCheckTiming(nowIso, dateStr, cutoff);
+  const deadline = Date.parse(dateStr + "T" + cutoff.time + ":00+07:00");
+  note.hidden = false;
+  if (currentTiming === "late") {
+    const elapsed = Math.max(1, Math.floor((Date.now() - deadline) / 60000));
+    note.className = "timing-note warn";
+    note.textContent = `เลยกำหนด ${cutoff.time} น. มาแล้ว ${elapsed} นาที`;
+  } else {
+    const remaining = Math.max(1, Math.ceil((deadline - Date.now()) / 60000));
+    note.className = "timing-note info";
+    note.textContent = `ต้องเช็คให้เสร็จก่อน ${cutoff.time} น. · เหลืออีก ${remaining} นาที`;
+  }
+}
+
+function startTimingClock(firstRecordedAt = "") {
+  clearInterval(timingTimer);
+  timingTimer = null;
+  renderTiming(firstRecordedAt);
+  if (!firstRecordedAt && el("attend-date").value === today && cutoff && !currentDailyData?.isHoliday) {
+    timingTimer = setInterval(() => renderTiming(""), 60_000);
+  }
+}
+
+function updateReasonConfirm() {
+  const custom = !el("late-reason-other-field").hidden;
+  if (custom) selectedReason = el("late-reason-other").value.trim();
+  el("late-reason-confirm").disabled = selectedReason.trim().length < 3;
+}
+
+function closeReasonModal(value = null) {
+  el("late-reason-overlay").hidden = true;
+  const resolve = reasonResolver;
+  reasonResolver = null;
+  if (resolve) resolve(value);
+}
+
+function askLateReason(timing, dateStr) {
+  el("late-reason-title").textContent = timing === "backdated"
+    ? `กำลังเช็คย้อนหลังของวันที่ ${formatRecordedDate(dateStr + "T00:00:00+07:00")}`
+    : `เลยกำหนด ${cutoff.time} น. แล้ว`;
+  selectedReason = "";
+  el("late-reason-other").value = "";
+  el("late-reason-other-field").hidden = true;
+  el("late-reason-chips").innerHTML = lateReasonPresets.map(reason =>
+    `<button type="button" class="reason-chip" data-reason="${esc(reason)}">${esc(reason)}</button>`
+  ).join("") + '<button type="button" class="reason-chip" data-reason-other>อื่น ๆ (ระบุ)</button>';
+  updateReasonConfirm();
+  el("late-reason-overlay").hidden = false;
+  el("late-reason-chips").querySelector("button")?.focus();
+  return new Promise(resolve => { reasonResolver = resolve; });
+}
+
+el("late-reason-chips").addEventListener("click", event => {
+  const chip = event.target.closest(".reason-chip");
+  if (!chip) return;
+  el("late-reason-chips").querySelectorAll(".reason-chip").forEach(item => item.classList.toggle("active", item === chip));
+  const isOther = chip.hasAttribute("data-reason-other");
+  el("late-reason-other-field").hidden = !isOther;
+  selectedReason = isOther ? el("late-reason-other").value.trim() : chip.dataset.reason;
+  updateReasonConfirm();
+  if (isOther) el("late-reason-other").focus();
+});
+el("late-reason-other").addEventListener("input", updateReasonConfirm);
+el("late-reason-cancel").addEventListener("click", () => closeReasonModal(null));
+el("late-reason-confirm").addEventListener("click", () => closeReasonModal(selectedReason.trim()));
+el("late-reason-overlay").addEventListener("click", event => {
+  if (event.target === el("late-reason-overlay")) closeReasonModal(null);
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !el("late-reason-overlay").hidden) closeReasonModal(null);
+});
 
 async function loadYearContext(dateStr) {
   hideAttendance();
@@ -354,6 +489,8 @@ async function loadRoom(index) {
   const existing = (dailyData.rows || []).filter(row =>
     row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom
   );
+  currentDailyData = dailyData;
+  currentExisting = existing;
   roster = placements.filter(p =>
     p.grade_level === selectedRoom.grade_level && p.classroom === selectedRoom.classroom
   ).sort(studentCompare);
@@ -375,9 +512,17 @@ async function loadRoom(index) {
       String(b.updated_at || b.recorded_at).localeCompare(String(a.updated_at || a.recorded_at))
     )[0];
     const who = await recorderLabel(latest.recorded_by);
-    el("checked-note").textContent = `ห้องนี้เช็คแล้วเมื่อ ${formatTime(latest.updated_at || latest.recorded_at)} โดย ${who} — แก้แล้วบันทึกทับได้`;
+    const firstRecordedAt = firstCheckTimeByRoom(existing).get(roomKey(selectedRoom)) || "";
+    const timing = classifyCheckTiming(firstRecordedAt, dateStr, cutoff);
+    let timingText = "";
+    if (timing === "ontime") timingText = ` (${CHECK_TIMING_LABEL.ontime})`;
+    else if (timing === "late") timingText = ` (${CHECK_TIMING_LABEL.late} ${cutoff.time} น.)`;
+    else if (timing === "backdated") timingText = ` (${CHECK_TIMING_LABEL.backdated} เมื่อ ${formatRecordedDate(firstRecordedAt)} ${formatTime(firstRecordedAt)})`;
+    el("checked-note").textContent = `ห้องนี้เช็คแล้วเมื่อ ${formatTime(latest.updated_at || latest.recorded_at)} โดย ${who} — แก้แล้วบันทึกทับได้${timingText}`;
+    startTimingClock(firstRecordedAt);
   } else {
     el("checked-note").textContent = "ยังไม่เคยเช็คห้องนี้ในวันที่เลือก — ทุกคนตั้งต้นเป็น “มา”";
+    startTimingClock("");
   }
   el("save-note").textContent = dailyData.isHoliday
     ? "วันที่เลือกเป็นวันหยุดตามตารางงาน กรุณาตรวจให้แน่ใจก่อนบันทึก"
@@ -418,6 +563,11 @@ el("save-attendance").addEventListener("click", async () => {
   if (!selectedRoom || !roster.length) return;
   const dateStr = el("attend-date").value;
   if (!dateStr || dateStr > today) return toast("ไม่สามารถบันทึกวันในอนาคตได้", true);
+  const recordedNow = new Date().toISOString();
+  const askReason = needsLateReason(currentExisting.length, recordedNow, dateStr, cutoff, currentDailyData?.isHoliday);
+  const timing = classifyCheckTiming(recordedNow, dateStr, cutoff);
+  const lateReason = askReason ? await askLateReason(timing, dateStr) : null;
+  if (askReason && !lateReason) return;
   const button = el("save-attendance");
   button.disabled = true;
   button.textContent = "กำลังบันทึก…";
@@ -438,10 +588,30 @@ el("save-attendance").addEventListener("click", async () => {
   });
   const { error } = await sb.from("daily_attendance")
     .upsert(payload, { onConflict:"student_id,attend_date" });
+  if (error) {
+    button.disabled = false;
+    button.textContent = "บันทึกเช็คชื่อ";
+    return toast("บันทึกไม่สำเร็จ: " + error.message, true);
+  }
+  let reasonError = null;
+  if (lateReason) {
+    const result = await sb.from("daily_attendance_late_reasons").upsert({
+      attend_date:dateStr,
+      year:currentYear,
+      grade_level:selectedRoom.grade_level,
+      classroom:selectedRoom.classroom,
+      reason:lateReason,
+      cutoff_time:cutoff.time,
+      kind:timing === "backdated" ? "เช็คย้อนหลัง" : "เลยเวลา",
+      recorded_by:session.user.id,
+      updated_at:now
+    }, { onConflict:"attend_date,year,grade_level,classroom" });
+    reasonError = result.error;
+  }
   button.disabled = false;
   button.textContent = "บันทึกเช็คชื่อ";
-  if (error) return toast("บันทึกไม่สำเร็จ: " + error.message, true);
-  toast(`บันทึกเช็คชื่อ ${payload.length} คนแล้ว`);
+  if (reasonError) toast("บันทึกเช็คชื่อแล้ว แต่บันทึกเหตุผลไม่สำเร็จ", true);
+  else toast(`บันทึกเช็คชื่อ ${payload.length} คนแล้ว`);
   try { await loadRoom(el("room-select").value); }
   catch (error) { toast("บันทึกแล้ว แต่โหลดผลล่าสุดไม่สำเร็จ: " + error.message, true); }
 });
@@ -455,10 +625,14 @@ if (session) {
     const accessResults = await Promise.all([
       getAcademicYears(),
       checkDepartment("บริหารทั่วไป"),
-      checkDepartment("บุคลากร")
+      checkDepartment("บุคลากร"),
+      getDailyAttendanceCutoff(),
+      getSetting("daily_attendance_late_reason_presets")
     ]);
     years = accessResults[0];
     canManage = accessResults[1];
+    cutoff = accessResults[3];
+    lateReasonPresets = String(accessResults[4] || "").split("|").map(value => value.trim()).filter(value => value.length >= 3);
     applyRestrictedMenuAccess(accessResults[1] || accessResults[2]);
     await loadYearContext(today);
   } catch (error) {

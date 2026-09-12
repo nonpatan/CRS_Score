@@ -72,7 +72,7 @@
   details { margin-top:7px; }
   summary { min-height:44px; padding:9px 0; color:var(--teal); font-weight:600; cursor:pointer; }
   .date-list { display:flex; flex-wrap:wrap; gap:6px; padding:4px 0 2px; }
-  .date-chip { padding:4px 8px; border-radius:99px; color:var(--amber); background:var(--amber-soft); font-size:13px; }
+  .date-chip { max-width:100%; padding:4px 8px; border-radius:99px; color:var(--amber); background:var(--amber-soft); font-size:13px; overflow-wrap:anywhere; }
   .cover-state { display:inline-block; margin-top:5px; padding:3px 9px; border-radius:99px; font-size:13px; font-weight:600; }
   .cover-state.ok { color:var(--teal); background:var(--teal-soft); }
   .cover-state.warn { color:var(--amber); background:var(--amber-soft); }
@@ -144,6 +144,7 @@
         <div class="section">วันเริ่มกำชับการเช็คชื่อ</div>
         <div id="start-setting-note" class="banner warn">กำลังโหลดค่าตั้ง…</div>
         <div class="hint">ครูที่ถูกกำหนดกลางปีจะเริ่มนับจากวันที่บันทึกเป็นครูประจำชั้น หากวันนั้นช้ากว่าค่านี้</div>
+        <div id="cutoff-setting-note" class="hint" style="margin-top:8px"></div>
       </section>
 
       <section id="state-banner" hidden></section>
@@ -157,12 +158,14 @@
       <section id="panel-rooms" class="card" data-panel="rooms">
         <div class="section">รายห้อง</div>
         <div id="rooms-summary" class="hint">เลือกช่วงวันที่แล้วกดแสดงรายงาน</div>
+        <div id="rooms-timing-hint" class="hint" hidden></div>
         <div id="rooms-list" class="audit-list"></div>
       </section>
 
       <section id="panel-staff" class="card" data-panel="staff" hidden>
         <div class="section">รายครู</div>
         <div id="staff-summary" class="hint"></div>
+        <div id="staff-timing-hint" class="hint" hidden></div>
         <div id="staff-list" class="audit-list"></div>
       </section>
 
@@ -185,9 +188,9 @@
 <script type="module">
 import {
   requireAuth, signOut, getProfile, checkDepartment, applyRestrictedMenuAccess,
-  getAcademicYears, academicYearRange, academicYearOf, getSetting, setSetting,
-  loadHomeroomAuditData, buildHomeroomAudit, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260910-1";
+  getAcademicYears, academicYearRange, academicYearOf, getSetting, setSetting, getDailyAttendanceCutoff,
+  loadHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL, bangkokNow, toDateStr
+} from "../supabase-client.js?v=20260912-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -201,6 +204,7 @@ const fmtDate = value => value ? new Intl.DateTimeFormat("th-TH", {
 let years = [];
 let isAdmin = false;
 let configuredStart = null;
+let configuredCutoff = null;
 let currentReport = null;
 let toastTimer = null;
 
@@ -260,10 +264,21 @@ function renderStartSetting() {
       ` — ผู้ดูแลระบบตั้งค่าได้ที่${editLink}`;
 }
 
-function missedDetails(rows) {
+function renderCutoffSetting() {
+  el("cutoff-setting-note").innerHTML = configuredCutoff
+    ? `เกณฑ์เวลาเช็คชื่อ ${esc(configuredCutoff.time)} น. · เริ่ม ${esc(fmtDate(configuredCutoff.start))}`
+    : 'ยังไม่ได้ตั้งเวลากำหนดเช็คชื่อ · ตั้งค่าได้ที่ <a href="homeroom.html">หน้าครูประจำชั้น</a>';
+}
+
+function missedDetails(rows, { label = "ดูวันที่ไม่มีการเช็คชื่อ", timing = false } = {}) {
   if (!rows.length) return "";
-  return `<details><summary>ดูวันที่ไม่มีการเช็คชื่อ ${rows.length} วัน</summary><div class="date-list">` +
+  return `<details><summary>${esc(label)} ${rows.length} วัน</summary><div class="date-list">` +
     rows.map(item => {
+      if (timing) {
+        const time = item.time ? ` · ${item.time} น.` : "";
+        const reason = item.reason ? item.reason : "เหตุผล: ไม่ได้ระบุ";
+        return `<span class="date-chip">${esc(fmtDate(item.date) + " · " + item.room + time + " · " + reason)}</span>`;
+      }
       const date = typeof item === "string" ? item : item.date;
       const room = typeof item === "string" ? "" : ` · ${item.room}`;
       return `<span class="date-chip">${esc(fmtDate(date) + room)}</span>`;
@@ -287,14 +302,16 @@ function roomDueNote(row, report) {
 
 function renderRooms(report) {
   el("rooms-summary").textContent = `${report.rooms.length} ห้อง · วันเปิดเรียนในช่วงนี้ ${report.schoolDays} วัน`;
-  el("rooms-list").innerHTML = report.rooms.length ? report.rooms.map(row => {
+  const rowsHtml = report.rooms.length ? report.rooms.map(row => {
     const teachers = row.teachers.map(person => person.full_name).filter(Boolean).join(" · ") || "ไม่ระบุชื่อครู";
     return `<article class="audit-row">
       <div class="audit-head"><div><b>${esc(row.room)}</b><div class="meta">${esc(teachers)}</div></div>
-      <div class="audit-counts">เช็คแล้ว <strong>${row.checked}/${row.due} วัน</strong> · ไม่มีการเช็ค ${row.missed} วัน${roomDueNote(row, report)}</div></div>
+      <div class="audit-counts">เช็คแล้ว <strong>${row.checked}/${row.due} วัน</strong> · ไม่มีการเช็ค ${row.missed} วัน${row.timingDue > 0 ? ` · ใน ${row.timingDue} วันที่อยู่ในเกณฑ์เวลา: ${CHECK_TIMING_LABEL.ontime} ${row.ontime} · ${CHECK_TIMING_LABEL.late} ${row.late} · ย้อนหลัง ${row.backdated}` : ""}${roomDueNote(row, report)}</div></div>
       ${missedDetails(row.missedDates)}
+      ${row.timingDue > 0 ? missedDetails(row.lateDates, { label:"วันที่เช็คเลยเวลา", timing:true }) + missedDetails(row.backdatedDates, { label:"วันที่เช็คย้อนหลัง", timing:true }) : ""}
     </article>`;
   }).join("") : '<div class="empty">ยังไม่มีห้องที่มีผู้รับผิดชอบในช่วงนี้</div>';
+  el("rooms-list").innerHTML = rowsHtml;
 }
 
 function renderStaff(report) {
@@ -304,17 +321,37 @@ function renderStaff(report) {
     const absentId = cover.absent?.id;
     if (absentId) coveredCounts.set(absentId, (coveredCounts.get(absentId) || 0) + 1);
   }
-  el("staff-list").innerHTML = report.staff.length ? report.staff.map(row => {
+  const rowsHtml = report.staff.length ? report.staff.map(row => {
     const coveredCount = coveredCounts.get(row.staff.id) || 0;
     const coveredNote = coveredCount
       ? `<div class="meta">มีคนแทนรับไป ${coveredCount} ครั้ง · ดูรายละเอียดที่แท็บคนแทน</div>`
       : "";
     return `<article class="audit-row">
       <div class="audit-head"><div><b>${esc(row.staff.full_name)}</b><div class="meta">${esc(row.rooms.join(" · "))}</div></div>
-      <div class="audit-counts">รับผิดชอบ <strong>${row.due} ครั้ง</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}${coveredNote}</div></div>
+      <div class="audit-counts">รับผิดชอบ <strong>${row.due} ครั้ง</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}${row.timingDue > 0 ? ` · ใน ${row.timingDue} วันที่อยู่ในเกณฑ์เวลา: ${CHECK_TIMING_LABEL.ontime} ${row.ontime} · ${CHECK_TIMING_LABEL.late} ${row.late} · ย้อนหลัง ${row.backdated}` : ""}${coveredNote}</div></div>
       ${missedDetails(row.missedDates)}
+      ${row.timingDue > 0 ? missedDetails(row.lateDates, { label:"วันที่ห้องถูกเช็คเลยเวลา", timing:true }) + missedDetails(row.backdatedDates, { label:"วันที่ห้องถูกเช็คย้อนหลัง", timing:true }) : ""}
     </article>`;
   }).join("") : '<div class="empty">ยังไม่มีรายการผู้รับผิดชอบในช่วงนี้</div>';
+  el("staff-list").innerHTML = rowsHtml;
+}
+
+function timingScopeHint(rows, report) {
+  return report.cutoffEnabled && configuredCutoff?.start && rows.length > 0
+    && rows.every(row => row.timingDue === 0)
+    ? `ช่วงที่เลือกอยู่ก่อนวันเริ่มเกณฑ์เวลา ${fmtDate(configuredCutoff.start)}`
+    : "";
+}
+
+function renderTimingScopeHints(report) {
+  for (const [id, rows] of [
+    ["rooms-timing-hint", report.rooms],
+    ["staff-timing-hint", report.staff]
+  ]) {
+    const message = timingScopeHint(rows, report);
+    el(id).textContent = message;
+    el(id).hidden = !message;
+  }
 }
 
 function renderCovers(report) {
@@ -358,6 +395,7 @@ function renderReport(report) {
     el("state-banner").innerHTML = `<div class="banner info"><b>ช่วง ${esc(fmtDate(report.from))} – ${esc(fmtDate(report.to))}</b><br>` +
       `นับวันเปิดเรียน ${report.schoolDays} วัน หลังตัดวันก่อน ${esc(fmtDate(report.startDate))} วันหยุด และวันที่ไม่ทำงานออกแล้ว</div>`;
   }
+  renderTimingScopeHints(report);
   renderRooms(report);
   renderStaff(report);
   renderCovers(report);
@@ -381,7 +419,7 @@ async function loadReport() {
   el("state-banner").innerHTML = '<div class="banner info">กำลังโหลดผลเช็คชื่อทั้งช่วง…</div>';
   try {
     const raw = await loadHomeroomAuditData(year, from, to);
-    renderReport(buildHomeroomAudit(raw, { startDate:effectiveStartDate() }));
+    renderReport(buildHomeroomAudit(raw, { startDate:effectiveStartDate(), cutoff:configuredCutoff }));
   } catch (error) {
     currentReport = null;
     el("state-banner").innerHTML = `<div class="banner bad"><b>โหลดรายงานไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
@@ -406,6 +444,7 @@ el("btn-load").addEventListener("click", loadReport);
 el("year-select").addEventListener("change", () => {
   setMonthRange();
   renderStartSetting();
+  renderCutoffSetting();
 });
 const session = await requireAuth();
 if (session) {
@@ -425,9 +464,10 @@ if (session) {
   } else {
     el("report-content").hidden = false;
     try {
-      [years, configuredStart] = await Promise.all([
+      [years, configuredStart, configuredCutoff] = await Promise.all([
         getAcademicYears(),
-        getSetting("daily_attendance_audit_start")
+        getSetting("daily_attendance_audit_start"),
+        getDailyAttendanceCutoff()
       ]);
       const activeYear = academicYearOf(today, years);
       el("year-select").innerHTML = years.length
@@ -438,6 +478,7 @@ if (session) {
       el("date-to").max = today;
       setMonthRange();
       renderStartSetting();
+      renderCutoffSetting();
       if (years.length) await loadReport();
     } catch (error) {
       el("state-banner").hidden = false;
