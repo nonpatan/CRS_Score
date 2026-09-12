@@ -190,7 +190,7 @@ import {
   requireAuth, signOut, getProfile, checkDepartment, applyRestrictedMenuAccess,
   getAcademicYears, academicYearRange, academicYearOf, getSetting, setSetting, getDailyAttendanceCutoff,
   loadHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260912-1";
+} from "../supabase-client.js?v=20260912-2";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -264,10 +264,25 @@ function renderStartSetting() {
       ` — ผู้ดูแลระบบตั้งค่าได้ที่${editLink}`;
 }
 
+const LEVEL_LABEL = { "อ.":"อนุบาล", "ป.":"ประถม", "ม.":"มัธยม" };
 function renderCutoffSetting() {
-  el("cutoff-setting-note").innerHTML = configuredCutoff
-    ? `เกณฑ์เวลาเช็คชื่อ ${esc(configuredCutoff.time)} น. · เริ่ม ${esc(fmtDate(configuredCutoff.start))}`
-    : 'ยังไม่ได้ตั้งเวลากำหนดเช็คชื่อ · ตั้งค่าได้ที่ <a href="homeroom.html">หน้าครูประจำชั้น</a>';
+  if (!configuredCutoff) {
+    el("cutoff-setting-note").innerHTML =
+      'ยังไม่ได้ตั้งเวลากำหนดเช็คชื่อ · ตั้งค่าได้ที่ <a href="homeroom.html">หน้าครูประจำชั้น</a>';
+    return;
+  }
+  // แต่ละระดับอาจใช้เวลาคนละค่า — ห้ามประกาศเวลาเดียวคลุมทั้งรายงาน
+  const byLevel = configuredCutoff.byLevel || {};
+  const levels = Object.keys(LEVEL_LABEL).map(prefix => ({
+    label: LEVEL_LABEL[prefix],
+    time: byLevel[prefix] || configuredCutoff.time
+  }));
+  const sameEverywhere = levels.every(item => item.time === levels[0].time);
+  const times = sameEverywhere
+    ? `${esc(levels[0].time)} น.`
+    : levels.map(item => `${esc(item.label)} ${esc(item.time)} น.`).join(" · ");
+  el("cutoff-setting-note").innerHTML =
+    `เกณฑ์เวลาเช็คชื่อ ${times} · เริ่ม ${esc(fmtDate(configuredCutoff.start))}`;
 }
 
 function missedDetails(rows, { label = "ดูวันที่ไม่มีการเช็คชื่อ", timing = false } = {}) {

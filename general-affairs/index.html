@@ -175,9 +175,9 @@ import {
   requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess,
   getAcademicYears, academicYearOf, getStudentPlacements,
   getActiveStudents, loadDailyAttendanceToday, summarizeDailyAttendance,
-  getDailyAttendanceCutoff, firstCheckTimeByRoom, classifyCheckTiming, CHECK_TIMING_LABEL,
+  getDailyAttendanceCutoff, firstCheckTimeByRoom, classifyCheckTiming, cutoffForGrade, CHECK_TIMING_LABEL,
   bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260912-1";
+} from "../supabase-client.js?v=20260912-2";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -271,17 +271,28 @@ async function loadOverview() {
   el("rooms-timing-note").hidden = !summary.cutoffOn || timingParts.length === 0;
   el("rooms-timing-note").textContent = timingParts.join(" · ");
 
-  const nowTiming = classifyCheckTiming(new Date().toISOString(), dateStr, cutoff);
+  // "เลยกำหนดหรือยัง" ต้องดูรายระดับ เพราะแต่ละระดับมีเส้นเวลาของตัวเอง
+  const nowIso = new Date().toISOString();
+  const roomTimingNow = room => classifyCheckTiming(nowIso, dateStr, cutoffForGrade(cutoff, room.grade_level));
+  const levelTimes = [...new Set(daily.rooms.map(room => cutoffForGrade(cutoff, room.grade_level)?.time).filter(Boolean))];
+  const oneTimeForAll = levelTimes.length === 1;
+  const anyLevelLate = daily.rooms.some(room => roomTimingNow(room) === "late");
   const uncheckedCount = Math.max(0, summary.roomsTotal - summary.roomsChecked);
-  const pendingRooms = daily.rooms.filter(room => !(daily.rows || []).some(row => keyOf(row) === keyOf(room)))
+  // ห้องที่ค้างและ "เลยเวลาของระดับตัวเอง" แล้วเท่านั้น — ห้องที่ยังไม่ถึงกำหนดไม่ควรถูกตาม
+  const pendingRooms = daily.rooms
+    .filter(room => !(daily.rows || []).some(row => keyOf(row) === keyOf(room)))
+    .filter(room => roomTimingNow(room) === "late")
     .map(room => `${room.grade_level} · ${room.classroom}`);
 
   if (summary.state === "holiday") {
     showBanner("<b>วันนี้เป็นวันหยุดตามตารางงาน</b><br>ระบบไม่ตีความห้องที่ยังไม่มีข้อมูลว่า “ยังไม่เช็ค”", "info");
   } else if (summary.state === "no-rooms") {
     showBanner('<b>ยังไม่มีข้อมูลห้องเรียนของปีนี้</b><br>กรุณาจัดชั้น/ห้องที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a>');
-  } else if (summary.cutoffOn && nowTiming === "late" && uncheckedCount > 0) {
-    showBanner(`<b>เลยกำหนด ${esc(cutoff.time)} น. แล้ว · ยังไม่เช็ค ${uncheckedCount} ห้อง</b><br>${esc(pendingRooms.join(" · "))}`);
+  } else if (summary.cutoffOn && anyLevelLate && pendingRooms.length > 0) {
+    const headline = oneTimeForAll
+      ? `เลยกำหนด ${esc(levelTimes[0])} น. แล้ว · ยังไม่เช็ค ${pendingRooms.length} ห้อง`
+      : `เลยกำหนดของบางระดับแล้ว · ยังไม่เช็ค ${pendingRooms.length} ห้อง`;
+    showBanner(`<b>${headline}</b><br>${esc(pendingRooms.join(" · "))}`);
   } else if (summary.state === "none") {
     showBanner("<b>ยังไม่มีห้องไหนเช็คชื่อวันนี้</b><br>เมื่อครูประจำชั้นบันทึก ห้องนั้นจะเปลี่ยนสถานะทันที");
   } else if (summary.state === "partial") {
@@ -314,9 +325,9 @@ async function loadOverview() {
     )[0];
     const checked = rows.length > 0;
     const timing = summary.cutoffOn
-      ? classifyCheckTiming(firstByRoom.get(keyOf(room)), dateStr, cutoff)
+      ? classifyCheckTiming(firstByRoom.get(keyOf(room)), dateStr, cutoffForGrade(cutoff, room.grade_level))
       : "off";
-    const beforeCutoff = !checked && summary.cutoffOn && nowTiming !== "late";
+    const beforeCutoff = !checked && summary.cutoffOn && roomTimingNow(room) !== "late";
     let stateLabel = checked ? "เช็คแล้ว" : "ยังไม่เช็ค";
     if (checked && CHECK_TIMING_LABEL[timing]) {
       stateLabel = timing === "backdated" ? CHECK_TIMING_LABEL[timing] : `เช็คแล้ว · ${CHECK_TIMING_LABEL[timing]}`;

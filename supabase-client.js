@@ -563,21 +563,55 @@ export async function setSetting(key, value) {
   return !error;
 }
 
-// เกณฑ์เวลาเช็คชื่อรายวันเปิดได้ต่อเมื่อค่าทั้งคู่ถูกต้อง เพื่อให้การล้างค่าใดค่าหนึ่ง
-// เป็นทางถอยที่ปิดฟีเจอร์ได้ทั้งระบบโดยไม่ต้อง deploy ใหม่
+const CUTOFF_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+// ระดับของชั้น ตัดจาก "คำนำหน้า" ไม่ใช่รายชื่อชั้น — ปีหน้าเปิด ม.4-ม.6 หรือเพิ่มห้อง
+// โค้ดตรงนี้ต้องไม่ต้องตามแก้ · ชั้นที่ไม่ตรงคำนำหน้าไหนคืน "" แล้วไปใช้ค่าตั้งต้น
+export function levelOfGrade(gradeLevel) {
+  const text = String(gradeLevel || "").trim();
+  for (const prefix of ["อ.", "ป.", "ม."]) {
+    if (text.startsWith(prefix)) return prefix;
+  }
+  return "";
+}
+
+// เวลาที่ใช้ตัดสินของห้องนั้น — คืนรูปแบบเดียวกับ cutoff เดิมเสมอ ({ time, start })
+// เพื่อให้ classifyCheckTiming() ไม่ต้องรู้จักคำว่า "ชั้น" เลย
+export function cutoffForGrade(cutoff, gradeLevel) {
+  if (!cutoff) return null;
+  const byLevel = cutoff.byLevel || {};
+  const time = byLevel[levelOfGrade(gradeLevel)] || cutoff.time;
+  return { time, start: cutoff.start };
+}
+
+// เกณฑ์เวลาเช็คชื่อรายวันเปิดได้ต่อเมื่อเวลาตั้งต้นและวันเริ่มถูกต้องทั้งคู่ เพื่อให้การล้าง
+// ค่าใดค่าหนึ่งเป็นทางถอยที่ปิดฟีเจอร์ได้ทั้งระบบโดยไม่ต้อง deploy ใหม่
+// · `byLevel` เป็นข้อยกเว้นรายระดับ — ไม่มี/พังรูปแบบ = ใช้ `time` ตัวเดิมทุกระดับ
+//   (พฤติกรรมเท่ากับก่อนมีค่ารายระดับเป๊ะ ๆ ซึ่งเป็นทางถอยอีกชั้น)
 export async function getDailyAttendanceCutoff() {
-  const [time, start] = await Promise.all([
+  const [time, start, byLevelRaw] = await Promise.all([
     getSetting("daily_attendance_cutoff_time"),
-    getSetting("daily_attendance_cutoff_start")
+    getSetting("daily_attendance_cutoff_start"),
+    getSetting("daily_attendance_cutoff_time_by_level")
   ]);
   const normalizedTime = String(time || "").trim();
   const normalizedStart = String(start || "").trim();
-  const validTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(normalizedTime);
+  const validTime = CUTOFF_TIME_PATTERN.test(normalizedTime);
   const startTimestamp = Date.parse(normalizedStart + "T00:00:00Z");
   const validStart = /^\d{4}-\d{2}-\d{2}$/.test(normalizedStart)
     && Number.isFinite(startTimestamp)
     && new Date(startTimestamp).toISOString().slice(0, 10) === normalizedStart;
-  return validTime && validStart ? { time: normalizedTime, start: normalizedStart } : null;
+  if (!validTime || !validStart) return null;
+
+  // รูปแบบ "อ.=09:45|ป.=09:15" — รายการไหนพังทิ้งเฉพาะรายการนั้น ไม่ใช่ทิ้งทั้งก้อน
+  const byLevel = {};
+  for (const part of String(byLevelRaw || "").split("|")) {
+    const [levelRaw, valueRaw] = String(part).split("=");
+    const level = levelOfGrade(String(levelRaw || "").trim());
+    const value = String(valueRaw || "").trim();
+    if (level && CUTOFF_TIME_PATTERN.test(value)) byLevel[level] = value;
+  }
+  return { time: normalizedTime, start: normalizedStart, byLevel };
 }
 
 // หาชั้นถัดไปตอนเลื่อนชั้น — คืน null ถ้าถึงชั้นสูงสุดที่เปิดสอนแล้ว (= จบการศึกษา)
@@ -2401,7 +2435,10 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
   if (cutoffOn) {
     const firstByRoom = firstCheckTimeByRoom(attendanceRows);
     for (const room of roomRows) {
-      const timing = classifyCheckTiming(firstByRoom.get(homeroomAuditRoomKey(room)), options.dateStr, options.cutoff);
+      // เวลาตัดสินเป็นของ "ระดับชั้นของห้องนั้น" — อนุบาลกับประถมอยู่ในผลรวมเดียวกันได้
+      // โดยใช้เส้นเวลาคนละเส้น
+      const roomCutoff = cutoffForGrade(options.cutoff, room.grade_level);
+      const timing = classifyCheckTiming(firstByRoom.get(homeroomAuditRoomKey(room)), options.dateStr, roomCutoff);
       if (timing === "ontime") roomsOnTime += 1;
       else if (timing === "late") roomsLate += 1;
       else if (timing === "backdated") roomsBackdated += 1;
@@ -2849,8 +2886,14 @@ export function buildHomeroomAudit(raw, { startDate, cutoff } = {}) {
       const responsibleUserIds = new Set(responsibilities.map(item => item.user_id).filter(Boolean));
       const checkedByResponsible = [...responsibleUserIds].some(userId => recorderIds.has(userId));
       const hasAttendance = Boolean(attendance);
+      // เวลาตัดสินตามระดับชั้นของห้อง — รายงานช่วงเดียวมีได้ทั้งห้องอนุบาลและห้องประถม
+      // ที่ใช้เส้นเวลาคนละเส้น (`start` ยังเป็นค่าเดียวทั้งโรงเรียน timingDue จึงไม่ขยับ)
       const timing = cutoffEnabled && hasAttendance
-        ? classifyCheckTiming(attendance.recordedAtFirst || attendance.recorded_at, date, cutoff)
+        ? classifyCheckTiming(
+            attendance.recordedAtFirst || attendance.recorded_at,
+            date,
+            cutoffForGrade(cutoff, room.grade_level)
+          )
         : "off";
       const timingDetail = hasAttendance ? {
         date,

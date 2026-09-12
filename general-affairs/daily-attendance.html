@@ -194,8 +194,8 @@ import {
   getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
   summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
   getMyCoverageFor, getSetting, getDailyAttendanceCutoff, firstCheckTimeByRoom,
-  classifyCheckTiming, needsLateReason, CHECK_TIMING_LABEL
-} from "../supabase-client.js?v=20260912-1";
+  classifyCheckTiming, needsLateReason, cutoffForGrade, CHECK_TIMING_LABEL
+} from "../supabase-client.js?v=20260912-2";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -237,6 +237,9 @@ let selectedRoom = null;
 let currentDailyData = null;
 let currentExisting = [];
 let cutoff = null;
+// เวลาที่ใช้ตัดสินของ "ห้องที่เลือกอยู่" — อนุบาลกับประถมใช้คนละเส้นได้ในหน้าเดียวกัน
+// โดยไม่ต้องรีโหลด · คืน null เมื่อยังไม่เปิดเกณฑ์ ทำให้ classifyCheckTiming() ได้ "off"
+const roomCutoff = () => cutoffForGrade(cutoff, selectedRoom?.grade_level);
 let lateReasonPresets = [];
 let timingTimer = null;
 let reasonResolver = null;
@@ -276,23 +279,24 @@ function renderTiming(firstRecordedAt = "") {
   note.textContent = "";
   if (!selectedRoom || !currentDailyData || currentDailyData.isHoliday) return;
   const dateStr = el("attend-date").value;
-  const timing = classifyCheckTiming(firstRecordedAt, dateStr, cutoff);
+  const active = roomCutoff();
+  const timing = classifyCheckTiming(firstRecordedAt, dateStr, active);
   if (timing === "off") return;
   if (firstRecordedAt) return;
   if (dateStr !== today) return;
 
   const nowIso = new Date().toISOString();
-  const currentTiming = classifyCheckTiming(nowIso, dateStr, cutoff);
-  const deadline = Date.parse(dateStr + "T" + cutoff.time + ":00+07:00");
+  const currentTiming = classifyCheckTiming(nowIso, dateStr, active);
+  const deadline = Date.parse(dateStr + "T" + active.time + ":00+07:00");
   note.hidden = false;
   if (currentTiming === "late") {
     const elapsed = Math.max(1, Math.floor((Date.now() - deadline) / 60000));
     note.className = "timing-note warn";
-    note.textContent = `เลยกำหนด ${cutoff.time} น. มาแล้ว ${elapsed} นาที`;
+    note.textContent = `เลยกำหนด ${active.time} น. มาแล้ว ${elapsed} นาที`;
   } else {
     const remaining = Math.max(1, Math.ceil((deadline - Date.now()) / 60000));
     note.className = "timing-note info";
-    note.textContent = `ต้องเช็คให้เสร็จก่อน ${cutoff.time} น. · เหลืออีก ${remaining} นาที`;
+    note.textContent = `ต้องเช็คให้เสร็จก่อน ${active.time} น. · เหลืออีก ${remaining} นาที`;
   }
 }
 
@@ -321,7 +325,7 @@ function closeReasonModal(value = null) {
 function askLateReason(timing, dateStr) {
   el("late-reason-title").textContent = timing === "backdated"
     ? `กำลังเช็คย้อนหลังของวันที่ ${formatRecordedDate(dateStr + "T00:00:00+07:00")}`
-    : `เลยกำหนด ${cutoff.time} น. แล้ว`;
+    : `เลยกำหนด ${roomCutoff().time} น. แล้ว`;
   selectedReason = "";
   el("late-reason-other").value = "";
   el("late-reason-other-field").hidden = true;
@@ -513,10 +517,10 @@ async function loadRoom(index) {
     )[0];
     const who = await recorderLabel(latest.recorded_by);
     const firstRecordedAt = firstCheckTimeByRoom(existing).get(roomKey(selectedRoom)) || "";
-    const timing = classifyCheckTiming(firstRecordedAt, dateStr, cutoff);
+    const timing = classifyCheckTiming(firstRecordedAt, dateStr, roomCutoff());
     let timingText = "";
     if (timing === "ontime") timingText = ` (${CHECK_TIMING_LABEL.ontime})`;
-    else if (timing === "late") timingText = ` (${CHECK_TIMING_LABEL.late} ${cutoff.time} น.)`;
+    else if (timing === "late") timingText = ` (${CHECK_TIMING_LABEL.late} ${roomCutoff().time} น.)`;
     else if (timing === "backdated") timingText = ` (${CHECK_TIMING_LABEL.backdated} เมื่อ ${formatRecordedDate(firstRecordedAt)} ${formatTime(firstRecordedAt)})`;
     el("checked-note").textContent = `ห้องนี้เช็คแล้วเมื่อ ${formatTime(latest.updated_at || latest.recorded_at)} โดย ${who} — แก้แล้วบันทึกทับได้${timingText}`;
     startTimingClock(firstRecordedAt);
@@ -564,8 +568,9 @@ el("save-attendance").addEventListener("click", async () => {
   const dateStr = el("attend-date").value;
   if (!dateStr || dateStr > today) return toast("ไม่สามารถบันทึกวันในอนาคตได้", true);
   const recordedNow = new Date().toISOString();
-  const askReason = needsLateReason(currentExisting.length, recordedNow, dateStr, cutoff, currentDailyData?.isHoliday);
-  const timing = classifyCheckTiming(recordedNow, dateStr, cutoff);
+  const active = roomCutoff();
+  const askReason = needsLateReason(currentExisting.length, recordedNow, dateStr, active, currentDailyData?.isHoliday);
+  const timing = classifyCheckTiming(recordedNow, dateStr, active);
   const lateReason = askReason ? await askLateReason(timing, dateStr) : null;
   if (askReason && !lateReason) return;
   const button = el("save-attendance");
@@ -601,7 +606,7 @@ el("save-attendance").addEventListener("click", async () => {
       grade_level:selectedRoom.grade_level,
       classroom:selectedRoom.classroom,
       reason:lateReason,
-      cutoff_time:cutoff.time,
+      cutoff_time:active.time,
       kind:timing === "backdated" ? "เช็คย้อนหลัง" : "เลยเวลา",
       recorded_by:session.user.id,
       updated_at:now
