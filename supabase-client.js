@@ -38,6 +38,70 @@ export const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   global: { fetch: fetchRetryingClockSkew }
 });
 
+// เปลือกหนังสือถึงผู้ปกครองใช้ร่วมกันทุกหน้า เพื่อให้แก้รูปแบบเอกสารเพียงจุดเดียว
+export const SCHOOL_LETTER_CSS = `
+    .retention-letter { width: 186mm; color: #111; background: #fff; font-size: 14px; line-height: 1.55; }
+    .school-heading { display: flex; justify-content: center; align-items: center; gap: 5mm; border-bottom: 1px solid #111; padding-bottom: 3mm; text-align: center; }
+    .school-logo { width: 18mm; height: 18mm; object-fit: contain; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .school-name { font-size: 19px; font-weight: 600; }
+    .school-address { white-space: pre-line; }
+    .letter-meta { display: flex; justify-content: space-between; gap: 8mm; margin: 4mm 0; }
+    .letter-line { margin: 2mm 0; }
+    .letter-body { margin: 3mm 0; text-indent: 10mm; }
+    .letter-table { width: 100%; border-collapse: collapse; margin: 3mm 0; }
+    .letter-table th, .letter-table td { border: 1px solid #111; padding: 1.5mm 2mm; text-align: left; }
+    .letter-table th:first-child, .letter-table td:first-child { width: 12mm; text-align: center; }
+    .letter-table th:last-child, .letter-table td:last-child { width: 28mm; text-align: center; }
+    .letter-summary { border: 1px solid #111; padding: 2.5mm 3mm; margin: 3mm 0; }
+    .letter-signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin: 6mm 0 3mm; text-align: center; }
+    .letter-signature-line { margin-top: 6mm; }
+    .letter-reply { border-top: 1px dashed #111; margin-top: 4mm; padding-top: 3mm; }
+    .letter-reply h3 { margin: 0 0 2mm; text-align: center; font-size: 15px; }
+    .letter-check { margin: 2mm 0; }
+    .letter-parent-signature { margin-top: 6mm; text-align: right; }
+  `;
+
+export function renderSchoolLetter({
+  schoolName = "", schoolAddress = "", logoSrc,
+  subject, recipientName, bodyHtml = "", tableHtml = "", summaryHtml = "", closingHtml = "",
+  replyOptionsHtml = ""
+}) {
+  const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
+  const hideSchoolText = schoolName || schoolAddress ? "" : " hidden";
+
+  // schoolName/schoolAddress/subject/recipientName ถูก escape ที่นี่
+  // ส่วนพารามิเตอร์ลงท้าย Html เป็น HTML ที่ผู้เรียกต้อง escape ข้อมูลมาแล้ว ฟังก์ชันนี้จึงไม่แตะ
+  return `<article class="retention-letter">
+    <div class="school-heading">
+      <img class="school-logo" src="${escapeHtml(logoSrc)}" alt="ตราโรงเรียน">
+      <div class="school-text"${hideSchoolText}>
+        <div class="school-name">${escapeHtml(schoolName)}</div>
+        <div class="school-address">${escapeHtml(schoolAddress)}</div>
+      </div>
+    </div>
+    <div class="letter-meta"><span>ที่ ...../.....</span><span>วันที่ ..... เดือน ......... พ.ศ. .....</span></div>
+    <div class="letter-line"><b>เรื่อง</b> ${escapeHtml(subject)}</div>
+    <div class="letter-line"><b>เรียน</b> ผู้ปกครองของ ${escapeHtml(recipientName)}</div>
+    ${bodyHtml}
+    ${tableHtml}
+    ${summaryHtml}
+    ${closingHtml}
+    <div class="letter-signatures avoid-break">
+      <div><div class="letter-signature-line">ลงชื่อ ....................................</div><div>( .................................... )</div><div>ครูประจำชั้น</div></div>
+      <div><div class="letter-signature-line">ลงชื่อ ....................................</div><div>( .................................... )</div><div>หัวหน้าฝ่ายวิชาการ</div></div>
+      <div><div class="letter-signature-line">ลงชื่อ ....................................</div><div>( .................................... )</div><div>ผู้อำนวยการโรงเรียน</div></div>
+    </div>
+    <section class="letter-reply avoid-break">
+      <h3>แบบตอบรับของผู้ปกครอง</h3>
+      <div>ข้าพเจ้า ผู้ปกครองของ ${escapeHtml(recipientName)} ได้รับหนังสือฉบับนี้แล้ว และขอแจ้งว่า</div>
+      ${replyOptionsHtml}
+      <div class="letter-parent-signature">ลงชื่อ .................................... ผู้ปกครอง &nbsp;&nbsp; โทร. ........................</div>
+    </section>
+  </article>`;
+}
+
 // ไฟล์กลางนี้อยู่รากเว็บเสมอ ใช้เป็นฐาน URL เพื่อให้หน้าที่อยู่ในโฟลเดอร์ย่อย
 // เด้งกลับ login ที่รากเว็บได้ถูกต้องทั้งบน GitHub Pages และ local server
 const APP_ROOT_URL = new URL("./", import.meta.url);
@@ -2527,7 +2591,7 @@ function homeroomAuditRoomKey(row) {
   return String(row?.grade_level || "") + "\u0000" + String(row?.classroom || "");
 }
 
-function homeroomAuditRoomLabel(row) {
+export function homeroomAuditRoomLabel(row) {
   const grade = String(row?.grade_level || "").trim();
   const classroom = String(row?.classroom || "").trim();
   if (!grade) return classroom || "ไม่ระบุห้อง";
@@ -2739,7 +2803,7 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
 }
 
 // คำนวณล้วน — ไม่มี query/DOM เพื่อให้รายงานเต็มและการ์ดเจ้าตัวใช้สูตรเดียวกัน
-export function buildHomeroomAudit(raw, { startDate, cutoff } = {}) {
+export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
   const data = raw || {};
   const from = String(data.from || "");
   const to = String(data.to || "");
@@ -2886,13 +2950,14 @@ export function buildHomeroomAudit(raw, { startDate, cutoff } = {}) {
       const responsibleUserIds = new Set(responsibilities.map(item => item.user_id).filter(Boolean));
       const checkedByResponsible = [...responsibleUserIds].some(userId => recorderIds.has(userId));
       const hasAttendance = Boolean(attendance);
+      const roomCutoff = cutoffForGrade(cutoff, room.grade_level);
       // เวลาตัดสินตามระดับชั้นของห้อง — รายงานช่วงเดียวมีได้ทั้งห้องอนุบาลและห้องประถม
       // ที่ใช้เส้นเวลาคนละเส้น (`start` ยังเป็นค่าเดียวทั้งโรงเรียน timingDue จึงไม่ขยับ)
       const timing = cutoffEnabled && hasAttendance
         ? classifyCheckTiming(
             attendance.recordedAtFirst || attendance.recorded_at,
             date,
-            cutoffForGrade(cutoff, room.grade_level)
+            roomCutoff
           )
         : "off";
       const timingDetail = hasAttendance ? {
@@ -2909,6 +2974,12 @@ export function buildHomeroomAudit(raw, { startDate, cutoff } = {}) {
         missing.dates.push(date);
         continue;
       }
+
+      // เมื่อผู้เรียกส่งนาฬิกามา วันนี้ที่ยังไม่เช็คและยังไม่เลยเวลาไม่ใช่งานค้าง
+      // ไม่ส่ง nowIso หรือปิดค่าตั้งเวลาไว้ = พฤติกรรมเดิมทุกฟิลด์
+      const notDueYet = Boolean(nowIso) && cutoffEnabled && !hasAttendance
+        && classifyCheckTiming(nowIso, date, roomCutoff) === "ontime";
+      if (notDueYet) continue;
 
       stat.due += 1;
       if (cutoffEnabled && date >= cutoff.start) stat.timingDue += 1;
@@ -3438,10 +3509,10 @@ export async function loadMyProjects(year, staffId) {
 // โหลดเฉพาะงานส่วนตัวที่หน้าแรกต้องใช้ — ยิงพร้อมกันและไม่ดึงประวัติเช็คชื่อทั้งเดือน
 export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
   if (!staffId || !year || !today) {
-    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null };
+    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null };
   }
 
-  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap] = await Promise.all([
+  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff] = await Promise.all([
     listMyDutySwaps(),
     sb.rpc("my_coverage_from", { p_from: today }),
     sb.from("duty_roster")
@@ -3456,7 +3527,9 @@ export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
       .eq("staff_id", staffId)
       .order("grade_level")
       .order("classroom"),
-    loadMyTeachingGap({ staffId, year })
+    loadMyTeachingGap({ staffId, year }),
+    // ค่าตั้งเวลาเป็นข้อมูลเสริม — อ่านไม่ได้ต้องคงการ์ดแบบเดิม ไม่ทำให้การ์ดทั้งใบหาย
+    getDailyAttendanceCutoff().catch(() => null)
   ]);
 
   if (coverageRes.error) {
@@ -3473,7 +3546,8 @@ export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
     duty: dutyRes.data || [],
     projects,
     homerooms: homeroomRes.data || [],
-    teachingGap
+    teachingGap,
+    cutoff
   };
 }
 
@@ -3497,7 +3571,7 @@ const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุ�
 // คำนวณล้วนสำหรับการ์ด “งานของฉัน” — ผู้เรียกต้อง escape ข้อความก่อนใส่ DOM
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
-  pendingApprovals = 0, isApprover = false
+  pendingApprovals = 0, isApprover = false, cutoff = null, nowIso = new Date().toISOString()
 } = {}) {
   const alerts = [];
 
@@ -3517,13 +3591,33 @@ export function pickMyDashboardAlerts({
       const key = homeroomAuditRoomKey(room);
       return activeRoomKeys.has(key) && !checkedRoomKeys.has(key);
     });
-    if (unchecked.length) {
-      const labels = unchecked.map(homeroomAuditRoomLabel);
+    const pending = [];
+    const lateByTime = new Map();
+    for (const room of unchecked) {
+      const roomCutoff = cutoffForGrade(cutoff, room.grade_level);
+      if (classifyCheckTiming(nowIso, today, roomCutoff) !== "late") {
+        pending.push(room);
+        continue;
+      }
+      if (!lateByTime.has(roomCutoff.time)) lateByTime.set(roomCutoff.time, []);
+      lateByTime.get(roomCutoff.time).push(room);
+    }
+    if (pending.length) {
+      const labels = pending.map(homeroomAuditRoomLabel);
       alerts.push({
         text: `ห้อง ${labels.join(", ")} ยังไม่ได้เช็คชื่อวันนี้`,
         href: "general-affairs/daily-attendance.html",
         linkLabel: "ไปเช็คชื่อ",
         kind: "ค้าง"
+      });
+    }
+    for (const [time, rooms] of lateByTime) {
+      const labels = rooms.map(homeroomAuditRoomLabel);
+      alerts.push({
+        text: `ห้อง ${labels.join(", ")} ยังไม่ได้เช็คชื่อ · เลยกำหนด ${time} น. แล้ว`,
+        href: "general-affairs/daily-attendance.html",
+        linkLabel: "ไปเช็คชื่อ",
+        kind: "วันนี้"
       });
     }
   }
