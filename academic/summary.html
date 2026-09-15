@@ -433,7 +433,7 @@ let compStudents = [], coreCompetencies = [], sourceWeights = [], interpretation
 let competencyConfigError = "", competencySettingsError = "", competencyPlacementError = "", selectedCompStudentId = "";
 let placementWarning = "";
 let subjectStructureMissing = false;
-let activitySummaryByStudent = new Map(), activitySummaryError = "";
+let activitySummaryByStudent = new Map(), activitySummaryError = "", activityScopeTerm = "";
 // แท็บ "ผลการเรียนรายคน" (GPA)
 let gpaStudents = [], gpaPlacementError = "", selectedGpaStudentId = "";
 let gpaResultsMap = null, gpaResultsKey = "", gpaResultsError = "";
@@ -685,7 +685,7 @@ elSubject.addEventListener("change", async () => {
   if (placementResult.missing > 0) {
     placementWarning = "นักเรียน " + placementResult.missing + " คนยังไม่มีประวัติชั้น/ห้องของปี " + currentSubject.year + " จึงแสดงได้เมื่อเลือกทุกห้อง";
   }
-  await loadActivitySummaries(currentSubject.year, students.map(student => student.id));
+  await loadActivitySummaries(currentSubject.year, currentSubject.term, students.map(student => student.id));
   await loadClassroomsByGrade(currentSubject.grade_level, currentSubject.year);
 
   populateStudentDropdown();
@@ -694,16 +694,20 @@ elSubject.addEventListener("change", async () => {
 
 elStudent.addEventListener("change", render);
 
-async function loadActivitySummaries(year, studentIds) {
+async function loadActivitySummaries(year, subjectTerm, studentIds) {
   activitySummaryByStudent = new Map();
   activitySummaryError = "";
+  activityScopeTerm = subjectTerm || "";
   if (!year || !studentIds.length) return;
 
-  const activityResult = await sb.from("competency_assessments")
+  // วิชามีภาคเรียน ⟹ เอาเฉพาะกิจกรรมภาคเรียนเดียวกัน บวกกิจกรรมที่ไม่ระบุภาคเรียน (ทั้งปี)
+  // วิชาไม่มีภาคเรียน (ประถม/รายปี) ⟹ ไม่กรอง คงพฤติกรรมเดิมไว้
+  let activityQuery = sb.from("competency_assessments")
     .select("id,name,year,term,in_transcript")
     .eq("year", year)
-    .eq("source_type", "กิจกรรม")
-    .order("created_at");
+    .eq("source_type", "กิจกรรม");
+  if (subjectTerm) activityQuery = activityQuery.or(`term.eq.${subjectTerm},term.is.null`);
+  const activityResult = await activityQuery.order("created_at");
   if (activityResult.error) {
     activitySummaryError = activityResult.error.message;
     return;
@@ -760,8 +764,11 @@ function renderActivitySummarySection(studentId) {
       (result && !result.passed && result.note ? "<br><span class='result-note'>หมายเหตุ: " + escapeHtml(result.note) + "</span>" : "") +
       "</span><span>" + badge + "</span></div>";
   }).join("");
-  return "<div class='section'><div class='section-title'>กิจกรรมพัฒนาผู้เรียน</div>" +
-    (html || "<div class='hint'>ยังไม่ได้ลงทะเบียนกิจกรรมในปีนี้</div>") + "</div>";
+  const scopeLabel = activityScopeTerm ? " · ภาคเรียน " + escapeHtml(activityScopeTerm) : " · ทั้งปี";
+  return "<div class='section'><div class='section-title'>กิจกรรมพัฒนาผู้เรียน" + scopeLabel + "</div>" +
+    (html || "<div class='hint'>" +
+      (activityScopeTerm ? "ยังไม่ได้ลงทะเบียนกิจกรรมในภาคเรียนนี้" : "ยังไม่ได้ลงทะเบียนกิจกรรมในปีนี้") +
+      "</div>") + "</div>";
 }
 
 function showEmpty(msg) {
