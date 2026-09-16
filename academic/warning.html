@@ -92,6 +92,7 @@
   .btn:disabled { background: var(--line); cursor: not-allowed; color: var(--muted); }
 
   .summary-line { font-size: 15px; font-weight: 500; }
+  .signer-picker-list { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 
   .student-card { padding: 0; overflow: hidden; margin-bottom: 16px; }
   .student-head {
@@ -272,8 +273,8 @@
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, MS_MAKEUP_RATIO,
     getSetting, homeroomAuditRoomLabel, SCHOOL_LETTER_CSS, renderSchoolLetter,
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
-    loadLetterSigners, issueStudentLetter, loadIssuedLetters
-  } from "../supabase-client.js?v=20260916-1";
+    loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters
+  } from "../supabase-client.js?v=20260916-2";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -289,6 +290,8 @@
   const toast = document.getElementById("toast");
   let flaggedStudents = [];
   let issuedLettersByStudent = new Map();
+  let teachersByRoom = new Map();
+  let signerByRoom = new Map();
   let reportGrade = "";
   let reportYear = "";
   let reportTerm = "";
@@ -344,6 +347,47 @@
     } else {
       badge.outerHTML = issuedBadgeHtml(letter);
     }
+  }
+
+  function latestHomeroomStaffId(students, issuedLetters, classroom) {
+    const studentIds = new Set(students
+      .filter(student => String(student.classroom || "") === classroom)
+      .map(student => String(student.id)));
+    const latest = issuedLetters
+      .filter(letter => studentIds.has(String(letter.student_id)))
+      .reduce((current, letter) => !current || Number(letter.doc_no) > Number(current.doc_no) ? letter : current, null);
+    return latest?.homeroom_staff_id || null;
+  }
+
+  async function loadSignerChoices(students, allStudents, issuedLetters, year, grade) {
+    teachersByRoom = new Map();
+    signerByRoom = new Map();
+    const classrooms = [...new Set(students
+      .map(student => String(student.classroom || "").trim())
+      .filter(Boolean))];
+    const entries = await Promise.all(classrooms.map(async classroom => ({
+      classroom,
+      teachers: await listHomeroomTeachers(year, grade, classroom)
+    })));
+    for (const { classroom, teachers } of entries) {
+      teachersByRoom.set(classroom, teachers);
+      if (teachers.length <= 1) continue;
+      const previousStaffId = latestHomeroomStaffId(allStudents, issuedLetters, classroom);
+      const initialTeacher = teachers.find(teacher => String(teacher.staffId) === String(previousStaffId)) || teachers[0];
+      signerByRoom.set(classroom, String(initialTeacher.staffId));
+    }
+  }
+
+  function signerPickerHtml(grade) {
+    const rooms = [...teachersByRoom.entries()].filter(([, teachers]) => teachers.length >= 2);
+    if (rooms.length === 0) return "";
+    return `<div class='signer-picker-list'>${rooms.map(([classroom, teachers], index) => {
+      const id = `signer-${index + 1}`;
+      const selectedStaffId = signerByRoom.get(classroom);
+      const roomLabel = homeroomAuditRoomLabel({ grade_level: grade, classroom });
+      const options = teachers.map(teacher => `<option value='${escapeHtml(teacher.staffId)}'${String(teacher.staffId) === String(selectedStaffId) ? " selected" : ""}>${escapeHtml(teacher.fullName)}</option>`).join("");
+      return `<div class='field'><label for='${id}'>ครูประจำชั้นผู้ลงนาม · ${escapeHtml(roomLabel)}</label><select id='${id}' data-signer-room='${escapeHtml(classroom)}'>${options}</select></div>`;
+    }).join("")}</div>`;
   }
 
   function renderWarningLetter(flagged, { grade, year, term, warnPercent }, letterFields = {}) {
@@ -631,12 +675,19 @@
       }
 
       if (flaggedStudents.length === 0) {
+        teachersByRoom = new Map();
+        signerByRoom = new Map();
         elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนที่ถึงเกณฑ์เฝ้าระวังในชั้นนี้ (ขาดสุทธิต่ำกว่า " + warnPercent + "%)</div>";
       } else {
         const studentRank = item => item.retake ? 2 : item.critical ? 1 : 0;
         flaggedStudents.sort((a,b) => studentRank(b) - studentRank(a) || b.maxPct - a.maxPct);
+        await loadSignerChoices(flaggedStudents.map(item => item.stu), targetStudents, issuedLetters, year, grade);
 
-        let html = `<div class='card summary-line'>นักเรียนทั้งหมด ${targetStudents.length} คน · เสี่ยงติด มส. <b>${flaggedStudents.length}</b> คน</div>`;
+        const summaryText = `นักเรียนทั้งหมด ${targetStudents.length} คน · เสี่ยงติด มส. <b>${flaggedStudents.length}</b> คน`;
+        const pickerHtml = signerPickerHtml(grade);
+        let html = pickerHtml
+          ? `<div class='card'><div class='summary-line'>${summaryText}</div>${pickerHtml}</div>`
+          : `<div class='card summary-line'>${summaryText}</div>`;
 
         for (const f of flaggedStudents) {
           const type = f.critical ? "danger" : "warn";
@@ -698,6 +749,12 @@
     }
   }
 
+  elResults.addEventListener("change", event => {
+    const select = event.target.closest("[data-signer-room]");
+    if (!select) return;
+    signerByRoom.set(String(select.dataset.signerRoom), select.value);
+  });
+
   elResults.addEventListener("click", async event => {
     const button = event.target.closest("[data-print-student]");
     if (!button || printing) return;
@@ -708,6 +765,8 @@
     const buttons = [...elResults.querySelectorAll("[data-print-student]")];
     buttons.forEach(item => { item.disabled = true; });
     try {
+      const classroom = String(flagged.stu.classroom || "");
+      const staffId = signerByRoom.get(classroom) || null;
       const issuedLetter = await issueStudentLetter({
         studentId: flagged.stu.id,
         year: reportYear,
@@ -716,9 +775,13 @@
         classroom: flagged.stu.classroom,
         term: elTerm.value,
         meetDate: elMeetDate.value,
-        meetTime: elMeetTime.value
+        meetTime: elMeetTime.value,
+        homeroomStaffId: staffId
       });
       const signers = await loadLetterSigners(reportYear, reportGrade, flagged.stu.classroom);
+      const homeroomName = staffId
+        ? (teachersByRoom.get(classroom) || []).find(teacher => String(teacher.staffId) === String(staffId))?.fullName || signers.homeroomName
+        : signers.homeroomName;
       elPrintArea.innerHTML = renderWarningLetter(flagged, {
         grade: reportGrade,
         year: reportYear,
@@ -729,7 +792,8 @@
         issuedDateText: thaiLetterDateText(issuedLetter.issued_date),
         meetDateText: thaiShortDateText(issuedLetter.meet_date),
         meetTime: String(issuedLetter.meet_time || "").slice(0, 5),
-        ...signers
+        ...signers,
+        homeroomName
       });
       await document.fonts.ready;
       try {

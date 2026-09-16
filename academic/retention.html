@@ -77,6 +77,7 @@
   .summary-line { font-size: 15px; font-weight: 500; }
   .summary-line b { color: var(--danger); }
   .summary-line b.trend { color: var(--amber); }
+  .signer-picker-list { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 
   .student-card { padding: 0; overflow: hidden; }
   .student-head {
@@ -236,8 +237,8 @@ import {
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter,
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
-  loadLetterSigners, issueStudentLetter, loadIssuedLetters
-} from "../supabase-client.js?v=20260916-1";
+  loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters
+} from "../supabase-client.js?v=20260916-2";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -258,6 +259,8 @@ const elPrintArea = document.getElementById("print-area");
 const el = id => document.getElementById(id);
 let reportRows = [];
 let issuedLettersByStudent = new Map();
+let teachersByRoom = new Map();
+let signerByRoom = new Map();
 let reportGrade = "";
 let reportYear = "";
 let printing = false;
@@ -314,6 +317,47 @@ function updateIssuedCard(studentId, letter) {
   } else {
     badge.outerHTML = issuedBadgeHtml(letter);
   }
+}
+
+function latestHomeroomStaffId(students, issuedLetters, classroom) {
+  const studentIds = new Set(students
+    .filter(student => String(student.classroom || "") === classroom)
+    .map(student => String(student.id)));
+  const latest = issuedLetters
+    .filter(letter => studentIds.has(String(letter.student_id)))
+    .reduce((current, letter) => !current || Number(letter.doc_no) > Number(current.doc_no) ? letter : current, null);
+  return latest?.homeroom_staff_id || null;
+}
+
+async function loadSignerChoices(students, allStudents, issuedLetters, year, grade) {
+  teachersByRoom = new Map();
+  signerByRoom = new Map();
+  const classrooms = [...new Set(students
+    .map(student => String(student.classroom || "").trim())
+    .filter(Boolean))];
+  const entries = await Promise.all(classrooms.map(async classroom => ({
+    classroom,
+    teachers: await listHomeroomTeachers(year, grade, classroom)
+  })));
+  for (const { classroom, teachers } of entries) {
+    teachersByRoom.set(classroom, teachers);
+    if (teachers.length <= 1) continue;
+    const previousStaffId = latestHomeroomStaffId(allStudents, issuedLetters, classroom);
+    const initialTeacher = teachers.find(teacher => String(teacher.staffId) === String(previousStaffId)) || teachers[0];
+    signerByRoom.set(classroom, String(initialTeacher.staffId));
+  }
+}
+
+function signerPickerHtml(grade) {
+  const rooms = [...teachersByRoom.entries()].filter(([, teachers]) => teachers.length >= 2);
+  if (rooms.length === 0) return "";
+  return `<div class='signer-picker-list'>${rooms.map(([classroom, teachers], index) => {
+    const id = `signer-${index + 1}`;
+    const selectedStaffId = signerByRoom.get(classroom);
+    const roomLabel = homeroomAuditRoomLabel({ grade_level: grade, classroom });
+    const options = teachers.map(teacher => `<option value='${escapeHtml(teacher.staffId)}'${String(teacher.staffId) === String(selectedStaffId) ? " selected" : ""}>${escapeHtml(teacher.fullName)}</option>`).join("");
+    return `<div class='field'><label for='${id}'>ครูประจำชั้นผู้ลงนาม · ${escapeHtml(roomLabel)}</label><select id='${id}' data-signer-room='${escapeHtml(classroom)}'>${options}</select></div>`;
+  }).join("")}</div>`;
 }
 
 function renderRetentionLetter(row, grade, year, letterFields = {}) {
@@ -436,6 +480,8 @@ async function loadReport() {
   const year = elYear.value;
   if (!grade || !year) { showEmpty("เลือกชั้นและปีการศึกษาเพื่อดูรายงาน"); return; }
 
+  teachersByRoom = new Map();
+  signerByRoom = new Map();
   showEmpty("กำลังโหลดข้อมูล...");
 
   // สารบบวิชาทั้งปีของชั้นนี้ — ใช้ดูว่านักเรียนลงทะเบียนครบหรือยัง
@@ -499,6 +545,13 @@ async function loadReport() {
     return (a.stu.student_no || "").localeCompare(b.stu.student_no || "");
   });
 
+  try {
+    const students = rows.map(row => row.stu);
+    await loadSignerChoices(students, students, issuedLetters, year, grade);
+  } catch (e) {
+    showEmpty(e.message); return;
+  }
+
   renderReport(rows, grade, year, classCoverage);
 }
 
@@ -531,13 +584,14 @@ function renderReport(rows, grade, year, classCoverage) {
   const missingMore = classCoverage.missing.length > 3
     ? " และอีก " + (classCoverage.missing.length - 3) + " วิชา"
     : "";
+  const pickerHtml = signerPickerHtml(grade);
   let html =
     "<div class='card'><div class='summary-line'>" + summaryParts + "</div>" +
     (!classCoverage.ready
       ? "<div class='warn-note'>⚠️ " + escapeHtml(classCoverage.reason) +
         (missingNames.length ? "<br>ยังไม่ได้ลงทะเบียน: " + missingNames.join(" · ") + missingMore : "") +
         "<br>ตัวเลขนี้เป็นแนวโน้ม ยังใช้ตัดสินเลื่อนชั้น/ซ้ำชั้นไม่ได้</div>"
-      : "") +
+      : "") + pickerHtml +
     "</div>";
 
   for (const row of rows) html += renderStudentRow(row);
@@ -614,6 +668,12 @@ function renderStudentRow(row) {
   );
 }
 
+elResult.addEventListener("change", event => {
+  const select = event.target.closest("[data-signer-room]");
+  if (!select) return;
+  signerByRoom.set(String(select.dataset.signerRoom), select.value);
+});
+
 elResult.addEventListener("click", async event => {
   const button = event.target.closest("[data-print-student]");
   if (!button || printing) return;
@@ -624,6 +684,8 @@ elResult.addEventListener("click", async event => {
   const buttons = [...elResult.querySelectorAll("[data-print-student]")];
   buttons.forEach(item => { item.disabled = true; });
   try {
+    const classroom = String(row.stu.classroom || "");
+    const staffId = signerByRoom.get(classroom) || null;
     const issuedLetter = await issueStudentLetter({
       studentId: row.stu.id,
       year: reportYear,
@@ -632,15 +694,20 @@ elResult.addEventListener("click", async event => {
       classroom: row.stu.classroom,
       term: null,
       meetDate: elMeetDate.value,
-      meetTime: elMeetTime.value
+      meetTime: elMeetTime.value,
+      homeroomStaffId: staffId
     });
     const signers = await loadLetterSigners(reportYear, reportGrade, row.stu.classroom);
+    const homeroomName = staffId
+      ? (teachersByRoom.get(classroom) || []).find(teacher => String(teacher.staffId) === String(staffId))?.fullName || signers.homeroomName
+      : signers.homeroomName;
     elPrintArea.innerHTML = renderRetentionLetter(row, reportGrade, reportYear, {
       docNoText: `${issuedLetter.doc_no}/${issuedLetter.year}`,
       issuedDateText: thaiLetterDateText(issuedLetter.issued_date),
       meetDateText: thaiShortDateText(issuedLetter.meet_date),
       meetTime: String(issuedLetter.meet_time || "").slice(0, 5),
-      ...signers
+      ...signers,
+      homeroomName
     });
     await document.fonts.ready;
     try {
