@@ -64,12 +64,19 @@ export const SCHOOL_LETTER_CSS = `
 export function renderSchoolLetter({
   schoolName = "", schoolAddress = "", logoSrc,
   subject, recipientName, bodyHtml = "", tableHtml = "", summaryHtml = "", closingHtml = "",
-  replyOptionsHtml = ""
+  replyOptionsHtml = "", docNoText = "", issuedDateText = "", homeroomName = "",
+  academicHeadName = "", directorName = ""
 }) {
   const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
   })[ch]);
   const hideSchoolText = schoolName || schoolAddress ? "" : " hidden";
+  const docNoCell = docNoText ? `ที่ ${escapeHtml(docNoText)}` : "ที่ ...../.....";
+  const dateCell = issuedDateText ? `วันที่ ${escapeHtml(issuedDateText)}` : "วันที่ ..... เดือน ......... พ.ศ. .....";
+  const signerBlank = "....................................";
+  const signatureCell = (name, role) =>
+    `<div><div class="letter-signature-line">ลงชื่อ ${signerBlank}</div>` +
+    `<div>( ${name ? escapeHtml(name) : signerBlank} )</div><div>${role}</div></div>`;
 
   // schoolName/schoolAddress/subject/recipientName ถูก escape ที่นี่
   // ส่วนพารามิเตอร์ลงท้าย Html เป็น HTML ที่ผู้เรียกต้อง escape ข้อมูลมาแล้ว ฟังก์ชันนี้จึงไม่แตะ
@@ -81,7 +88,7 @@ export function renderSchoolLetter({
         <div class="school-address">${escapeHtml(schoolAddress)}</div>
       </div>
     </div>
-    <div class="letter-meta"><span>ที่ ...../.....</span><span>วันที่ ..... เดือน ......... พ.ศ. .....</span></div>
+    <div class="letter-meta"><span>${docNoCell}</span><span>${dateCell}</span></div>
     <div class="letter-line"><b>เรื่อง</b> ${escapeHtml(subject)}</div>
     <div class="letter-line"><b>เรียน</b> ผู้ปกครองของ ${escapeHtml(recipientName)}</div>
     ${bodyHtml}
@@ -89,9 +96,9 @@ export function renderSchoolLetter({
     ${summaryHtml}
     ${closingHtml}
     <div class="letter-signatures avoid-break">
-      <div><div class="letter-signature-line">ลงชื่อ ....................................</div><div>( .................................... )</div><div>ครูประจำชั้น</div></div>
-      <div><div class="letter-signature-line">ลงชื่อ ....................................</div><div>( .................................... )</div><div>หัวหน้าฝ่ายวิชาการ</div></div>
-      <div><div class="letter-signature-line">ลงชื่อ ....................................</div><div>( .................................... )</div><div>ผู้อำนวยการโรงเรียน</div></div>
+      ${signatureCell(homeroomName, "ครูประจำชั้น")}
+      ${signatureCell(academicHeadName, "หัวหน้าฝ่ายวิชาการ")}
+      ${signatureCell(directorName, "ผู้อำนวยการโรงเรียน")}
     </div>
     <section class="letter-reply avoid-break">
       <h3>แบบตอบรับของผู้ปกครอง</h3>
@@ -105,6 +112,66 @@ export function renderSchoolLetter({
 // ไฟล์กลางนี้อยู่รากเว็บเสมอ ใช้เป็นฐาน URL เพื่อให้หน้าที่อยู่ในโฟลเดอร์ย่อย
 // เด้งกลับ login ที่รากเว็บได้ถูกต้องทั้งบน GitHub Pages และ local server
 const APP_ROOT_URL = new URL("./", import.meta.url);
+
+const THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+const THAI_SHORT_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+function thaiDateParts(dateStr) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return { year: year + 543, month: month - 1, day };
+}
+
+export function thaiLetterDateText(dateStr) {
+  const parts = thaiDateParts(dateStr);
+  return parts ? `${parts.day} เดือน ${THAI_MONTHS[parts.month]} พ.ศ. ${parts.year}` : "";
+}
+
+export function thaiShortDateText(dateStr) {
+  const parts = thaiDateParts(dateStr);
+  return parts ? `${parts.day} ${THAI_SHORT_MONTHS[parts.month]} ${parts.year}` : "";
+}
+
+export async function loadLetterSigners(year, gradeLevel, classroom) {
+  const { data, error } = await sb.rpc("get_letter_signers", {
+    p_year: year, p_grade_level: gradeLevel, p_classroom: classroom
+  });
+  if (error) throw new Error("อ่านชื่อผู้ลงนามไม่สำเร็จ: " + error.message);
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    homeroomName: row?.homeroom_name || "",
+    academicHeadName: row?.academic_head_name || "",
+    directorName: row?.director_name || ""
+  };
+}
+
+export async function issueStudentLetter({ studentId, year, kind, gradeLevel, classroom, term, meetDate, meetTime }) {
+  const { data, error } = await sb.rpc("get_or_create_student_letter", {
+    p_student_id: studentId, p_year: year, p_letter_kind: kind,
+    p_grade_level: gradeLevel, p_classroom: classroom,
+    p_term: term || null, p_meet_date: meetDate || null, p_meet_time: meetTime || null
+  });
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function loadIssuedLetters(year, kind, gradeLevel) {
+  const { data, error } = await sb.from("student_letters")
+    .select("student_id,year,doc_no,term,issued_date,meet_date,meet_time")
+    .eq("year", year)
+    .eq("letter_kind", kind)
+    .eq("grade_level", gradeLevel)
+    .order("doc_no", { ascending: true });
+  if (error) throw new Error("อ่านทะเบียนหนังสือไม่สำเร็จ: " + error.message);
+  return data || [];
+}
 
 function appRelativeLocation() {
   const rootPath = APP_ROOT_URL.pathname;

@@ -57,7 +57,7 @@
     margin-bottom: 16px;
   }
   label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 15px; }
-  select {
+  select, input[type="date"], input[type="time"] {
     width: 100%;
     font-family: inherit;
     font-size: 16px;
@@ -67,9 +67,10 @@
     background: var(--white);
     color: var(--ink);
   }
-  select:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .field { margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
   .hint { color: var(--muted); font-size: 14px; }
 
@@ -133,6 +134,7 @@
   .badge.good  { background: var(--teal-soft);  color: var(--teal); }
   .badge.mid   { background: var(--amber-soft); color: var(--amber); }
   .badge.bad   { background: var(--danger-soft); color: var(--danger); }
+  .badge.issued { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
   .result-note { color: var(--muted); font-size: 13px; margin-top: 6px; }
 
   .warn-note {
@@ -143,8 +145,12 @@
     font-size: 13px;
     margin-bottom: 16px;
   }
+  .toast { position: sticky; bottom: 12px; display: none; padding: 10px; border-radius: 8px; text-align: center; margin-top: 12px; font-size: 14px; }
+  .toast.ok { display: block; background: var(--teal-soft); color: var(--teal); }
+  .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
 
   #print-area { position: fixed; left: -100000px; top: 0; width: 186mm; height: 0; overflow: hidden; }
+  @media (max-width: 520px) { .row2 { grid-template-columns: 1fr; gap: 0; } }
   @media print {
     @page { size: A4 portrait; margin: 12mm; }
     .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print { display: none !important; }
@@ -201,12 +207,24 @@
       <label for="filter-year">ปีการศึกษา</label>
       <select id="filter-year"><option value="">— เลือกชั้นก่อน —</option></select>
     </div>
+    <div class="row2">
+      <div class="field">
+        <label for="meet-date">วันนัดพบครูประจำชั้น</label>
+        <input type="date" id="meet-date">
+        <div class="hint">เลือกจากปฏิทิน · ปีในช่องนี้เป็น ค.ศ. (2026) ถูกต้องแล้ว ระบบจะแปลงเป็น พ.ศ. ให้เองตอนพิมพ์</div>
+      </div>
+      <div class="field">
+        <label for="meet-time">เวลานัดพบ</label>
+        <input type="time" id="meet-time">
+      </div>
+    </div>
   </div>
 
   <div id="result-area"></div>
 
   <div class="card hint" id="empty-hint">เลือกชั้นและปีการศึกษาเพื่อดูรายงาน</div>
   <div id="print-area" aria-hidden="true"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
 </div>
 
@@ -216,8 +234,10 @@ import {
   computeStudentSubjectResults, computeGpa,
   pickCountableSubjects, retentionCoverage, isSubjectResultDecided,
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting, homeroomAuditRoomLabel,
-  SCHOOL_LETTER_CSS, renderSchoolLetter
-} from "../supabase-client.js?v=20260914-1";
+  SCHOOL_LETTER_CSS, renderSchoolLetter,
+  bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
+  loadLetterSigners, issueStudentLetter, loadIssuedLetters
+} from "../supabase-client.js?v=20260916-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -230,16 +250,29 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 
 const elGrade  = document.getElementById("filter-grade");
 const elYear   = document.getElementById("filter-year");
+const elMeetDate = document.getElementById("meet-date");
+const elMeetTime = document.getElementById("meet-time");
 const elResult = document.getElementById("result-area");
 const elEmptyHint = document.getElementById("empty-hint");
 const elPrintArea = document.getElementById("print-area");
 const el = id => document.getElementById(id);
 let reportRows = [];
+let issuedLettersByStudent = new Map();
 let reportGrade = "";
 let reportYear = "";
 let printing = false;
 let schoolName = "";
 let schoolAddress = "";
+
+elMeetDate.value = addDaysStr(toDateStr(bangkokNow()), 7);
+elMeetTime.value = "09:00";
+
+function showToast(message, ok = true) {
+  const box = el("toast");
+  box.textContent = message;
+  box.className = "toast " + (ok ? "ok" : "err");
+  setTimeout(() => { box.className = "toast"; }, 4500);
+}
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, ch => ({
@@ -264,8 +297,31 @@ function retentionReasonLines(row) {
   return reasons;
 }
 
-function renderRetentionLetter(row, grade, year) {
+function issuedBadgeHtml(letter) {
+  if (!letter) return "";
+  return `<span class='badge issued' data-issued-letter>ออกหนังสือแล้ว ที่ ${escapeHtml(letter.doc_no)}/${escapeHtml(letter.year)} · ${escapeHtml(thaiShortDateText(letter.issued_date))}</span>`;
+}
+
+function updateIssuedCard(studentId, letter) {
+  issuedLettersByStudent.set(String(studentId), letter);
+  const button = [...elResult.querySelectorAll("[data-print-student]")]
+    .find(item => item.dataset.printStudent === String(studentId));
+  if (!button) return;
+  button.textContent = "พิมพ์ซ้ำ";
+  let badge = button.parentElement.querySelector("[data-issued-letter]");
+  if (!badge) {
+    button.insertAdjacentHTML("beforebegin", issuedBadgeHtml(letter));
+  } else {
+    badge.outerHTML = issuedBadgeHtml(letter);
+  }
+}
+
+function renderRetentionLetter(row, grade, year, letterFields = {}) {
   const { stu, subjList, incompleteCount, coverage, official } = row;
+  const {
+    docNoText = "", issuedDateText = "", homeroomName = "", academicHeadName = "", directorName = "",
+    meetDateText = "", meetTime = ""
+  } = letterFields;
   const room = homeroomAuditRoomLabel({ grade_level:grade, classroom:stu.classroom });
   const failingSubjects = subjList.filter(isFailingSubject);
   const subjectRows = failingSubjects.map((item, index) => {
@@ -296,9 +352,14 @@ function renderRetentionLetter(row, grade, year) {
       <tbody>${subjectRows}</tbody>
     </table>`,
     summaryHtml: `<div class="letter-summary avoid-break"><b>สรุปผล</b><br>${reasons}<br><b>สถานะ</b> ${status}${statusNote}</div>`,
-    closingHtml: `<p class="letter-body">จึงขอความร่วมมือผู้ปกครองกำกับดูแลและประสานกับโรงเรียน เพื่อร่วมกันวางแผนช่วยเหลือนักเรียน กรุณาติดต่อครูประจำชั้นภายในวันที่ .......</p>`,
+    closingHtml: `<p class="letter-body">จึงขอความร่วมมือผู้ปกครองกำกับดูแลและประสานกับโรงเรียน เพื่อร่วมกันวางแผนช่วยเหลือนักเรียน กรุณาติดต่อครูประจำชั้นภายในวันที่ ${meetDateText ? escapeHtml(meetDateText) : "......."}</p>`,
     replyOptionsHtml: `<div class="letter-check">☐ รับทราบและจะกำกับดูแล</div>
-      <div class="letter-check">☐ ขอพบครูประจำชั้น วันที่ ........................ เวลา ............ น.</div>`
+      <div class="letter-check">☐ ขอพบครูประจำชั้น วันที่ ${meetDateText ? escapeHtml(meetDateText) : "........................"} เวลา ${meetTime ? escapeHtml(meetTime) : "............"} น.</div>`,
+    docNoText,
+    issuedDateText,
+    homeroomName,
+    academicHeadName,
+    directorName
   });
 }
 
@@ -390,12 +451,17 @@ async function loadReport() {
   // รวมผลทุกวิชาของนักเรียนทุกคนในชั้น+ปี (ตรรกะกลาง ใช้ร่วมกับ summary.html แท็บผลการเรียนรายคน)
   // ไม่ส่ง term = เกณฑ์เรียนซ้ำชั้นคิดรวมทั้งปีเสมอ (พฤติกรรมเดิม)
   let studentResults;
+  let issuedLetters;
   try {
-    studentResults = await computeStudentSubjectResults({ grade, year });
+    [studentResults, issuedLetters] = await Promise.all([
+      computeStudentSubjectResults({ grade, year }),
+      loadIssuedLetters(year, "เรียนซ้ำชั้น", grade)
+    ]);
   } catch (e) {
     showEmpty(e.message); return;
   }
   if (studentResults.size === 0) { showEmpty("ยังไม่มีนักเรียนลงทะเบียนวิชาใดๆ ของชั้น/ปีการศึกษานี้"); return; }
+  issuedLettersByStudent = new Map((issuedLetters || []).map(letter => [String(letter.student_id), letter]));
 
   const unionSubjects = [...new Map(
     [...studentResults.values()].flatMap(entry => entry.subjects.map(item => [item.subject.id, item.subject]))
@@ -521,7 +587,9 @@ function renderStudentRow(row) {
   }
 
   const printButton = flagged
-    ? "<button type='button' class='print-letter-btn no-print' data-print-student='" + escapeHtml(stu.id) + "'>พิมพ์หนังสือติดตาม</button>"
+    ? issuedBadgeHtml(issuedLettersByStudent.get(String(stu.id))) +
+      "<button type='button' class='print-letter-btn no-print' data-print-student='" + escapeHtml(stu.id) + "'>" +
+      (issuedLettersByStudent.has(String(stu.id)) ? "พิมพ์ซ้ำ" : "พิมพ์หนังสือติดตาม") + "</button>"
     : "";
 
   return (
@@ -556,7 +624,24 @@ elResult.addEventListener("click", async event => {
   const buttons = [...elResult.querySelectorAll("[data-print-student]")];
   buttons.forEach(item => { item.disabled = true; });
   try {
-    elPrintArea.innerHTML = renderRetentionLetter(row, reportGrade, reportYear);
+    const issuedLetter = await issueStudentLetter({
+      studentId: row.stu.id,
+      year: reportYear,
+      kind: "เรียนซ้ำชั้น",
+      gradeLevel: reportGrade,
+      classroom: row.stu.classroom,
+      term: null,
+      meetDate: elMeetDate.value,
+      meetTime: elMeetTime.value
+    });
+    const signers = await loadLetterSigners(reportYear, reportGrade, row.stu.classroom);
+    elPrintArea.innerHTML = renderRetentionLetter(row, reportGrade, reportYear, {
+      docNoText: `${issuedLetter.doc_no}/${issuedLetter.year}`,
+      issuedDateText: thaiLetterDateText(issuedLetter.issued_date),
+      meetDateText: thaiShortDateText(issuedLetter.meet_date),
+      meetTime: String(issuedLetter.meet_time || "").slice(0, 5),
+      ...signers
+    });
     await document.fonts.ready;
     try {
       await Promise.all([...el("print-area").querySelectorAll("img")].map(img => img.decode()));
@@ -564,6 +649,9 @@ elResult.addEventListener("click", async event => {
       // รูปเสียยังพิมพ์ข้อความต่อได้ ดีกว่าหยุดทั้งเอกสาร
     }
     window.print();
+    updateIssuedCard(row.stu.id, issuedLetter);
+  } catch (error) {
+    showToast(error.message || "ออกหนังสือไม่สำเร็จ", false);
   } finally {
     elPrintArea.innerHTML = "";
     printing = false;
