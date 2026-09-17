@@ -115,6 +115,9 @@
   .report-link { color:var(--teal); font-weight:600; text-decoration:none; }
   .gap-subject, .makeup-request { padding:12px 0; border-bottom:1px solid var(--line); }
   .gap-subject:last-child, .makeup-request:last-child { border-bottom:0; }
+  /* เน้นคำขอที่เพิ่งส่ง ~3 วิ — ครูเคยส่งซ้ำเพราะไม่เห็นว่าใบแรกเข้าไปแล้ว (2026-09-17) */
+  .makeup-request.just-added { border-left:3px solid var(--teal); border-radius:0 8px 8px 0;
+                               padding-left:10px; background:var(--teal-soft); }
   .gap-title { font-weight:600; }
   .gap-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin-top:9px; }
   .gap-metric { padding:7px 9px; border-radius:8px; background:var(--bg); }
@@ -164,7 +167,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260907-2"></script>
+    <script src="../app-shell.js?v=20260917-1"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -295,7 +298,7 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getSetting, getDailyAttendanceCutoff, loadMyHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge, loadMyTeachingGap,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260917-1";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260917-2";
 
 const session = await requireAuth();
 if (session) {
@@ -426,6 +429,20 @@ if (session) {
       ? `${shortTime(makeup.start_time)}–${shortTime(makeup.end_time)} น.`
       : "ไม่ระบุเวลา";
 
+    // คำขอเดิมที่ชนกัน (วิชาเดียว วันเดียว ยังไม่ถูกปฏิเสธ) หรือ null ถ้าไม่ชน
+    // ⛔ ใช้ "เตือน" เท่านั้น ห้ามปิดกั้น — วันเดียวสอนชดได้หลายรอบจริง และ schema.sql:13401
+    //    จงใจไม่ใส่ unique ไว้ด้วยเหตุผลเดียวกัน
+    // 🪤 ต้องกัน excludeId ไม่งั้นการกดแก้คำขอเดิมแล้วส่งใหม่จะเตือนว่าซ้ำกับตัวเอง
+    function findExistingMakeupRequest(makeups, { subjectId, date, excludeId = null, startTime = "" } = {}) {
+      const clashes = (makeups || []).filter(makeup =>
+        String(makeup.subject_id) === String(subjectId) &&
+        String(makeup.makeup_date) === String(date) &&
+        String(makeup.id) !== String(excludeId ?? "") &&
+        (makeup.approval_status || "รออนุมัติ") !== "ไม่อนุมัติ");
+      if (!clashes.length) return null;
+      return clashes.find(makeup => shortTime(makeup.start_time) === shortTime(startTime)) || clashes[0];
+    }
+
     function renderTeachingGapSubjects() {
       const rows = (teachingGapReport?.rows || []).filter(row => row.required > 0);
       el("my-teaching-gap-list").innerHTML = rows.length ? rows.map(row => {
@@ -496,6 +513,20 @@ if (session) {
       renderMakeupFormOptions(el("makeup-subject").value);
     }
 
+    // เลื่อนไปให้เห็นคำขอที่เพิ่งส่งแล้วเน้นไว้ 3 วินาที
+    // 🔑 การ์ด "คำขอของฉัน" อยู่เหนือฟอร์ม ส่งเสร็จแล้วจอค้างที่ฟอร์มเปล่า ครูจึงไม่รู้ว่าส่งติด
+    //    (ต้นเหตุจริงของคำขอซ้ำ 2 ใบ 2026-09-16 — ห่างกัน 1 นาที 42 วินาที)
+    function spotlightMakeupRequest(makeupId) {
+      const list = el("my-makeup-requests");
+      list.scrollIntoView({ behavior:"smooth", block:"center" });
+      if (!makeupId) return;
+      const row = list.querySelector(`[data-makeup-id="${CSS.escape(String(makeupId))}"]`);
+      if (!row) return;
+      row.classList.add("just-added");
+      clearTimeout(spotlightMakeupRequest.timer);
+      spotlightMakeupRequest.timer = setTimeout(() => row.classList.remove("just-added"), 3000);
+    }
+
     async function loadMyTeachingGapReport() {
       const year = academicYearOf(today, years);
       if (!year) {
@@ -555,6 +586,17 @@ if (session) {
       if (!isValidMakeupPeriods(periods)) {
         return toast("จำนวนคาบต้องมากกว่า 0 ไม่เกิน 12 และเป็นครึ่งคาบ เช่น 0.5, 1 หรือ 2.5", true);
       }
+      const clash = findExistingMakeupRequest(teachingGapReport.makeups, {
+        subjectId, date, excludeId:editingMakeupId, startTime
+      });
+      if (clash && !await window.crsAskConfirm({
+        title: "มีคำขอของวันนี้อยู่แล้ว",
+        message: `${teachingSubjectName(subjectRow.subject)}\n${fmt(clash.makeup_date)} · ${makeupTimeLabel(clash)} · ${fmtPeriods(clash.periods)} คาบ · ${clash.approval_status || "รออนุมัติ"}\n\nถ้าเป็นการสอนชดคนละรอบให้กดส่งเพิ่ม · ถ้าเพิ่งกดส่งไปแล้วให้กดยกเลิก`,
+        okLabel: "ส่งเพิ่มอีกรายการ",
+        requireText: null,
+        danger: false
+      })) return;
+
       const action = editingMakeupId ? "ส่งขออนุมัติใหม่" : "ขออนุมัติสอนชด";
       if (!await window.crsAskConfirm({
         title: action,
@@ -573,6 +615,7 @@ if (session) {
         periods,
         note:note || null
       };
+      const editedId = editingMakeupId;
       let result;
       if (editingMakeupId) {
         result = await sb.from("teacher_makeups").update({
@@ -584,11 +627,12 @@ if (session) {
           updated_at:new Date().toISOString()
         }).eq("id", editingMakeupId);
       } else {
+        // select id กลับมาเพื่อเน้นแถวที่เพิ่งส่ง (RLS อ่านแถวตัวเองได้อยู่แล้ว)
         result = await sb.from("teacher_makeups").insert({
           ...payload,
           staff_id:me.id,
           created_by:session.user.id
-        });
+        }).select("id").maybeSingle();
       }
       makeupBusy = false;
       el("btn-submit-makeup").disabled = false;
@@ -596,6 +640,8 @@ if (session) {
       toast(editingMakeupId ? "ส่งคำขอที่แก้ไขแล้ว" : "ส่งคำขอสอนชดแล้ว");
       resetMakeupForm();
       await loadMyTeachingGapReport();
+      // ไม่มี id ก็เลื่อนอย่างเดียว ห้ามให้การเน้นแถวทำให้การส่งที่สำเร็จแล้วดูเหมือนล้ม
+      spotlightMakeupRequest(editedId || result.data?.id || "");
     });
 
     async function renderMyHomeroomAudit() {

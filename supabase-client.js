@@ -3358,6 +3358,24 @@ export async function isProjectApprover() {
   return data === true;
 }
 
+// ผู้อนุมัติคำขอสอนชด = หัวหน้าวิชาการ (ตำแหน่งตาม app_settings.makeup_approver_position) หรือ admin
+// 🔑 ถามฐานด้วยฟังก์ชันตัวเดียวกับที่ RLS ใช้ตัดสิน หน้าเว็บจึงไม่มีทางโชว์ปุ่มที่กดแล้วฐานปฏิเสธ
+// 🪤 ไม่โยน error เมื่อไม่มีสิทธิ์ — หน้าแรกของครูทั้งโรงเรียนเรียกตัวนี้
+export async function isMakeupApprover() {
+  const { data, error } = await sb.rpc("is_makeup_approver");
+  if (error) return false;
+  return data === true;
+}
+
+// คิวคำขอสอนชดที่รออนุมัติ พร้อมชื่อครูและวิชา
+// 🔴 ต้องผ่าน RPC — staff_select เปิดให้เฉพาะฝ่ายบุคคลและเจ้าของแถว ถ้ายิง staff ตรงจะได้ 0 แถว
+//    เงียบ ๆ แล้วคิวจะขึ้นคำขอที่ไม่มีชื่อครู (บทเรียนเดียวกับ get_letter_signers)
+export async function listPendingMakeupRequests() {
+  const { data, error } = await sb.rpc("list_pending_makeup_requests");
+  if (error) return [];
+  return data || [];
+}
+
 function approvalHistoryOf(project) {
   const rows = project?.approval_history || project?.approvals || [];
   return Array.isArray(rows) ? rows : [];
@@ -3648,7 +3666,8 @@ const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุ�
 // คำนวณล้วนสำหรับการ์ด “งานของฉัน” — ผู้เรียกต้อง escape ข้อความก่อนใส่ DOM
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
-  pendingApprovals = 0, isApprover = false, cutoff = null, nowIso = new Date().toISOString()
+  pendingApprovals = 0, isApprover = false, pendingMakeups = 0, isMakeupApprover = false,
+  cutoff = null, nowIso = new Date().toISOString()
 } = {}) {
   const alerts = [];
 
@@ -3656,6 +3675,16 @@ export function pickMyDashboardAlerts({
     alerts.push({
       text: `มีโครงการรออนุมัติ ${pendingApprovals} รายการ`,
       href: "academic/project-approval.html",
+      linkLabel: "เปิดหน้าอนุมัติ",
+      kind: "รอคุณ"
+    });
+  }
+
+  // คิวของหัวหน้าวิชาการ — อยู่ต่อจากคิวโครงการเพราะเป็นงานที่ค้าง "คนอื่น" เหมือนกัน
+  if (isMakeupApprover && pendingMakeups > 0) {
+    alerts.push({
+      text: `มีคำขอสอนชดรออนุมัติ ${pendingMakeups} รายการ`,
+      href: "academic/makeup-approval.html",
       linkLabel: "เปิดหน้าอนุมัติ",
       kind: "รอคุณ"
     });

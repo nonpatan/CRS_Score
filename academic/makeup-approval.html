@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>อนุมัติคำขอสอนชด — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:         #1f2a2e;
+    --muted:       #5f6b70;
+    --line:        #dfe4e3;
+    --teal:        #0f6e56;
+    --teal-soft:   #e1f5ee;
+    --bg:          #f7f8f7;
+    --white:       #ffffff;
+    --danger:      #a32d2d;
+    --danger-soft: #fceaea;
+    --amber:       #8a5a00;
+    --amber-soft:  #fff4df;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; color: var(--ink); background: var(--bg);
+    font-family: "Sarabun", sans-serif; font-size: 16px; line-height: 1.6;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header h1 { margin: 4px 0; font-size: 23px; }
+  header p { margin: 0 0 8px; color: var(--muted); }
+  header .nav { min-height: 54px; }
+  .card { margin-bottom: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
+  .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .section-head h2 { margin: 0; font-size: 19px; }
+  .section-head p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+  .field { margin-bottom: 14px; }
+  label { display: block; margin-bottom: 5px; font-weight: 600; }
+  textarea {
+    width: 100%; min-height: 96px; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; color: var(--ink); background: var(--white);
+    font-family: inherit; font-size: 16px; resize: vertical;
+  }
+  textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  button {
+    min-height: 44px; padding: 9px 14px; border: 0; border-radius: 8px;
+    font: inherit; font-weight: 600; cursor: pointer; text-align: center;
+  }
+  button.primary { color: var(--white); background: var(--teal); }
+  button.ghost { color: var(--teal); background: var(--teal-soft); }
+  button.danger { color: var(--danger); background: var(--danger-soft); }
+  button:disabled { opacity: .52; cursor: default; }
+  .banner { margin-bottom: 14px; padding: 11px 13px; border-radius: 10px; font-size: 14px; }
+  .banner.info { color: var(--teal); background: var(--teal-soft); }
+  .banner.warn { color: var(--amber); background: var(--amber-soft); }
+  .banner.fail { color: var(--danger); background: var(--danger-soft); }
+  .banner a { color: inherit; font-weight: 700; }
+  .queue-card { margin-top: 12px; padding: 15px; border: 1px solid var(--line); border-radius: 12px; }
+  .queue-title { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+  .meta { margin-top: 4px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .note { margin-top: 12px; padding: 12px; border-radius: 10px; background: var(--bg); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .decision-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+  .reject-form { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .empty { padding: 26px 10px; color: var(--muted); text-align: center; }
+  .toast { position: sticky; z-index: 80; bottom: 14px; margin: 12px auto 0; max-width: 680px; padding: 11px 16px; border-radius: 10px; color: var(--white); background: var(--ink); font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s; }
+  .toast.show { opacity: 1; }
+  .toast.err { background: var(--danger); }
+  [hidden] { display: none !important; }
+  @media (max-width: 560px) {
+    body { padding: 12px; }
+    .card { padding: 14px; }
+    .section-head { display: block; }
+    .decision-actions { grid-template-columns: 1fr; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>อนุมัติคำขอสอนชด</h1>
+    <p>คำขอที่ครูส่งมาเอง — ตรวจวันเวลาและจำนวนคาบก่อนตัดสิน</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260917-1"></script>
+  </header>
+
+  <main class="academic-content">
+    <section class="card" id="gate" hidden></section>
+
+    <div id="content" hidden>
+      <section class="card">
+        <div class="section-head">
+          <div><h2>รออนุมัติ</h2><p id="pending-count">กำลังโหลด…</p></div>
+        </div>
+        <div class="banner info">อนุมัติแล้วระบบจะนับเป็น “สอนชดแล้ว” ทันที · ไม่อนุมัติต้องบอกเหตุผลให้ครูแก้ได้</div>
+        <div id="pending-list"><div class="empty">กำลังโหลด…</div></div>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+</div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, isMakeupApprover, listPendingMakeupRequests
+} from "../supabase-client.js?v=20260917-2";
+
+const session = await requireAuth();
+if (session) {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g,
+    char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[char]);
+
+  const toast = (message, error = false) => {
+    const box = el("toast");
+    box.textContent = message;
+    box.classList.toggle("err", error);
+    box.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => box.classList.remove("show"), 3800);
+  };
+
+  const fmtDate = value => {
+    const date = new Date(String(value) + "T00:00:00Z");
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("th-TH",
+      { day:"numeric", month:"short", year:"numeric", timeZone:"UTC" });
+  };
+  const fmtDateTime = value => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("th-TH",
+      { day:"numeric", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  };
+  const shortTime = value => String(value || "").slice(0, 5);
+  const timeLabel = row => row.start_time && row.end_time
+    ? `${shortTime(row.start_time)}–${shortTime(row.end_time)} น.`
+    : "ไม่ระบุเวลา";
+  const fmtPeriods = value => {
+    const number = Number(value);
+    return Number.isFinite(number) ? String(number) : String(value ?? "—");
+  };
+  const subjectLabel = row => [row.subject_code, row.subject_name, row.grade_level]
+    .filter(Boolean).join(" · ");
+
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+
+  let pending = [];
+  let rejectingId = null;
+  let busy = false;
+
+  function render() {
+    el("pending-count").textContent = pending.length
+      ? `${pending.length} รายการ`
+      : "ไม่มีคำขอรออนุมัติ";
+    el("pending-list").innerHTML = pending.length ? pending.map(row => {
+      const rejecting = rejectingId === row.id;
+      return `<div class="queue-card" data-request="${esc(row.id)}">
+        <div class="queue-title">${esc(row.staff_name || "(ไม่พบชื่อครู)")}</div>
+        <div class="meta">${esc(subjectLabel(row) || "ไม่ระบุวิชา")}</div>
+        <div class="meta">สอนชด ${esc(fmtDate(row.makeup_date))} · ${esc(timeLabel(row))} · ${esc(fmtPeriods(row.periods))} คาบ</div>
+        <div class="meta">ครูส่งคำขอเมื่อ ${esc(fmtDateTime(row.created_at))}</div>
+        ${row.note ? `<div class="note">หมายเหตุจากครู: ${esc(row.note)}</div>` : ""}
+        <div class="decision-actions">
+          <button class="primary" type="button" data-approve>อนุมัติ</button>
+          <button class="danger" type="button" data-reject>${rejecting ? "ยืนยันไม่อนุมัติ" : "ไม่อนุมัติ"}</button>
+        </div>
+        ${rejecting ? `<div class="reject-form">
+          <label for="reason-${esc(row.id)}">เหตุผลที่ไม่อนุมัติ (บังคับ)</label>
+          <textarea id="reason-${esc(row.id)}" data-reason maxlength="500" placeholder="บอกครูว่าต้องแก้อะไร"></textarea>
+        </div>` : ""}
+      </div>`;
+    }).join("") : '<div class="empty">ไม่มีคำขอรออนุมัติ</div>';
+  }
+
+  async function loadQueue() {
+    pending = await listPendingMakeupRequests();
+    if (rejectingId && !pending.some(row => row.id === rejectingId)) rejectingId = null;
+    render();
+  }
+
+  el("pending-list").addEventListener("click", async event => {
+    const card = event.target.closest("[data-request]");
+    if (!card || busy) return;
+    const row = pending.find(item => item.id === card.dataset.request);
+    if (!row) return;
+    const now = new Date().toISOString();
+    const summary = `${row.staff_name || "ครู"} · ${subjectLabel(row)}\n${fmtDate(row.makeup_date)} · ${timeLabel(row)} · ${fmtPeriods(row.periods)} คาบ`;
+
+    if (event.target.closest("[data-approve]")) {
+      if (!await window.crsAskConfirm({
+        title: "อนุมัติคำขอสอนชด",
+        message: `${summary}\nรายการนี้จะถูกนับเป็นสอนชดแล้วทันที`,
+        okLabel: "อนุมัติ",
+        requireText: null,
+        danger: false
+      })) return;
+      busy = true;
+      const { error } = await sb.from("teacher_makeups").update({
+        approval_status:"อนุมัติ", approval_note:null,
+        approved_by:session.user.id, approved_at:now, updated_at:now
+      }).eq("id", row.id);
+      busy = false;
+      if (error) return toast("อนุมัติคำขอไม่สำเร็จ: " + error.message, true);
+      toast("อนุมัติคำขอสอนชดแล้ว");
+      await loadQueue();
+      return;
+    }
+
+    if (!event.target.closest("[data-reject]")) return;
+    // กดครั้งแรก = เปิดช่องเหตุผล · กดซ้ำ = ยืนยัน (แพตเทิร์นเดียวกับหน้าฝ่ายบุคคลเดิม)
+    if (rejectingId !== row.id) {
+      rejectingId = row.id;
+      render();
+      el("pending-list").querySelector(`[data-request="${CSS.escape(row.id)}"] [data-reason]`)?.focus();
+      return;
+    }
+    const reason = card.querySelector("[data-reason]")?.value.trim() || "";
+    // 🪤 ฐานข้อมูลบังคับให้ 'ไม่อนุมัติ' ต้องมีเหตุผลเสมอ — กันที่หน้าจอก่อนเพื่อไม่ให้เจอ error ดิบ
+    if (!reason) return toast("กรุณาระบุเหตุผลที่ไม่อนุมัติ", true);
+    if (!await window.crsAskConfirm({
+      title: "ไม่อนุมัติคำขอสอนชด",
+      message: `${summary}\nเหตุผล: ${reason}`,
+      okLabel: "ไม่อนุมัติ",
+      requireText: null,
+      danger: true
+    })) return;
+    busy = true;
+    const { error } = await sb.from("teacher_makeups").update({
+      approval_status:"ไม่อนุมัติ", approval_note:reason,
+      approved_by:session.user.id, approved_at:now, updated_at:now
+    }).eq("id", row.id);
+    busy = false;
+    if (error) return toast("บันทึกผลไม่อนุมัติไม่สำเร็จ: " + error.message, true);
+    rejectingId = null;
+    toast("บันทึกผลไม่อนุมัติแล้ว · ครูจะเห็นเหตุผลที่หน้างานของฉัน");
+    await loadQueue();
+  });
+
+  const approver = await isMakeupApprover();
+  if (!approver) {
+    el("gate").hidden = false;
+    el("gate").innerHTML = '<div class="banner fail"><b>หน้านี้สำหรับหัวหน้าวิชาการเท่านั้น</b><br>' +
+      'สิทธิ์อนุมัติคำขอสอนชดกำหนดจากตำแหน่งในทะเบียนบุคลากร</div>' +
+      '<div class="banner warn">ถ้าคุณเป็นครูที่ส่งคำขอ ดูสถานะคำขอของคุณได้ที่หน้า ' +
+      '<a href="../personnel/my-work.html">ข้อมูลการทำงานของฉัน</a></div>';
+  } else {
+    el("content").hidden = false;
+    await loadQueue();
+
+    // Realtime — เปิดหน้าค้างไว้แล้วครูส่งคำขอ ต้องเห็นเองโดยไม่ต้องรีเฟรช
+    // 🔑 ไม่เชื่อ payload ที่มากับ event ใช้เป็นแค่สัญญาณแล้วดึงของจริงผ่าน RPC เหมือนตอนเปิดหน้า
+    // 🪤 ไม่ใส่ filter สถานะ เพราะการอนุมัติคือการ "ออก" จากสถานะนั้น ถ้ากรองไว้คิวจะไม่ยอมลด
+    let syncTimer = null;
+    const channel = sb.channel("makeup-approval");
+    channel.on("postgres_changes",
+      { event:"*", schema:"public", table:"teacher_makeups" },
+      () => {
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => { if (!busy) loadQueue(); }, 400);
+      });
+    channel.subscribe();
+  }
+}
+</script>
+</body>
+</html>

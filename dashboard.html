@@ -320,9 +320,9 @@
     loadAcademicCalendar, pickCalendarUpcoming,
     loadAcademicProjects, filterProjectsInMonth, countPendingProjects, projectResponsibleName,
     loadMyDashboardAlerts, pickMyDashboardAlerts,
-    isProjectApprover,
+    isProjectApprover, isMakeupApprover, listPendingMakeupRequests,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20260917-1";
+  } from "./supabase-client.js?v=20260917-2";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayCard = document.getElementById("student-today-card");
@@ -355,19 +355,23 @@
   const myAlertsCount = document.getElementById("my-alerts-count");
 
   let isApprover = false;
+  let makeupApprover = false;
+  let pendingMakeups = 0;
 
   function hideMyAlerts() {
     myAlerts.hidden = true;
     myAlertsList.innerHTML = "";
   }
 
-  function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver) {
+  function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver,
+    pendingMakeups = 0, makeupApproverFlag = false) {
     try {
       const loaded = resultValue(alertsResult) || {};
       let daily = null;
       try { daily = resultValue(dailyResult); } catch { daily = null; }
       const rows = pickMyDashboardAlerts({
-        ...loaded, daily, today, pendingApprovals, isApprover:approver
+        ...loaded, daily, today, pendingApprovals, isApprover:approver,
+        pendingMakeups, isMakeupApprover:makeupApproverFlag
       });
       if (!rows.length) {
         hideMyAlerts();
@@ -769,7 +773,8 @@
     const yearMonth = today.slice(0, 7);
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
-    const [dailyResult, calendarResult, projectResult, approverResult, myAlertsResult] = await Promise.all([
+    const [dailyResult, calendarResult, projectResult, approverResult, makeupApproverResult,
+      myAlertsResult] = await Promise.all([
       capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
@@ -777,10 +782,14 @@
       ])),
       capture(loadAcademicProjects(year)),
       capture(isProjectApprover()),
+      capture(isMakeupApprover()),
       me ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today })) : Promise.resolve({ value:null })
     ]);
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
+    makeupApprover = makeupApproverResult?.value === true;
+    // คิวสอนชดดึงเฉพาะผู้อนุมัติ — ครูทั้งโรงเรียนไม่ต้องจ่ายคิวรีนี้
+    pendingMakeups = makeupApprover ? (await listPendingMakeupRequests()).length : 0;
 
     let dailySummaryResult;
     try {
@@ -800,7 +809,8 @@
     } catch {
       pendingApprovals = 0;
     }
-    renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover);
+    renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover,
+      pendingMakeups, makeupApprover);
 
     let upcomingResult;
     try {
@@ -842,7 +852,7 @@
     //    จากสถานะนั้น ถ้ากรองไว้ เลขจะขึ้นตอนมีของเข้าคิว แต่ไม่ยอมลดตอน ผอ. อนุมัติเสร็จ
     // ⛔ ไม่ subscribe daily_attendance — ตารางใหญ่และมี event พร้อมกันหลายร้อยแถว
     // ต่อเมื่อมีแถว staff หรือเป็นผู้อนุมัติเท่านั้น คนอื่นไม่มีแถวในการ์ดที่ต้องอัปเดต
-    if (me || isApprover) {
+    if (me || isApprover || makeupApprover) {
       let syncPending = false;
       async function syncDashboardAlerts() {
         if (syncPending) return;
@@ -854,6 +864,8 @@
               ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today }))
               : Promise.resolve({ value:{} })
           ]);
+          // คิวสอนชดนับใหม่ทุกครั้งที่มีสัญญาณ — ครูส่งคำขอเพิ่มหรือถูกตัดสินไปแล้วก็ได้
+          if (makeupApprover) pendingMakeups = (await listPendingMakeupRequests()).length;
           if (freshProjectsResult) {
             try {
               const allProjects = resultValue(freshProjectsResult);
@@ -864,7 +876,8 @@
             }
           }
           renderMyAlerts(
-            freshAlertsResult, dailyResult, today, pendingApprovals, isApprover
+            freshAlertsResult, dailyResult, today, pendingApprovals, isApprover,
+            pendingMakeups, makeupApprover
           );
           if ((!freshProjectsResult || !freshProjectsResult.error) && !freshAlertsResult.error) {
             updateFreshTime();
@@ -892,6 +905,10 @@
         alertsChannel.on("postgres_changes", {
           event: "*", schema: "public", table: "coverage_assignments"
         }, scheduleSync);
+      }
+      // 🔑 ผู้อนุมัติต้องได้ event ของ teacher_makeups แม้ไม่มีแถว staff ของตัวเอง
+      //    (ของเดิมอยู่ใน if (me) จึงไม่ครอบคนที่เข้ามาในฐานะผู้อนุมัติอย่างเดียว)
+      if (me || makeupApprover) {
         alertsChannel.on("postgres_changes", {
           event: "*", schema: "public", table: "teacher_makeups"
         }, scheduleSync);

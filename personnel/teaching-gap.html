@@ -114,7 +114,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260907-2"></script>
+    <script src="../app-shell.js?v=20260917-1"></script>
   </header>
 
   <main class="academic-content">
@@ -131,6 +131,8 @@
 
       <div id="approval-card" class="card" hidden>
         <div class="section-title">คำขอสอนชดที่รออนุมัติ</div>
+        <div class="banner info">หัวหน้าวิชาการเป็นผู้อนุมัติคำขอสอนชด ·
+          ดูและตัดสินได้ที่หน้า <a href="../academic/makeup-approval.html">อนุมัติคำขอสอนชด</a></div>
         <div id="approval-list"></div>
       </div>
 
@@ -200,7 +202,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
   personnelAccessDeniedHtml, getAcademicYears, academicYearOf,
   bangkokNow, toDateStr, loadTeachingGap
-} from "../supabase-client.js?v=20260917-1";
+} from "../supabase-client.js?v=20260917-2";
 
 const session = await requireAuth();
 if (session) {
@@ -229,8 +231,6 @@ if (session) {
     const today = toDateStr(bangkokNow());
     let report = null;
     let editingId = null;
-    let rejectingId = null;
-    let approvalBusy = false;
 
     // คัดลอกจาก academic/attendance.html:415 — numeric "2.0" ต้องแสดงเป็น "2"
     function fmtPeriods(value) {
@@ -327,24 +327,19 @@ if (session) {
       </table></div>`;
     }
 
+    // 🔻 2026-09-17 ผู้ใช้ย้ายสิทธิ์อนุมัติไปที่หัวหน้าวิชาการ (RLS ถอนสิทธิ์ฝ่ายบุคคลแล้ว)
+    //    การ์ดนี้จึงเหลือ "ดูอย่างเดียว" — ห้ามใส่ปุ่มอนุมัติกลับมา ปุ่มจะกดแล้วฐานข้อมูลปฏิเสธ
     function renderApprovalQueue() {
       const pending = (report?.makeups || []).filter(makeup => makeup.approval_status === "รออนุมัติ");
       const rowBySubject = new Map((report?.rows || []).map(row => [row.subject.id, row]));
       el("approval-card").hidden = !pending.length;
       el("approval-list").innerHTML = pending.map(makeup => {
         const row = rowBySubject.get(makeup.subject_id);
-        const rejecting = rejectingId === makeup.id;
         return `<div class="approval-request" data-approval-id="${esc(makeup.id)}">
           <div class="approval-head"><div><b>${esc(row?.staff?.full_name || "(ไม่พบชื่อครู)")} · ${esc(subjectName(row?.subject || {}))}</b>
             <div class="meta">${esc(fmtDate(makeup.makeup_date))} · ${esc(timeLabel(makeup))} · ${esc(fmtPeriods(makeup.periods))} คาบ</div>
             ${makeup.note ? `<div class="meta">หมายเหตุ: ${esc(makeup.note)}</div>` : ""}</div>
             <span class="status amber">รออนุมัติ</span></div>
-          <div class="approval-actions">
-            <button class="ghost" type="button" data-approve-makeup>อนุมัติ</button>
-            <button class="danger" type="button" data-reject-makeup>${rejecting ? "ยืนยันไม่อนุมัติ" : "ไม่อนุมัติ"}</button>
-          </div>
-          ${rejecting ? `<div class="reject-form"><label for="reject-reason-${esc(makeup.id)}">เหตุผลที่ไม่อนุมัติ (บังคับ)</label>
-            <textarea id="reject-reason-${esc(makeup.id)}" data-reject-reason placeholder="บอกครูว่าต้องแก้อะไร"></textarea></div>` : ""}
         </div>`;
       }).join("");
     }
@@ -447,65 +442,6 @@ if (session) {
       row.setAttribute("aria-expanded", String(!detail.hidden));
     });
 
-    el("approval-list").addEventListener("click", async event => {
-      if (approvalBusy || !report) return;
-      const item = event.target.closest("[data-approval-id]");
-      const makeup = report.makeups.find(row => row.id === item?.dataset.approvalId);
-      if (!makeup || makeup.approval_status !== "รออนุมัติ") return;
-      const row = report.rows.find(entry => entry.subject.id === makeup.subject_id);
-      const now = new Date().toISOString();
-
-      if (event.target.closest("[data-approve-makeup]")) {
-        if (!await window.crsAskConfirm({
-          title:"อนุมัติคำขอสอนชด",
-          message:`${row?.staff?.full_name || "ครู"} · ${subjectName(row?.subject || {})} · ${fmtDate(makeup.makeup_date)} · ${fmtPeriods(makeup.periods)} คาบ\nรายการนี้จะถูกนับเป็นสอนชดแล้วทันที`,
-          okLabel:"อนุมัติ",
-          danger:false
-        })) return;
-        approvalBusy = true;
-        const { error } = await sb.from("teacher_makeups").update({
-          approval_status:"อนุมัติ",
-          approval_note:null,
-          approved_by:session.user.id,
-          approved_at:now,
-          updated_at:now
-        }).eq("id", makeup.id);
-        approvalBusy = false;
-        if (error) return toast("อนุมัติคำขอไม่สำเร็จ: " + error.message, true);
-        toast("อนุมัติคำขอสอนชดแล้ว");
-        await loadReport();
-        return;
-      }
-
-      if (!event.target.closest("[data-reject-makeup]")) return;
-      if (rejectingId !== makeup.id) {
-        rejectingId = makeup.id;
-        renderApprovalQueue();
-        el("approval-list").querySelector(`[data-approval-id="${CSS.escape(makeup.id)}"] [data-reject-reason]`)?.focus();
-        return;
-      }
-      const reason = item.querySelector("[data-reject-reason]")?.value.trim() || "";
-      if (!reason) return toast("กรุณาระบุเหตุผลที่ไม่อนุมัติ", true);
-      if (!await window.crsAskConfirm({
-        title:"ไม่อนุมัติคำขอสอนชด",
-        message:`${row?.staff?.full_name || "ครู"} · ${subjectName(row?.subject || {})}\nเหตุผล: ${reason}`,
-        okLabel:"ไม่อนุมัติ",
-        danger:true
-      })) return;
-      approvalBusy = true;
-      const { error } = await sb.from("teacher_makeups").update({
-        approval_status:"ไม่อนุมัติ",
-        approval_note:reason,
-        approved_by:session.user.id,
-        approved_at:now,
-        updated_at:now
-      }).eq("id", makeup.id);
-      approvalBusy = false;
-      if (error) return toast("บันทึกผลไม่อนุมัติไม่สำเร็จ: " + error.message, true);
-      rejectingId = null;
-      toast("ส่งเหตุผลกลับให้ครูแล้ว");
-      await loadReport();
-    });
     el("report-table").addEventListener("keydown", event => {
       if ((event.key === "Enter" || event.key === " ") && event.target.matches("tr[data-subject-row]")) {
         event.preventDefault();
@@ -575,7 +511,7 @@ if (session) {
     let approvalSyncTimer = null;
     const scheduleApprovalSync = () => {
       clearTimeout(approvalSyncTimer);
-      approvalSyncTimer = setTimeout(() => { if (!approvalBusy) loadReport(); }, 400);
+      approvalSyncTimer = setTimeout(loadReport, 400);
     };
     const approvalChannel = sb.channel("teaching-gap-approvals");
     approvalChannel.on("postgres_changes", {
