@@ -3361,6 +3361,15 @@ export async function isProjectApprover() {
 // ผู้อนุมัติคำขอสอนชด = หัวหน้าวิชาการ (ตำแหน่งตาม app_settings.makeup_approver_position) หรือ admin
 // 🔑 ถามฐานด้วยฟังก์ชันตัวเดียวกับที่ RLS ใช้ตัดสิน หน้าเว็บจึงไม่มีทางโชว์ปุ่มที่กดแล้วฐานปฏิเสธ
 // 🪤 ไม่โยน error เมื่อไม่มีสิทธิ์ — หน้าแรกของครูทั้งโรงเรียนเรียกตัวนี้
+// ครูกดรับทราบคำขอที่ถูกตีกลับ — คืน true เมื่ออัปเดตจริง
+// 🔴 ต้องผ่าน RPC: policy teacher_makeups_update_own บังคับให้แถวที่ครูแตะจบที่ 'รออนุมัติ'
+//    (กันครูอนุมัติตัวเอง) ครูจึงเขียน teacher_seen_at บนแถวที่ถูกตีกลับตรง ๆ ไม่ได้
+export async function ackMakeupRejection(makeupId) {
+  const { data, error } = await sb.rpc("ack_makeup_rejection", { p_id: makeupId });
+  if (error) throw new Error("บันทึกการรับทราบไม่สำเร็จ: " + error.message);
+  return data === true;
+}
+
 export async function isMakeupApprover() {
   const { data, error } = await sb.rpc("is_makeup_approver");
   if (error) return false;
@@ -3753,6 +3762,21 @@ export function pickMyDashboardAlerts({
       href: "personnel/my-work.html",
       linkLabel: "ดูตารางวันนี้",
       kind: "วันนี้"
+    });
+  }
+
+  // ใบที่ถูกตีกลับและครูยังไม่กดรับทราบ — เตือนไว้จนกว่าจะกดรับทราบ ไม่ใช่หายตามเวลา
+  // 🔑 ต้องมี teacher_seen_at ไม่งั้นแถวนี้จะค้างตลอดไป เพราะเคสที่ถูกต้องคือครูไม่ต้องทำอะไร
+  const subjectOf = new Map((teachingGap?.rows || []).map(row => [row.subject?.id, row.subject]));
+  for (const makeup of teachingGap?.makeups || []) {
+    if (makeup?.approval_status !== "ไม่อนุมัติ" || makeup?.teacher_seen_at) continue;
+    const subject = subjectOf.get(makeup.subject_id) || {};
+    const label = [subject.code, subject.name, subject.grade_level].filter(Boolean).join(" ");
+    alerts.push({
+      text: `คำขอสอนชดถูกตีกลับ · ${label || "ไม่ระบุวิชา"}`,
+      href: "personnel/my-work.html",
+      linkLabel: "ดูเหตุผล",
+      kind: "รอคุณ"
     });
   }
 
@@ -5794,7 +5818,7 @@ async function loadMyTeachingGap({ staffId, year } = {}) {
       .eq("absent_staff_id", staffId)
       .in("subject_id", subjectIds)),
     fetchAllRows(() => sb.from("teacher_makeups")
-      .select("id,staff_id,subject_id,makeup_date,start_time,end_time,periods,note,approval_status,approval_note,approved_by,approved_at,created_by,created_at,updated_at")
+      .select("id,staff_id,subject_id,makeup_date,start_time,end_time,periods,note,approval_status,approval_note,approved_by,approved_at,created_by,created_at,updated_at,teacher_seen_at")
       .eq("staff_id", staffId)
       .in("subject_id", subjectIds))
   ]);

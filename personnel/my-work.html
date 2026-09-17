@@ -297,8 +297,8 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          respondDutySwap, cancelDutySwap, listMyDutySwaps,
          getSetting, getDailyAttendanceCutoff, loadMyHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
-         loadMyProjects, projectApprovalBadge, loadMyTeachingGap,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260917-2";
+         loadMyProjects, projectApprovalBadge, loadMyTeachingGap, ackMakeupRejection,
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260917-3";
 
 const session = await requireAuth();
 if (session) {
@@ -473,7 +473,11 @@ if (session) {
         const rejected = makeup.approval_status === "ไม่อนุมัติ";
         const edit = approved ? "" : `<div class="makeup-actions"><button type="button" class="ghost" data-edit-makeup="${escapeHtml(makeup.id)}">${rejected ? "แก้แล้วส่งใหม่" : "แก้ไข"}</button></div>`;
         const reason = rejected
-          ? `<div class="reject-note"><b>เหตุผลที่ไม่อนุมัติ:</b> ${escapeHtml(makeup.approval_note || "ไม่ระบุเหตุผล")}</div>`
+          ? `<div class="reject-note"><b>เหตุผลที่ไม่อนุมัติ:</b> ${escapeHtml(makeup.approval_note || "ไม่ระบุเหตุผล")}</div>` +
+            // กดรับทราบแล้วแถวเตือนบนหน้าแรกจะหายถาวร — ใบที่ไม่ต้องส่งใหม่จึงไม่ตามเตือนตลอดไป
+            (makeup.teacher_seen_at
+              ? `<div class="field-note">รับทราบแล้ว</div>`
+              : `<div class="makeup-actions"><button type="button" class="ghost" data-ack-makeup="${escapeHtml(makeup.id)}">รับทราบ</button></div>`)
           : "";
         return `<div class="makeup-request" data-makeup-id="${escapeHtml(makeup.id)}">
           <div class="makeup-head"><div><b>${escapeHtml(fmt(makeup.makeup_date))} · ${escapeHtml(teachingSubjectName(subjectById.get(makeup.subject_id)))}</b>
@@ -545,7 +549,21 @@ if (session) {
       }
     }
 
-    el("my-makeup-requests").addEventListener("click", event => {
+    el("my-makeup-requests").addEventListener("click", async event => {
+      const ackButton = event.target.closest("[data-ack-makeup]");
+      if (ackButton) {
+        if (ackButton.disabled) return;
+        ackButton.disabled = true;
+        try {
+          await ackMakeupRejection(ackButton.dataset.ackMakeup);
+          toast("รับทราบแล้ว");
+          await loadMyTeachingGapReport();
+        } catch (error) {
+          ackButton.disabled = false;
+          toast(error.message || "บันทึกการรับทราบไม่สำเร็จ", true);
+        }
+        return;
+      }
       const button = event.target.closest("[data-edit-makeup]");
       if (!button || !teachingGapReport) return;
       const makeup = teachingGapReport.makeups.find(row => row.id === button.dataset.editMakeup);
