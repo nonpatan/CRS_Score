@@ -100,6 +100,16 @@
   .student-identity { display: flex; flex: 1 1 220px; min-width: 0; flex-direction: column; }
   .student-head .name { font-weight: 600; font-size: 16px; }
   .student-head .meta { color: var(--muted); font-size: 13px; }
+  .student-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .invite-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .invite-toggle input { width: 20px; height: 20px; margin: 0; }
   .print-letter-btn {
     min-height: 44px;
     border: 1px solid var(--teal);
@@ -226,6 +236,7 @@
         <input type="time" id="meet-time">
       </div>
     </div>
+    <div class="hint">ใช้กับนักเรียนที่ติ๊ก 'เชิญมาพบครูประจำชั้น' เท่านั้น</div>
   </div>
 
   <div id="result-area"></div>
@@ -245,7 +256,7 @@ import {
   SCHOOL_LETTER_CSS, renderSchoolLetter,
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
   loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters
-} from "../supabase-client.js?v=20260916-2";
+} from "../supabase-client.js?v=20260917-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -268,6 +279,8 @@ let reportRows = [];
 let issuedLettersByStudent = new Map();
 let teachersByRoom = new Map();
 let signerByRoom = new Map();
+let inviteByStudent = new Map();
+let inviteContext = "";
 let reportGrade = "";
 let reportYear = "";
 let printing = false;
@@ -309,7 +322,8 @@ function retentionReasonLines(row) {
 
 function issuedBadgeHtml(letter) {
   if (!letter) return "";
-  return `<span class='badge issued' data-issued-letter>ออกหนังสือแล้ว ที่ ${escapeHtml(letter.doc_no)}/${escapeHtml(letter.year)} · ${escapeHtml(thaiShortDateText(letter.issued_date))}</span>`;
+  const inviteLabel = letter.invite_meeting === true ? " · เชิญพบ" : "";
+  return `<span class='badge issued' data-issued-letter>ออกหนังสือแล้ว ที่ ${escapeHtml(letter.doc_no)}/${escapeHtml(letter.year)} · ${escapeHtml(thaiShortDateText(letter.issued_date))}${inviteLabel}</span>`;
 }
 
 function updateIssuedCard(studentId, letter) {
@@ -371,7 +385,7 @@ function renderRetentionLetter(row, grade, year, letterFields = {}) {
   const { stu, subjList, incompleteCount, coverage, official } = row;
   const {
     docNoText = "", issuedDateText = "", homeroomName = "", academicHeadName = "", directorName = "",
-    meetDateText = "", meetTime = ""
+    meetDateText = "", meetTime = "", inviteMeeting = false
   } = letterFields;
   const room = homeroomAuditRoomLabel({ grade_level:grade, classroom:stu.classroom });
   const failingSubjects = subjList.filter(isFailingSubject);
@@ -391,6 +405,14 @@ function renderRetentionLetter(row, grade, year, letterFields = {}) {
     ? ""
     : `<br>ยังไม่ใช่ผลตัดสิน เนื่องจาก ${escapeHtml(unofficialReason)}`;
   const schoolLabel = schoolName || "โรงเรียน";
+  const closingHtml = inviteMeeting
+    ? `<p class="letter-body">จึงขอความร่วมมือผู้ปกครองกำกับดูแลและประสานกับโรงเรียน และขอเชิญท่านมาพบครูประจำชั้นในวันที่ ${escapeHtml(meetDateText)} เวลา ${escapeHtml(meetTime)} น. ณ โรงเรียน เพื่อร่วมกันวางแผนช่วยเหลือนักเรียน</p>`
+    : `<p class="letter-body">จึงเรียนมาเพื่อทราบ และขอความร่วมมือผู้ปกครองกำกับดูแลนักเรียนร่วมกับโรงเรียนเพื่อวางแผนช่วยเหลือนักเรียนต่อไป</p>`;
+  const replyOptionsHtml = inviteMeeting
+    ? `<div class="letter-check">☐ รับทราบ และจะไปพบครูประจำชั้นตามวันเวลาที่นัดหมาย</div>
+      <div class="letter-check">☐ รับทราบ แต่ไม่สะดวกตามวันเวลาดังกล่าว ขอนัดวันที่ ............ เวลา ......... น.</div>`
+    : `<div class="letter-check">☐ รับทราบและจะกำกับดูแล</div>
+      <div class="letter-check">☐ ประสงค์จะพบครูประจำชั้น (โรงเรียนจะติดต่อกลับเพื่อนัดวันและเวลา)</div>`;
   return renderSchoolLetter({
     schoolName,
     schoolAddress,
@@ -403,9 +425,8 @@ function renderRetentionLetter(row, grade, year, letterFields = {}) {
       <tbody>${subjectRows}</tbody>
     </table>`,
     summaryHtml: `<div class="letter-summary avoid-break"><b>สรุปผล</b><br>${reasons}<br><b>สถานะ</b> ${status}${statusNote}</div>`,
-    closingHtml: `<p class="letter-body">จึงขอความร่วมมือผู้ปกครองกำกับดูแลและประสานกับโรงเรียน เพื่อร่วมกันวางแผนช่วยเหลือนักเรียน กรุณาติดต่อครูประจำชั้นภายในวันที่ ${meetDateText ? escapeHtml(meetDateText) : "......."}</p>`,
-    replyOptionsHtml: `<div class="letter-check">☐ รับทราบและจะกำกับดูแล</div>
-      <div class="letter-check">☐ ขอพบครูประจำชั้น วันที่ ${meetDateText ? escapeHtml(meetDateText) : "........................"} เวลา ${meetTime ? escapeHtml(meetTime) : "............"} น.</div>`,
+    closingHtml,
+    replyOptionsHtml,
     docNoText,
     issuedDateText,
     homeroomName,
@@ -487,6 +508,12 @@ async function loadReport() {
   const year = elYear.value;
   if (!grade || !year) { showEmpty("เลือกชั้นและปีการศึกษาเพื่อดูรายงาน"); return; }
 
+  const nextInviteContext = `${grade}|${year}`;
+  if (inviteContext !== nextInviteContext) {
+    inviteByStudent = new Map();
+    inviteContext = nextInviteContext;
+  }
+
   teachersByRoom = new Map();
   signerByRoom = new Map();
   showEmpty("กำลังโหลดข้อมูล...");
@@ -515,6 +542,12 @@ async function loadReport() {
   }
   if (studentResults.size === 0) { showEmpty("ยังไม่มีนักเรียนลงทะเบียนวิชาใดๆ ของชั้น/ปีการศึกษานี้"); return; }
   issuedLettersByStudent = new Map((issuedLetters || []).map(letter => [String(letter.student_id), letter]));
+  for (const entry of studentResults.values()) {
+    const studentId = String(entry.student.id);
+    if (!inviteByStudent.has(studentId)) {
+      inviteByStudent.set(studentId, issuedLettersByStudent.get(studentId)?.invite_meeting === true);
+    }
+  }
 
   const unionSubjects = [...new Map(
     [...studentResults.values()].flatMap(entry => entry.subjects.map(item => [item.subject.id, item.subject]))
@@ -648,9 +681,11 @@ function renderStudentRow(row) {
   }
 
   const printButton = flagged
-    ? issuedBadgeHtml(issuedLettersByStudent.get(String(stu.id))) +
+    ? "<div class='student-actions'>" + issuedBadgeHtml(issuedLettersByStudent.get(String(stu.id))) +
+      "<label class='invite-toggle no-print'><input type='checkbox' data-invite-student='" + escapeHtml(stu.id) + "'" +
+      (inviteByStudent.get(String(stu.id)) === true ? " checked" : "") + "> เชิญมาพบครูประจำชั้น</label>" +
       "<button type='button' class='print-letter-btn no-print' data-print-student='" + escapeHtml(stu.id) + "'>" +
-      (issuedLettersByStudent.has(String(stu.id)) ? "พิมพ์ซ้ำ" : "พิมพ์หนังสือติดตาม") + "</button>"
+      (issuedLettersByStudent.has(String(stu.id)) ? "พิมพ์ซ้ำ" : "พิมพ์หนังสือติดตาม") + "</button></div>"
     : "";
 
   return (
@@ -676,6 +711,11 @@ function renderStudentRow(row) {
 }
 
 elResult.addEventListener("change", event => {
+  const invite = event.target.closest("[data-invite-student]");
+  if (invite) {
+    inviteByStudent.set(String(invite.dataset.inviteStudent), invite.checked);
+    return;
+  }
   const select = event.target.closest("[data-signer-room]");
   if (!select) return;
   signerByRoom.set(String(select.dataset.signerRoom), select.value);
@@ -686,6 +726,11 @@ elResult.addEventListener("click", async event => {
   if (!button || printing) return;
   const row = reportRows.find(item => String(item.stu.id) === button.dataset.printStudent);
   if (!row) return;
+  const inviteMeeting = inviteByStudent.get(String(row.stu.id)) === true;
+  if (inviteMeeting && (!elMeetDate.value || !elMeetTime.value)) {
+    showToast("กรุณาระบุวันและเวลานัดพบครูประจำชั้นให้ครบ", false);
+    return;
+  }
 
   printing = true;
   const buttons = [...elResult.querySelectorAll("[data-print-student]")];
@@ -702,7 +747,8 @@ elResult.addEventListener("click", async event => {
       term: null,
       meetDate: elMeetDate.value,
       meetTime: elMeetTime.value,
-      homeroomStaffId: staffId
+      homeroomStaffId: staffId,
+      inviteMeeting
     });
     const signers = await loadLetterSigners(reportYear, reportGrade, row.stu.classroom);
     const homeroomName = staffId
@@ -713,6 +759,7 @@ elResult.addEventListener("click", async event => {
       issuedDateText: thaiLetterDateText(issuedLetter.issued_date),
       meetDateText: thaiShortDateText(issuedLetter.meet_date),
       meetTime: String(issuedLetter.meet_time || "").slice(0, 5),
+      inviteMeeting: issuedLetter.invite_meeting === true,
       ...signers,
       homeroomName
     });

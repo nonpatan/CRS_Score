@@ -116,6 +116,15 @@
   .student-head .name { font-weight: 600; font-size: 16px; }
   .student-head .meta { opacity: 0.8; font-size: 13px; }
   .student-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .invite-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .invite-toggle input { width: 20px; height: 20px; margin: 0; }
   .print-letter-btn {
     min-height: 44px;
     border: 1px solid var(--teal);
@@ -263,6 +272,7 @@
         <input type="time" id="meet-time">
       </div>
     </div>
+    <div class="hint">ใช้กับนักเรียนที่ติ๊ก 'เชิญมาพบครูประจำชั้น' เท่านั้น</div>
 
     <button id="btn-check" class="btn">ตรวจสอบความเสี่ยง</button>
   </div>
@@ -281,7 +291,7 @@
     getSetting, homeroomAuditRoomLabel, SCHOOL_LETTER_CSS, renderSchoolLetter,
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
     loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters
-  } from "../supabase-client.js?v=20260916-2";
+  } from "../supabase-client.js?v=20260917-1";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -299,6 +309,8 @@
   let issuedLettersByStudent = new Map();
   let teachersByRoom = new Map();
   let signerByRoom = new Map();
+  let inviteByStudent = new Map();
+  let inviteContext = "";
   let reportGrade = "";
   let reportYear = "";
   let reportTerm = "";
@@ -339,7 +351,8 @@
 
   function issuedBadgeHtml(letter) {
     if (!letter) return "";
-    return `<span class='badge issued' data-issued-letter>ออกหนังสือแล้ว ที่ ${escapeHtml(letter.doc_no)}/${escapeHtml(letter.year)} · ${escapeHtml(thaiShortDateText(letter.issued_date))}</span>`;
+    const inviteLabel = letter.invite_meeting === true ? " · เชิญพบ" : "";
+    return `<span class='badge issued' data-issued-letter>ออกหนังสือแล้ว ที่ ${escapeHtml(letter.doc_no)}/${escapeHtml(letter.year)} · ${escapeHtml(thaiShortDateText(letter.issued_date))}${inviteLabel}</span>`;
   }
 
   function updateIssuedCard(studentId, letter) {
@@ -401,7 +414,7 @@
     const { stu, riskySubjects } = flagged;
     const {
       docNoText = "", issuedDateText = "", homeroomName = "", academicHeadName = "", directorName = "",
-      meetDateText = "", meetTime = ""
+      meetDateText = "", meetTime = "", inviteMeeting = false
     } = letterFields;
     const room = homeroomAuditRoomLabel({ grade_level: grade, classroom: stu.classroom });
     const schoolLabel = schoolName || "โรงเรียน";
@@ -435,6 +448,14 @@
     if (riskySubjects.some(subj => !subj.retake && !subj.critical)) {
       actionLines.push("<b>เฝ้าระวัง</b> — ยังแก้ไขได้ หากมาเรียนสม่ำเสมอตั้งแต่บัดนี้");
     }
+    const closingHtml = inviteMeeting
+      ? `<p class="letter-body">จึงเรียนมาเพื่อขอความร่วมมือจากท่านในการกำกับดูแลให้นักเรียนมาเรียนอย่างสม่ำเสมอ และขอเชิญท่านมาพบครูประจำชั้นในวันที่ ${escapeHtml(meetDateText)} เวลา ${escapeHtml(meetTime)} น. ณ โรงเรียน เพื่อร่วมกันวางแนวทางแก้ไขเวลาเรียนก่อนสิ้นภาคเรียน</p>`
+      : `<p class="letter-body">จึงเรียนมาเพื่อทราบ และขอความร่วมมือจากท่านในการกำกับดูแลให้นักเรียนมาเรียนอย่างสม่ำเสมอ เพื่อแก้ไขเวลาเรียนให้ครบก่อนสิ้นภาคเรียน</p>`;
+    const replyOptionsHtml = inviteMeeting
+      ? `<div class="letter-check">☐ รับทราบ และจะไปพบครูประจำชั้นตามวันเวลาที่นัดหมาย</div>
+        <div class="letter-check">☐ รับทราบ แต่ไม่สะดวกตามวันเวลาดังกล่าว ขอนัดวันที่ ............ เวลา ......... น.</div>`
+      : `<div class="letter-check">☐ รับทราบและจะกำกับดูแลให้นักเรียนมาเรียนสม่ำเสมอ</div>
+        <div class="letter-check">☐ ประสงค์จะพบครูประจำชั้น (โรงเรียนจะติดต่อกลับเพื่อนัดวันและเวลา)</div>`;
 
     return renderSchoolLetter({
       schoolName,
@@ -445,9 +466,8 @@
       bodyHtml: `<p class="letter-body">ด้วย${escapeHtml(schoolLabel)}ได้ตรวจสอบเวลาเรียนของนักเรียนในความปกครองของท่าน คือ ${escapeHtml(stu.name)} เลขประจำตัว ${escapeHtml(stu.student_no)} ชั้น ${escapeHtml(room)}${termLabel}ปีการศึกษา ${escapeHtml(year)} พบว่ามีเวลาเรียนไม่เพียงพอในบางรายวิชา ซึ่งอาจส่งผลให้ไม่มีสิทธิ์เข้าสอบ (มส.) ดังรายละเอียดต่อไปนี้</p>`,
       tableHtml: `<table class="letter-table"><thead><tr><th>ที่</th><th>รายวิชา</th><th>ขาด/ทั้งหมด</th><th>ร้อยละ</th><th>ขาดได้อีก</th><th>สถานะ</th></tr></thead><tbody>${subjectRows}</tbody></table>`,
       summaryHtml: `<div class="letter-summary avoid-break"><b>สิ่งที่นักเรียนต้องดำเนินการ</b><br>${actionLines.join("<br>")}</div>`,
-      closingHtml: `<p class="letter-body">จึงเรียนมาเพื่อขอความร่วมมือจากท่านในการกำกับดูแลให้นักเรียนมาเรียนอย่างสม่ำเสมอ และติดต่อครูประจำชั้นภายในวันที่ ${meetDateText ? escapeHtml(meetDateText) : "......."} เพื่อร่วมกันวางแนวทางแก้ไขเวลาเรียนก่อนสิ้นภาคเรียน</p>`,
-      replyOptionsHtml: `<div class="letter-check">☐ รับทราบและจะกำกับดูแลให้นักเรียนมาเรียนสม่ำเสมอ</div>
-        <div class="letter-check">☐ ขอพบครูประจำชั้น วันที่ ${meetDateText ? escapeHtml(meetDateText) : "........"} เวลา ${meetTime ? escapeHtml(meetTime) : "......"} น.</div>`,
+      closingHtml,
+      replyOptionsHtml,
       docNoText,
       issuedDateText,
       homeroomName,
@@ -536,10 +556,21 @@
         return;
       }
       const targetStudentIds = targetStudents.map(s => s.id);
+      const nextInviteContext = `${year}|${term}|${grade}`;
+      if (inviteContext !== nextInviteContext) {
+        inviteByStudent = new Map();
+        inviteContext = nextInviteContext;
+      }
       const issuedLetters = await loadIssuedLetters(year, "มส.", grade);
       issuedLettersByStudent = new Map(issuedLetters
         .filter(letter => String(letter.term || "") === String(term || ""))
         .map(letter => [String(letter.student_id), letter]));
+      for (const student of targetStudents) {
+        const studentId = String(student.id);
+        if (!inviteByStudent.has(studentId)) {
+          inviteByStudent.set(studentId, issuedLettersByStudent.get(studentId)?.invite_meeting === true);
+        }
+      }
 
       // ดึงวิชาทั้งหมดในปีและชั้นนี้ (กรองตามภาคเรียนถ้ามีการเลือก)
       let query = sb.from("subjects")
@@ -716,7 +747,7 @@
                   <div class='name'>${escapeHtml(f.stu.name)} ${f.stu.classroom ? `<span style='font-weight:400; font-size:14px;'>(${escapeHtml(f.stu.classroom)})</span>` : ''}</div>
                   <div class='meta'>เลขประจำตัว: ${escapeHtml(f.stu.student_no)}</div>
                 </div>
-                <div class='student-actions'>${badgeHtml}${issuedBadgeHtml(issuedLetter)}<button type='button' class='print-letter-btn no-print' data-print-student='${escapeHtml(f.stu.id)}'>${issuedLetter ? "พิมพ์ซ้ำ" : "พิมพ์หนังสือติดตาม"}</button></div>
+                <div class='student-actions'>${badgeHtml}${issuedBadgeHtml(issuedLetter)}<label class='invite-toggle no-print'><input type='checkbox' data-invite-student='${escapeHtml(f.stu.id)}'${inviteByStudent.get(String(f.stu.id)) === true ? " checked" : ""}> เชิญมาพบครูประจำชั้น</label><button type='button' class='print-letter-btn no-print' data-print-student='${escapeHtml(f.stu.id)}'>${issuedLetter ? "พิมพ์ซ้ำ" : "พิมพ์หนังสือติดตาม"}</button></div>
               </div>
               <div class='section'>
                 <div class='section-title'>รายวิชาที่มีความเสี่ยง</div>
@@ -761,6 +792,11 @@
   }
 
   elResults.addEventListener("change", event => {
+    const invite = event.target.closest("[data-invite-student]");
+    if (invite) {
+      inviteByStudent.set(String(invite.dataset.inviteStudent), invite.checked);
+      return;
+    }
     const select = event.target.closest("[data-signer-room]");
     if (!select) return;
     signerByRoom.set(String(select.dataset.signerRoom), select.value);
@@ -771,6 +807,11 @@
     if (!button || printing) return;
     const flagged = flaggedStudents.find(item => String(item.stu.id) === button.dataset.printStudent);
     if (!flagged) return;
+    const inviteMeeting = inviteByStudent.get(String(flagged.stu.id)) === true;
+    if (inviteMeeting && (!elMeetDate.value || !elMeetTime.value)) {
+      showToast("กรุณาระบุวันและเวลานัดพบครูประจำชั้นให้ครบ", false);
+      return;
+    }
 
     printing = true;
     const buttons = [...elResults.querySelectorAll("[data-print-student]")];
@@ -787,7 +828,8 @@
         term: elTerm.value,
         meetDate: elMeetDate.value,
         meetTime: elMeetTime.value,
-        homeroomStaffId: staffId
+        homeroomStaffId: staffId,
+        inviteMeeting
       });
       const signers = await loadLetterSigners(reportYear, reportGrade, flagged.stu.classroom);
       const homeroomName = staffId
@@ -803,6 +845,7 @@
         issuedDateText: thaiLetterDateText(issuedLetter.issued_date),
         meetDateText: thaiShortDateText(issuedLetter.meet_date),
         meetTime: String(issuedLetter.meet_time || "").slice(0, 5),
+        inviteMeeting: issuedLetter.invite_meeting === true,
         ...signers,
         homeroomName
       });

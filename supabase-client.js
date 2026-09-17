@@ -160,12 +160,13 @@ export async function listHomeroomTeachers(year, gradeLevel, classroom) {
   return (data || []).map(row => ({ staffId: row.staff_id, fullName: row.full_name }));
 }
 
-export async function issueStudentLetter({ studentId, year, kind, gradeLevel, classroom, term, meetDate, meetTime, homeroomStaffId }) {
+export async function issueStudentLetter({ studentId, year, kind, gradeLevel, classroom, term, meetDate, meetTime, homeroomStaffId, inviteMeeting }) {
   const { data, error } = await sb.rpc("get_or_create_student_letter", {
     p_student_id: studentId, p_year: year, p_letter_kind: kind,
     p_grade_level: gradeLevel, p_classroom: classroom,
     p_term: term || null, p_meet_date: meetDate || null, p_meet_time: meetTime || null,
-    p_homeroom_staff_id: homeroomStaffId || null
+    p_homeroom_staff_id: homeroomStaffId || null,
+    p_invite_meeting: inviteMeeting === true
   });
   if (error) throw new Error(error.message);
   return Array.isArray(data) ? data[0] : data;
@@ -173,7 +174,7 @@ export async function issueStudentLetter({ studentId, year, kind, gradeLevel, cl
 
 export async function loadIssuedLetters(year, kind, gradeLevel) {
   const { data, error } = await sb.from("student_letters")
-    .select("student_id,year,doc_no,term,issued_date,meet_date,meet_time,homeroom_staff_id")
+    .select("student_id,year,doc_no,term,issued_date,meet_date,meet_time,homeroom_staff_id,invite_meeting")
     .eq("year", year)
     .eq("letter_kind", kind)
     .eq("grade_level", gradeLevel)
