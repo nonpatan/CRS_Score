@@ -265,11 +265,12 @@
       <div class="field">
         <label for="meet-date">วันนัดพบครูประจำชั้น</label>
         <input type="date" id="meet-date">
-        <div class="hint">เลือกจากปฏิทิน · ปีในช่องนี้เป็น ค.ศ. (2026) ถูกต้องแล้ว ระบบจะแปลงเป็น พ.ศ. ให้เองตอนพิมพ์</div>
+        <div class="hint" id="meet-date-hint"></div>
       </div>
       <div class="field">
         <label for="meet-time">เวลานัดพบ</label>
         <input type="time" id="meet-time">
+        <div class="hint" id="meet-time-hint"></div>
       </div>
     </div>
     <div class="hint">ใช้กับนักเรียนที่ติ๊ก 'เชิญมาพบครูประจำชั้น' เท่านั้น</div>
@@ -290,8 +291,9 @@
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, MS_MAKEUP_RATIO,
     getSetting, homeroomAuditRoomLabel, SCHOOL_LETTER_CSS, renderSchoolLetter,
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
-    loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters
-  } from "../supabase-client.js?v=20260917-3";
+    loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
+    bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
+  } from "../supabase-client.js?v=20260918-1";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -482,6 +484,10 @@
 
     elMeetDate.value = addDaysStr(toDateStr(bangkokNow()), 7);
     elMeetTime.value = "09:00";
+    bindDatePickOnly(elMeetDate);
+    bindDatePickOnly(elMeetTime);
+    document.getElementById("meet-date-hint").textContent = DATE_PICK_ONLY_NOTE;
+    document.getElementById("meet-time-hint").textContent = TIME_PICK_ONLY_NOTE;
 
     try {
       const [name, address] = await Promise.all([
@@ -807,6 +813,10 @@
     if (!button || printing) return;
     const flagged = flaggedStudents.find(item => String(item.stu.id) === button.dataset.printStudent);
     if (!flagged) return;
+    if (!elTerm.value) {
+      showToast("เลือกภาคเรียนก่อนออกหนังสือ มส. — หนังสือต้องระบุว่าเป็นภาคเรียนไหน", false);
+      return;
+    }
     const inviteMeeting = inviteByStudent.get(String(flagged.stu.id)) === true;
     if (inviteMeeting && (!elMeetDate.value || !elMeetTime.value)) {
       showToast("กรุณาระบุวันและเวลานัดพบครูประจำชั้นให้ครบ", false);

@@ -77,6 +77,20 @@
   .summary-line { font-size: 15px; font-weight: 500; }
   .summary-line b { color: var(--danger); }
   .summary-line b.trend { color: var(--amber); }
+  .summary-line b.pending { color: var(--amber); }
+  .retention-group { margin-bottom: 16px; }
+  .retention-group > summary {
+    min-height: 44px;
+    padding: 11px 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--white);
+    color: var(--ink);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .retention-group[open] > summary { margin-bottom: 16px; }
+  .retention-group-list .student-card:last-child { margin-bottom: 0; }
   .signer-picker-list { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
   /* จอ >=700px: การ์ดตัวกรองถูก app-shell.css จัดเป็นกริด 2 คอลัมน์ ช่องกรอกจึงกว้างครึ่งการ์ด
      การ์ดผลลัพธ์เป็นบล็อกธรรมดา ช่องเลือกผู้ลงนามจะยืดเต็มความกว้างจนกว้างกว่าช่องอื่นเท่าตัว
@@ -229,11 +243,12 @@
       <div class="field">
         <label for="meet-date">วันนัดพบครูประจำชั้น</label>
         <input type="date" id="meet-date">
-        <div class="hint">เลือกจากปฏิทิน · ปีในช่องนี้เป็น ค.ศ. (2026) ถูกต้องแล้ว ระบบจะแปลงเป็น พ.ศ. ให้เองตอนพิมพ์</div>
+        <div class="hint" id="meet-date-hint"></div>
       </div>
       <div class="field">
         <label for="meet-time">เวลานัดพบ</label>
         <input type="time" id="meet-time">
+        <div class="hint" id="meet-time-hint"></div>
       </div>
     </div>
     <div class="hint">ใช้กับนักเรียนที่ติ๊ก 'เชิญมาพบครูประจำชั้น' เท่านั้น</div>
@@ -255,8 +270,9 @@ import {
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter,
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
-  loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters
-} from "../supabase-client.js?v=20260917-3";
+  loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
+  bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
+} from "../supabase-client.js?v=20260918-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -289,6 +305,10 @@ let schoolAddress = "";
 
 elMeetDate.value = addDaysStr(toDateStr(bangkokNow()), 7);
 elMeetTime.value = "09:00";
+bindDatePickOnly(elMeetDate);
+bindDatePickOnly(elMeetTime);
+document.getElementById("meet-date-hint").textContent = DATE_PICK_ONLY_NOTE;
+document.getElementById("meet-time-hint").textContent = TIME_PICK_ONLY_NOTE;
 
 function showToast(message, ok = true) {
   const box = el("toast");
@@ -610,6 +630,7 @@ function renderReport(rows, grade, year, classCoverage) {
   elEmptyHint.style.display = "none";
   const officialCount = rows.filter(r => r.flagged && r.official).length;
   const trendCount = rows.filter(r => r.flagged && !r.official).length;
+  const pendingCount = rows.filter(r => !r.flagged && r.pending).length;
   let summaryParts = "ชั้น " + escapeHtml(grade) + " ปีการศึกษา " + escapeHtml(year) +
     " — นักเรียนทั้งหมด " + rows.length + " คน";
   if (classCoverage.ready) {
@@ -618,6 +639,7 @@ function renderReport(rows, grade, year, classCoverage) {
   if (trendCount > 0) {
     summaryParts += " · แนวโน้มซ้ำชั้น <b class='trend'>" + trendCount + "</b> คน";
   }
+  summaryParts += " · ยังสรุปไม่ได้ <b class='pending'>" + pendingCount + "</b> คน";
   const missingNames = classCoverage.missing.slice(0, 3).map(subject =>
     escapeHtml(subject.name) + (subject.code ? " (" + escapeHtml(subject.code) + ")" : "")
   );
@@ -634,7 +656,27 @@ function renderReport(rows, grade, year, classCoverage) {
       : "") + pickerHtml +
     "</div>";
 
-  for (const row of rows) html += renderStudentRow(row);
+  const flaggedRows = [];
+  const pendingRows = [];
+  const clearRows = [];
+  for (const row of rows) {
+    const rowHtml = renderStudentRow(row);
+    if (row.flagged) flaggedRows.push(rowHtml);
+    else if (row.pending) pendingRows.push(rowHtml);
+    else clearRows.push(rowHtml);
+  }
+  html += flaggedRows.length
+    ? flaggedRows.join("")
+    : "<div class='card empty retention-empty'>ยังไม่มีนักเรียนเข้าเกณฑ์หรือมีแนวโน้มซ้ำชั้นในชั้นนี้</div>";
+  if (pendingRows.length > 0) {
+    html += "<details class='retention-group retention-pending'><summary>ยังสรุปไม่ได้ " + pendingRows.length +
+      " คน — มี ร./มส. ค้างหรือคะแนนยังไม่ครบ ยังไม่ใช่กลุ่มที่ผ่าน</summary>" +
+      "<div class='retention-group-list'>" + pendingRows.join("") + "</div></details>";
+  }
+  if (clearRows.length > 0) {
+    html += "<details class='retention-group retention-clear'><summary>ไม่เข้าเกณฑ์ " + clearRows.length +
+      " คน</summary><div class='retention-group-list'>" + clearRows.join("") + "</div></details>";
+  }
   elResult.innerHTML = html;
 }
 

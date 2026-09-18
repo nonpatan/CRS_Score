@@ -227,8 +227,8 @@ import {
   requestProjectRevision, reportProjectProgress, appendProjectLinks,
   loadSchoolOkrs, loadProjectPlanPicker,
   buildOkrTree, buildProjectTree, projectBudgetOf, summarizeProjectBudget,
-  okrChipLabel, okrCoverage
-} from "../supabase-client.js?v=20260917-3";
+  okrChipLabel, okrCoverage, DATE_PICK_ONLY_NOTE, bindDatePickOnly
+} from "../supabase-client.js?v=20260918-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -244,39 +244,12 @@ if (!session) {
   const fmtMoney = value => Number(value || 0).toLocaleString("th-TH", { maximumFractionDigits:2 }) + " บาท";
   const fmtMoneyOrMissing = value => value == null ? "ยังไม่ได้กรอก" : fmtMoney(value);
   const numberOrNull = id => el(id).value.trim() === "" ? null : Number(el(id).value);
-  // ครู 3 คนกรอกปี พ.ศ. ลงช่องวันที่ ได้ 9 แถวที่เก็บเป็น ค.ศ. 2569 แล้วแสดงออกมาเป็น 3112
-  // เพราะ fmtDate() บวก 543 ให้อีกรอบ ⟹ แถวพวกนี้หลุดจากทุกรายงานที่กรองตามวันที่ โดยไม่มี error
-  // ต้นเหตุ: input type="date" ตามสเปกเป็น ค.ศ. เสมอ Chrome ภาษาไทยจึงขึ้น 18/05/2026
-  // ทั้งที่หน้าจอรอบ ๆ เป็น พ.ศ. หมด ครูเลยคิดว่าช่องผิดแล้วพิมพ์แก้เอง
-  const DATE_PICK_ONLY_NOTE = "เลือกจากปฏิทินเท่านั้น พิมพ์เองไม่ได้ · ปีในช่องนี้เป็น ค.ศ. (2026) ถูกต้องแล้ว ระบบจะแปลงเป็น พ.ศ. ให้เองตอนแสดงผล";
-  // แป้นที่ยังต้องผ่าน ไม่งั้นแท็บออกจากช่องไม่ได้ ปิดปฏิทินไม่ได้ และส่งฟอร์มด้วยคีย์บอร์ดไม่ได้
-  const DATE_ALLOWED_KEYS = ["Tab", "Escape", "Enter"];
   // hint ของช่องวันสิ้นสุดมี 2 ท่อน — ท่อนหน้าเปลี่ยนตามว่าบังคับไหม ท่อนหลังคงที่
   // 🔴 ต้องต่อ DATE_PICK_ONLY_NOTE ทุกครั้ง ห้ามเขียนทับ ไม่งั้นครูจะไม่รู้ว่าปี ค.ศ. ในช่องถูกแล้ว
   const END_HINT_OPTIONAL = "เว้นว่างได้ถ้าเป็นงานวันเดียว";
   const END_HINT_REQUIRED = "โครงการที่มีกิจกรรมต้องระบุวันสิ้นสุด";
   const setEndDateHint = required =>
     el("p-end-hint").textContent = (required ? END_HINT_REQUIRED : END_HINT_OPTIONAL) + " · " + DATE_PICK_ONLY_NOTE;
-  // ⛔ ห้ามเปลี่ยนไปใช้ readonly/disabled — ทดสอบบนเบราว์เซอร์จริงแล้วพังทั้ง 2 ทาง:
-  //    showPicker() โยน InvalidStateError (ครูเปิดปฏิทินไม่ได้เลย) และ willValidate เป็น false
-  //    ⟹ required ตายสนิท ครูเว้นว่างแล้วบันทึกผ่านไปโดน not null ของ DB เด้ง error ดิบใส่หน้า
-  function bindDatePickOnly(input) {
-    input.addEventListener("keydown", event => {
-      if (DATE_ALLOWED_KEYS.includes(event.key)) return;
-      event.preventDefault();
-      // p-end เว้นว่างได้ตามดีไซน์เดิม ถ้าล้างไม่ได้ครูที่เผลอใส่วันสิ้นสุดจะติดกับถาวร
-      if (event.key === "Backspace" || event.key === "Delete") {
-        input.value = "";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      }
-    });
-    // เดิมต้องคลิกไอคอนปฏิทินเล็ก ๆ ทางขวาเท่านั้น พอพิมพ์ไม่ได้แล้ว
-    // คลิกกลางช่องแล้วเงียบจะดูเหมือนหน้าเว็บเสีย · try/catch เพราะ showPicker โยนได้
-    // ทั้งตอนเบราว์เซอร์ไม่รองรับและตอนปฏิทินเปิดค้างอยู่แล้ว
-    input.addEventListener("click", () => {
-      try { input.showPicker(); } catch { /* ปฏิทินเปิดอยู่แล้วหรือเบราว์เซอร์ไม่รองรับ — ปล่อยผ่าน */ }
-    });
-  }
   // RLS บังคับว่าแถวใหม่ต้องเป็น "วางแผน"/"ยกเลิก" เท่านั้น (schema.sql:4806-4822)
   // และแถวที่ยังไม่เคยอนุมัติ ครูเจ้าของก็ถูกล็อกแค่ 2 ตัวนั้นเหมือนกัน
   // ⛔ เช็ก approvedAt ไม่ใช่ approval_status — แถวที่ถูกส่งกลับให้แก้ approved_at ยังค้างอยู่

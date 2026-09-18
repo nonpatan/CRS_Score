@@ -58,6 +58,7 @@
   th { color:var(--muted); font-size:13px; font-weight:600; background:var(--bg); white-space:nowrap; }
   td.num { text-align:right; white-space:nowrap; }
   tr[data-subject-row] { cursor:pointer; }
+  tr[data-subject-row] > td:first-child { white-space:nowrap; }
   tr[data-subject-row]:hover { background:var(--teal-soft); }
   tr:last-child td { border-bottom:0; }
   .subject-name { font-weight:600; }
@@ -202,7 +203,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
   personnelAccessDeniedHtml, getAcademicYears, academicYearOf,
   bangkokNow, toDateStr, loadTeachingGap
-} from "../supabase-client.js?v=20260917-3";
+} from "../supabase-client.js?v=20260918-1";
 
 const session = await requireAuth();
 if (session) {
@@ -302,15 +303,17 @@ if (session) {
       const body = report.rows.map((row, index) => {
         const status = statusOf(row);
         const noTotal = row.percentUsed === null;
+        const capReason = row.cap === null
+          ? (!report.hasPercent ? "ยังไม่ได้ตั้งเกณฑ์" : "วิชายังไม่ตั้งจำนวนคาบ")
+          : "";
         return `<tbody>
           <tr data-subject-row="${index}" tabindex="0" aria-expanded="false">
             <td>${esc(row.staff.full_name)}</td>
             <td><div class="subject-name">${esc(row.subject.code || "—")} · ${esc(row.subject.name)}</div>
                 <div class="meta">${esc(row.subject.grade_level || "—")} · ภาคเรียนที่ ${esc(row.subject.term || "—")}</div></td>
             <td class="num">${esc(fmtPeriods(row.missed))}</td>
-            <td class="num">${row.cap !== null ? esc(fmtPeriods(row.cap))
-              : !report.hasPercent ? "ยังไม่ได้ตั้งเกณฑ์"
-              : "วิชายังไม่ตั้งจำนวนคาบ"}</td>
+            <td class="num"${capReason ? ` title="${esc(capReason)}"` : ""}>${row.cap !== null
+              ? esc(fmtPeriods(row.cap)) : "—"}</td>
             <td class="num">${noTotal ? "—" : esc(row.percentUsed.toFixed(1)) + "%"}</td>
             <td class="num">${row.required === null ? "—" : esc(fmtPeriods(row.required))}</td>
             <td class="num">${esc(fmtPeriods(row.madeUp))}</td>
