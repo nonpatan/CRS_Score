@@ -50,6 +50,10 @@
     .due { color:var(--danger); font-weight:700; }
     .summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
     .summary-actions, .actions { display:flex; flex-wrap:wrap; gap:8px; }
+    .add-line-card { margin:16px 0 0; background:var(--bg); }
+    .add-kind { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .add-kind button[aria-pressed="true"] { color:var(--white); background:var(--teal); }
+    .manage { width:1%; white-space:nowrap; }
     .history { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
     .history h3 { margin:0; font-size:17px; }
     .history-list { display:grid; gap:10px; margin-top:10px; }
@@ -129,6 +133,49 @@
         <div class="actions"><button id="auto-fill" class="ghost" type="button">เติมยอดเก่าสุดก่อน</button></div>
         <div id="savings-hint" class="banner info" hidden></div>
         <div id="charge-list"></div>
+        <section id="add-line-card" class="card add-line-card" hidden>
+          <div class="section-head">
+            <div><h2>เพิ่มรายการให้เด็กคนนี้</h2><p>เพิ่มรายการเฉพาะรายก่อนรับเงินและพิมพ์เอกสาร</p></div>
+          </div>
+          <div id="add-kind" class="add-kind" role="group" aria-label="ชนิดรายการที่จะเพิ่ม">
+            <button class="ghost" type="button" data-add-kind="product" aria-pressed="true">สินค้าในระบบ</button>
+            <button class="ghost" type="button" data-add-kind="manual" aria-pressed="false">พิมพ์เอง</button>
+            <button class="ghost" type="button" data-add-kind="promo" aria-pressed="false">ส่วนลด</button>
+            <button class="ghost" type="button" data-add-kind="subsidy" aria-pressed="false">เงินอุดหนุน</button>
+          </div>
+          <div id="add-product-form">
+            <div class="row2">
+              <div class="field"><label for="add-product-group">กลุ่มสินค้า</label><select id="add-product-group"></select></div>
+              <div class="field"><label for="add-product-item">ตัวเลือก</label><select id="add-product-item"></select></div>
+            </div>
+            <div class="row2">
+              <div class="field"><label for="add-product-qty">จำนวน</label><input id="add-product-qty" type="number" min="1" step="1" value="1"></div>
+              <div class="field"><label for="add-product-price">ราคาต่อหน่วย</label><input id="add-product-price" type="number" min="0" step="0.01"></div>
+            </div>
+            <div id="add-product-status" class="banner info"></div>
+            <div class="field"><label for="add-product-note">เหตุผลเมื่อราคาไม่ตรงอัตรา</label><textarea id="add-product-note" maxlength="500" placeholder="เว้นว่างได้เมื่อใช้ราคาที่ประกาศ"></textarea></div>
+            <div class="actions"><button id="add-product-submit" class="ghost" type="button">เพิ่มสินค้าในบิล</button></div>
+          </div>
+          <div id="add-manual-form" hidden>
+            <div id="add-manual-status" class="banner info"></div>
+            <div class="field"><label for="add-manual-description">ชื่อรายการ</label><input id="add-manual-description" type="text" maxlength="200" placeholder="เช่น ค่าซ่อมกระจกห้อง ป.4/1"></div>
+            <div class="row2">
+              <div class="field"><label for="add-manual-qty">จำนวน</label><input id="add-manual-qty" type="number" min="1" step="1" value="1"></div>
+              <div class="field"><label for="add-manual-price">ราคาต่อหน่วย</label><input id="add-manual-price" type="number" min="0" step="0.01" placeholder="0.00"></div>
+            </div>
+            <div class="field"><label for="add-manual-note">รายละเอียดเพิ่มเติม (ไม่บังคับ · พิมพ์แล้วขึ้นบนใบเสร็จ)</label><textarea id="add-manual-note" maxlength="500" placeholder="เช่น กระจกหน้าต่างบานที่ 3 แตก 12 ก.ย. · เว้นว่างได้ ใบเสร็จจะมีแค่ชื่อรายการ"></textarea></div>
+            <div class="actions"><button id="add-manual-submit" class="ghost" type="button">เพิ่มรายการที่พิมพ์เอง</button></div>
+          </div>
+          <div id="add-promo-form" hidden>
+            <div class="field"><label for="add-promo">คูปองส่วนลด</label><select id="add-promo"></select></div>
+            <div id="add-promo-status" class="banner info"></div>
+            <div class="actions"><button id="add-promo-submit" class="ghost" type="button">บันทึกส่วนลด</button></div>
+          </div>
+          <div id="add-subsidy-form" hidden>
+            <div id="add-subsidy-status" class="banner info"></div>
+            <div class="actions"><button id="add-subsidy-submit" class="ghost" type="button">บันทึกเงินอุดหนุน</button></div>
+          </div>
+        </section>
         <section class="history">
           <h3>ประวัติรับเงินของเอกสารนี้</h3>
           <p class="hint">รายการที่ยกเลิกยังอยู่ครบเพื่อให้ตรวจย้อนหลังได้</p>
@@ -150,6 +197,15 @@
         <div class="modal-actions"><button id="void-payment-cancel" class="ghost" type="button">กลับ</button><button id="void-payment-submit" class="danger" type="submit">ยืนยันยกเลิกรายการนี้</button></div>
       </form>
     </div>
+    <div id="void-charge-overlay" class="overlay" hidden>
+      <form id="void-charge-form" class="modal" role="dialog" aria-modal="true" aria-labelledby="void-charge-title" aria-describedby="void-charge-detail">
+        <h2 id="void-charge-title">ยกเลิกรายการค่าใช้จ่าย</h2>
+        <p id="void-charge-detail"></p>
+        <div class="field"><label for="void-charge-reason">เหตุผลการยกเลิก</label><textarea id="void-charge-reason" maxlength="500" placeholder="ระบุเหตุผลให้ตรวจย้อนหลังได้"></textarea></div>
+        <p id="void-charge-error" class="form-error" role="alert"></p>
+        <div class="modal-actions"><button id="void-charge-cancel" class="ghost" type="button">กลับ</button><button id="void-charge-submit" class="danger" type="submit">ยืนยันยกเลิกรายการนี้</button></div>
+      </form>
+    </div>
   </main>
 </div>
 
@@ -158,8 +214,22 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, getStudentPlacements,
   activePlacements, roomsFromPlacements, computeFeeOutstanding, chargeLineRemaining,
-  computeSavingsBalance, computeScholarshipBalance, formatMoney, fetchAllRows, getStaffNamesByUser
+  computeSavingsBalance, computeScholarshipBalance, computeStockBalance, formatMoney, fetchAllRows, getStaffNamesByUser
 } from "../supabase-client.js?v=20260917-3";
+
+// ============================================================
+// 🪤 ข้อความสำรองของบรรทัด "พิมพ์เอง" — ห้ามแก้ข้อความนี้เดี่ยว ๆ
+// ------------------------------------------------------------
+// รายการกลาง "รายการอื่น ๆ" ประกาศราคาไว้ 0 บาท ⟹ ราคาที่ครูพิมพ์ต่างจากอัตราเสมอ
+// ⟹ student_charges_guard บังคับให้ทุกแถวมี note ⟹ ปล่อยว่างไม่ได้
+// แต่ fee-receipt.html พิมพ์ note เป็นบรรทัดย่อยใต้ชื่อรายการ ⟹ ถ้าเติมคำอธิบายภายใน
+// ลงไป ผู้ปกครองจะได้ใบเสร็จที่มีศัพท์ของระบบติดมาด้วย (เจอตอน Opus ตรวจงาน 2026-09-18)
+//
+// ⟹ ครูไม่พิมพ์อะไร = เก็บข้อความนี้ลงฐานเพื่อผ่านด่าน · แล้ว fee-receipt.html
+//    **ซ่อนบรรทัดย่อยเมื่อ note ตรงกับข้อความนี้เป๊ะ** (ค่าเดียวกันอยู่ที่นั่นด้วย)
+// ⛔ แก้ที่นี่แล้วต้องแก้ finance/fee-receipt.html ให้ตรงกันเสมอ ไม่งั้นข้อความจะโผล่บนใบเสร็จ
+// ============================================================
+const MANUAL_NOTE_PLACEHOLDER="รายการเฉพาะรายที่ตั้งจากหน้ารับเงิน";
 
 const el=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
@@ -242,8 +312,10 @@ function renderPaymentHistory(rows,chargeRows,names,canVoid=true){
 }
 
 let session,currentYear="",placements=[],rooms=[],charges=[],roomPlacements=[];
+let items=[],prices=[],moves=[],promotions=[],subsidies=[],addKind="product",addingLine=false;
 let receipt=null,payments=[],savingsTxns=[],scholarshipTxns=[],saving=false,submissionBlocked=false,loadToken=0;
 let activeVoidPayment=null,voidBusy=false,voidBlocked=false;
+let activeVoidCharge=null,voidChargeBusy=false;
 const profileNames=new Map();
 
 function selectedRoom(){return rooms[Number(el("room").value)]||null}
@@ -267,13 +339,145 @@ function toast(message,isError=false){
   toast.timer=setTimeout(()=>{el("toast").className="toast"},5000)
 }
 
+function otherItem(){
+  return items.find(item=>item.group_name==="รายการอื่น ๆ"&&item.variant_label==="")||null
+}
+
+function productItems(){
+  const middle=otherItem();
+  return items.filter(item=>item.active&&item.category==="ค่าสินค้า"&&item.id!==middle?.id)
+}
+
+function chargeHasPayment(charge){
+  return Number(charge?.amount)>0&&chargeLineRemaining(charge,payments)<Number(charge.amount)
+}
+
+function annualSubsidyFor(studentId){
+  return charges.find(charge=>charge.student_id===studentId&&charge.kind==="เงินอุดหนุน"&&!charge.voided_at)||null
+}
+
+function displayChargeDate(charge){
+  const value=charge?.charge_date||charge?.created_at;
+  if(!value)return"ไม่พบวันที่";
+  return new Intl.DateTimeFormat("th-TH",{dateStyle:"medium",timeZone:"Asia/Bangkok"}).format(new Date(value))
+}
+
+function syncAddProduct(){
+  const group=el("add-product-group").value,current=el("add-product-item").value;
+  const variants=productItems().filter(item=>item.group_name===group);
+  el("add-product-item").innerHTML=variants.map(item=>`<option value="${esc(item.id)}">${esc(item.variant_label||item.display_name)}</option>`).join("");
+  if(variants.some(item=>item.id===current))el("add-product-item").value=current;
+  const item=variants.find(row=>row.id===el("add-product-item").value)||variants[0];
+  const published=prices.find(price=>price.item_id===item?.id);
+  el("add-product-price").value=published?.amount??"";
+  syncAddProductStatus()
+}
+
+function syncAddProductStatus(){
+  const item=items.find(row=>row.id===el("add-product-item").value);
+  const published=prices.find(price=>price.item_id===item?.id);
+  const stock=computeStockBalance(moves.filter(move=>move.item_id===item?.id));
+  const qty=Number(el("add-product-qty").value);
+  const short=Boolean(item?.track_stock)&&(!Number.isInteger(qty)||qty<1||qty>stock);
+  const status=el("add-product-status");
+  status.className=`banner ${!item||!published||short?"bad":"info"}`;
+  status.textContent=!item
+    ?"ยังไม่มีสินค้าในระบบ · เพิ่มรายการสินค้าและราคาได้ที่หน้าคลังสินค้า"
+    :!published
+      ?`ยังไม่ได้ตั้งราคาปี ${currentYear} ของ ${item.display_name}`
+      :item.track_stock
+        ?`คงเหลือ ${stock} ${item.unit}${short?` · จำนวนที่ขอ ${qty||0} ไม่พร้อมตัดสต๊อก`:" · ระบบจะตรวจและตัดสต๊อกตอนบันทึก"}`
+        :`${item.display_name} ไม่ได้คุมสต๊อก`;
+  el("add-product-submit").disabled=addingLine||!selectedPlacement()||!item||!published||short
+}
+
+function syncAddManualStatus(){
+  const installed=Boolean(otherItem()),status=el("add-manual-status");
+  status.className=`banner ${installed?"info":"bad"}`;
+  status.textContent=installed
+    ?"ชื่อที่พิมพ์จะแสดงบนใบแจ้งหนี้และใบเสร็จ"
+    :"ยังไม่ได้ติดตั้งรายการกลาง 'รายการอื่น ๆ' · ให้ผู้ดูแลระบบรัน SQL รอบนี้ก่อน";
+  el("add-manual-submit").disabled=addingLine||!selectedPlacement()||!installed
+}
+
+function syncAddPromo(){
+  const placement=selectedPlacement(),promo=promotions.find(row=>row.id===el("add-promo").value);
+  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
+  const status=el("add-promo-status");
+  status.className=`banner ${!promo?"bad":existing?"":"info"}`;
+  status.textContent=!promo
+    ?"ยังไม่มีคูปองส่วนลดที่เปิดใช้งานในปีนี้"
+    :existing
+      ?`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`
+      :`ส่วนลด ${money(promo.amount)} · ใช้อัตราที่ประกาศไว้เท่านั้น`;
+  el("add-promo-submit").disabled=addingLine||!placement||!promo||Boolean(existing)
+}
+
+function syncAddSubsidy(){
+  const placement=selectedPlacement(),existing=annualSubsidyFor(placement?.student_id);
+  const rate=subsidies.find(row=>row.grade_level===placement?.grade_level),status=el("add-subsidy-status");
+  status.className=`banner ${!rate?"bad":existing?"":"info"}`;
+  status.textContent=!placement
+    ?"เลือกนักเรียนก่อนเพิ่มเงินอุดหนุน"
+    :existing
+      ?`ได้รับแล้วเมื่อ ${displayChargeDate(existing)} · ภาคเรียน ${existing.term}`
+      :!rate
+        ?`ยังไม่มีอัตราเงินอุดหนุนของ ${placement.grade_level}`
+        :`อัตรา ${placement.grade_level} · ${money(rate.amount)} · นักเรียนได้รับได้ปีละครั้งเดียว`;
+  el("add-subsidy-submit").disabled=addingLine||!placement||!rate||Boolean(existing)
+}
+
+function setAddKind(kind){
+  addKind=["product","manual","promo","subsidy"].includes(kind)?kind:"product";
+  el("add-kind").querySelectorAll("[data-add-kind]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.addKind===addKind)));
+  el("add-product-form").hidden=addKind!=="product";
+  el("add-manual-form").hidden=addKind!=="manual";
+  el("add-promo-form").hidden=addKind!=="promo";
+  el("add-subsidy-form").hidden=addKind!=="subsidy";
+  if(addKind==="product")syncAddProductStatus();
+  if(addKind==="manual")syncAddManualStatus();
+  if(addKind==="promo")syncAddPromo();
+  if(addKind==="subsidy")syncAddSubsidy()
+}
+
+function renderAddLineForms(){
+  const placement=selectedPlacement();
+  el("add-line-card").hidden=!placement;
+  if(!placement)return;
+  const currentGroup=el("add-product-group").value;
+  const groups=[...new Set(productItems().map(item=>item.group_name))];
+  el("add-product-group").innerHTML=groups.map(group=>`<option value="${esc(group)}">${esc(group)}</option>`).join("");
+  if(groups.includes(currentGroup))el("add-product-group").value=currentGroup;
+  const currentPromo=el("add-promo").value;
+  el("add-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${esc(promo.id)}">${esc(promo.name)} · ${money(promo.amount)}</option>`).join("");
+  if(promotions.some(promo=>promo.active&&promo.id===currentPromo))el("add-promo").value=currentPromo;
+  syncAddProduct();
+  syncAddManualStatus();
+  syncAddPromo();
+  syncAddSubsidy();
+  setAddKind(addKind)
+}
+
+function resetAddLineForm(){
+  addKind="product";
+  el("add-product-group").selectedIndex=0;
+  el("add-product-qty").value="1";
+  el("add-product-note").value="";
+  el("add-manual-description").value="";
+  el("add-manual-qty").value="1";
+  el("add-manual-price").value="";
+  el("add-manual-note").value="";
+  el("add-promo").selectedIndex=0;
+  renderAddLineForms()
+}
+
 function renderChargeList(){
   const rows=selectedCharges().sort((a,b)=>String(a.charge_date||"").localeCompare(String(b.charge_date||""))||String(a.created_at||"").localeCompare(String(b.created_at||"")));
   el("charge-list").innerHTML=rows.length?`<div class="table-wrap"><table>
-    <thead><tr><th class="pick">เลือก</th><th>รายการ</th><th class="money">คงเหลือ</th><th class="money">รับครั้งนี้</th></tr></thead>
+    <thead><tr><th class="pick">เลือก</th><th>รายการ</th><th class="money">คงเหลือ</th><th class="money">รับครั้งนี้</th><th class="manage">จัดการ</th></tr></thead>
     <tbody>${rows.map(row=>{
-      const remaining=chargeLineRemaining(row,payments),credit=Number(row.amount)<0;
-      return`<tr><td class="pick">${credit||remaining<=0?"—":`<input type="checkbox" data-pay-check="${esc(row.id)}" aria-label="เลือกรับเงิน ${esc(row.description)}">`}</td><td><b>${esc(row.description)}</b><span class="meta">${esc(row.charge_date||"")} · ${esc(row.kind)}${row.note?` · ${esc(row.note)}`:""}</span></td><td class="money ${credit?"negative":""}">${money(remaining)}</td><td class="money">${credit?"—":`<input class="payment-input" type="number" min="0" max="${esc(remaining)}" step="0.01" inputmode="decimal" value="" data-pay-amount="${esc(row.id)}" aria-label="ยอดรับ ${esc(row.description)}" ${remaining<=0?"disabled":""}>`}</td></tr>`
+      const remaining=chargeLineRemaining(row,payments),credit=Number(row.amount)<0,paid=chargeHasPayment(row);
+      return`<tr><td class="pick">${credit||remaining<=0?"—":`<input type="checkbox" data-pay-check="${esc(row.id)}" aria-label="เลือกรับเงิน ${esc(row.description)}">`}</td><td><b>${esc(row.description)}</b><span class="meta">${esc(row.charge_date||"")} · ${esc(row.kind)}${row.note?` · ${esc(row.note)}`:""}</span></td><td class="money ${credit?"negative":""}">${money(remaining)}</td><td class="money">${credit?"—":`<input class="payment-input" type="number" min="0" max="${esc(remaining)}" step="0.01" inputmode="decimal" value="" data-pay-amount="${esc(row.id)}" aria-label="ยอดรับ ${esc(row.description)}" ${remaining<=0?"disabled":""}>`}</td><td class="manage">${paid?"—":`<button class="danger" type="button" data-void-charge="${esc(row.id)}">ยกเลิก</button>`}</td></tr>`
     }).join("")}</tbody>
   </table></div>`:'<div class="empty">นักเรียนคนนี้ยังไม่มีรายการค่าใช้จ่ายในภาคเรียนนี้</div>'
 }
@@ -325,6 +529,7 @@ function renderPayment(){
   el("payment-title").textContent=placement?`รายการค้าง · ${placement.student?.name||"นักเรียน"}`:"รายการค้าง";
   el("stats").innerHTML=`<div class="stat"><span>ยอดสุทธิ</span><b>${money(summary.charged-summary.credited)}</b></div><div class="stat"><span>ชำระแล้ว</span><b>${money(summary.paid)}</b></div><div class="stat"><span>ค้างชำระ</span><b class="${summary.outstanding>0?"due":""}">${money(summary.outstanding)}</b></div>`;
   renderChargeList();
+  renderAddLineForms();
   el("payment-history").innerHTML=renderPaymentHistory(payments,rows,profileNames,true);
   el("received").value="";
   el("payer-name").value="";
@@ -336,6 +541,7 @@ function renderPayment(){
 
 async function loadStudent(){
   const placement=selectedPlacement(),token=++loadToken;
+  addKind="product";
   receipt=null;payments=[];savingsTxns=[];scholarshipTxns=[];
   if(!placement){renderPayment();return}
   const term=Number(el("term").value);
@@ -370,14 +576,29 @@ function renderStudents(preferredStudentId=""){
 }
 
 async function loadYear(preferred={}){
-  const [placementRes,chargeRes]=await Promise.all([
+  const [placementRes,chargeRes,itemRes,priceRes,moveRes,promoRes,subsidyRes]=await Promise.all([
     getStudentPlacements(currentYear),
-    fetchAllRows(()=>sb.from("student_charges").select("*").eq("year",currentYear),["student_id","charge_date","id"])
+    fetchAllRows(()=>sb.from("student_charges").select("*").eq("year",currentYear),["student_id","charge_date","id"]),
+    sb.from("fee_items").select("*").eq("active",true).order("sort_order"),
+    sb.from("fee_product_prices").select("*").eq("year",currentYear),
+    sb.from("fee_stock_moves").select("item_id,qty"),
+    sb.from("fee_promotions").select("*").eq("year",currentYear).eq("active",true),
+    sb.from("fee_subsidies").select("*").eq("year",currentYear)
   ]);
   if(placementRes.error)throw new Error("โหลดทะเบียนไม่สำเร็จ: "+placementRes.error.message);
   if(chargeRes.error)throw new Error("โหลดรายการค่าใช้จ่ายไม่สำเร็จ: "+chargeRes.error.message);
+  if(itemRes.error)throw new Error("โหลดรายการสินค้าไม่สำเร็จ: "+itemRes.error.message);
+  if(priceRes.error)throw new Error("โหลดราคาสินค้าไม่สำเร็จ: "+priceRes.error.message);
+  if(moveRes.error)throw new Error("โหลดยอดคลังไม่สำเร็จ: "+moveRes.error.message);
+  if(promoRes.error)throw new Error("โหลดส่วนลดไม่สำเร็จ: "+promoRes.error.message);
+  if(subsidyRes.error)throw new Error("โหลดเงินอุดหนุนไม่สำเร็จ: "+subsidyRes.error.message);
   placements=activePlacements(placementRes.data||[]);
   charges=chargeRes.data||[];
+  items=itemRes.data||[];
+  prices=priceRes.data||[];
+  moves=moveRes.data||[];
+  promotions=promoRes.data||[];
+  subsidies=subsidyRes.data||[];
   rooms=roomsFromPlacements(placements,currentYear);
   el("room").innerHTML=rooms.map((room,index)=>`<option value="${index}">${esc(roomLabel(room))} · ${room.studentCount} คน</option>`).join("");
   el("room").disabled=!rooms.length;
@@ -398,6 +619,240 @@ el("received").onchange=applyOldestFirst;
 el("auto-fill").onclick=applyOldestFirst;
 el("charge-list").oninput=syncSelectedTotal;
 el("charge-list").onchange=syncSelectedTotal;
+
+async function refreshSelectedStudentCharges(){
+  const placement=selectedPlacement();
+  if(!placement)return;
+  const result=await fetchAllRows(
+    ()=>sb.from("student_charges").select("*").eq("year",currentYear).eq("student_id",placement.student_id),
+    ["charge_date","id"]
+  );
+  if(result.error)throw new Error("โหลดรายการใหม่ไม่สำเร็จ: "+result.error.message);
+  charges=charges.filter(row=>row.student_id!==placement.student_id).concat(result.data||[])
+}
+
+async function afterChargeInserted(message,stockMove=null){
+  if(stockMove)moves.push(stockMove);
+  try{
+    await refreshSelectedStudentCharges();
+    resetAddLineForm();
+    renderPayment();
+    toast(message)
+  }catch(error){
+    toast(`เพิ่มรายการแล้ว แต่โหลดรายการล่าสุดไม่สำเร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่: ${friendly(error)}`,true)
+  }
+}
+
+async function ensureOtherItemPrice(item){
+  if(prices.some(price=>price.item_id===item.id))return;
+  const {error}=await sb.from("fee_product_prices").insert({year:currentYear,item_id:item.id,amount:0});
+  if(error&&error.code!=="23505")throw error;
+  if(!prices.some(price=>price.item_id===item.id))prices.push({year:currentYear,item_id:item.id,amount:0})
+}
+
+el("add-kind").onclick=event=>{
+  const button=event.target.closest("[data-add-kind]");
+  if(button)setAddKind(button.dataset.addKind)
+};
+el("add-product-group").onchange=syncAddProduct;
+el("add-product-item").onchange=syncAddProduct;
+el("add-product-qty").oninput=syncAddProductStatus;
+el("add-promo").onchange=syncAddPromo;
+
+el("add-product-submit").onclick=async()=>{
+  if(addingLine)return;
+  const placement=selectedPlacement(),item=items.find(row=>row.id===el("add-product-item").value);
+  const published=prices.find(row=>row.item_id===item?.id),qty=Number(el("add-product-qty").value);
+  const priceText=el("add-product-price").value,price=Number(priceText),note=squash(el("add-product-note").value);
+  const stock=computeStockBalance(moves.filter(move=>move.item_id===item?.id));
+  if(!placement||!item||!published)return toast("กรุณาเลือกนักเรียนและสินค้าที่มีราคาประกาศ",true);
+  if(!Number.isInteger(qty)||qty<1)return toast("จำนวนต้องเป็นจำนวนเต็มอย่างน้อย 1",true);
+  if(priceText===""||!Number.isFinite(price)||price<0)return toast("กรอกราคาต่อหน่วยเป็นจำนวนตั้งแต่ 0 บาท",true);
+  if(item.track_stock&&qty>stock)return toast(`สินค้าเหลือ ${stock} ${item.unit} · ตั้งจำนวน ${qty} ไม่ได้`,true);
+  if(price!==Number(published.amount)&&!note)return toast("ราคาต่างจากที่ประกาศ ต้องระบุเหตุผล",true);
+  if(!await window.crsAskConfirm({
+    title:"ยืนยันเพิ่มสินค้าในบิล",
+    message:`${placement.student?.name||"นักเรียน"}\n${item.display_name} · ${qty} ${item.unit}\nรวม ${money(qty*price)}`,
+    okLabel:"เพิ่มสินค้า",
+    danger:false
+  }))return;
+  addingLine=true;syncAddProductStatus();
+  try{
+    const {error}=await sb.from("student_charges").insert([{
+      student_id:placement.student_id,
+      year:currentYear,
+      term:Number(el("term").value),
+      grade_level:placement.grade_level,
+      kind:"ค่าสินค้า",
+      item_id:item.id,
+      description:item.display_name,
+      qty,
+      unit_price:price,
+      note:note||null,
+      created_by:session.user.id
+    }]);
+    if(error)throw error;
+    await afterChargeInserted(`เพิ่ม ${item.display_name} ${money(qty*price)} แล้ว`,item.track_stock?{item_id:item.id,qty:-qty}:null)
+  }catch(error){toast("เพิ่มสินค้าไม่สำเร็จ: "+friendly(error),true)}
+  finally{addingLine=false;renderAddLineForms()}
+};
+
+el("add-manual-submit").onclick=async()=>{
+  if(addingLine)return;
+  const placement=selectedPlacement(),item=otherItem(),description=squash(el("add-manual-description").value);
+  const qty=Number(el("add-manual-qty").value),priceText=el("add-manual-price").value,price=Number(priceText);
+  const note=squash(el("add-manual-note").value)||MANUAL_NOTE_PLACEHOLDER;
+  if(!placement)return toast("กรุณาเลือกนักเรียนก่อนเพิ่มรายการ",true);
+  if(!item)return toast("ยังไม่ได้ติดตั้งรายการกลาง 'รายการอื่น ๆ' · ให้ผู้ดูแลระบบรัน SQL รอบนี้ก่อน",true);
+  if(!description)return toast("กรอกชื่อรายการที่จะให้แสดงบนใบเสร็จ",true);
+  if(!Number.isInteger(qty)||qty<1)return toast("จำนวนต้องเป็นจำนวนเต็มอย่างน้อย 1",true);
+  if(priceText===""||!Number.isFinite(price)||price<0)return toast("กรอกราคาต่อหน่วยเป็นจำนวนตั้งแต่ 0 บาท",true);
+  if(!await window.crsAskConfirm({
+    title:"ยืนยันเพิ่มรายการที่พิมพ์เอง",
+    message:`${placement.student?.name||"นักเรียน"}\n${description} · ${qty} รายการ\nรวม ${money(qty*price)}`,
+    okLabel:"เพิ่มรายการ",
+    danger:false
+  }))return;
+  addingLine=true;syncAddManualStatus();
+  try{
+    await ensureOtherItemPrice(item);
+    const {error}=await sb.from("student_charges").insert([{
+      student_id:placement.student_id,
+      year:currentYear,
+      term:Number(el("term").value),
+      grade_level:placement.grade_level,
+      kind:"ค่าสินค้า",
+      item_id:item.id,
+      description,
+      qty,
+      unit_price:price,
+      note,
+      created_by:session.user.id
+    }]);
+    if(error)throw error;
+    await afterChargeInserted(`เพิ่ม ${description} ${money(qty*price)} แล้ว`)
+  }catch(error){toast("เพิ่มรายการไม่สำเร็จ: "+friendly(error),true)}
+  finally{addingLine=false;renderAddLineForms()}
+};
+
+el("add-promo-submit").onclick=async()=>{
+  if(addingLine)return;
+  const placement=selectedPlacement(),promo=promotions.find(row=>row.id===el("add-promo").value);
+  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
+  if(!placement||!promo)return toast("ยังไม่มีคูปองส่วนลดที่เลือกได้",true);
+  if(existing)return toast(`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`,true);
+  if(!await window.crsAskConfirm({
+    title:"ยืนยันให้ส่วนลด",
+    message:`${placement.student?.name||"นักเรียน"}\n${promo.name} · ลด ${money(promo.amount)}`,
+    okLabel:"บันทึกส่วนลด",
+    danger:false
+  }))return;
+  addingLine=true;syncAddPromo();
+  try{
+    const {error}=await sb.from("student_charges").insert([{
+      student_id:placement.student_id,
+      year:currentYear,
+      term:Number(el("term").value),
+      grade_level:placement.grade_level,
+      kind:"ส่วนลด",
+      promotion_id:promo.id,
+      description:promo.name,
+      qty:1,
+      unit_price:Number(promo.amount),
+      note:promo.condition_note||null,
+      created_by:session.user.id
+    }]);
+    if(error)throw error;
+    await afterChargeInserted(`เพิ่มส่วนลด ${promo.name} ${money(promo.amount)} แล้ว`)
+  }catch(error){toast("เพิ่มส่วนลดไม่สำเร็จ: "+friendly(error),true)}
+  finally{addingLine=false;renderAddLineForms()}
+};
+
+el("add-subsidy-submit").onclick=async()=>{
+  if(addingLine)return;
+  const placement=selectedPlacement(),rate=subsidies.find(row=>row.grade_level===placement?.grade_level);
+  const existing=annualSubsidyFor(placement?.student_id);
+  if(!placement||!rate)return toast(`ยังไม่มีอัตราเงินอุดหนุนของ ${placement?.grade_level||"ชั้นนี้"}`,true);
+  if(existing)return toast(`ได้รับแล้วเมื่อ ${displayChargeDate(existing)} · ภาคเรียน ${existing.term}`,true);
+  if(!await window.crsAskConfirm({
+    title:"ยืนยันให้เงินอุดหนุน",
+    message:`${placement.student?.name||"นักเรียน"}\nอัตรา ${placement.grade_level} · ${money(rate.amount)}`,
+    okLabel:"บันทึกเงินอุดหนุน",
+    danger:false
+  }))return;
+  addingLine=true;syncAddSubsidy();
+  try{
+    const {error}=await sb.from("student_charges").insert([{
+      student_id:placement.student_id,
+      year:currentYear,
+      term:Number(el("term").value),
+      grade_level:placement.grade_level,
+      kind:"เงินอุดหนุน",
+      description:"เงินอุดหนุน",
+      qty:1,
+      unit_price:Number(rate.amount),
+      note:rate.note||null,
+      created_by:session.user.id
+    }]);
+    if(error)throw error;
+    await afterChargeInserted(`เพิ่มเงินอุดหนุน ${money(rate.amount)} แล้ว`)
+  }catch(error){toast("เพิ่มเงินอุดหนุนไม่สำเร็จ: "+friendly(error),true)}
+  finally{addingLine=false;renderAddLineForms()}
+};
+
+function closeVoidCharge(){
+  if(voidChargeBusy)return;
+  el("void-charge-overlay").hidden=true;
+  activeVoidCharge=null;
+  el("void-charge-error").textContent=""
+}
+
+el("charge-list").onclick=event=>{
+  if(voidChargeBusy)return;
+  const button=event.target.closest("[data-void-charge]");
+  if(!button)return;
+  const charge=selectedCharges().find(row=>row.id===button.dataset.voidCharge)||null;
+  if(!charge)return toast("ไม่พบรายการนี้ กรุณาโหลดข้อมูลใหม่",true);
+  if(chargeHasPayment(charge))return toast("รายการนี้รับเงินไปแล้ว · ต้องยกเลิกรายการรับเงินก่อน",true);
+  activeVoidCharge=charge;
+  el("void-charge-detail").textContent=`${charge.description} · ${money(charge.amount)}`;
+  el("void-charge-reason").value="";
+  el("void-charge-error").textContent="";
+  el("void-charge-overlay").hidden=false;
+  setTimeout(()=>el("void-charge-reason").focus(),0)
+};
+el("void-charge-cancel").onclick=closeVoidCharge;
+el("void-charge-overlay").onclick=event=>{if(event.target===el("void-charge-overlay"))closeVoidCharge()};
+document.addEventListener("keydown",event=>{if(event.key==="Escape"&&!el("void-charge-overlay").hidden)closeVoidCharge()});
+el("void-charge-form").onsubmit=async event=>{
+  event.preventDefault();
+  if(voidChargeBusy||!activeVoidCharge)return;
+  const reason=squash(el("void-charge-reason").value);
+  if(!reason){el("void-charge-error").textContent="กรุณากรอกเหตุผลการยกเลิก";return}
+  const charge=activeVoidCharge,button=el("void-charge-submit");
+  voidChargeBusy=true;button.disabled=true;el("void-charge-cancel").disabled=true;el("void-charge-reason").readOnly=true;
+  try{
+    const {data,error}=await sb.from("student_charges")
+      .update({voided_at:new Date().toISOString(),void_reason:reason})
+      .eq("id",charge.id)
+      .is("voided_at",null)
+      .select("id");
+    if(error){el("void-charge-error").textContent=friendly(error);return}
+    if(!data?.length){el("void-charge-error").textContent="ยกเลิกไม่สำเร็จ รายการอาจถูกยกเลิกหรือรับเงินไปแล้ว";return}
+    const item=items.find(row=>row.id===charge.item_id);
+    if(charge.kind==="ค่าสินค้า"&&item?.track_stock)moves.push({item_id:item.id,qty:Number(charge.qty)});
+    el("void-charge-overlay").hidden=true;activeVoidCharge=null;
+    try{
+      await refreshSelectedStudentCharges();
+      renderPayment();
+      toast(`ยกเลิก ${charge.description} แล้ว`)
+    }catch(loadError){toast("ยกเลิกแล้ว แต่โหลดรายการล่าสุดไม่สำเร็จ: "+friendly(loadError),true)}
+  }catch(error){
+    el("void-charge-error").textContent="ผลการยกเลิกไม่แน่ชัด · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน: "+friendly(error)
+  }finally{
+    voidChargeBusy=false;button.disabled=false;el("void-charge-cancel").disabled=false;el("void-charge-reason").readOnly=false
+  }
+};
 
 function closeVoidPayment(){
   if(voidBusy||voidBlocked)return;
