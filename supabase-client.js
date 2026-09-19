@@ -5575,7 +5575,7 @@ export async function loadTeachingGap(year) {
   const selectedYear = String(year ?? "").trim();
   const [subjectsRes, staffRes, leaveTypes, settingRes, years] = await Promise.all([
     sb.from("subjects")
-      .select("id,code,name,grade_level,year,term,total_periods,owner_id")
+      .select("id,code,name,grade_level,year,term,total_periods,owner_id,subject_type")
       .eq("year", selectedYear),
     sb.from("staff").select("id,full_name,user_id,is_active").order("full_name"),
     getLeaveTypes(true),
@@ -5594,6 +5594,32 @@ export async function loadTeachingGap(year) {
   const subjectIds = subjects.map(subject => subject.id);
   const chunks = [];
   for (let i = 0; i < subjectIds.length; i += 100) chunks.push(subjectIds.slice(i, i + 100));
+
+  // ---------- วิชาบูรณาการ ↔ วิชาย่อย ----------
+  // วิชาบูรณาการไม่มี total_periods ของตัวเอง "โดยการออกแบบ" (คาบจริงอยู่ที่วิชาย่อย)
+  // ⟹ หารไม่ได้ ⟹ ตัดสินไม่ได้ตลอดกาล จึงไม่สร้างแถวรายงานให้ (ผู้ใช้เคาะ 2026-09-19)
+  // 🔑 เจ้าของวิชาบูรณาการเป็นแอดมินเสมอเพราะบางตัวสอน 2 คน — ถ้าปล่อยให้มีแถว
+  //    คอลัมน์ "ครู" จะโชว์ชื่อแอดมินซึ่งไม่ได้เป็นคนสอน = ข้อมูลผิด ไม่ใช่แค่ว่าง
+  const integratedSubjects = subjects.filter(s => s.subject_type === "บูรณาการ");
+  const integratedChunks = [];
+  for (let i = 0; i < integratedSubjects.length; i += 100) {
+    integratedChunks.push(integratedSubjects.slice(i, i + 100).map(s => s.id));
+  }
+  const memberLinkResults = await Promise.all(integratedChunks.map(ids =>
+    sb.from("integration_members").select("integrated_subject_id,member_subject_id")
+      .in("integrated_subject_id", ids)));
+  const memberLinkError = memberLinkResults.find(result => result.error)?.error;
+  if (memberLinkError) {
+    throw new Error("โหลดสมาชิกวิชาบูรณาการไม่สำเร็จ: " + memberLinkError.message);
+  }
+  const subjectById = new Map(subjects.map(s => [s.id, s]));
+  const parentOfMember = new Map();
+  for (const link of memberLinkResults.flatMap(result => result.data || [])) {
+    const parent = subjectById.get(link.integrated_subject_id);
+    if (!parent) continue;
+    parentOfMember.set(link.member_subject_id,
+      { id:parent.id, code:parent.code || null, name:parent.name || "" });
+  }
 
   // coverage_assignments ไม่มีคอลัมน์ year: ตัวตั้งต้องกรองด้วย subject_id เท่านั้น
   // แบ่งก้อนละ 100 กัน URL ของ PostgREST ยาวเกินเมื่อจำนวนวิชาโตขึ้น
@@ -5668,7 +5694,7 @@ export async function loadTeachingGap(year) {
   }
 
   const needsReview = [];
-  const rows = subjects.map(subject => {
+  const rows = subjects.filter(subject => subject.subject_type !== "บูรณาการ").map(subject => {
     const owner = staffByUser.get(subject.owner_id) || {
       id: null,
       full_name: "(ไม่พบชื่อในทะเบียนบุคลากร)",
@@ -5687,13 +5713,36 @@ export async function loadTeachingGap(year) {
       staffById
     });
     needsReview.push(...computed.needsReview);
-    return computed;
+    return { ...computed, integratedParent: parentOfMember.get(subject.id) || null };
   }).sort((a, b) => {
     if (a.percentUsed === null) return b.percentUsed === null ? 0 : 1;
     if (b.percentUsed === null) return -1;
     return b.percentUsed - a.percentUsed ||
       String(a.subject.code || a.subject.name).localeCompare(String(b.subject.code || b.subject.name), "th");
   });
+
+  // 🔻 วิชาบูรณาการไม่มีแถวรายงานแล้ว — ถ้ามีข้อมูลตกอยู่ที่นั่นต้อง "ดังขึ้น" ไม่ใช่หายเงียบ
+  //    หน้า coverage.html ยังให้เลือกวิชาบูรณาการได้ วันหน้าถ้าโอนวิชาให้ครูจริง ฝ่ายบุคคลกดผิดได้
+  //    ⛔ ห้ามนับเข้ารายงานหรือเดาว่าเป็นของวิชาย่อยตัวไหน ต้องให้คนย้ายข้อมูลเอง
+  for (const subject of integratedSubjects) {
+    const strayCover = (coverageBySubject.get(subject.id) || []).filter(cover => {
+      if (cover.source !== "ลา") return false;
+      const leave = Array.isArray(cover.leave) ? cover.leave[0] : cover.leave;
+      return Boolean(leave) && gapTypes.has(leave.leave_type);
+    });
+    const strayMakeups = makeupBySubject.get(subject.id) || [];
+    if (!strayCover.length && !strayMakeups.length) continue;
+    needsReview.push({
+      subject,
+      staff: staffByUser.get(subject.owner_id) || {
+        id: null, full_name: "(ไม่พบชื่อในทะเบียนบุคลากร)",
+        user_id: subject.owner_id || null, is_active: false, missing: true
+      },
+      coverDate: strayCover[0]?.cover_date || null,
+      coverageId: strayCover[0]?.id || null,
+      reason: "บันทึกไว้ที่วิชาบูรณาการ ต้องย้ายไปวิชาย่อย"
+    });
+  }
 
   const coveragePresence = new Set((coveragePresenceRes.data || [])
     .map(row => row.absent_staff_id + "|" + row.cover_date));
@@ -5780,7 +5829,8 @@ function computeTeachingGapRow({
 
   const totalPeriods = Number(subject?.total_periods);
   const validTotal = Number.isFinite(totalPeriods) && totalPeriods > 0;
-  if (!validTotal) {
+  // วิชาบูรณาการไม่มีคาบเต็มโดยการออกแบบ ไม่ใช่เพราะลืมกรอก
+  if (!validTotal && subject?.subject_type !== "บูรณาการ") {
     needsReview.push({ subject, staff, coverDate: details[0]?.coverDate || null,
       coverageId: null, reason: "วิชายังไม่ตั้งจำนวนคาบ" });
   }
@@ -5833,14 +5883,30 @@ async function loadMyTeachingGap({ staffId, year } = {}) {
   }
 
   const subjectsRes = await sb.from("subjects")
-    .select("id,code,name,grade_level,year,term,total_periods,owner_id")
+    .select("id,code,name,grade_level,year,term,total_periods,owner_id,subject_type")
     .eq("year", selectedYear)
     .eq("owner_id", staff.user_id);
   if (subjectsRes.error) throw new Error("โหลดวิชาของคุณไม่สำเร็จ: " + subjectsRes.error.message);
-  const subjects = subjectsRes.data || [];
+  const subjects = (subjectsRes.data || []).filter(subject => subject.subject_type !== "บูรณาการ");
   if (!subjects.length) return { year:selectedYear, percent, hasPercent, rows:[], makeups:[] };
 
   const subjectIds = subjects.map(subject => subject.id);
+  // 🪤 ครูเป็นเจ้าของวิชาย่อย แต่วิชาแม่เป็นของแอดมิน ⟹ ต้องขอชื่อวิชาแม่แยก
+  const linkRes = await sb.from("integration_members")
+    .select("integrated_subject_id,member_subject_id").in("member_subject_id", subjectIds);
+  if (linkRes.error) throw new Error("โหลดวิชาบูรณาการที่เกี่ยวข้องไม่สำเร็จ: " + linkRes.error.message);
+  const parentIds = [...new Set((linkRes.data || []).map(link => link.integrated_subject_id))];
+  const parentRes = parentIds.length
+    ? await sb.from("subjects").select("id,code,name").in("id", parentIds)
+    : { data: [], error: null };
+  if (parentRes.error) throw new Error("โหลดชื่อวิชาบูรณาการไม่สำเร็จ: " + parentRes.error.message);
+  const parentById = new Map((parentRes.data || []).map(parent => [parent.id, parent]));
+  const parentOfMember = new Map();
+  for (const link of linkRes.data || []) {
+    const parent = parentById.get(link.integrated_subject_id);
+    if (parent) parentOfMember.set(link.member_subject_id,
+      { id:parent.id, code:parent.code || null, name:parent.name || "" });
+  }
   const [coverageRes, makeupRes] = await Promise.all([
     fetchAllRows(() => sb.from("coverage_assignments")
       .select("id,subject_id,cover_date,kind,source,leave_id,periods,substitute_staff_id,leave:staff_leaves(leave_type),substitute:staff!coverage_assignments_substitute_staff_id_fkey(full_name)")
@@ -5873,14 +5939,17 @@ async function loadMyTeachingGap({ staffId, year } = {}) {
     makeupBySubject.get(row.subject_id).push(row);
   }
 
-  const rows = subjects.map(subject => computeTeachingGapRow({
-    subject,
-    staff,
-    coverRows: coverageBySubject.get(subject.id) || [],
-    makeupRows: makeupBySubject.get(subject.id) || [],
-    gapTypes,
-    percent,
-    hasPercent
+  const rows = subjects.map(subject => ({
+    ...computeTeachingGapRow({
+      subject,
+      staff,
+      coverRows: coverageBySubject.get(subject.id) || [],
+      makeupRows: makeupBySubject.get(subject.id) || [],
+      gapTypes,
+      percent,
+      hasPercent
+    }),
+    integratedParent: parentOfMember.get(subject.id) || null
   })).sort((a, b) => {
     if (a.percentUsed === null) return b.percentUsed === null ? 0 : 1;
     if (b.percentUsed === null) return -1;
@@ -6029,6 +6098,29 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
     subjects = res.data || [];
   }
 
+  // ---------- วิชาย่อยอยู่ในบูรณาการตัวไหน ----------
+  // ฝ่ายบุคคลเลือกวิชาจากรายการนี้ = ต้นทางของเลขขาดสอนทั้งระบบ
+  // 🪤 วิชาแม่เป็นของแอดมิน จึงไม่อยู่ใน subjects ที่เพิ่งโหลดมา ต้องขอชื่อแยก
+  const parentBySubjectId = new Map();
+  if (subjects.length) {
+    // ⚠ ไม่ throw โดยตั้งใจ: ป้ายหายยังจัดคนแทนได้ แต่หน้าล่มแปลว่าเช้านั้นไม่มีใครคุมห้อง
+    const linkRes = await sb.from("integration_members")
+      .select("integrated_subject_id,member_subject_id")
+      .in("member_subject_id", subjects.map(s => s.id));
+    if (linkRes.error) console.warn("โหลดวิชาบูรณาการที่เกี่ยวข้องไม่สำเร็จ:", linkRes.error.message);
+    const parentIds = [...new Set((linkRes.data || []).map(link => link.integrated_subject_id))];
+    if (parentIds.length) {
+      const parentRes = await sb.from("subjects").select("id,code,name").in("id", parentIds);
+      if (parentRes.error) console.warn("โหลดชื่อวิชาบูรณาการไม่สำเร็จ:", parentRes.error.message);
+      const parentById = new Map((parentRes.data || []).map(row => [row.id, row]));
+      for (const link of linkRes.data || []) {
+        const parent = parentById.get(link.integrated_subject_id);
+        if (parent) parentBySubjectId.set(link.member_subject_id,
+          { id:parent.id, code:parent.code || null, name:parent.name || "" });
+      }
+    }
+  }
+
   // ---------- คาบที่จะเติมให้ล่วงหน้า ----------
   // 🔑 ต้องรวมเป็น "คาบต่อวัน" ก่อน แล้วค่อยหาค่าที่พบบ่อยที่สุด
   //    ⛔ ห้ามหา mode จาก periods_covered รายครั้งตรง ๆ — ครูที่เช็คชื่อแยกคาบ
@@ -6093,7 +6185,8 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
       kind: "วิชา", key: coverageItemKey("วิชา", s.id), refId: s.id,
       label: subjectLabel(s),
       sub: [s.grade_level, s.term && ("ภาคเรียนที่ " + s.term)].filter(Boolean).join(" · "),
-      suggestedPeriods: periodHint.get(s.id) ?? null
+      suggestedPeriods: periodHint.get(s.id) ?? null,
+      integratedParent: parentBySubjectId.get(s.id) || null
     });
   }
   for (const h of homerooms) {

@@ -298,7 +298,7 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getSetting, getDailyAttendanceCutoff, loadMyHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge, loadMyTeachingGap, ackMakeupRejection,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260918-1";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260919-1";
 
 const session = await requireAuth();
 if (session) {
@@ -423,6 +423,12 @@ if (session) {
     };
     const teachingSubjectName = subject => [subject?.code, subject?.name, subject?.grade_level]
       .filter(Boolean).join(" · ");
+    // วิชาย่อยของบูรณาการต้องบอกวิชาแม่ — integratedParent อยู่ที่แถว ไม่ใช่ subject
+    const parentOfSubjectId = id =>
+      (teachingGapReport?.rows || []).find(row => row.subject.id === id)?.integratedParent || null;
+    const parentNote = parent => parent
+      ? `<div class="field-note">อยู่ในบูรณาการ · ${escapeHtml([parent.code, parent.name].filter(Boolean).join(" · "))}</div>`
+      : "";
     const isValidMakeupPeriods = value => Number.isFinite(value) && value > 0 && value <= 12 &&
       (value * 2) % 1 === 0;
     const makeupTimeLabel = makeup => makeup.start_time && makeup.end_time
@@ -453,6 +459,7 @@ if (session) {
           : "";
         return `<div class="gap-subject">
           <div class="gap-title">${escapeHtml(teachingSubjectName(row.subject))}</div>
+          ${parentNote(row.integratedParent)}
           <div class="gap-metrics">
             <div class="gap-metric"><span class="field-note">ขาดสอน</span><b>${escapeHtml(fmtPeriods(row.missed))}</b></div>
             <div class="gap-metric"><span class="field-note">เพดาน</span><b>${row.cap === null ? "—" : escapeHtml(fmtPeriods(row.cap))}</b></div>
@@ -481,7 +488,8 @@ if (session) {
           : "";
         return `<div class="makeup-request" data-makeup-id="${escapeHtml(makeup.id)}">
           <div class="makeup-head"><div><b>${escapeHtml(fmt(makeup.makeup_date))} · ${escapeHtml(teachingSubjectName(subjectById.get(makeup.subject_id)))}</b>
-            <div class="my-duty-meta">${escapeHtml(makeupTimeLabel(makeup))} · ${escapeHtml(fmtPeriods(makeup.periods))} คาบ</div></div>
+            <div class="my-duty-meta">${escapeHtml(makeupTimeLabel(makeup))} · ${escapeHtml(fmtPeriods(makeup.periods))} คาบ</div>
+            ${parentNote(parentOfSubjectId(makeup.subject_id))}</div>
             <span class="status-chip${approved ? " approved" : ""}">${escapeHtml(makeup.approval_status || "รออนุมัติ")}</span></div>
           ${makeup.note ? `<div class="field-note">หมายเหตุ: ${escapeHtml(makeup.note)}</div>` : ""}${reason}${edit}
         </div>`;
@@ -492,7 +500,7 @@ if (session) {
       const eligible = (teachingGapReport?.rows || []).filter(row => row.required > 0);
       el("makeup-request-card").hidden = !eligible.length;
       el("makeup-subject").innerHTML = ['<option value="">— เลือกวิชา —</option>'].concat(
-        eligible.map(row => `<option value="${escapeHtml(row.subject.id)}"${row.subject.id === selectedId ? " selected" : ""}>${escapeHtml(teachingSubjectName(row.subject))}</option>`)
+        eligible.map(row => `<option value="${escapeHtml(row.subject.id)}"${row.subject.id === selectedId ? " selected" : ""}>${escapeHtml(teachingSubjectName(row.subject))}${row.integratedParent ? " · ในบูรณาการ " + escapeHtml([row.integratedParent.code, row.integratedParent.name].filter(Boolean).join(" · ")) : ""}</option>`)
       ).join("");
     }
 

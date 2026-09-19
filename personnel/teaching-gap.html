@@ -203,7 +203,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
   personnelAccessDeniedHtml, getAcademicYears, academicYearOf,
   bangkokNow, toDateStr, loadTeachingGap
-} from "../supabase-client.js?v=20260918-1";
+} from "../supabase-client.js?v=20260919-1";
 
 const session = await requireAuth();
 if (session) {
@@ -243,6 +243,9 @@ if (session) {
     });
     const subjectName = subject => [subject.code, subject.name, subject.grade_level,
       subject.term && `ภาคเรียนที่ ${subject.term}`].filter(Boolean).join(" · ");
+    // วิชาย่อยต้องบอกว่ามาจากบูรณาการอะไร — ผู้ใช้สั่ง 2026-09-19
+    const parentLabel = parent => parent
+      ? [parent.code, parent.name].filter(Boolean).join(" · ") : "";
     const timeLabel = makeup => makeup.start_time && makeup.end_time
       ? `${String(makeup.start_time).slice(0, 5)}–${String(makeup.end_time).slice(0, 5)} น.`
       : "ไม่ระบุเวลา";
@@ -310,7 +313,10 @@ if (session) {
           <tr data-subject-row="${index}" tabindex="0" aria-expanded="false">
             <td>${esc(row.staff.full_name)}</td>
             <td><div class="subject-name">${esc(row.subject.code || "—")} · ${esc(row.subject.name)}</div>
-                <div class="meta">${esc(row.subject.grade_level || "—")} · ภาคเรียนที่ ${esc(row.subject.term || "—")}</div></td>
+                <div class="meta">${esc(row.subject.grade_level || "—")} · ภาคเรียนที่ ${esc(row.subject.term || "—")}</div>
+                ${row.integratedParent
+                  ? `<div class="meta">อยู่ในบูรณาการ · ${esc(parentLabel(row.integratedParent))}</div>`
+                  : ""}</td>
             <td class="num">${esc(fmtPeriods(row.missed))}</td>
             <td class="num"${capReason ? ` title="${esc(capReason)}"` : ""}>${row.cap !== null
               ? esc(fmtPeriods(row.cap)) : "—"}</td>
@@ -339,7 +345,7 @@ if (session) {
       el("approval-list").innerHTML = pending.map(makeup => {
         const row = rowBySubject.get(makeup.subject_id);
         return `<div class="approval-request" data-approval-id="${esc(makeup.id)}">
-          <div class="approval-head"><div><b>${esc(row?.staff?.full_name || "(ไม่พบชื่อครู)")} · ${esc(subjectName(row?.subject || {}))}</b>
+          <div class="approval-head"><div><b>${esc(row?.staff?.full_name || "(ไม่พบชื่อครู)")} · ${esc(subjectName(row?.subject || {}))}${row?.integratedParent ? " · ในบูรณาการ " + esc(parentLabel(row.integratedParent)) : ""}</b>
             <div class="meta">${esc(fmtDate(makeup.makeup_date))} · ${esc(timeLabel(makeup))} · ${esc(fmtPeriods(makeup.periods))} คาบ</div>
             ${makeup.note ? `<div class="meta">หมายเหตุ: ${esc(makeup.note)}</div>` : ""}</div>
             <span class="status amber">รออนุมัติ</span></div>
@@ -370,7 +376,7 @@ if (session) {
       const eligible = report.rows.filter(row => row.required > 0);
       el("makeup-subject").innerHTML = ['<option value="">— เลือกวิชา —</option>'].concat(
         eligible.map(row => `<option value="${esc(row.subject.id)}"${row.subject.id === selectedId ? " selected" : ""}${row.staff.id ? "" : " disabled"}>
-          ${esc(row.staff.full_name)} · ${esc(subjectName(row.subject))}${row.staff.id ? "" : " · ไม่พบบุคลากร"}
+          ${esc(row.staff.full_name)} · ${esc(subjectName(row.subject))}${row.integratedParent ? " · ในบูรณาการ " + esc(parentLabel(row.integratedParent)) : ""}${row.staff.id ? "" : " · ไม่พบบุคลากร"}
         </option>`)
       ).join("");
       el("btn-save-makeup").disabled = !eligible.some(row => row.staff.id);
