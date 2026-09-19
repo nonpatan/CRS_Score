@@ -222,6 +222,19 @@ if (session) {
     const PORTION_LABEL = { full:"เต็มวัน", morning:"ครึ่งวันเช้า", afternoon:"ครึ่งวันบ่าย" };
     const COVERAGE_KIND_ORDER = ["วิชา", "ครูประจำชั้น", "เวร"];
 
+    // ---------- ข้อความบนชิป ----------
+    // 🔑 สีของชิปยังผูกกับ "หมวด" (SOURCE_CHIP) เหมือนเดิม — เปลี่ยนแค่ข้อความ
+    //    source มี 3 ค่าตายตัวและแปลว่า "มาจากทะเบียนไหน" ⟹ ขึ้น "ออกปฏิบัติหน้าที่"
+    //    ตลอดแม้ฝ่ายบุคคลจะแก้ประเภทเป็น "อบรม" แล้ว (ผู้ใช้เจอเองและสับสน 2026-09-19)
+    //    ⟹ ถ้ามีบันทึกผูกอยู่ ให้โชว์ประเภทจริงจาก staff_field_duties.kind
+    // ⚠ ค่าว่าง/ไม่มีบันทึก ให้ตกกลับเป็นชื่อหมวด ห้ามปล่อยชิปว่าง
+    const chipText = entry => {
+      if (entry.source === "ออกปฏิบัติหน้าที่" && entry.fieldDuty?.kind) {
+        return entry.fieldDuty.kind;
+      }
+      return entry.source;
+    };
+
     // ---------- คำอธิบายว่าทำไมคนนี้ไม่มา ----------
     const whyText = entry => {
       if (entry.source === "ลา" && entry.leave) {
@@ -229,8 +242,10 @@ if (session) {
                 entry.leave.reason].filter(Boolean).join(" · ");
       }
       if (entry.source === "ออกปฏิบัติหน้าที่" && entry.fieldDuty) {
-        return [entry.fieldDuty.kind, entry.fieldDuty.title,
-                entry.fieldDuty.organizer].filter(Boolean).join(" · ");
+        // ⛔ ไม่ใส่ kind ซ้ำ — ขึ้นบนชิปไปแล้ว · ถ้า kind ว่าง ชิปตกกลับเป็นชื่อหมวด
+        //    ซึ่งก็ไม่มีอะไรให้ซ้ำอยู่ดี จึงตัดออกได้ทุกกรณี
+        return [entry.fieldDuty.title, entry.fieldDuty.organizer]
+          .filter(Boolean).join(" · ");
       }
       return "ไม่มีใบลาหรือบันทึกออกปฏิบัติหน้าที่ — ฝ่ายบุคคลบันทึกเอง";
     };
@@ -268,7 +283,7 @@ if (session) {
           : "";
         const head =
           "<div class='person-head'><span class='person-name'>" + esc(entry.staff.full_name) +
-          "</span><span class='chip " + chip + "'>" + esc(entry.source) + "</span>" +
+          "</span><span class='chip " + chip + "'>" + esc(chipText(entry)) + "</span>" +
           coverageChip + "</div>" +
           "<div class='person-why'>" + esc(whyText(entry)) + "</div>";
 
