@@ -323,30 +323,21 @@ function showToast(msg, ok) {
   elToast.className = "toast " + (ok ? "ok" : "err");
 }
 
-// รับ next ได้เฉพาะหน้าภายในระบบที่ระบุไว้ ป้องกันลิงก์ login.html?next=https://เว็บปลอม
+// รับ next ได้เฉพาะหน้าภายในระบบ ป้องกันลิงก์ login.html?next=https://เว็บปลอม
 // ซึ่งอาจใช้ส่งครูต่อไปยังหน้า phishing หลังล็อกอินสำเร็จ
-const MODULE_PAGES = {
-  academic: new Set([
-    "index.html", "entry.html", "attendance.html", "summary.html", "manage.html", "students.html",
-    "retention.html", "warning.html", "rollover.html", "competency-manage.html",
-    "competency-core.html", "competency-entry.html", "calendar.html", "projects.html",
-    "project-approval.html"
-  ]),
-  personnel: new Set([
-    "index.html", "leave.html", "staff.html", "hr-settings.html", "work-summary.html", "my-work.html"
-  ]),
-  "general-affairs": new Set([
-    "index.html", "daily-attendance.html", "homeroom.html"
-  ]),
-  finance: new Set([
-    "index.html", "savings-entry.html", "savings-opening.html",
-    "savings-withdraw.html", "savings-payout.html", "savings-remit.html", "savings-report.html",
-    "transport-settings.html", "transport-entry.html", "transport-remit.html", "transport-report.html",
-    "fee-settings.html", "fee-stock.html", "fee-assign.html", "fee-payment.html", "fee-receipt.html", "fee-report.html",
-    "scholarship-sources.html", "scholarship-grant.html", "scholarship-report.html"
-  ])
-};
-const ROOT_PAGES = new Set(["dashboard.html", "profile.html"]);
+//
+// 🔻 2026-09-19 เปลี่ยนจาก "รายชื่อหน้าทีละหน้า" มาเป็น "กติกาเชิงโครงสร้าง" (ผู้ใช้เคาะ)
+//    ของเดิมไล่ชื่อหน้าไว้ในไฟล์นี้ แล้วหน้าที่เพิ่มเข้าระบบทีหลังไม่มีใครย้อนมาต่อรายชื่อ
+//    ⟹ ตกหล่นสะสม 13 หน้า (coverage · teaching-gap · duty · lesson-logs · okr …)
+//    อาการคือกดลิงก์ตอนเซสชันหลุด แล้วล็อกอินเสร็จถูกโยนไป dashboard เสียทั้งหน้าและค่าที่ส่งมา
+// 🔑 ด่านที่กัน phishing จริงคือ origin + appPath ไม่ใช่รายชื่อหน้า —
+//    next=https://เว็บปลอม · //เว็บปลอม · javascript:… ถูกปัดตกที่ origin ทั้งหมด
+//    ⛔ ห้ามถอด 2 เงื่อนไขนั้นเด็ดขาด ส่วนรายชื่อหน้าแค่กันเด้งไปหน้าที่ไม่มีอยู่ (ผลคือ 404)
+const MODULE_FOLDERS = new Set(["academic", "personnel", "finance", "general-affairs"]);
+const PAGE_NAME = /^[a-z0-9-]+\.html$/;
+// ห้ามเป็นปลายทาง: index.html ที่รากเว็บคือหน้าเด้งเข้า login และ login.html คือหน้านี้เอง
+// — ทั้งคู่ทำให้วนกลับมาที่หน้าล็อกอินไม่รู้จบ
+const NEVER_NEXT = new Set(["index.html", "login.html"]);
 
 function getSafeNextPage() {
   const raw = new URLSearchParams(location.search).get("next");
@@ -355,31 +346,20 @@ function getSafeNextPage() {
   try {
     const target = new URL(raw, location.href);
     const appPath = location.pathname.replace(/[^/]*$/, "");
-    const relativePath = target.pathname.slice(appPath.length);
-    if (target.origin === location.origin && target.pathname.startsWith(appPath) && ROOT_PAGES.has(relativePath)) {
-      return relativePath + target.search;
-    }
-    const parts = relativePath.split("/");
-    if (
-      target.origin === location.origin &&
-      target.pathname.startsWith(appPath) &&
-      parts.length === 2 &&
-      MODULE_PAGES[parts[0]]?.has(parts[1])
-    ) {
-      return relativePath + target.search;
-    }
-    const legacyPage = parts.length === 1 ? relativePath : "";
-    // "index.html" ที่รากเว็บคือหน้าเด้งเข้า login ไม่ใช่หน้าภาพรวมวิชาการ — ห้ามแมปข้ามให้
-    // (หน้าอื่นที่รากเว็บเป็น URL เก่าของหน้าวิชาการจริง จึงยังแมปต่อได้เหมือนเดิม)
-    const page = legacyPage === "index.html" ? "" : legacyPage;
-    if (
-      target.origin !== location.origin ||
-      !target.pathname.startsWith(appPath) ||
-      !MODULE_PAGES.academic.has(page)
-    ) {
+    if (target.origin !== location.origin || !target.pathname.startsWith(appPath)) {
       return "dashboard.html";
     }
-    return "academic/" + page + target.search;
+    const relativePath = target.pathname.slice(appPath.length);
+    const parts = relativePath.split("/");
+    // หน้าที่รากเว็บ (dashboard · profile · permissions · URL เก่าของหน้าวิชาการซึ่งเด้งต่อเอง)
+    if (parts.length === 1 && PAGE_NAME.test(parts[0]) && !NEVER_NEXT.has(parts[0])) {
+      return relativePath + target.search;
+    }
+    // หน้าของฝ่าย: <โฟลเดอร์ฝ่ายที่มีจริง>/<ชื่อไฟล์>.html — ไม่ต้องไล่ชื่อหน้าอีกต่อไป
+    if (parts.length === 2 && MODULE_FOLDERS.has(parts[0]) && PAGE_NAME.test(parts[1])) {
+      return relativePath + target.search;
+    }
+    return "dashboard.html";
   } catch {
     return "dashboard.html";
   }
