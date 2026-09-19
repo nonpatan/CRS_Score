@@ -510,7 +510,17 @@ if (session) {
     el("f-date").addEventListener("change", () => { pendingUrgent.clear(); reload(); });
     el("btn-reload").addEventListener("click", () => reload());
 
-    el("f-date").value = toDateStr(bangkokNow());
+    // ---------- เปิดหน้าด้วยวันที่จากลิงก์ ----------
+    // การ์ด "ต้องตรวจสอบ" และ "วันลาที่ยังไม่มีบันทึกคนแทน" ในหน้าคาบที่ครูไม่ได้สอน
+    // ลิงก์มาที่ coverage.html?date=YYYY-MM-DD — ถ้าไม่อ่านค่านี้ ฝ่ายบุคคลต้องจำวันที่
+    // แล้วพิมพ์เองทุกครั้ง ซึ่งพิมพ์ผิดวันได้ และคาบจะไปเกาะวันผิดแบบไม่มีใครรู้
+    // 🪤 ค่าจาก URL เชื่อไม่ได้ ต้องตรวจรูปแบบก่อน — input[type=date] ที่ได้ค่าพังจะกลายเป็น
+    //    ช่องว่าง แล้ว reload() จะ return ทันที (บรรทัด "if (!date) return") หน้าจะค้างว่าง
+    //    โดยไม่มีคำอธิบายใด ๆ ⟹ ค่าที่ไม่ผ่านต้องตกกลับเป็นวันนี้เสมอ ไม่ใช่ปล่อยว่าง
+    const dateParam = new URLSearchParams(location.search).get("date") || "";
+    const validDateParam = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) &&
+      !Number.isNaN(new Date(dateParam + "T00:00:00Z").getTime());
+    el("f-date").value = validDateParam ? dateParam : toDateStr(bangkokNow());
     await reload();
   }
 }
