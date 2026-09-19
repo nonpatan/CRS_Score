@@ -466,6 +466,11 @@
       <label for="new-academic-year-start">วันเริ่มปีการศึกษา</label>
       <input type="date" id="new-academic-year-start">
     </div>
+    <div class="field">
+      <label for="new-academic-year-term2">วันเปิดภาคเรียนที่ 2</label>
+      <input type="date" id="new-academic-year-term2">
+      <div class="field-note">เว้นว่างได้ถ้ายังไม่รู้ — ระบบจะแสดงวิชาทุกภาคเรียนไปก่อน ไม่เดาให้</div>
+    </div>
     <div class="year-start-note">ดูจากปฏิทินโรงเรียนจริง อย่ากรอกวันที่ 1 โดยอัตโนมัติ</div>
     <div class="modal-actions">
       <button type="button" class="ghost" id="year-modal-cancel">ยกเลิก</button>
@@ -475,7 +480,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260919-1";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260919-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -561,6 +566,7 @@ const elYearOverlay = document.getElementById("year-overlay");
 const elYearModalTitle = document.getElementById("year-modal-title");
 const elNewAcademicYear = document.getElementById("new-academic-year");
 const elNewAcademicYearStart = document.getElementById("new-academic-year-start");
+const elNewAcademicYearTerm2 = document.getElementById("new-academic-year-term2");
 const btnYearModalSave = document.getElementById("year-modal-save");
 
 // การสร้างวิชาใหม่ทำได้เฉพาะ admin
@@ -983,6 +989,7 @@ function closeYearModal() {
   elNewAcademicYear.disabled = false;
   elNewAcademicYear.value = "";
   elNewAcademicYearStart.value = "";
+  elNewAcademicYearTerm2.value = "";
 }
 
 function openYearModal(row = null) {
@@ -993,6 +1000,7 @@ function openYearModal(row = null) {
   elNewAcademicYear.value = row?.year || "";
   elNewAcademicYear.disabled = !!row;
   elNewAcademicYearStart.value = row?.start_date || "";
+  elNewAcademicYearTerm2.value = row?.term2_start_date || "";
   elYearOverlay.classList.add("show");
   setTimeout(() => (row ? elNewAcademicYearStart : elNewAcademicYear).focus(), 0);
 }
@@ -1018,7 +1026,11 @@ btnYearModalSave.addEventListener("click", async () => {
       if (!agreed) return;
     }
     const preferredSubjectYear = fYear.value;
-    const saved = await saveAcademicYear(elNewAcademicYear.value, elNewAcademicYearStart.value);
+    const saved = await saveAcademicYear(
+      elNewAcademicYear.value,
+      elNewAcademicYearStart.value,
+      elNewAcademicYearTerm2.value
+    );
     await refreshSelectableYears(preferredSubjectYear);
     closeYearModal();
     showToast("บันทึกปีการศึกษา " + saved.year + " แล้ว", true);

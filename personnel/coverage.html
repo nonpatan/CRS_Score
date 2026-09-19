@@ -117,6 +117,15 @@
           <label for="f-date">วันที่ต้องหาคนแทน</label>
           <input id="f-date" type="date">
         </div>
+        <div class="field">
+          <label for="f-term">ภาคเรียน</label>
+          <select id="f-term">
+            <option value="">— ทุกภาคเรียน —</option>
+            <option value="1">ภาคเรียนที่ 1</option>
+            <option value="2">ภาคเรียนที่ 2</option>
+          </select>
+          <div class="field-note">วิชาประถมไม่มีภาคเรียน จึงแสดงทุกภาค · วิชาที่จัดคนแทนไว้แล้วก็แสดงเสมอ</div>
+        </div>
         <div class="field" style="flex:0 0 auto">
           <button id="btn-reload" class="ghost">โหลดใหม่</button>
         </div>
@@ -166,7 +175,7 @@ import {
   loadCoverageDay, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260919-1";
+} from "../supabase-client.js?v=20260919-2";
 
 const session = await requireAuth();
 if (session) {
@@ -196,6 +205,12 @@ if (session) {
     // คนที่ฝ่ายบุคคลเพิ่มเองแบบเหตุสุดวิสัยแต่ยังไม่ได้เลือกคนแทน — ยังไม่มีแถวใน DB
     // จึงต้องจำไว้ฝั่งหน้าจอ ไม่งั้นกดเพิ่มแล้วชื่อหายทันทีที่โหลดใหม่
     let pendingUrgent = new Set();
+    let termPickedByUser = false;
+    const termForLoad = () => termPickedByUser ? el("f-term").value : undefined;
+    const applySuggestedTerm = term => {
+      if (!termPickedByUser) el("f-term").value = term ?? "";
+    };
+    const markTermPickedByUser = () => { termPickedByUser = true; };
 
     const SOURCE_CHIP = {
       "ลา": "leave", "ออกปฏิบัติหน้าที่": "offsite", "เหตุสุดวิสัย": "urgent"
@@ -486,7 +501,11 @@ if (session) {
       try {
         // ส่งคนที่เพิ่งกดเพิ่มแบบเหตุสุดวิสัยเข้าไปด้วย เพื่อให้ได้ของค้าง 3 อย่างของเขามาครบ
         // เหมือนคนที่มีใบลา — ไม่งั้นจะเห็นชื่อแต่ไม่มีอะไรให้จัดคนแทน
-        day = await loadCoverageDay(date, { extraAbsentIds: [...pendingUrgent] });
+        day = await loadCoverageDay(date, {
+          extraAbsentIds: [...pendingUrgent],
+          term: termForLoad()
+        });
+        applySuggestedTerm(day.term);
       } catch (e) {
         el("list").innerHTML = "<div class='muted-empty'>โหลดข้อมูลไม่สำเร็จ</div>";
         toast(e.message || String(e), true);
@@ -508,6 +527,11 @@ if (session) {
     }
 
     el("f-date").addEventListener("change", () => { pendingUrgent.clear(); reload(); });
+    el("f-term").addEventListener("change", () => {
+      markTermPickedByUser();
+      pendingUrgent.clear();
+      reload();
+    });
     el("btn-reload").addEventListener("click", () => reload());
 
     // ---------- เปิดหน้าด้วยวันที่จากลิงก์ ----------

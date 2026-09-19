@@ -5493,7 +5493,8 @@ export async function clearHrYearStart(year) {
 // รายการปีสำหรับจุดที่สร้าง/แก้ข้อมูล = ปีที่ลงทะเบียนไว้ + ปีเก่าที่มีอยู่จริงในข้อมูล
 // คืนค่าเรียงจากใหม่ไปเก่า และติด registered=false เพื่อให้หน้าจอเตือนโดยไม่ทำค่าปีเดิมหาย
 export async function listSelectableYears(extraYears = []) {
-  const { data, error } = await sb.from("academic_years").select("year,start_date").order("year");
+  const { data, error } = await sb.from("academic_years")
+    .select("year,start_date,term2_start_date").order("year");
   if (error) throw new Error("โหลดรายการปีการศึกษาไม่สำเร็จ: " + error.message);
 
   const byYear = new Map();
@@ -5502,13 +5503,14 @@ export async function listSelectableYears(extraYears = []) {
     byYear.set(String(row.year), {
       year: String(row.year),
       start_date: row.start_date || null,
+      term2_start_date: row.term2_start_date || null,
       registered: true
     });
   }
   for (const item of (extraYears || [])) {
     const year = String(typeof item === "string" ? item : (item && item.year) || "").trim();
     if (!year || byYear.has(year)) continue;
-    byYear.set(year, { year, start_date: null, registered: false });
+    byYear.set(year, { year, start_date: null, term2_start_date: null, registered: false });
   }
   return [...byYear.values()].sort((a, b) =>
     b.year.localeCompare(a.year, "th", { numeric: true })
@@ -5516,7 +5518,7 @@ export async function listSelectableYears(extraYears = []) {
 }
 
 // เพิ่ม/แก้ปีการศึกษาจากจุดสร้างข้อมูล — วันเริ่มปีต้องมาจากปฏิทินโรงเรียนจริงเสมอ
-export async function saveAcademicYear(year, startDate) {
+export async function saveAcademicYear(year, startDate, term2StartDate) {
   const normalizedYear = String(year == null ? "" : year).trim();
   const normalizedStartDate = String(startDate == null ? "" : startDate).trim();
   if (!/^\d{4}$/.test(normalizedYear)) {
@@ -5524,9 +5526,15 @@ export async function saveAcademicYear(year, startDate) {
   }
   if (!normalizedStartDate) throw new Error("กรุณาเลือกวันเริ่มปี");
 
+  const payload = { year: normalizedYear, start_date: normalizedStartDate };
+  // undefined = ตัวเรียกเก่ายังไม่รู้จักช่องนี้ จึงห้ามเขียนทับค่าที่มีอยู่
+  // ส่วนค่าว่าง = ผู้ใช้ตั้งใจล้างวันเปิดภาคเรียนที่ 2
+  if (term2StartDate !== undefined) {
+    payload.term2_start_date = String(term2StartDate == null ? "" : term2StartDate).trim() || null;
+  }
   const { data, error } = await sb.from("academic_years")
-    .upsert({ year: normalizedYear, start_date: normalizedStartDate }, { onConflict: "year" })
-    .select("year,start_date")
+    .upsert(payload, { onConflict: "year" })
+    .select("year,start_date,term2_start_date")
     .single();
   if (error) throw new Error("บันทึกปีการศึกษาไม่สำเร็จ: " + error.message);
   return data;
@@ -5551,6 +5559,27 @@ export function academicYearOf(dateStr, years) {
   const found = list.find(y => y.start_date <= dateStr);
   return found ? found.year : null;
 }
+
+// ภาคเรียนที่ระบบเสนอเป็นค่าตั้งต้นให้ผู้ใช้ — ถ้ายังไม่ได้ตั้งวันเปิดภาค 2 ให้ตอบไม่ได้แทนการเดา
+export function academicTermOf(dateStr, years) {
+  const year = academicYearOf(dateStr, years);
+  if (!year) return null;
+  const row = years.find(item => String(item.year) === String(year));
+  if (!row?.term2_start_date) return null;
+  return dateStr >= row.term2_start_date ? "2" : "1";
+}
+
+// วิชาที่หน้าจัดคนแทนควรแสดง — รายการเดิมที่บันทึกแล้วต้องมองเห็นและแก้ได้เสมอ
+export function pickCoverageSubjects({ subjects, assignedSubjectIds, term }) {
+  return (subjects || []).filter(subject =>
+    assignedSubjectIds.has(subject.id) ||
+    (subject.subject_type !== "บูรณาการ" &&
+      (term === null || subject.term == null || subject.term === "" ||
+        String(subject.term) === String(term)))
+  );
+}
+
+const COVERAGE_SUBJECT_COLUMNS = "id,name,code,year,term,grade_level,owner_id,subject_type";
 
 // โควตาวันลาของปีการศึกษาหนึ่ง → { 'ลากิจ': 7, ... }
 export async function getLeaveQuotas(year) {
@@ -6033,7 +6062,7 @@ export async function getMyCoverageFor(dateStr) {
 // ---------- โหลดทุกอย่างที่หน้าจัดคนแทนต้องใช้ของวันหนึ่ง ----------
 // extraAbsentIds = คนที่ฝ่ายบุคคลเพิ่งกดเพิ่มแบบ "เหตุสุดวิสัย" แต่ยังไม่ได้เลือกคนแทน
 // → ยังไม่มีแถวใน DB ให้จับได้ ถ้าไม่ส่งเข้ามา เขาจะโผล่บนจอแบบไม่มีของค้างให้เลือกเลย
-export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
+export async function loadCoverageDay(dateStr, { extraAbsentIds = [], term } = {}) {
   const [staffRes, years, leaveRes, fieldRes, dutyRes, dutyTypes, assignRes] = await Promise.all([
     sb.from("staff").select("id,full_name,is_active,user_id,exempt").order("full_name"),
     getAcademicYears(),
@@ -6061,6 +6090,11 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
   const duties = dutyRes.data || [];
   const assignments = assignRes.data || [];
   const year = academicYearOf(dateStr, years);
+  // undefined = ให้ระบบเสนอจากวันที่ · "" = ผู้ใช้เลือกทุกภาคเรียนเอง
+  const resolvedTerm = term === undefined ? academicTermOf(dateStr, years) : (term === "" ? null : term);
+  const assignedSubjectIds = new Set(assignments
+    .filter(row => row.kind === "วิชา" && row.subject_id)
+    .map(row => row.subject_id));
 
   // ---------- ใครไม่มา ----------
   // 3 ทาง: ใบลา · ออกปฏิบัติหน้าที่ · เหตุสุดวิสัย (ตัวหลังไม่มีใบอะไรรองรับ
@@ -6089,13 +6123,13 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
   let subjects = [], homerooms = [];
   if (absentUserIds.length) {
     let query = sb.from("subjects")
-      .select("id,name,code,year,term,grade_level,owner_id")
+      .select(COVERAGE_SUBJECT_COLUMNS)
       .in("owner_id", absentUserIds);
     // ปีการศึกษาว่าง = ยังไม่ได้ตั้ง academic_years → ไม่กรอง ดีกว่าคืนค่าว่างแบบเงียบ ๆ
     if (year) query = query.eq("year", year);
     const res = await query;
     if (res.error) throw new Error("โหลดวิชาที่สอนไม่สำเร็จ: " + res.error.message);
-    subjects = res.data || [];
+    subjects = pickCoverageSubjects({ subjects: res.data || [], assignedSubjectIds, term: resolvedTerm });
   }
 
   // ---------- วิชาย่อยอยู่ในบูรณาการตัวไหน ----------
@@ -6233,7 +6267,7 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [] } = {}) {
   const byKey = new Map(assignments.map(row => [coverageRowKey(row), row]));
   // dutyRoster ของทั้งวัน (ไม่ใช่เฉพาะคนที่ไม่มา) — หน้าเว็บต้องรู้ว่าคนแทนมีเวรงานนั้น
   // อยู่ก่อนแล้วหรือเปล่า ไม่งั้นตอนยกเลิกการจัดคนแทนจะเผลอถอดเวรของเขาเองทิ้ง
-  return { date: dateStr, year, staff, staffById, dutyTypes, dutyRoster: duties,
+  return { date: dateStr, year, term: resolvedTerm, staff, staffById, dutyTypes, dutyRoster: duties,
            absentees, assignments, byKey };
 }
 
