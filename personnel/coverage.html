@@ -36,6 +36,10 @@
   .field { margin-bottom:14px; } .field:last-child { margin-bottom:0; }
   .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
   .row2 { display:flex; gap:12px; align-items:flex-end; } .row2 > * { flex:1; }
+  /* แถวตัวกรองชิดบน — ช่องภาคเรียนมีคำอธิบายใต้ช่อง ถ้าชิดล่างช่องวันที่จะหล่นต่ำกว่า */
+  .row2.align-top { align-items:flex-start; }
+  /* บรรทัดสรุป + ปุ่มโหลดใหม่อยู่บรรทัดเดียวกัน (จอแคบให้ตกบรรทัดได้) */
+  .day-note-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   button { font-family:inherit; font-size:15px; font-weight:600; padding:10px 14px;
            border:none; border-radius:8px; cursor:pointer; }
   button.primary { background:var(--teal); color:var(--white); }
@@ -112,7 +116,7 @@
 
   <div id="content" style="display:none">
     <div class="card">
-      <div class="row2">
+      <div class="row2 align-top">
         <div class="field">
           <label for="f-date">วันที่ต้องหาคนแทน</label>
           <input id="f-date" type="date">
@@ -126,11 +130,11 @@
           </select>
           <div class="field-note">วิชาประถมไม่มีภาคเรียน จึงแสดงทุกภาค · วิชาที่จัดคนแทนไว้แล้วก็แสดงเสมอ</div>
         </div>
-        <div class="field" style="flex:0 0 auto">
-          <button id="btn-reload" class="ghost">โหลดใหม่</button>
-        </div>
       </div>
-      <div id="day-note" class="field-note">—</div>
+      <div id="day-note" class="field-note day-note-row">
+        <span id="day-note-text">—</span>
+        <button id="btn-reload" class="ghost small">โหลดใหม่</button>
+      </div>
       <div class="banner info" style="margin-top:12px">
         <b>สิทธิ์เช็คชื่อของคนแทนผูกกับวันที่ที่จัดไว้</b><br>
         คนแทนที่มีบัญชีล็อกอินจะเช็คชื่อวิชาหรือห้องนั้นได้เฉพาะวันที่ถูกจัดให้แทน
@@ -513,7 +517,9 @@ if (session) {
       }
 
       const covered = day.assignments.length;
-      el("day-note").textContent = day.year
+      // ⛔ ต้องเซ็ตที่ span ไม่ใช่ #day-note — ในกล่องนั้นมีปุ่ม "โหลดใหม่" อยู่ด้วย
+      //    ถ้าเซ็ต textContent ที่กล่อง ปุ่มจะถูกลบทิ้งพร้อม listener ตั้งแต่โหลดรอบแรก
+      el("day-note-text").textContent = day.year
         ? "ปีการศึกษา " + day.year + " · คนที่ไม่มา " + day.absentees.length +
           " คน · จัดคนแทนแล้ว " + covered + " รายการ"
         : "⚠ ยังไม่ได้ตั้งปีการศึกษา — ให้ฝ่ายวิชาการเปิดปีที่หน้า \"จัดการโครงสร้าง\" ก่อน จะยังหาวิชาและครูประจำชั้นไม่เจอ";
