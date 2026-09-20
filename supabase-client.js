@@ -3406,6 +3406,12 @@ export async function isMakeupApprover() {
   return data === true;
 }
 
+export async function isAcademicHead() {
+  const { data, error } = await sb.rpc("is_academic_head");
+  if (error) return false;
+  return data === true;
+}
+
 // คิวคำขอสอนชดที่รออนุมัติ พร้อมชื่อครูและวิชา
 // 🔴 ต้องผ่าน RPC — staff_select เปิดให้เฉพาะฝ่ายบุคคลและเจ้าของแถว ถ้ายิง staff ตรงจะได้ 0 แถว
 //    เงียบ ๆ แล้วคิวจะขึ้นคำขอที่ไม่มีชื่อครู (บทเรียนเดียวกับ get_letter_signers)
