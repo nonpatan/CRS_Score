@@ -82,6 +82,9 @@
   .dot.offsite { background: #7b61a8; }
   .dot.absent { background: #d65353; }
   .dot.pending { background: var(--slate); }
+  .dot.permit { background: var(--amber); }
+  .permit-row { width: 100%; margin-top: 12px; }
+  .permit-row span:last-child { white-space: normal; }
   .today-people { margin-top: 14px; padding: 12px 13px; border: 1px solid var(--line);
                   border-radius: 10px; background: #fbfdfd; }
   .today-people-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -147,6 +150,7 @@
         <div class="section-title">สถานะบุคลากรวันนี้</div>
         <h2 id="today-date">กำลังโหลด…</h2>
         <p>จำนวนคนตามสถานะล่าสุดจากระบบลงเวลา</p>
+        <p id="today-updated">กำลังโหลด…</p>
       </div>
       <a class="detail-link" href="work-summary.html">ดูรายละเอียดรายคน →</a>
     </div>
@@ -187,6 +191,11 @@
         </button>
       </div>
     </div>
+    <button type="button" class="legend-item permit-row" id="today-permit-btn"
+            aria-expanded="false" aria-controls="today-people" disabled>
+      <div class="legend-value"><span class="dot permit"></span><b id="today-permit">—</b></div>
+      <span>ขออนุญาตเข้าสายวันนี้ · นับซ้อนกับสถานะด้านบน</span>
+    </button>
     <div id="today-people" class="today-people" hidden></div>
     <div class="today-note" id="today-status">กำลังเตรียมข้อมูล…</div>
   </div>
@@ -228,6 +237,8 @@ if (session) {
   const todayLegendButtons = [...document.querySelectorAll(".legend-item[data-status]")];
   let todayRows = [];
   let openTodayStatus = "";
+  const permitButton = el("today-permit-btn");
+  let todayPermits = [];
 
   function todayPersonDetail(row) {
     const details = [];
@@ -246,6 +257,7 @@ if (session) {
     el("today-people").hidden = true;
     el("today-people").innerHTML = "";
     todayLegendButtons.forEach(button => button.setAttribute("aria-expanded", "false"));
+    permitButton.setAttribute("aria-expanded", "false");
   }
 
   function renderTodayPeople(status) {
@@ -271,8 +283,44 @@ if (session) {
     todayLegendButtons.forEach(button => button.setAttribute(
       "aria-expanded", button.dataset.status === status ? "true" : "false"
     ));
+    permitButton.setAttribute("aria-expanded", "false");
     renderTodayPeople(status);
   }
+
+  function permitDetail(entry) {
+    const parts = [`ขอถึง ${String(entry.permit.until_time).slice(0, 5)} น.`];
+    const row = entry.row;
+    if (row.firstIn) parts.push(`มาถึง ${String(row.firstIn).slice(0, 5)}`);
+    if (row.onDuty) parts.push("วันนี้มีเวร ใบขอไม่มีผล");
+    else if (row.status === "late") parts.push("สายเกินเวลาที่ขอ");
+    else if (row.status === "present" && row.latePermissionUsed) parts.push("ทันเวลาที่ขอ");
+    else if (row.status === "present" && row.firstIn) parts.push("มาก่อนเวลาปกติ");
+    else if (row.status === "pending") parts.push("ยังไม่ลงเวลา");
+    else if (LABELS[row.status]) parts.push(LABELS[row.status]);
+    return parts.join(" · ");
+  }
+
+  function renderPermitPeople() {
+    const box = el("today-people");
+    const people = [...todayPermits].sort((a, b) => String(a.row.staff.full_name || "").localeCompare(
+      String(b.row.staff.full_name || ""), "th"
+    ));
+    box.innerHTML = '<div class="today-people-head"><span class="dot permit"></span>' +
+      `<b>ขออนุญาตเข้าสายวันนี้ · ${people.length} คน</b></div>` +
+      people.map(entry =>
+        `<div class="today-person"><div class="today-person-name">${esc(entry.row.staff.full_name || "ไม่ระบุชื่อ")}</div>` +
+        `<div class="today-person-detail">${esc(permitDetail(entry))}</div></div>`
+      ).join("");
+    box.hidden = false;
+  }
+
+  permitButton.addEventListener("click", () => {
+    if (openTodayStatus === "permit") return closeTodayPeople();
+    openTodayStatus = "permit";
+    todayLegendButtons.forEach(button => button.setAttribute("aria-expanded", "false"));
+    permitButton.setAttribute("aria-expanded", "true");
+    renderPermitPeople();
+  });
 
   todayLegendButtons.forEach(button => button.addEventListener("click", () => {
     toggleTodayPeople(button.dataset.status);
@@ -285,6 +333,12 @@ if (session) {
     const counts = { present: 0, late: 0, leave: 0, offsite: 0, absent: 0, pending: 0 };
     rows.forEach(r => { if (Object.hasOwn(counts, r.status)) counts[r.status]++; });
 
+    const rowByStaffId = new Map(rows.map(r => [r.staff.id, r]));
+    todayPermits = (ctx.latePermissions || [])
+      .filter(p => p.permit_date === today && rowByStaffId.has(p.staff_id))
+      .map(p => ({ permit: p, row: rowByStaffId.get(p.staff_id) }));
+    el("today-permit").textContent = todayPermits.length;
+
     Object.entries(counts).forEach(([status, count]) => {
       el(`today-${status}`).textContent = count;
     });
@@ -293,7 +347,10 @@ if (session) {
     todayLegendButtons.forEach(button => {
       button.disabled = isHoliday || counts[button.dataset.status] === 0;
     });
-    if (isHoliday || (openTodayStatus && counts[openTodayStatus] === 0)) closeTodayPeople();
+    permitButton.disabled = isHoliday || todayPermits.length === 0;
+    const openCount = openTodayStatus === "permit" ? todayPermits.length : counts[openTodayStatus];
+    if (isHoliday || (openTodayStatus && openCount === 0)) closeTodayPeople();
+    else if (openTodayStatus === "permit") renderPermitPeople();
     else if (openTodayStatus) renderTodayPeople(openTodayStatus);
     const chartTotal = Object.values(counts).reduce((sum, n) => sum + n, 0);
     el("today-total").textContent = isHoliday ? "—" : active.length;
@@ -420,6 +477,73 @@ if (session) {
     }
     renderToday(ctx, today, todayHoliday?.name || "", syncWarning);
     await renderTodayDutySwaps(today, ctx);
+
+    // ---------- อัปเดตอัตโนมัติ ----------
+    // 2 กลไกคู่กัน เพราะแหล่งข้อมูลคนละชนิด (ดู docs/brief-personnel-today-realtime.md)
+    //   1) Realtime — ใบขอเข้าสาย/ใบลา/งานนอกสถานที่ เขียนเข้า Postgres ตรงจากหน้าอื่น
+    //   2) ดึงซ้ำตามรอบ — เวลาเข้างานมาจาก Jibble ผ่าน Edge Function เท่านั้น
+    //      รอบเท่ากับค่าที่ Edge Function throttle ตัวเองไว้ จะถี่กว่านั้นก็ได้ข้อมูลเดิม
+    const { data: refreshSetting } = await sb.from("hr_settings")
+      .select("value").eq("key", "today_refresh_minutes").maybeSingle();
+    // Edge Function ยอมให้ตั้ง 0 ได้ (= ดึงทุกครั้ง) แต่ฝั่งเบราว์เซอร์ต้องไม่ยิงถี่กว่า 1 นาที
+    const refreshMinutes = Math.max(1, Number(refreshSetting?.value ?? 5) || 5);
+
+    const markUpdated = () => {
+      // 🪤 ต้องใช้ bangkokNow() — ครูบางคนตั้งโซนเวลาเครื่องไว้ผิด
+      el("today-updated").textContent =
+        `ข้อมูล ณ ${bangkokNow().toISOString().slice(11, 16)} น. · อัปเดตอัตโนมัติ`;
+    };
+    markUpdated();
+
+    let refreshBusy = false;
+    let refreshTimer = null;
+    let pendingPull = false;
+
+    async function refreshToday(pullJibble = false) {
+      if (refreshBusy) return scheduleRefresh(pullJibble);
+      refreshBusy = true;
+      try {
+        if (pullJibble && isWorkday && canSync) await syncJibble("today");
+        ctx = await loadWorkContext(today, today);
+        renderToday(ctx, today, todayHoliday?.name || "", "");
+        markUpdated();
+      } catch (e) {
+        // ⛔ ห้ามล้างการ์ด — ตัวเลขชุดเดิมยังจริงกว่าจอว่าง
+        el("today-updated").textContent = `อัปเดตไม่สำเร็จ · ${e.message} · จะลองใหม่อัตโนมัติ`;
+      } finally {
+        refreshBusy = false;
+      }
+    }
+
+    function scheduleRefresh(pullJibble = false) {
+      pendingPull = pendingPull || pullJibble;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        const pull = pendingPull;
+        pendingPull = false;
+        refreshToday(pull);
+      }, 400);
+    }
+
+    const todayChannel = sb.channel("personnel-today");
+    for (const table of ["late_permissions", "staff_leaves", "staff_field_duties"]) {
+      todayChannel.on("postgres_changes",
+        { event: "*", schema: "public", table }, () => scheduleRefresh());
+    }
+    todayChannel.subscribe();
+
+    // 🛟 กันเหนียวเมื่อ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket) หรือเครื่องหลับ
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === "visible") scheduleRefresh(true);
+    }, refreshMinutes * 60_000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") scheduleRefresh(true);
+    });
+    window.addEventListener("pagehide", () => {
+      sb.removeChannel(todayChannel);
+      clearInterval(pollTimer);
+      clearTimeout(refreshTimer);
+    });
 
     const log = await getLastSyncLog();
     el("sync-status").textContent = log
