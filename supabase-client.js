@@ -834,10 +834,10 @@ export function promoteClassroom(classroom, oldGrade, newGrade) {
   return classroom;
 }
 
-// รายชื่อนักเรียนที่ยัง active (ยังเรียนอยู่จริง) ทั้งหมด เรียงตามชั้น+ห้อง+เลขที่
-// active = ยังไม่จบ (graduated=false) และ ยังไม่ย้ายออก/เลิกเรียน (left_school=false)
-// ใช้ที่หน้าจัดการนักเรียน + ตัวจับคู่ลงทะเบียน (คนจบ/คนย้ายออกไม่โผล่ในรายชื่อใช้งาน)
-export function buildAbsenceStreaks(rows, { minDays = 5 } = {}) {
+// เกณฑ์เดียวของรายงานและการ์ดขาดเรียนติดต่อกัน — สองหน้าต้อง import ค่านี้ ห้ามแยกเลขไว้รายหน้า
+export const MIN_ABSENT_DAYS = 5;
+
+export function buildAbsenceStreaks(rows, { minDays = MIN_ABSENT_DAYS } = {}) {
   const byStudent = new Map();
   for (const row of rows || []) {
     const studentId = String(row?.student_id || "");
@@ -877,7 +877,7 @@ export function buildAbsenceStreaks(rows, { minDays = 5 } = {}) {
 }
 
 export async function loadAbsenceStreaks(year, {
-  minDays = 5,
+  minDays = MIN_ABSENT_DAYS,
   asOf = toDateStr(bangkokNow()),
   years = null
 } = {}) {
@@ -937,6 +937,26 @@ export async function loadAbsenceStreaks(year, {
       toDate: item.toDate
     }];
   });
+}
+
+// ห้องประจำชั้นของบัญชี แยกตามปี — ใช้ร่วมกันทั้งหน้ารายงานเต็มและการ์ดภาพรวม
+// ค่าใน Set ใช้รูป grade_level + NUL + classroom ให้ตรงกับคีย์ห้องของทั้งสองหน้า
+export async function loadMyHomeroomRooms(userId) {
+  const byYear = new Map();
+  if (!userId) return byYear;
+  const me = await sb.from("staff").select("id").eq("user_id", userId).maybeSingle();
+  if (me.error) throw new Error("ตรวจข้อมูลครูประจำชั้นไม่สำเร็จ: " + me.error.message);
+  if (!me.data) return byYear;
+  const result = await sb.from("homeroom_teachers")
+    .select("year,grade_level,classroom")
+    .eq("staff_id", me.data.id);
+  if (result.error) throw new Error("อ่านห้องครูประจำชั้นไม่สำเร็จ: " + result.error.message);
+  for (const row of result.data || []) {
+    const year = String(row.year);
+    if (!byYear.has(year)) byYear.set(year, new Set());
+    byYear.get(year).add(String(row.grade_level || "") + "\u0000" + String(row.classroom || ""));
+  }
+  return byYear;
 }
 
 export async function getActiveStudents() {

@@ -88,6 +88,11 @@
   .room-copy span { color:var(--muted); font-size:12px; }
   .room-state { color:var(--amber); font-size:12px; font-weight:700; white-space:nowrap; }
   .room-row.checked .room-state { color:var(--teal); }
+  .absence-rooms { display:grid; gap:10px; }
+  .absence-room { padding:12px; border:1px solid var(--line); border-radius:11px; background:var(--white); }
+  .absence-room-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .absence-room-head span { color:var(--danger); font-size:13px; font-weight:700; white-space:nowrap; }
+  .absence-names { margin-top:5px; color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
   .empty { padding:28px 10px; color:var(--muted); text-align:center; }
   [hidden] { display:none !important; }
   @media (max-width:700px) { .room-grid { grid-template-columns:1fr; } }
@@ -167,6 +172,17 @@
       </div>
       <div class="room-grid" id="room-grid"><div class="empty">กำลังโหลด…</div></div>
     </section>
+
+    <section class="card" id="absence-card">
+      <div class="section-head">
+        <div>
+          <h2>นักเรียนขาดเรียนติดต่อกัน</h2>
+          <p id="absence-note">กำลังโหลด…</p>
+        </div>
+        <a href="absence-follow.html">ดูรายงานเต็ม →</a>
+      </div>
+      <div id="absence-overview"><div class="empty">กำลังโหลด…</div></div>
+    </section>
   </main>
 </div>
 
@@ -176,8 +192,9 @@ import {
   getAcademicYears, academicYearOf, getStudentPlacements,
   getActiveStudents, loadDailyAttendanceToday, summarizeDailyAttendance,
   getDailyAttendanceCutoff, firstCheckTimeByRoom, classifyCheckTiming, cutoffForGrade, CHECK_TIMING_LABEL,
+  loadAbsenceStreaks, loadMyHomeroomRooms, MIN_ABSENT_DAYS, homeroomAuditRoomLabel,
   bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260921-1";
+} from "../supabase-client.js?v=20260921-2";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -196,6 +213,70 @@ const thaiDate = dateStr => new Intl.DateTimeFormat("th-TH", {
 function showBanner(html, type = "warn") {
   el("state-banner").hidden = false;
   el("state-banner").innerHTML = `<div class="banner ${type}">${html}</div>`;
+}
+
+async function loadAbsenceOverviewData(year, years, userId, canGeneral) {
+  const [streaks, roomsByYear] = await Promise.all([
+    loadAbsenceStreaks(year, { years }).catch(() => null),
+    canGeneral
+      ? Promise.resolve(new Map())
+      : loadMyHomeroomRooms(userId).catch(() => null)
+  ]);
+  if (streaks === null || roomsByYear === null) return null;
+  return { streaks, roomsByYear };
+}
+
+function groupAbsenceStreaksByRoom(streaks, rooms) {
+  const roomOrder = new Map((rooms || []).map((room, index) => [keyOf(room), index]));
+  const grouped = new Map();
+  for (const row of streaks || []) {
+    const room = { grade_level:row.gradeLevel, classroom:row.classroom };
+    const key = keyOf(room);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key, gradeLevel:row.gradeLevel, classroom:row.classroom,
+        order:roomOrder.get(key) ?? Number.MAX_SAFE_INTEGER, students:[]
+      });
+    }
+    grouped.get(key).students.push(row);
+  }
+  for (const group of grouped.values()) {
+    group.students.sort((a, b) =>
+      Number(b.days) - Number(a.days) || String(a.name || "").localeCompare(String(b.name || ""), "th")
+    );
+  }
+  return [...grouped.values()].sort((a, b) =>
+    b.students.length - a.students.length || a.order - b.order || a.key.localeCompare(b.key, "th")
+  );
+}
+
+function renderAbsenceOverview(data, rooms, year, canGeneral) {
+  el("absence-note").textContent = `ขาดติดต่อกันตั้งแต่ ${MIN_ABSENT_DAYS} วันขึ้นไป · ปีการศึกษา ${year}`;
+  const container = el("absence-overview");
+  if (data === null) {
+    container.innerHTML = '<div class="empty">โหลดรายชื่อไม่สำเร็จ</div>';
+    return;
+  }
+  const groups = groupAbsenceStreaksByRoom(data.streaks, rooms);
+  if (!groups.length) {
+    container.innerHTML = '<div class="empty">ไม่มีนักเรียนที่ขาดเรียนติดต่อกันถึงเกณฑ์</div>';
+    return;
+  }
+  const myRooms = data.roomsByYear.get(String(year)) || new Set();
+  container.innerHTML = `<div class="absence-rooms">${groups.map(group => {
+    const showNames = canGeneral || myRooms.has(group.key);
+    const names = showNames
+      ? `<div class="absence-names">${group.students.map(row =>
+          `${esc(row.name)} (${Number(row.days)} วัน)`
+        ).join(" · ")}</div>`
+      : "";
+    return `<article class="absence-room">
+      <div class="absence-room-head"><b>${esc(homeroomAuditRoomLabel({
+        grade_level:group.gradeLevel, classroom:group.classroom
+      }))}</b><span>${group.students.length} คน</span></div>
+      ${names}
+    </article>`;
+  }).join("")}</div>`;
 }
 
 // สีของวงนักเรียน: เขียว/อำพัน/แดง ยกชุดที่ตรวจระยะห่างสีมาแล้วจาก academic/index.html
@@ -241,7 +322,7 @@ function renderMetricDonuts(summary) {
   });
 }
 
-async function loadOverview() {
+async function loadOverview(canGeneral, userId) {
   const dateStr = toDateStr(bangkokNow());
   const years = await getAcademicYears();
   const year = academicYearOf(dateStr, years);
@@ -253,13 +334,15 @@ async function loadOverview() {
     return;
   }
   el("date-note").textContent = `${thaiDate(dateStr)} · ปีการศึกษา ${year}`;
-  const [daily, placementRes, activeStudents, cutoff] = await Promise.all([
+  const [daily, placementRes, activeStudents, cutoff, absenceData] = await Promise.all([
     loadDailyAttendanceToday(year, dateStr, years),
     getStudentPlacements(year),
     getActiveStudents(),
-    getDailyAttendanceCutoff()
+    getDailyAttendanceCutoff(),
+    loadAbsenceOverviewData(year, years, userId, canGeneral)
   ]);
   if (placementRes.error) throw new Error("โหลด placement ไม่สำเร็จ: " + placementRes.error.message);
+  renderAbsenceOverview(absenceData, daily.rooms, year, canGeneral);
   const summary = summarizeDailyAttendance(daily.rows, daily.rooms, {
     isHoliday:daily.isHoliday, cutoff, dateStr
   });
@@ -352,7 +435,7 @@ if (session) {
       checkDepartment("บุคลากร")
     ]);
     applyRestrictedMenuAccess(canGeneral || canPersonnel);
-    await loadOverview();
+    await loadOverview(canGeneral, session.user.id);
   } catch (error) {
     el("metrics").hidden = true;
     showBanner(`<b>โหลดภาพรวมไม่สำเร็จ</b><br>${esc(error.message)}`, "bad");

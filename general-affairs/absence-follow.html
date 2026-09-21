@@ -111,7 +111,6 @@
             <label for="year-select">ปีการศึกษา</label>
             <select id="year-select"><option value="">กำลังโหลด…</option></select>
           </div>
-          <button type="button" class="primary" id="btn-load">แสดงรายงาน</button>
         </div>
         <div class="banner warn" id="threshold-note" style="margin:12px 0 0"></div>
         <div class="row2" style="margin-top:14px">
@@ -131,7 +130,7 @@
 
       <section class="card" id="report-card">
         <div class="section">รายชื่อนักเรียนที่เข้าเกณฑ์</div>
-        <div id="report-state" class="hint">เลือกปีการศึกษาแล้วกดแสดงรายงาน</div>
+        <div id="report-state" class="hint">กำลังโหลด…</div>
         <div id="absence-list" class="audit-list"></div>
       </section>
     </div>
@@ -144,15 +143,15 @@
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, addDaysStr,
-  loadAbsenceStreaks, issueAbsenceLetter, loadIssuedAbsenceLetters,
+  loadAbsenceStreaks, loadMyHomeroomRooms, MIN_ABSENT_DAYS,
+  issueAbsenceLetter, loadIssuedAbsenceLetters,
   loadLetterSigners, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter, thaiLetterDateText, thaiShortDateText,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20260921-1";
+} from "../supabase-client.js?v=20260921-2";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
-const MIN_ABSENT_DAYS = 5;
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -171,6 +170,7 @@ let printing = false;
 let schoolName = "";
 let schoolAddress = "";
 let toastTimer = null;
+let loadRequestSeq = 0;
 
 function toast(message, isError = false) {
   el("toast").textContent = message;
@@ -248,23 +248,6 @@ function renderReport() {
   }).join("");
 }
 
-async function loadMyHomerooms(userId) {
-  const me = await sb.from("staff").select("id").eq("user_id", userId).maybeSingle();
-  if (me.error) throw new Error("ตรวจข้อมูลครูประจำชั้นไม่สำเร็จ: " + me.error.message);
-  if (!me.data) return new Map();
-  const result = await sb.from("homeroom_teachers")
-    .select("year,grade_level,classroom")
-    .eq("staff_id", me.data.id);
-  if (result.error) throw new Error("อ่านห้องครูประจำชั้นไม่สำเร็จ: " + result.error.message);
-  const byYear = new Map();
-  for (const row of result.data || []) {
-    const year = String(row.year);
-    if (!byYear.has(year)) byYear.set(year, new Set());
-    byYear.get(year).add(roomKey(row.grade_level, row.classroom));
-  }
-  return byYear;
-}
-
 function showGate(message) {
   el("report-content").hidden = true;
   el("gate").className = "card";
@@ -273,9 +256,13 @@ function showGate(message) {
 }
 
 async function loadReport() {
-  const year = el("year-select").value;
+  const requestSeq = ++loadRequestSeq;
+  const yearSelect = el("year-select");
+  const year = yearSelect.value;
   if (!year) {
-    toast("กรุณาเลือกปีการศึกษา", true);
+    el("report-state").textContent = "ยังไม่มีปีการศึกษาให้เลือก";
+    el("absence-list").innerHTML = "";
+    yearSelect.disabled = false;
     return;
   }
   const allowedRooms = canGeneral ? null : (homeroomRoomsByYear.get(String(year)) || new Set());
@@ -284,19 +271,19 @@ async function loadReport() {
     issuedByStudent = new Map();
     el("report-state").textContent = "ปีการศึกษานี้คุณไม่ได้เป็นครูประจำชั้น จึงไม่มีรายงานที่เปิดให้ดู";
     renderReport();
+    yearSelect.disabled = false;
     return;
   }
 
-  const button = el("btn-load");
-  button.disabled = true;
-  button.textContent = "กำลังโหลด…";
-  el("report-state").textContent = "กำลังตรวจการขาดเรียนติดต่อกัน…";
+  yearSelect.disabled = true;
+  el("report-state").textContent = "กำลังโหลด…";
   el("absence-list").innerHTML = "";
   try {
     const [streaks, issued] = await Promise.all([
-      loadAbsenceStreaks(year, { minDays:MIN_ABSENT_DAYS, years }),
+      loadAbsenceStreaks(year, { years }),
       loadIssuedAbsenceLetters(year)
     ]);
+    if (requestSeq !== loadRequestSeq) return;
     reportRows = canGeneral
       ? streaks
       : streaks.filter(row => allowedRooms.has(roomKey(row.gradeLevel, row.classroom)));
@@ -306,12 +293,12 @@ async function loadReport() {
       : "ตรวจครบแล้ว";
     renderReport();
   } catch (error) {
+    if (requestSeq !== loadRequestSeq) return;
     reportRows = [];
     issuedByStudent = new Map();
     el("report-state").innerHTML = `<div class="banner bad" style="margin:0"><b>โหลดรายงานไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
   } finally {
-    button.disabled = false;
-    button.textContent = "แสดงรายงาน";
+    if (requestSeq === loadRequestSeq) yearSelect.disabled = false;
   }
 }
 
@@ -449,20 +436,14 @@ el("absence-list").addEventListener("click", async event => {
   }
 });
 
-el("btn-load").addEventListener("click", loadReport);
-el("year-select").addEventListener("change", () => {
-  reportRows = [];
-  issuedByStudent = new Map();
-  el("report-state").textContent = "เลือกปีการศึกษาแล้วกดแสดงรายงาน";
-  el("absence-list").innerHTML = "";
-});
+el("year-select").addEventListener("change", loadReport);
 
 const session = await requireAuth();
 if (session) {
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     canGeneral = await checkDepartment("บริหารทั่วไป");
-    homeroomRoomsByYear = canGeneral ? new Map() : await loadMyHomerooms(session.user.id);
+    homeroomRoomsByYear = canGeneral ? new Map() : await loadMyHomeroomRooms(session.user.id);
     const hasAnyHomeroom = [...homeroomRoomsByYear.values()].some(rooms => rooms.size > 0);
     const canAccess = canGeneral || hasAnyHomeroom;
     applyRestrictedMenuAccess(canAccess);
