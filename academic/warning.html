@@ -254,6 +254,7 @@
         <option value="1">ภาคเรียนที่ 1</option>
         <option value="2">ภาคเรียนที่ 2</option>
       </select>
+      <div class="hint" id="filter-term-hint" hidden>ประถม/อนุบาลนับคาบเรียนทั้งปี ไม่มีภาคเรียน — หนังสือ มส. จึงออกปีละ 1 ฉบับต่อคน</div>
     </div>
     <div class="field">
       <label for="filter-grade">ระดับชั้น</label>
@@ -300,6 +301,7 @@
   let allActiveStudents = [];
   const elYear = document.getElementById("filter-year");
   const elTerm = document.getElementById("filter-term");
+  const elTermHint = document.getElementById("filter-term-hint");
   const elGrade = document.getElementById("filter-grade");
   const elMeetDate = document.getElementById("meet-date");
   const elMeetTime = document.getElementById("meet-time");
@@ -327,6 +329,17 @@
     toast.classList.add("show");
     setTimeout(() => toast.classList.remove("show"), 3000);
   }
+
+  function updateTermAvailability() {
+    const grade = String(elGrade.value || "");
+    const termAvailable = !grade || grade.startsWith("ม.");
+    const termChanged = !termAvailable && elTerm.value !== "";
+    if (termChanged) elTerm.value = "";
+    elTerm.disabled = !termAvailable;
+    elTermHint.hidden = termAvailable;
+    if (termChanged) elResults.innerHTML = "";
+  }
+
   function escapeHtml(str) {
     if (!str) return "";
     return String(str).replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[m]);
@@ -509,6 +522,7 @@
       opt.value = g; opt.textContent = g;
       elGrade.appendChild(opt);
     });
+    updateTermAvailability();
 
     const { data: subjs } = await sb.from("subjects").select("year");
     const yList = distinctYears(subjs || []);
@@ -529,6 +543,7 @@
     });
 
     elGrade.addEventListener("change", () => {
+      updateTermAvailability();
       elResults.innerHTML = "";
     });
 
@@ -813,7 +828,9 @@
     if (!button || printing) return;
     const flagged = flaggedStudents.find(item => String(item.stu.id) === button.dataset.printStudent);
     if (!flagged) return;
-    if (!elTerm.value) {
+    // ประถม/อนุบาลไม่มีภาคเรียน (subjects.term = null เสมอ) — บังคับเลือกได้เฉพาะมัธยม
+    // ไม่งั้นด่านกันใบซ้ำของมัธยมจะปิดทางพิมพ์ของประถมทั้งระดับ (เจอจริง 2026-09-21)
+    if (String(reportGrade || "").startsWith("ม.") && !elTerm.value) {
       showToast("เลือกภาคเรียนก่อนออกหนังสือ มส. — หนังสือต้องระบุว่าเป็นภาคเรียนไหน", false);
       return;
     }
