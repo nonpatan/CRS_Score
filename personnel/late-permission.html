@@ -9,7 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
-          --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --amber:#8a5a00; --amber-soft:#fff4df; }
+          --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
+          --amber:#8a5a00; --amber-soft:#fff4df; }
   * { box-sizing:border-box; }
   body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
          margin:0; padding:16px; font-size:16px; line-height:1.6; }
@@ -37,6 +38,9 @@
   button.primary { background:var(--teal); color:var(--white); }
   button.ghost { background:var(--teal-soft); color:var(--teal); }
   button.small { font-size:13px; padding:6px 10px; }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  .row-actions { display:flex; gap:10px; align-items:center; }
+  .row-actions button.small { min-height:44px; }
   button:disabled { opacity:.5; cursor:default; }
   .field-note { color:var(--muted); font-size:13px; margin-top:5px; }
   .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
@@ -59,7 +63,7 @@
   #toast.err { background:var(--danger); }
   @media (max-width:520px) {
     .permit-row { grid-template-columns:1fr; }
-    .permit-row button { justify-self:start; }
+    .row-actions { justify-self:start; }
   }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20260820-2">
@@ -261,12 +265,18 @@ if (session) {
       el("list").innerHTML = rows.map(row => {
         const name = staffById.get(row.staff_id)?.full_name || "(ไม่พบชื่อ)";
         const reason = row.reason ? ` · ${esc(row.reason)}` : "";
+        const canEdit = row.permit_date >= el("permit-date").min &&
+                        row.permit_date <= el("permit-date").max;
+        const actions = `<div class="row-actions">
+            <button type="button" class="ghost small" data-edit="${row.id}">นำมาแก้ไข</button>` +
+          (canEdit ? `<button type="button" class="danger small" data-delete="${row.id}">ลบ</button>` : "") +
+          `</div>`;
         return `<div class="permit-row">
           <div>
             <div class="who">${esc(name)}<span class="chip">ถึง ${esc(String(row.until_time).slice(0, 5))} น.</span></div>
             <div class="meta">${dateText(row.permit_date)}${reason}</div>
           </div>
-          <button type="button" class="ghost small" data-edit="${row.id}">นำมาแก้ไข</button>
+          ${actions}
         </div>`;
       }).join("");
     }
@@ -371,6 +381,40 @@ if (session) {
     });
 
     el("list").addEventListener("click", async event => {
+      const removeButton = event.target.closest("[data-delete]");
+      if (removeButton) {
+        const row = permissions.find(item => item.id === removeButton.dataset.delete);
+        if (!row) return;
+        refreshDateBounds(false);
+        if (row.permit_date < el("permit-date").min || row.permit_date > el("permit-date").max) {
+          return toast("รายการเดือนก่อนลบไม่ได้ เพราะปิดรอบรายงานแล้ว", true);
+        }
+        const name = staff.find(person => person.id === row.staff_id)?.full_name || "(ไม่พบชื่อ)";
+        const until = String(row.until_time).slice(0, 5);
+        if (!await window.crsAskConfirm({
+          title: "ลบคำขอเข้าสาย",
+          message: `ลบใบของ ${name} วันที่ ${dateText(row.permit_date)} (อนุญาตถึง ${until} น.)\n` +
+            "ไม่มีข้อมูลอื่นหายตามไป และบันทึกใหม่ได้ถ้ายังอยู่ในเดือนนี้ — " +
+            "แต่ถ้าคนคนนี้มาสายวันนั้น สถานะจะเปลี่ยนจาก “มา” เป็น “มาสาย” ทันที",
+          okLabel: "ลบคำขอ",
+          requireText: null,
+          danger: true
+        })) return;
+        removeButton.disabled = true;
+        const result = await sb.from("late_permissions").delete().eq("id", row.id);
+        if (result.error) {
+          removeButton.disabled = false;
+          const denied = result.error.code === "42501" ||
+            /row-level security|policy/i.test(String(result.error.message || ""));
+          return toast(denied
+            ? "ลบไม่ได้: บัญชีนี้ไม่มีสิทธิ์ฝ่ายบุคคลแล้ว"
+            : "ลบคำขอไม่สำเร็จ กรุณาลองใหม่", true);
+        }
+        toast(`ลบคำขอของ ${name} วันที่ ${dateText(row.permit_date)} แล้ว`);
+        await loadList();
+        updateEntryState();
+        return;
+      }
       const button = event.target.closest("[data-edit]");
       if (!button) return;
       const row = permissions.find(item => item.id === button.dataset.edit);
