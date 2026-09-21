@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>นักเรียนขาดเรียนติดต่อกัน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56;
+    --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff;
+    --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; color:var(--ink); background:var(--bg);
+    font-family:"Sarabun",sans-serif; font-size:16px; line-height:1.6;
+  }
+  .wrap { max-width:1040px; margin:0 auto; }
+  header h1 { margin:4px 0; font-size:22px; }
+  header p { margin:0 0 8px; color:var(--muted); font-size:14px; }
+  header .nav { min-height:54px; }
+  .card {
+    margin-bottom:16px; padding:16px; border:1px solid var(--line);
+    border-radius:12px; background:var(--white);
+  }
+  .filters { display:grid; grid-template-columns:minmax(180px,.6fr) minmax(260px,1.4fr); gap:12px; align-items:end; }
+  .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .field { min-width:0; margin-bottom:14px; }
+  .field:last-child { margin-bottom:0; }
+  label { display:block; margin-bottom:6px; font-size:15px; font-weight:600; }
+  input[type="date"], input[type="time"], select {
+    width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px;
+  }
+  input:focus, select:focus, button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  button {
+    min-height:44px; padding:9px 14px; border:0; border-radius:9px;
+    font:inherit; font-weight:600; cursor:pointer;
+  }
+  button.primary { width:100%; color:var(--white); background:var(--teal); }
+  button.ghost { color:var(--teal); background:var(--teal-soft); }
+  button:disabled { cursor:not-allowed; opacity:.55; }
+  .section { margin:0 0 8px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+  .hint, .meta { color:var(--muted); font-size:14px; }
+  .banner { margin-bottom:14px; padding:11px 13px; border-radius:10px; font-size:14px; }
+  .banner.info { color:var(--teal); background:var(--teal-soft); }
+  .banner.warn { color:var(--amber); background:var(--amber-soft); }
+  .banner.bad { color:var(--danger); background:var(--danger-soft); }
+  .audit-list { display:grid; gap:12px; }
+  .audit-row { padding:14px; border:1px solid var(--line); border-radius:10px; }
+  .audit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+  .student-name { font-size:17px; font-weight:700; overflow-wrap:anywhere; }
+  .streak-count { color:var(--danger); font-weight:700; white-space:nowrap; }
+  .issued-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .badge { display:inline-block; padding:3px 9px; border:1px solid var(--line); border-radius:99px; color:var(--muted); background:var(--bg); font-size:13px; }
+  .letter-controls { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+  .control-grid { display:grid; grid-template-columns:minmax(150px,.55fr) minmax(220px,1fr) auto; gap:10px; align-items:end; }
+  .control-grid .field { margin:0; }
+  .invite-toggle { display:flex; align-items:center; gap:8px; min-height:44px; margin:0; cursor:pointer; }
+  .invite-toggle input { width:20px; height:20px; margin:0; }
+  .print-letter-btn { min-width:170px; border:1px solid var(--teal); color:var(--teal); background:var(--white); }
+  .empty { padding:24px 8px; color:var(--muted); text-align:center; }
+  .toast {
+    position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
+    padding:11px 18px; border-radius:10px; color:var(--white); background:var(--teal);
+    font-weight:600; opacity:0; pointer-events:none; transform:translateX(-50%); transition:opacity .18s;
+  }
+  .toast.show { opacity:1; }
+  .toast.err { background:var(--danger); }
+  #print-area { position:fixed; left:-100000px; top:0; width:186mm; height:0; overflow:hidden; }
+  [hidden] { display:none !important; }
+  @media (max-width:760px) {
+    .filters, .row2, .control-grid { grid-template-columns:1fr; }
+    .print-letter-btn { width:100%; }
+  }
+  @media (max-width:520px) {
+    .audit-head { display:block; }
+    .streak-count { display:block; margin-top:4px; white-space:normal; }
+  }
+  @media print {
+    @page { size:A4 portrait; margin:12mm; }
+    .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print { display:none !important; }
+    html body { display:block !important; padding:0 !important; margin:0; background:#fff !important; font-size:14px; }
+    html body .wrap, .academic-content { display:block !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; }
+    header, .card, #report-state { display:none !important; }
+    #print-area { position:static; width:100%; height:auto; overflow:visible; }
+    tr, .avoid-break { break-inside:avoid; }
+    a[href]::after { content:""; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>นักเรียนขาดเรียนติดต่อกัน</h1>
+    <p>ดูรายชื่อที่ขาดเรียนต่อเนื่องถึงเกณฑ์และพิมพ์หนังสือเตือนผู้ปกครอง</p>
+    <div class="nav"></div>
+    <script src="../app-shell.js?v=20260921-1"></script>
+  </header>
+
+  <main class="academic-content">
+    <section id="gate" hidden></section>
+    <div id="report-content" hidden>
+      <section class="card no-print">
+        <div class="filters">
+          <div class="field">
+            <label for="year-select">ปีการศึกษา</label>
+            <select id="year-select"><option value="">กำลังโหลด…</option></select>
+          </div>
+          <button type="button" class="primary" id="btn-load">แสดงรายงาน</button>
+        </div>
+        <div class="banner warn" id="threshold-note" style="margin:12px 0 0"></div>
+        <div class="row2" style="margin-top:14px">
+          <div class="field">
+            <label for="meet-date">วันนัดพบครูประจำชั้น</label>
+            <input id="meet-date" type="date">
+            <div class="hint" id="meet-date-hint"></div>
+          </div>
+          <div class="field">
+            <label for="meet-time">เวลานัดพบ</label>
+            <input id="meet-time" type="time">
+            <div class="hint" id="meet-time-hint"></div>
+          </div>
+        </div>
+        <div class="hint">ใช้วันและเวลานี้เฉพาะนักเรียนที่เลือก “เชิญพบครูประจำชั้น”</div>
+      </section>
+
+      <section class="card" id="report-card">
+        <div class="section">รายชื่อนักเรียนที่เข้าเกณฑ์</div>
+        <div id="report-state" class="hint">เลือกปีการศึกษาแล้วกดแสดงรายงาน</div>
+        <div id="absence-list" class="audit-list"></div>
+      </section>
+    </div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+<div id="print-area" aria-hidden="true"></div>
+
+<script type="module">
+import {
+  sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess,
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, addDaysStr,
+  loadAbsenceStreaks, issueAbsenceLetter, loadIssuedAbsenceLetters,
+  loadLetterSigners, getSetting, homeroomAuditRoomLabel,
+  SCHOOL_LETTER_CSS, renderSchoolLetter, thaiLetterDateText, thaiShortDateText,
+  bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
+} from "../supabase-client.js?v=20260921-1";
+
+document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
+
+const MIN_ABSENT_DAYS = 5;
+const el = id => document.getElementById(id);
+const today = toDateStr(bangkokNow());
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+})[ch]);
+const fmtDate = value => value ? new Intl.DateTimeFormat("th-TH", {
+  day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+}).format(new Date(value + "T00:00:00Z")) : "—";
+
+let years = [];
+let canGeneral = false;
+let homeroomRoomsByYear = new Map();
+let reportRows = [];
+let issuedByStudent = new Map();
+let printing = false;
+let schoolName = "";
+let schoolAddress = "";
+let toastTimer = null;
+
+function toast(message, isError = false) {
+  el("toast").textContent = message;
+  el("toast").classList.toggle("err", isError);
+  el("toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el("toast").classList.remove("show"), 3200);
+}
+
+function roomKey(gradeLevel, classroom) {
+  return `${String(gradeLevel || "")}\u0000${String(classroom || "")}`;
+}
+
+function groupIssuedLetters(rows) {
+  const grouped = new Map();
+  for (const letter of rows || []) {
+    const key = String(letter.student_id);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(letter);
+  }
+  for (const letters of grouped.values()) {
+    letters.sort((a, b) => Number(a.letter_round) - Number(b.letter_round));
+  }
+  return grouped;
+}
+
+function roundOptions(letters) {
+  const nextRound = letters.length + 1;
+  const rounds = [...new Set([...letters.map(letter => Number(letter.letter_round)), nextRound])]
+    .filter(round => Number.isInteger(round) && round > 0)
+    .sort((a, b) => a - b);
+  return rounds.map(round => {
+    const existing = letters.some(letter => Number(letter.letter_round) === round);
+    return `<option value="${round}"${round === nextRound ? " selected" : ""}>ครั้งที่ ${round}${existing ? " · พิมพ์ซ้ำ" : " · ออกฉบับใหม่"}</option>`;
+  }).join("");
+}
+
+function issuedBadges(letters) {
+  if (!letters.length) return "";
+  return `<div class="issued-list">${letters.map(letter =>
+    `<span class="badge">ออกหนังสือแล้ว ครั้งที่ ${Number(letter.letter_round)} (บร.${Number(letter.doc_no)}/${esc(letter.year)})</span>`
+  ).join("")}</div>`;
+}
+
+function renderReport() {
+  const list = el("absence-list");
+  if (!reportRows.length) {
+    list.innerHTML = '<div class="empty">ไม่มีนักเรียนที่ขาดเรียนติดต่อกันถึงเกณฑ์</div>';
+    return;
+  }
+
+  list.innerHTML = reportRows.map(row => {
+    const letters = issuedByStudent.get(String(row.studentId)) || [];
+    return `<article class="audit-row" data-student-card="${esc(row.studentId)}">
+      <div class="audit-head">
+        <div>
+          <div class="student-name">${esc(row.name)}</div>
+          <div class="meta">เลขประจำตัว ${esc(row.studentNo)} · ${esc(homeroomAuditRoomLabel({ grade_level:row.gradeLevel, classroom:row.classroom }))}</div>
+        </div>
+        <div class="streak-count">ขาด ${Number(row.days)} วัน</div>
+      </div>
+      <div class="meta">ตั้งแต่ ${esc(fmtDate(row.fromDate))} ถึง ${esc(fmtDate(row.toDate))}</div>
+      ${issuedBadges(letters)}
+      <div class="letter-controls no-print">
+        <div class="control-grid">
+          <div class="field">
+            <label for="round-${esc(row.studentId)}">หนังสือครั้งที่</label>
+            <select id="round-${esc(row.studentId)}" data-letter-round="${esc(row.studentId)}">${roundOptions(letters)}</select>
+          </div>
+          <label class="invite-toggle"><input type="checkbox" data-invite-student="${esc(row.studentId)}"> เชิญพบครูประจำชั้น</label>
+          <button type="button" class="print-letter-btn" data-print-student="${esc(row.studentId)}">พิมพ์หนังสือเตือน</button>
+        </div>
+      </div>
+    </article>`;
+  }).join("");
+}
+
+async function loadMyHomerooms(userId) {
+  const me = await sb.from("staff").select("id").eq("user_id", userId).maybeSingle();
+  if (me.error) throw new Error("ตรวจข้อมูลครูประจำชั้นไม่สำเร็จ: " + me.error.message);
+  if (!me.data) return new Map();
+  const result = await sb.from("homeroom_teachers")
+    .select("year,grade_level,classroom")
+    .eq("staff_id", me.data.id);
+  if (result.error) throw new Error("อ่านห้องครูประจำชั้นไม่สำเร็จ: " + result.error.message);
+  const byYear = new Map();
+  for (const row of result.data || []) {
+    const year = String(row.year);
+    if (!byYear.has(year)) byYear.set(year, new Set());
+    byYear.get(year).add(roomKey(row.grade_level, row.classroom));
+  }
+  return byYear;
+}
+
+function showGate(message) {
+  el("report-content").hidden = true;
+  el("gate").className = "card";
+  el("gate").hidden = false;
+  el("gate").innerHTML = `<div class="banner warn" style="margin:0"><b>ไม่มีสิทธิ์ดูรายงานนี้</b><br>${esc(message)}</div>`;
+}
+
+async function loadReport() {
+  const year = el("year-select").value;
+  if (!year) {
+    toast("กรุณาเลือกปีการศึกษา", true);
+    return;
+  }
+  const allowedRooms = canGeneral ? null : (homeroomRoomsByYear.get(String(year)) || new Set());
+  if (!canGeneral && allowedRooms.size === 0) {
+    reportRows = [];
+    issuedByStudent = new Map();
+    el("report-state").textContent = "ปีการศึกษานี้คุณไม่ได้เป็นครูประจำชั้น จึงไม่มีรายงานที่เปิดให้ดู";
+    renderReport();
+    return;
+  }
+
+  const button = el("btn-load");
+  button.disabled = true;
+  button.textContent = "กำลังโหลด…";
+  el("report-state").textContent = "กำลังตรวจการขาดเรียนติดต่อกัน…";
+  el("absence-list").innerHTML = "";
+  try {
+    const [streaks, issued] = await Promise.all([
+      loadAbsenceStreaks(year, { minDays:MIN_ABSENT_DAYS, years }),
+      loadIssuedAbsenceLetters(year)
+    ]);
+    reportRows = canGeneral
+      ? streaks
+      : streaks.filter(row => allowedRooms.has(roomKey(row.gradeLevel, row.classroom)));
+    issuedByStudent = groupIssuedLetters(issued);
+    el("report-state").textContent = reportRows.length
+      ? `พบ ${reportRows.length} คน · แสดงช่วงวันที่จริงเพื่อให้ตรวจสอบได้`
+      : "ตรวจครบแล้ว";
+    renderReport();
+  } catch (error) {
+    reportRows = [];
+    issuedByStudent = new Map();
+    el("report-state").innerHTML = `<div class="banner bad" style="margin:0"><b>โหลดรายงานไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "แสดงรายงาน";
+  }
+}
+
+async function loadFrozenAbsenceRows(letter) {
+  const { data, error } = await sb.from("daily_attendance")
+    .select("attend_date,status")
+    .eq("student_id", letter.student_id)
+    .eq("status", "ขาด")
+    .gte("attend_date", letter.absent_from)
+    .lte("attend_date", letter.absent_to)
+    .order("attend_date", { ascending:true });
+  if (error) throw new Error("อ่านวันที่ขาดเรียนในหนังสือไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+function renderAbsenceLetter(student, letter, absenceRows, previousLetter, directorName) {
+  const room = homeroomAuditRoomLabel({
+    grade_level:letter.grade_level,
+    classroom:letter.classroom
+  });
+  const schoolLabel = schoolName || "โรงเรียน";
+  const tableRows = absenceRows.length
+    ? absenceRows.map((row, index) => `<tr class="avoid-break"><td>${index + 1}</td><td>${esc(fmtDate(row.attend_date))}</td><td>ขาด</td></tr>`).join("")
+    : '<tr><td colspan="3">ไม่พบแถวการเช็คชื่อในช่วงที่บันทึกไว้</td></tr>';
+  const repeatedNotice = Number(letter.letter_round) >= 2
+    ? `<br><b>หนังสือฉบับนี้เป็นการแจ้งครั้งที่ ${Number(letter.letter_round)}</b> — โรงเรียนเคยมีหนังสือแจ้งท่านแล้วเมื่อวันที่ ${esc(fmtDate(previousLetter?.issued_date))} หากนักเรียนยังไม่มาเรียน โรงเรียนจำเป็นต้องดำเนินการตามระเบียบต่อไป`
+    : "";
+  const meetDateText = thaiShortDateText(letter.meet_date);
+  const meetTime = String(letter.meet_time || "").slice(0, 5);
+  const closingHtml = letter.invite_meeting === true
+    ? `<p class="letter-body">จึงเรียนมาเพื่อขอความร่วมมือจากท่าน และขอเชิญท่านมาพบครูประจำชั้นในวันที่ ${esc(meetDateText)} เวลา ${esc(meetTime)} น. ณ โรงเรียน เพื่อร่วมกันหาแนวทางช่วยเหลือนักเรียน</p>`
+    : '<p class="letter-body">จึงเรียนมาเพื่อทราบ และขอความร่วมมือจากท่านในการกำกับดูแลให้นักเรียนมาเรียนอย่างสม่ำเสมอ</p>';
+  const replyOptionsHtml = letter.invite_meeting === true
+    ? `<div class="letter-check">☐ รับทราบ และจะไปพบครูประจำชั้นในวันที่ ${esc(meetDateText)} เวลา ${esc(meetTime)} น.</div>
+      <div class="letter-check">☐ รับทราบ แต่ไม่สะดวกตามวันเวลาดังกล่าว ขอนัดวันที่ ............ เวลา ......... น.</div>`
+    : `<div class="letter-check">☐ รับทราบและจะกำกับดูแลให้นักเรียนมาเรียนอย่างสม่ำเสมอ</div>
+      <div class="letter-check">☐ ประสงค์จะพบครูประจำชั้น (โรงเรียนจะติดต่อกลับเพื่อนัดวันและเวลา)</div>`;
+
+  return renderSchoolLetter({
+    schoolName,
+    schoolAddress,
+    logoSrc:"../logo.png",
+    subject:"แจ้งการขาดเรียนของนักเรียนและขอความร่วมมือผู้ปกครอง",
+    recipientName:student.name,
+    bodyHtml:`<p class="letter-body">ด้วย${esc(schoolLabel)}ได้ตรวจสอบการมาเรียนของนักเรียนในความปกครองของท่าน คือ ${esc(student.name)} เลขประจำตัว ${esc(student.studentNo)} ชั้น ${esc(room)} ปีการศึกษา ${esc(letter.year)} พบว่านักเรียน <b>ขาดเรียนติดต่อกัน ${Number(letter.absent_days)} วัน ตั้งแต่วันที่ ${esc(fmtDate(letter.absent_from))} ถึงวันที่ ${esc(fmtDate(letter.absent_to))}</b> โดยไม่ได้แจ้งเหตุผลให้ทางโรงเรียนทราบ ดังรายละเอียดต่อไปนี้</p>`,
+    tableHtml:`<table class="letter-table"><thead><tr><th>ที่</th><th>วันที่</th><th>สถานะการเช็คชื่อ</th></tr></thead><tbody>${tableRows}</tbody></table>`,
+    summaryHtml:`<div class="letter-summary avoid-break"><b>สิ่งที่ขอความร่วมมือจากท่าน</b><br>1. กำกับดูแลให้นักเรียนมาเรียนตามปกติ ตั้งแต่วันที่ได้รับหนังสือฉบับนี้<br>2. หากนักเรียนมีเหตุจำเป็น เช่น เจ็บป่วย ขอให้แจ้งครูประจำชั้นทุกครั้ง<br>3. การขาดเรียนติดต่อกันโดยไม่แจ้งเหตุผล มีผลต่อเวลาเรียนและสถานภาพการเป็นนักเรียน${repeatedNotice}</div>`,
+    closingHtml,
+    replyOptionsHtml,
+    docNoText:`บร.${Number(letter.doc_no)}/${letter.year}`,
+    issuedDateText:thaiLetterDateText(letter.issued_date),
+    signatures:[{ name:directorName, role:"ผู้อำนวยการโรงเรียน" }]
+  });
+}
+
+el("absence-list").addEventListener("change", event => {
+  const select = event.target.closest("[data-letter-round]");
+  if (!select) return;
+  const studentId = String(select.dataset.letterRound);
+  const letter = (issuedByStudent.get(studentId) || [])
+    .find(item => Number(item.letter_round) === Number(select.value));
+  const checkbox = el("absence-list").querySelector(`[data-invite-student="${CSS.escape(studentId)}"]`);
+  if (checkbox) checkbox.checked = letter?.invite_meeting === true;
+});
+
+el("absence-list").addEventListener("click", async event => {
+  const button = event.target.closest("[data-print-student]");
+  if (!button || printing) return;
+  const student = reportRows.find(row => String(row.studentId) === String(button.dataset.printStudent));
+  if (!student) return;
+  const card = button.closest("[data-student-card]");
+  const round = Number(card.querySelector("[data-letter-round]").value);
+  const inviteMeeting = card.querySelector("[data-invite-student]").checked;
+  if (inviteMeeting && (!el("meet-date").value || !el("meet-time").value)) {
+    toast("กรุณาระบุวันและเวลานัดพบครูประจำชั้นให้ครบ", true);
+    return;
+  }
+
+  printing = true;
+  const buttons = [...el("absence-list").querySelectorAll("[data-print-student]")];
+  buttons.forEach(item => { item.disabled = true; });
+  try {
+    const approved = await window.crsAskConfirm({
+      title:`ออกหนังสือเตือนครั้งที่ ${round}`,
+      message:`${student.name}\nขาดติดต่อกัน ${student.days} วัน · ${fmtDate(student.fromDate)} ถึง ${fmtDate(student.toDate)}`,
+      okLabel:"ออกหนังสือและพิมพ์",
+      danger:false
+    });
+    if (!approved) return;
+
+    const issuedLetter = await issueAbsenceLetter({
+      studentId:student.studentId,
+      year:el("year-select").value,
+      gradeLevel:student.gradeLevel,
+      classroom:student.classroom,
+      absentDays:student.days,
+      absentFrom:student.fromDate,
+      absentTo:student.toDate,
+      letterRound:round,
+      meetDate:el("meet-date").value,
+      meetTime:el("meet-time").value,
+      inviteMeeting
+    });
+    const existingLetters = issuedByStudent.get(String(student.studentId)) || [];
+    const previousLetter = [...existingLetters]
+      .filter(letter => Number(letter.letter_round) < Number(issuedLetter.letter_round))
+      .sort((a, b) => Number(b.letter_round) - Number(a.letter_round))[0] || null;
+    const [absenceRows, signers] = await Promise.all([
+      loadFrozenAbsenceRows(issuedLetter),
+      loadLetterSigners(issuedLetter.year, issuedLetter.grade_level, issuedLetter.classroom)
+    ]);
+    el("print-area").innerHTML = renderAbsenceLetter(
+      student, issuedLetter, absenceRows, previousLetter, signers.directorName
+    );
+    await document.fonts.ready;
+    try {
+      await Promise.all([...el("print-area").querySelectorAll("img")].map(img => img.decode()));
+    } catch (error) {
+      // รูปเสียยังพิมพ์ข้อความต่อได้ ดีกว่าหยุดทั้งเอกสาร
+    }
+    window.print();
+
+    const withoutSameRound = existingLetters.filter(letter =>
+      Number(letter.letter_round) !== Number(issuedLetter.letter_round)
+    );
+    issuedByStudent.set(String(student.studentId), [...withoutSameRound, issuedLetter]
+      .sort((a, b) => Number(a.letter_round) - Number(b.letter_round)));
+    renderReport();
+  } catch (error) {
+    toast(error.message || "ออกหนังสือไม่สำเร็จ", true);
+  } finally {
+    el("print-area").innerHTML = "";
+    printing = false;
+    buttons.forEach(item => { if (item.isConnected) item.disabled = false; });
+  }
+});
+
+el("btn-load").addEventListener("click", loadReport);
+el("year-select").addEventListener("change", () => {
+  reportRows = [];
+  issuedByStudent = new Map();
+  el("report-state").textContent = "เลือกปีการศึกษาแล้วกดแสดงรายงาน";
+  el("absence-list").innerHTML = "";
+});
+
+const session = await requireAuth();
+if (session) {
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    canGeneral = await checkDepartment("บริหารทั่วไป");
+    homeroomRoomsByYear = canGeneral ? new Map() : await loadMyHomerooms(session.user.id);
+    const hasAnyHomeroom = [...homeroomRoomsByYear.values()].some(rooms => rooms.size > 0);
+    const canAccess = canGeneral || hasAnyHomeroom;
+    applyRestrictedMenuAccess(canAccess);
+    if (!canAccess) {
+      showGate("รายงานนี้เปิดให้ฝ่ายบริหารทั่วไป ผู้ดูแลระบบ และครูประจำชั้นของปีที่เลือก");
+    } else {
+      el("report-content").hidden = false;
+      el("threshold-note").textContent = `ขาดติดต่อกันตั้งแต่ ${MIN_ABSENT_DAYS} วันขึ้นไป`;
+      el("meet-date").value = addDaysStr(today, 7);
+      el("meet-time").value = "09:00";
+      bindDatePickOnly(el("meet-date"));
+      bindDatePickOnly(el("meet-time"));
+      el("meet-date-hint").textContent = DATE_PICK_ONLY_NOTE;
+      el("meet-time-hint").textContent = TIME_PICK_ONLY_NOTE;
+
+      const [academicYears, name, address] = await Promise.all([
+        getAcademicYears(),
+        getSetting("receipt_school_name"),
+        getSetting("receipt_address")
+      ]);
+      years = academicYears;
+      schoolName = String(name || "").trim();
+      schoolAddress = String(address || "").trim();
+      const activeYear = academicYearOf(today, years);
+      el("year-select").innerHTML = years.length
+        ? [...years].sort((a, b) => b.start_date.localeCompare(a.start_date))
+            .map(row => `<option value="${esc(row.year)}"${row.year === activeYear ? " selected" : ""}>${esc(row.year)}</option>`).join("")
+        : '<option value="">— ยังไม่มีปีการศึกษา —</option>';
+      if (years.length) await loadReport();
+    }
+  } catch (error) {
+    showGate(error.message || "เปิดรายงานไม่สำเร็จ");
+  }
+}
+</script>
+</body>
+</html>

@@ -54,6 +54,7 @@ export const SCHOOL_LETTER_CSS = `
     .letter-table th:last-child, .letter-table td:last-child { width: 28mm; text-align: center; }
     .letter-summary { border: 1px solid #111; padding: 2.5mm 3mm; margin: 3mm 0; }
     .letter-signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; margin: 6mm 0 3mm; text-align: center; }
+    .letter-signatures.signatures-1 { grid-template-columns: 1fr; }
     .letter-signature-line { margin-top: 6mm; }
     .letter-reply { border-top: 1px dashed #111; margin-top: 4mm; padding-top: 3mm; }
     .letter-reply h3 { margin: 0 0 2mm; text-align: center; font-size: 15px; }
@@ -65,7 +66,7 @@ export function renderSchoolLetter({
   schoolName = "", schoolAddress = "", logoSrc,
   subject, recipientName, bodyHtml = "", tableHtml = "", summaryHtml = "", closingHtml = "",
   replyOptionsHtml = "", docNoText = "", issuedDateText = "", homeroomName = "",
-  academicHeadName = "", directorName = ""
+  academicHeadName = "", directorName = "", signatures
 }) {
   const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
@@ -77,6 +78,11 @@ export function renderSchoolLetter({
   const signatureCell = (name, role) =>
     `<div><div class="letter-signature-line">ลงชื่อ ${signerBlank}</div>` +
     `<div>( ${name ? escapeHtml(name) : signerBlank} )</div><div>${role}</div></div>`;
+  const customSignatures = Array.isArray(signatures) ? signatures : null;
+  const signatureClass = customSignatures?.length === 1 ? " signatures-1" : "";
+  const signatureHtml = customSignatures
+    ? customSignatures.map(item => signatureCell(item?.name || "", escapeHtml(item?.role || ""))).join("\n      ")
+    : `${signatureCell(homeroomName, "ครูประจำชั้น")}\n      ${signatureCell(academicHeadName, "หัวหน้าฝ่ายวิชาการ")}\n      ${signatureCell(directorName, "ผู้อำนวยการโรงเรียน")}`;
 
   // schoolName/schoolAddress/subject/recipientName ถูก escape ที่นี่
   // ส่วนพารามิเตอร์ลงท้าย Html เป็น HTML ที่ผู้เรียกต้อง escape ข้อมูลมาแล้ว ฟังก์ชันนี้จึงไม่แตะ
@@ -95,10 +101,8 @@ export function renderSchoolLetter({
     ${tableHtml}
     ${summaryHtml}
     ${closingHtml}
-    <div class="letter-signatures avoid-break">
-      ${signatureCell(homeroomName, "ครูประจำชั้น")}
-      ${signatureCell(academicHeadName, "หัวหน้าฝ่ายวิชาการ")}
-      ${signatureCell(directorName, "ผู้อำนวยการโรงเรียน")}
+    <div class="letter-signatures${signatureClass} avoid-break">
+      ${signatureHtml}
     </div>
     <section class="letter-reply avoid-break">
       <h3>แบบตอบรับของผู้ปกครอง</h3>
@@ -210,6 +214,34 @@ export async function loadIssuedLetters(year, kind, gradeLevel) {
     .eq("grade_level", gradeLevel)
     .order("doc_no", { ascending: true });
   if (error) throw new Error("อ่านทะเบียนหนังสือไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function issueAbsenceLetter({ studentId, year, gradeLevel, classroom,
+  absentDays, absentFrom, absentTo, letterRound = 1, meetDate, meetTime, inviteMeeting }) {
+  const { data, error } = await sb.rpc("get_or_create_absence_letter", {
+    p_student_id: studentId,
+    p_year: year,
+    p_grade_level: gradeLevel,
+    p_classroom: classroom,
+    p_absent_days: absentDays,
+    p_absent_from: absentFrom,
+    p_absent_to: absentTo,
+    p_letter_round: letterRound,
+    p_meet_date: meetDate || null,
+    p_meet_time: meetTime || null,
+    p_invite_meeting: inviteMeeting === true
+  });
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function loadIssuedAbsenceLetters(year) {
+  const { data, error } = await sb.from("absence_letters")
+    .select("student_id,year,doc_no,letter_round,grade_level,classroom,absent_days,absent_from,absent_to,issued_date,meet_date,meet_time,invite_meeting")
+    .eq("year", year)
+    .order("doc_no", { ascending: true });
+  if (error) throw new Error("อ่านทะเบียนหนังสือเตือนไม่สำเร็จ: " + error.message);
   return data || [];
 }
 
@@ -805,6 +837,108 @@ export function promoteClassroom(classroom, oldGrade, newGrade) {
 // รายชื่อนักเรียนที่ยัง active (ยังเรียนอยู่จริง) ทั้งหมด เรียงตามชั้น+ห้อง+เลขที่
 // active = ยังไม่จบ (graduated=false) และ ยังไม่ย้ายออก/เลิกเรียน (left_school=false)
 // ใช้ที่หน้าจัดการนักเรียน + ตัวจับคู่ลงทะเบียน (คนจบ/คนย้ายออกไม่โผล่ในรายชื่อใช้งาน)
+export function buildAbsenceStreaks(rows, { minDays = 5 } = {}) {
+  const byStudent = new Map();
+  for (const row of rows || []) {
+    const studentId = String(row?.student_id || "");
+    if (!studentId || !row?.attend_date) continue;
+    if (!byStudent.has(studentId)) byStudent.set(studentId, []);
+    byStudent.get(studentId).push(row);
+  }
+
+  const streaks = [];
+  for (const [studentId, studentRows] of byStudent) {
+    const ordered = [...studentRows].sort((a, b) =>
+      String(a.attend_date).localeCompare(String(b.attend_date))
+    );
+    const latest = ordered[ordered.length - 1];
+    let days = 0;
+    let fromDate = "";
+    for (let index = ordered.length - 1; index >= 0; index--) {
+      const row = ordered[index];
+      if (row.status !== "ขาด") break;
+      days++;
+      fromDate = row.attend_date;
+    }
+    if (days < minDays) continue;
+    streaks.push({
+      studentId,
+      days,
+      fromDate,
+      toDate: latest.attend_date,
+      gradeLevel: latest.grade_level,
+      classroom: latest.classroom
+    });
+  }
+
+  return streaks.sort((a, b) =>
+    b.days - a.days || String(a.fromDate).localeCompare(String(b.fromDate))
+  );
+}
+
+export async function loadAbsenceStreaks(year, {
+  minDays = 5,
+  asOf = toDateStr(bangkokNow()),
+  years = null
+} = {}) {
+  const academicYears = years ?? await getAcademicYears();
+  const range = academicYearRange(year, academicYears);
+  if (!range) throw new Error("ไม่พบช่วงปีการศึกษาที่เลือก");
+  const to = range.end < asOf ? range.end : asOf;
+  if (to < range.start) return [];
+
+  const candidateFromRaw = addDaysStr(asOf, -60);
+  const candidateFrom = candidateFromRaw < range.start ? range.start : candidateFromRaw;
+  const candidateResult = await fetchAllRows(() => sb.from("daily_attendance")
+    .select("student_id,attend_date")
+    .eq("status", "ขาด")
+    .gte("attend_date", candidateFrom)
+    .lte("attend_date", to), ["student_id", "attend_date"]);
+  if (candidateResult.error) {
+    throw new Error("โหลดข้อมูลคัดกรองการขาดเรียนไม่สำเร็จ: " + candidateResult.error.message);
+  }
+
+  const absentCounts = new Map();
+  for (const row of candidateResult.data || []) {
+    absentCounts.set(row.student_id, (absentCounts.get(row.student_id) || 0) + 1);
+  }
+  const candidateIds = [...absentCounts]
+    .filter(([, count]) => count >= minDays)
+    .map(([studentId]) => studentId);
+  if (candidateIds.length === 0) return [];
+
+  const detailResult = await fetchAllRows(() => sb.from("daily_attendance")
+    .select("student_id,attend_date,status,grade_level,classroom")
+    .gte("attend_date", range.start)
+    .lte("attend_date", to)
+    .in("student_id", candidateIds), ["student_id", "attend_date"]);
+  if (detailResult.error) {
+    throw new Error("โหลดประวัติการขาดเรียนไม่สำเร็จ: " + detailResult.error.message);
+  }
+
+  const recentCutoff = addDaysStr(asOf, -14);
+  const streaks = buildAbsenceStreaks(detailResult.data || [], { minDays })
+    .filter(item => item.toDate >= recentCutoff);
+  if (streaks.length === 0) return [];
+
+  const activeStudents = await getActiveStudents();
+  const activeById = new Map(activeStudents.map(student => [String(student.id), student]));
+  return streaks.flatMap(item => {
+    const student = activeById.get(String(item.studentId));
+    if (!student) return [];
+    return [{
+      studentId: item.studentId,
+      name: student.name,
+      studentNo: student.student_no,
+      gradeLevel: item.gradeLevel,
+      classroom: item.classroom,
+      days: item.days,
+      fromDate: item.fromDate,
+      toDate: item.toDate
+    }];
+  });
+}
+
 export async function getActiveStudents() {
   const { data, error } = await sb
     .from("students")
