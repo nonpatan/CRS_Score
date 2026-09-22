@@ -556,6 +556,42 @@ export function distinctYears(subjects) {
   return years;
 }
 
+// สร้างแผนก๊อปโครงสร้างคะแนนโดยไม่แตะฐานข้อมูล เพื่อให้หน้าเว็บตรวจและเทสต์ invariant ได้ก่อนเขียนจริง
+// ก๊อปครั้งที่เดิมเพียงตัวที่ลำดับน้อยที่สุด และรับประกันว่าทุกตัวชี้วัดมีครั้งที่ 1 อย่างน้อยหนึ่งรายการ
+export function buildStructureCopyPlan(sourceUnits, options = {}) {
+  const startSeq = Number.isFinite(Number(options.startSeq)) ? Number(options.startSeq) : 0;
+  const bySeq = (a, b) => Number(a?.seq || 0) - Number(b?.seq || 0);
+  const allowedKinds = new Set(["วิชา", "สมรรถนะหลัก"]);
+
+  return (sourceUnits || [])
+    .filter(unit => unit && allowedKinds.has(unit.kind))
+    .slice()
+    .sort(bySeq)
+    .map((unit, unitIndex) => {
+      const sourceSeq = Number(unit.seq);
+      const indicators = (unit.indicators || []).slice().sort(bySeq).map((indicator, indicatorIndex) => {
+        const firstCollection = (indicator.collections || []).slice().sort(bySeq)[0];
+        return {
+          name: indicator.name,
+          max_score: indicator.max_score,
+          seq: Number.isFinite(Number(indicator.seq)) ? Number(indicator.seq) : indicatorIndex + 1,
+          counts_score: indicator.counts_score === false ? false : true,
+          collections: [{
+            seq: 1,
+            max_score: firstCollection ? firstCollection.max_score : indicator.max_score
+          }]
+        };
+      });
+      return {
+        kind: unit.kind,
+        name: unit.name,
+        max_score: unit.max_score,
+        seq: startSeq + (Number.isFinite(sourceSeq) ? sourceSeq : unitIndex + 1),
+        indicators
+      };
+    });
+}
+
 // ============================================================
 // ค่าตั้งค่าส่วนกลาง (app_settings) + ตรรกะลำดับชั้น/เลื่อนชั้น — ใช้ที่หน้า rollover (ขึ้นปีใหม่)
 // ============================================================
@@ -615,6 +651,7 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
     if (!indicators.length) { structureComplete = false; stat.structureIncomplete = true; }
     let unitRaw = 0, unitCap = 0;
     for (const indicator of indicators) {
+      if (indicator.counts_score === false) continue;
       const collections = indicator.collections || [];
       if (!collections.length) { structureComplete = false; stat.structureIncomplete = true; }
       let indicatorRaw = 0, indicatorCap = 0;
@@ -636,8 +673,10 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
     }
     const unitMax = Number(unit.max_score) || 0;
     const unitScaled = unitCap > 0 ? (unitRaw / unitCap) * unitMax : 0;
-    scaledSum += unitScaled;
-    maxSum += unitMax;
+    if (unitCap > 0) {
+      scaledSum += unitScaled;
+      maxSum += unitMax;
+    }
   }
 
   const complete = structureComplete && expectedCount > 0 && scoredCount === expectedCount && maxSum > 0;
@@ -1723,7 +1762,7 @@ export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
   const [subjectResult, unitResult, remarkResult, sessionResult, makeupResult, examResult, weightsResult] = await Promise.all([
     sb.from("subjects").select("*").eq("id", subjectId).single(),
     sb.from("units")
-      .select("*, indicators(*, collections(*, scores(student_id, raw_score)))")
+      .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(student_id, raw_score)))")
       .eq("subject_id", subjectId)
       .order("seq"),
     sb.from("remarks").select("*").eq("subject_id", subjectId),
@@ -1786,12 +1825,16 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   // partial คิดจากเฉพาะครั้งที่กรอกแล้ว ใช้แค่แสดงระหว่างเทอม ไม่ใช่เกรดทางการ
   let subjectPartialRaw = 0, subjectPartialCap = 0;
   let expectedCount = 0, scoredCount = 0;
+  let notScoredIndicatorCount = 0;
 
   for (const unit of unitsTree) {
+    const unitIndicators = unit.indicators || [];
+    const notScoredCount = unitIndicators.filter(ind => ind.counts_score === false).length;
     let unitRaw = 0, unitCap = 0;
     let unitPartialRaw = 0, unitPartialCap = 0;
     let unitExpected = 0, unitScored = 0;
-    for (const ind of (unit.indicators || [])) {
+    for (const ind of unitIndicators) {
+      if (ind.counts_score === false) continue;
       let indRaw = 0, indCap = 0, indPartialCap = 0;
       for (const coll of (ind.collections || [])) {
         const collectionMax = Number(coll.max_score) || 0;
@@ -1815,17 +1858,20 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
     const unitScaled = unitCap > 0 ? (unitRaw / unitCap) * unit.max_score : 0;
     const unitPartialScaled = unitPartialCap > 0 ? (unitPartialRaw / unitPartialCap) * unit.max_score : 0;
     if (unit.kind === "วิชา") {
-      subjectUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score });
-      subjectRaw += unitScaled;
-      subjectCap += unit.max_score;
-      if (unitPartialCap > 0) {
-        subjectPartialRaw += unitPartialScaled;
-        subjectPartialCap += unit.max_score;
+      subjectUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score, notScoredCount });
+      notScoredIndicatorCount += notScoredCount;
+      if (unitCap > 0) {
+        subjectRaw += unitScaled;
+        subjectCap += unit.max_score;
+        if (unitPartialCap > 0) {
+          subjectPartialRaw += unitPartialScaled;
+          subjectPartialCap += unit.max_score;
+        }
       }
       expectedCount += unitExpected;
       scoredCount += unitScored;
     } else {
-      competencyUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score });
+      competencyUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score, notScoredCount });
     }
   }
 
@@ -1833,7 +1879,8 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   const collectPercent = subj.max_score > 0 ? (subjectScaled / subj.max_score) * 100 : 0;
   const collectPart = collectPercent * collectWeight / 100;
   const collectExpectedCount = expectedCount;
-  const hasCollectStructure = collectExpectedCount > 0;
+  const collectScoredCount = scoredCount;
+  const hasCollectStructure = subjectCap > 0 && collectExpectedCount > 0;
   expectedCount += 1;
   if (examUsable) scoredCount += 1;
   const collectPartialPercent = subjectPartialCap > 0
@@ -1852,6 +1899,8 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
     expectedCount,
     scoredCount,
     collectExpectedCount,
+    collectScoredCount,
+    notScoredIndicatorCount,
     hasCollectStructure,
     examScored: examUsable,
     examOverCap,
@@ -1929,7 +1978,9 @@ export function computeIntegratedResult(studentId, memberDataList) {
   let hasR = false;
   let weightedSum = 0, weightSum = 0;
   let expectedCount = 0, scoredCount = 0;
+  let collectExpectedCount = 0, collectScoredCount = 0, notScoredIndicatorCount = 0;
   let hasCollectStructure = memberDataList.length > 0;
+  let examScored = memberDataList.length > 0;
   let examOverCap = false;
   let partialWeightedSum = 0, partialWeightSum = 0;
   let totalBase = 0, rawMissed = 0, makeupTotal = 0, anySessions = false;
@@ -1949,7 +2000,11 @@ export function computeIntegratedResult(studentId, memberDataList) {
     memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed, scoring: r.scoring });
     expectedCount += r.scoring.expectedCount;
     scoredCount += r.scoring.scoredCount;
+    collectExpectedCount += r.scoring.collectExpectedCount;
+    collectScoredCount += r.scoring.collectScoredCount;
+    notScoredIndicatorCount += r.scoring.notScoredIndicatorCount;
     if (!r.scoring.hasCollectStructure) hasCollectStructure = false;
+    if (!r.scoring.examScored) examScored = false;
     if (r.scoring.examOverCap) examOverCap = true;
     if (r.scoring.partialPercent !== null && weight > 0) {
       partialWeightedSum += r.scoring.partialPercent * weight;
@@ -2000,7 +2055,11 @@ export function computeIntegratedResult(studentId, memberDataList) {
   const scoring = {
     expectedCount,
     scoredCount,
+    collectExpectedCount,
+    collectScoredCount,
+    notScoredIndicatorCount,
     hasCollectStructure,
+    examScored,
     examOverCap,
     complete: hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount,
     partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null

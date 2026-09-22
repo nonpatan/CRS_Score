@@ -106,9 +106,23 @@
     padding: 8px 12px; border-top: 1px solid var(--line);
   }
   .node-row .title { flex: 1; font-size: 14px; }
-  .node-row.indicator { padding-left: 20px; }
+  .node-row.indicator { padding-left: 20px; flex-wrap: wrap; }
   .node-row.collection { padding-left: 36px; color: var(--muted); }
   .node-row .cap { color: var(--muted); font-size: 13px; margin-right: 4px; }
+  .node-row.indicator.not-scored { background: var(--bg); }
+  .node-row.indicator.not-scored > .title,
+  .node-row.indicator.not-scored > .cap,
+  .node-row.collection.not-scored { opacity: 0.55; }
+  .not-scored-badge {
+    background: var(--amber-soft); color: var(--amber); border-radius: 999px;
+    padding: 3px 8px; font-size: 12px; font-weight: 600;
+  }
+  .score-toggle {
+    display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+    color: var(--ink); font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  .score-toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--teal); }
+  .score-toggle:has(input:disabled) { cursor: default; }
   .add-row { padding: 8px 12px; border-top: 1px dashed var(--line); }
   .add-row.indicator { padding-left: 20px; }
   .add-row.collection { padding-left: 36px; }
@@ -151,6 +165,9 @@
   .exam-status .status-title { font-weight:600; }
   .exam-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:10px; }
   .exam-actions button { min-height:44px; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; }
+  .copy-summary { background:var(--teal-soft); color:var(--teal); border-radius:8px; padding:10px 12px; margin:2px 0 12px; font-size:14px; }
+  .copy-summary.empty { background:var(--amber-soft); color:var(--amber); }
+  #btn-copy-structure { width:100%; min-height:44px; }
 
   @media (max-width: 520px) {
     .year-control { align-items:stretch; flex-direction:column; }
@@ -358,6 +375,38 @@
     </div>
   </div>
 
+  <!-- ก๊อปโครงสร้างจากวิชาอื่น (เฉพาะเจ้าของ/admin ของวิชาพื้นฐานปลายทาง) -->
+  <div class="card" id="structure-copy-card" style="display:none">
+    <div class="section-title">ก๊อปโครงสร้างจากวิชาอื่น</div>
+    <div class="field-note" style="margin-bottom:12px">
+      เลือกต้นทางได้ข้ามปี ภาคเรียน ชั้น และครู ระบบจะก๊อปหน่วยใหญ่ ตัวชี้วัด และครั้งที่แรกเพียงครั้งเดียว โดยไม่ก๊อปคะแนน รายชื่อ หรือเช็คชื่อ
+    </div>
+    <div class="field">
+      <label for="copy-filter-year">ปีการศึกษาต้นทาง</label>
+      <select id="copy-filter-year"><option value="">— ทุกปี —</option></select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="copy-filter-grade">ชั้นต้นทาง</label>
+        <select id="copy-filter-grade"><option value="">— ทุกชั้น —</option></select>
+      </div>
+      <div class="field">
+        <label for="copy-filter-term">ภาคเรียนต้นทาง</label>
+        <select id="copy-filter-term">
+          <option value="">— ทุกภาคเรียน —</option>
+          <option value="1">ภาคเรียน 1</option>
+          <option value="2">ภาคเรียน 2</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label for="copy-source-subject">วิชาต้นทาง</label>
+      <select id="copy-source-subject"><option value="">— เลือกวิชาต้นทาง —</option></select>
+    </div>
+    <div class="copy-summary empty" id="copy-structure-summary">เลือกวิชาต้นทางเพื่อดูจำนวนโครงสร้างที่จะได้</div>
+    <button type="button" class="ghost" id="btn-copy-structure" disabled>ก๊อปโครงสร้าง</button>
+  </div>
+
   <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
   <div class="card" id="structure-card" style="display:none">
     <div class="section-title">คะแนนวิชา</div>
@@ -480,7 +529,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead } from "../supabase-client.js?v=20260922-1";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead } from "../supabase-client.js?v=20260922-4";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -526,6 +575,13 @@ const elManageExamStatusTitle = document.getElementById("manage-exam-status-titl
 const elManageExamStatusNote = document.getElementById("manage-exam-status-note");
 const elManageExamMissingCount = document.getElementById("manage-exam-missing-count");
 const btnManageToggleExam = document.getElementById("btn-manage-toggle-exam");
+const elStructureCopyCard = document.getElementById("structure-copy-card");
+const elCopyFilterYear = document.getElementById("copy-filter-year");
+const elCopyFilterGrade = document.getElementById("copy-filter-grade");
+const elCopyFilterTerm = document.getElementById("copy-filter-term");
+const elCopySourceSubject = document.getElementById("copy-source-subject");
+const elCopyStructureSummary = document.getElementById("copy-structure-summary");
+const btnCopyStructure = document.getElementById("btn-copy-structure");
 const elWeightsReadonly = document.getElementById("weights-readonly");
 const elWeightsTitle = document.getElementById("weights-title");
 const elWeightYear = document.getElementById("weight-year");
@@ -832,6 +888,7 @@ function updateTypeDependentUI() {
     if (isIntegrated) loadMembers();
     else loadEnrollments();
   }
+  syncStructureCopyCard();
 }
 fType.addEventListener("change", updateTypeDependentUI);
 
@@ -856,6 +913,9 @@ let members = [];             // แถว integration_members ของวิ�
 let savedGradeWeights = new Map();
 let selectableYears = [];
 let editingAcademicYear = null;
+let copyTargetSubjectId = null;
+let copySourceUnits = [];
+let copyLoadSequence = 0;
 const DEFAULT_GRADE_WEIGHTS = [
   { level: "ประถม", collect_weight: 80, exam_weight: 20 },
   { level: "มัธยม", collect_weight: 70, exam_weight: 30 }
@@ -1270,10 +1330,228 @@ function fillSelect(el, items, getLabel, placeholder) {
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
   if (s.year) parts.push("ปี " + s.year);
+  if (s.grade_level) parts.push("ชั้น " + s.grade_level);
   if (s.term) parts.push("เทอม " + s.term);
   if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
   return parts.join("  ·  ");
 }
+
+// ---------- ก๊อปโครงสร้างจากวิชาอื่น ----------
+function resetStructureCopySource(message = "เลือกวิชาต้นทางเพื่อดูจำนวนโครงสร้างที่จะได้") {
+  copyLoadSequence += 1;
+  copySourceUnits = [];
+  elCopyStructureSummary.textContent = message;
+  elCopyStructureSummary.classList.add("empty");
+  btnCopyStructure.disabled = true;
+}
+
+function fillCopyFilterOptions() {
+  const candidates = allSubjects.filter(subject =>
+    subject.subject_type === "พื้นฐาน" && subject.id !== currentSubject.id
+  );
+  const years = distinctYears(candidates);
+  elCopyFilterYear.innerHTML = "<option value=''>— ทุกปี —</option>";
+  for (const year of years) {
+    const option = document.createElement("option");
+    option.value = year;
+    option.textContent = "ปีการศึกษา " + year;
+    elCopyFilterYear.appendChild(option);
+  }
+
+  const grades = [...new Set(candidates.map(subject => subject.grade_level).filter(Boolean))]
+    .sort((a, b) => {
+      const ai = GRADE_ORDER.indexOf(a), bi = GRADE_ORDER.indexOf(b);
+      if (ai !== bi) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      return a.localeCompare(b, "th", { numeric: true });
+    });
+  elCopyFilterGrade.innerHTML = "<option value=''>— ทุกชั้น —</option>";
+  for (const grade of grades) {
+    const option = document.createElement("option");
+    option.value = grade;
+    option.textContent = grade;
+    elCopyFilterGrade.appendChild(option);
+  }
+
+  elCopyFilterYear.value = years.includes(currentSubject.year) ? currentSubject.year : "";
+  elCopyFilterGrade.value = grades.includes(currentSubject.grade_level) ? currentSubject.grade_level : "";
+  elCopyFilterTerm.value = "";
+}
+
+function applyCopySubjectFilter() {
+  if (!currentSubject) return;
+  const year = elCopyFilterYear.value;
+  const grade = elCopyFilterGrade.value;
+  const term = elCopyFilterTerm.value;
+  const candidates = allSubjects.filter(subject => {
+    if (subject.subject_type !== "พื้นฐาน" || subject.id === currentSubject.id) return false;
+    if (year && subject.year !== year) return false;
+    if (grade && subject.grade_level !== grade) return false;
+    if (term && subject.term !== term) return false;
+    return true;
+  });
+  fillSelect(elCopySourceSubject, candidates, subjectLabel,
+    candidates.length ? "— เลือกวิชาต้นทาง (" + candidates.length + " วิชา) —" : "— ไม่พบวิชาต้นทางตามตัวกรอง —");
+  resetStructureCopySource();
+}
+
+function syncStructureCopyCard(force = false) {
+  const eligible = Boolean(currentSubject) &&
+    currentSubject.subject_type === "พื้นฐาน" &&
+    canEditCurrentSubject();
+  elStructureCopyCard.style.display = eligible ? "block" : "none";
+  if (!eligible) {
+    copyTargetSubjectId = null;
+    resetStructureCopySource();
+    return;
+  }
+  if (!force && copyTargetSubjectId === currentSubject.id) return;
+  copyTargetSubjectId = currentSubject.id;
+  fillCopyFilterOptions();
+  applyCopySubjectFilter();
+}
+
+async function readCopySourceUnits(subjectId) {
+  const { data, error } = await sb.from("units")
+    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*))")
+    .eq("subject_id", subjectId)
+    .order("seq");
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+async function loadCopySourceSummary() {
+  const sourceId = elCopySourceSubject.value;
+  if (!sourceId) { resetStructureCopySource(); return; }
+  const requestId = ++copyLoadSequence;
+  copySourceUnits = [];
+  btnCopyStructure.disabled = true;
+  elCopyStructureSummary.textContent = "กำลังโหลดโครงสร้างต้นทาง…";
+  elCopyStructureSummary.classList.add("empty");
+  try {
+    const sourceUnits = await readCopySourceUnits(sourceId);
+    if (requestId !== copyLoadSequence || elCopySourceSubject.value !== sourceId) return;
+    copySourceUnits = sourceUnits;
+    const plan = buildStructureCopyPlan(sourceUnits, { startSeq: 0 });
+    const indicatorCount = plan.reduce((sum, unit) => sum + unit.indicators.length, 0);
+    if (plan.length === 0) {
+      resetStructureCopySource("วิชาต้นทางนี้ยังไม่มีโครงสร้างให้ก๊อป");
+      return;
+    }
+    elCopyStructureSummary.textContent = "จะได้ หน่วยใหญ่ " + plan.length + " · ตัวชี้วัด " + indicatorCount +
+      " · ครั้งที่ " + indicatorCount + " (ครั้งละ 1)";
+    elCopyStructureSummary.classList.remove("empty");
+    btnCopyStructure.disabled = false;
+  } catch (error) {
+    if (requestId !== copyLoadSequence) return;
+    resetStructureCopySource("โหลดโครงสร้างต้นทางไม่สำเร็จ: " + error.message);
+  }
+}
+
+[elCopyFilterYear, elCopyFilterGrade, elCopyFilterTerm].forEach(filter => {
+  filter.addEventListener("change", applyCopySubjectFilter);
+});
+elCopySourceSubject.addEventListener("change", loadCopySourceSummary);
+
+btnCopyStructure.addEventListener("click", async () => {
+  if (!currentSubject || currentSubject.subject_type !== "พื้นฐาน" || !canEditCurrentSubject()) return;
+  const targetId = currentSubject.id;
+  const sourceId = elCopySourceSubject.value;
+  const sourceSubject = allSubjects.find(subject => subject.id === sourceId);
+  if (!sourceId || !sourceSubject || sourceId === targetId) {
+    showToast("เลือกวิชาต้นทางก่อน", false);
+    return;
+  }
+
+  btnCopyStructure.disabled = true;
+  try {
+    const [sourceUnits, destinationResult] = await Promise.all([
+      readCopySourceUnits(sourceId),
+      sb.from("units")
+        .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(id)))")
+        .eq("subject_id", targetId)
+        .order("seq")
+    ]);
+    if (!currentSubject || currentSubject.id !== targetId || elCopySourceSubject.value !== sourceId) return;
+    if (destinationResult.error) throw new Error("ตรวจโครงสร้างปลายทางไม่สำเร็จ: " + destinationResult.error.message);
+
+    const destinationUnits = destinationResult.data || [];
+    const scoreCount = countScoresInUnits(destinationUnits);
+    if (scoreCount > 0) {
+      showToast("ก๊อปไม่ได้ วิชาปลายทางมีคะแนนนักเรียนกรอกไว้แล้ว " + scoreCount + " ช่อง", false);
+      return;
+    }
+    const startSeq = destinationUnits.reduce((max, unit) => Math.max(max, Number(unit.seq) || 0), 0);
+    const plan = buildStructureCopyPlan(sourceUnits, { startSeq });
+    if (plan.length === 0) {
+      showToast("วิชาต้นทางยังไม่มีโครงสร้างให้ก๊อป", false);
+      return;
+    }
+    if (plan.some(unit => unit.indicators.some(indicator => indicator.collections.length === 0))) {
+      throw new Error("แผนก๊อปไม่สมบูรณ์: พบตัวชี้วัดที่ไม่มีครั้งที่");
+    }
+
+    const indicatorCount = plan.reduce((sum, unit) => sum + unit.indicators.length, 0);
+    const hasExistingStructure = destinationUnits.length > 0;
+    const agreed = await window.crsAskConfirm({
+      title: hasExistingStructure ? "เพิ่มโครงสร้างต่อท้ายของเดิม" : "ก๊อปโครงสร้างวิชา",
+      message: (hasExistingStructure
+        ? "วิชาปลายทางมีโครงสร้างเดิม " + destinationUnits.length + " หน่วยใหญ่ แต่ยังไม่มีคะแนน ระบบจะไม่ลบของเดิมและจะเพิ่มต่อท้าย\n\n"
+        : "วิชาปลายทางยังว่าง ระบบจะสร้างโครงสร้างใหม่\n\n") +
+        "ต้นทาง: " + subjectLabel(sourceSubject) + "\n" +
+        "จะได้ หน่วยใหญ่ " + plan.length + " · ตัวชี้วัด " + indicatorCount + " · ครั้งที่ " + indicatorCount + " (ครั้งละ 1)",
+      okLabel: "ก๊อปโครงสร้าง"
+    });
+    if (!agreed || !currentSubject || currentSubject.id !== targetId || elCopySourceSubject.value !== sourceId) return;
+
+    for (const unit of plan) {
+      try {
+        const { data: newUnit, error: unitError } = await sb.from("units")
+          .insert({
+            subject_id: targetId,
+            kind: unit.kind,
+            name: unit.name,
+            max_score: unit.max_score,
+            seq: unit.seq
+          })
+          .select("id").single();
+        if (unitError) throw new Error("สร้างหน่วยใหญ่ไม่สำเร็จ: " + unitError.message);
+
+        for (const indicator of unit.indicators) {
+          const { data: newIndicator, error: indicatorError } = await sb.from("indicators")
+            .insert({
+              unit_id: newUnit.id,
+              name: indicator.name,
+              max_score: indicator.max_score,
+              seq: indicator.seq,
+              counts_score: indicator.counts_score
+            })
+            .select("id").single();
+          if (indicatorError) throw new Error("สร้างตัวชี้วัดไม่สำเร็จ: " + indicatorError.message);
+
+          const collection = indicator.collections[0];
+          const { error: collectionError } = await sb.from("collections").insert({
+            indicator_id: newIndicator.id,
+            seq: collection.seq,
+            max_score: collection.max_score
+          });
+          if (collectionError) throw new Error("สร้างครั้งที่ 1 ไม่สำเร็จ: " + collectionError.message);
+        }
+      } catch (error) {
+        showToast("ก๊อปหยุดที่หน่วยใหญ่ ‘" + unit.name + "’: " + error.message +
+          " · ของที่สร้างไปแล้วก่อนจุดนี้ยังอยู่ กรุณาตรวจแล้วลบเองหรือกดก๊อปซ้ำเพื่อเพิ่มต่อท้าย", false);
+        await loadStructure();
+        return;
+      }
+    }
+
+    await loadStructure();
+    showToast("ก๊อปโครงสร้างแล้ว " + plan.length + " หน่วยใหญ่ · " + indicatorCount + " ตัวชี้วัด · ทุกตัวมีครั้งที่ 1", true);
+  } catch (error) {
+    showToast("ก๊อปโครงสร้างไม่สำเร็จ: " + error.message, false);
+  } finally {
+    btnCopyStructure.disabled = copySourceUnits.length === 0;
+  }
+});
 
 // ---------- เติมตัวเลือกปีการศึกษาจากวิชาที่มีจริง แล้วตั้งค่าเป็นปีที่เลือกไว้ (จำข้ามหน้า) ----------
 function fillYearOptions() {
@@ -1349,6 +1627,7 @@ elSubject.addEventListener("change", async () => {
     await loadStructure();
     elStructure.style.display = "block";
   }
+  syncStructureCopyCard();
   await loadExamControl();
 });
 
@@ -1370,6 +1649,7 @@ document.getElementById("btn-new-subject").addEventListener("click", () => {
   elEnrollCard.style.display = "none";
   elMembersCard.style.display = "none";
   elExamControlCard.style.display = "none";
+  elStructureCopyCard.style.display = "none";
   elEmptyHint.style.display = "none";
   applyEditPermissionUI();
   fName.focus();
@@ -1452,6 +1732,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     currentSubject = { ...currentSubject, ...payload };
     updateTypeDependentUI();
     applyEditPermissionUI();
+    syncStructureCopyCard(true);
     await loadExamControl();
   } else {
     const { data, error } = await sb.from("subjects").insert(payload).select().single();
@@ -1468,6 +1749,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
       await loadStructure();
       elStructure.style.display = "block";
     }
+    syncStructureCopyCard();
   }
 });
 
@@ -1477,7 +1759,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
 async function countScoresOfSubject(subjectId) {
   const { data, error } = await sb
     .from("units")
-    .select("indicators(collections(scores(id)))")
+    .select("indicators(counts_score,collections(scores(id)))")
     .eq("subject_id", subjectId);
   if (error) return { count: null, error };
   return { count: countScoresInUnits(data || []), error: null };
@@ -1547,7 +1829,7 @@ elDelSubject.addEventListener("click", async () => {
 async function loadStructure() {
   const { data, error } = await sb
     .from("units")
-    .select("*, indicators(*, collections(*, scores(id)))")
+    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(id)))")
     .eq("subject_id", currentSubject.id)
     .order("seq");
   if (error) { showToast("โหลดโครงสร้างไม่สำเร็จ: " + error.message, false); return; }
@@ -1611,11 +1893,28 @@ function renderUnit(unit) {
   block.appendChild(head);
 
   for (const ind of (unit.indicators || [])) {
+    const isNotScored = ind.counts_score === false;
     const row = document.createElement("div");
-    row.className = "node-row indicator";
+    row.className = "node-row indicator" + (isNotScored ? " not-scored" : "");
     row.innerHTML =
       "<span class='title'>" + escapeHtml(ind.name) + "</span>" +
       "<span class='cap'>เต็ม " + ind.max_score + "</span>";
+    if (isNotScored) {
+      const badge = document.createElement("span");
+      badge.className = "not-scored-badge";
+      badge.textContent = "ไม่คิดคะแนน";
+      row.appendChild(badge);
+    }
+    const toggleLabel = document.createElement("label");
+    toggleLabel.className = "score-toggle";
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.checked = !isNotScored;
+    toggle.disabled = !canEdit;
+    toggle.setAttribute("aria-label", "คิดคะแนน " + ind.name);
+    toggle.addEventListener("change", () => updateIndicatorCountsScore(ind, toggle));
+    toggleLabel.append(toggle, document.createTextNode("คิดคะแนน"));
+    row.appendChild(toggleLabel);
     if (canEdit) {
       row.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("indicator", "edit", ind)));
       row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
@@ -1624,7 +1923,7 @@ function renderUnit(unit) {
 
     for (const coll of (ind.collections || [])) {
       const crow = document.createElement("div");
-      crow.className = "node-row collection";
+      crow.className = "node-row collection" + (isNotScored ? " not-scored" : "");
       crow.innerHTML =
         "<span class='title'>ครั้งที่ " + coll.seq + "</span>" +
         "<span class='cap'>เต็ม " + coll.max_score + "</span>";
@@ -1651,6 +1950,44 @@ function renderUnit(unit) {
   }
 
   return block;
+}
+
+async function updateIndicatorCountsScore(indicator, checkbox) {
+  const nextValue = checkbox.checked;
+  const wasNotScored = indicator.counts_score === false;
+  if (nextValue === !wasNotScored) return;
+
+  if (!nextValue) {
+    const scoreCount = countScoresInIndicator(indicator);
+    if (scoreCount > 0) {
+      const agreed = await window.crsAskConfirm({
+        title: "ตั้งตัวชี้วัดเป็นไม่คิดคะแนน",
+        message: "ตัวชี้วัด ‘" + indicator.name + "’ มีคะแนนนักเรียนอยู่แล้ว " + scoreCount +
+          " ช่อง\n\nคะแนนจะไม่ถูกลบ ติ๊กกลับมาได้ตลอด",
+        okLabel: "ไม่คิดคะแนน"
+      });
+      if (!agreed) {
+        checkbox.checked = true;
+        return;
+      }
+    }
+  }
+
+  checkbox.disabled = true;
+  const { data, error } = await sb.from("indicators")
+    .update({ counts_score: nextValue })
+    .eq("id", indicator.id)
+    .select("id,counts_score");
+  if (error || !data || data.length === 0) {
+    checkbox.checked = !wasNotScored;
+    checkbox.disabled = false;
+    showToast("เปลี่ยนสถานะคิดคะแนนไม่สำเร็จ" + (error ? ": " + error.message : ""), false);
+    return;
+  }
+
+  indicator.counts_score = nextValue;
+  renderStructure();
+  showToast(nextValue ? "นำตัวชี้วัดกลับมาคิดคะแนนแล้ว" : "ตั้งเป็นไม่คิดคะแนนแล้ว · คะแนนเดิมยังอยู่ครบ", true);
 }
 
 function makeIconBtn(label, kind, onClick) {
@@ -2120,10 +2457,13 @@ function hideAll() {
   currentSubject = null;
   elSubjectForm.style.display = "none";
   elExamControlCard.style.display = "none";
+  elStructureCopyCard.style.display = "none";
   elStructure.style.display = "none";
   elEnrollCard.style.display = "none";
   elMembersCard.style.display = "none";
   elEmptyHint.style.display = "block";
+  copyTargetSubjectId = null;
+  resetStructureCopySource();
 }
 
 // เริ่มทำงาน — โหลดชั้นสูงสุดก่อน แล้วสร้างตัวเลือกชั้น (ตัวกรอง + ฟอร์ม) ให้จำกัดตามที่เปิดสอน

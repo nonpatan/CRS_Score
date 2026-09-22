@@ -270,7 +270,7 @@ import {
   sb, requireAuth, signOut, getProfile,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20260922-1";
+} from "../supabase-client.js?v=20260922-4";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -791,7 +791,7 @@ async function cloneSubject(src, newYear) {
   // ก๊อปโครงสร้าง หน่วยใหญ่ > หน่วยย่อย > ครั้งที่ (ไม่ก๊อปคะแนน/เช็คชื่อ = เริ่มปีใหม่ว่างเปล่า)
   const { data: units } = await sb
     .from("units")
-    .select("*, indicators(*, collections(*))")
+    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*))")
     .eq("subject_id", src.id)
     .order("seq");
   for (const u of (units || [])) {
@@ -801,7 +801,13 @@ async function cloneSubject(src, newYear) {
     if (uErr) throw new Error("ก๊อปหน่วยใหญ่ไม่สำเร็จ: " + uErr.message);
     for (const ind of (u.indicators || [])) {
       const { data: newInd, error: iErr } = await sb.from("indicators")
-        .insert({ unit_id: newUnit.id, name: ind.name, max_score: ind.max_score, seq: ind.seq })
+        .insert({
+          unit_id: newUnit.id,
+          name: ind.name,
+          max_score: ind.max_score,
+          seq: ind.seq,
+          counts_score: ind.counts_score === false ? false : true
+        })
         .select().single();
       if (iErr) throw new Error("ก๊อปหน่วยย่อยไม่สำเร็จ: " + iErr.message);
       const colls = (ind.collections || []).map(c => ({ indicator_id: newInd.id, seq: c.seq, max_score: c.max_score }));
