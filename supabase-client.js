@@ -854,18 +854,22 @@ export function buildAbsenceStreaks(rows, { minDays = MIN_ABSENT_DAYS } = {}) {
     const latest = ordered[ordered.length - 1];
     let days = 0;
     let fromDate = "";
+    const dates = [];
     for (let index = ordered.length - 1; index >= 0; index--) {
       const row = ordered[index];
       if (row.status !== "ขาด") break;
       days++;
       fromDate = row.attend_date;
+      dates.push(row.attend_date);
     }
     if (days < minDays) continue;
+    dates.reverse();
     streaks.push({
       studentId,
       days,
       fromDate,
       toDate: latest.attend_date,
+      dates,
       gradeLevel: latest.grade_level,
       classroom: latest.classroom
     });
@@ -934,7 +938,8 @@ export async function loadAbsenceStreaks(year, {
       classroom: item.classroom,
       days: item.days,
       fromDate: item.fromDate,
-      toDate: item.toDate
+      toDate: item.toDate,
+      dates: item.dates
     }];
   });
 }

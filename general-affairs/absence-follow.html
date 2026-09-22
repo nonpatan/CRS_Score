@@ -52,8 +52,20 @@
   .audit-list { display:grid; gap:12px; }
   .audit-row { padding:14px; border:1px solid var(--line); border-radius:10px; }
   .audit-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
-  .student-name { font-size:17px; font-weight:700; overflow-wrap:anywhere; }
+  .student-name-toggle {
+    display:inline-flex; align-items:center; gap:6px; min-width:0; min-height:44px;
+    padding:0; border:0; border-radius:4px; color:var(--ink); background:transparent;
+    font-size:17px; font-weight:700; text-align:left; overflow-wrap:anywhere; cursor:pointer;
+  }
+  .student-name-toggle:hover { color:var(--teal); }
+  .student-name-arrow { flex:0 0 auto; }
   .streak-count { color:var(--danger); font-weight:700; white-space:nowrap; }
+  .absent-dates { display:flex; flex-wrap:wrap; gap:6px; min-width:0; max-width:100%; margin-top:8px; }
+  .absent-date-chip {
+    flex:0 1 auto; max-width:100%; padding:3px 9px; border:1px solid var(--line);
+    border-radius:99px; color:var(--teal); background:var(--teal-soft); font-size:13px;
+    white-space:nowrap;
+  }
   .issued-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .badge { display:inline-block; padding:3px 9px; border:1px solid var(--line); border-radius:99px; color:var(--muted); background:var(--bg); font-size:13px; }
   .letter-controls { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
@@ -148,7 +160,7 @@ import {
   loadLetterSigners, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter, thaiLetterDateText, thaiShortDateText,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20260921-2";
+} from "../supabase-client.js?v=20260922-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -160,6 +172,13 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
 const fmtDate = value => value ? new Intl.DateTimeFormat("th-TH", {
   day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
 }).format(new Date(value + "T00:00:00Z")) : "—";
+const fmtAbsenceDate = (value, includeYear = false) => value
+  ? new Intl.DateTimeFormat("th-TH", {
+      weekday:"short", day:"numeric", month:"short",
+      ...(includeYear ? { year:"2-digit" } : {}),
+      timeZone:"UTC"
+    }).format(new Date(value + "T00:00:00Z"))
+  : "—";
 
 let years = [];
 let canGeneral = false;
@@ -171,6 +190,7 @@ let schoolName = "";
 let schoolAddress = "";
 let toastTimer = null;
 let loadRequestSeq = 0;
+const expandedStudentIds = new Set();
 
 function toast(message, isError = false) {
   el("toast").textContent = message;
@@ -215,6 +235,15 @@ function issuedBadges(letters) {
   ).join("")}</div>`;
 }
 
+function absenceDateChips(row) {
+  const dates = Array.isArray(row.dates) ? row.dates : [];
+  const includeYear = dates.length > 1
+    && Number(dates[0].slice(5, 7)) > Number(dates[dates.length - 1].slice(5, 7));
+  return dates.map(date =>
+    `<span class="absent-date-chip">${esc(fmtAbsenceDate(date, includeYear))}</span>`
+  ).join("");
+}
+
 function renderReport() {
   const list = el("absence-list");
   if (!reportRows.length) {
@@ -223,16 +252,21 @@ function renderReport() {
   }
 
   list.innerHTML = reportRows.map(row => {
+    const studentId = String(row.studentId);
+    const expanded = expandedStudentIds.has(studentId);
     const letters = issuedByStudent.get(String(row.studentId)) || [];
     return `<article class="audit-row" data-student-card="${esc(row.studentId)}">
       <div class="audit-head">
         <div>
-          <div class="student-name">${esc(row.name)}</div>
+          <button type="button" class="student-name-toggle" aria-expanded="${expanded ? "true" : "false"}" data-toggle-student="${esc(row.studentId)}">
+            <span>${esc(row.name)}</span><span class="student-name-arrow" aria-hidden="true">${expanded ? "▴" : "▾"}</span>
+          </button>
           <div class="meta">เลขประจำตัว ${esc(row.studentNo)} · ${esc(homeroomAuditRoomLabel({ grade_level:row.gradeLevel, classroom:row.classroom }))}</div>
         </div>
         <div class="streak-count">ขาด ${Number(row.days)} วัน</div>
       </div>
       <div class="meta">ตั้งแต่ ${esc(fmtDate(row.fromDate))} ถึง ${esc(fmtDate(row.toDate))}</div>
+      <div class="absent-dates"${expanded ? "" : " hidden"}>${absenceDateChips(row)}</div>
       ${issuedBadges(letters)}
       <div class="letter-controls no-print">
         <div class="control-grid">
@@ -365,6 +399,20 @@ el("absence-list").addEventListener("change", event => {
 });
 
 el("absence-list").addEventListener("click", async event => {
+  const toggle = event.target.closest("[data-toggle-student]");
+  if (toggle) {
+    const studentId = String(toggle.dataset.toggleStudent);
+    const expanded = !expandedStudentIds.has(studentId);
+    if (expanded) expandedStudentIds.add(studentId);
+    else expandedStudentIds.delete(studentId);
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    const arrow = toggle.querySelector(".student-name-arrow");
+    if (arrow) arrow.textContent = expanded ? "▴" : "▾";
+    const dates = toggle.closest("[data-student-card]")?.querySelector(".absent-dates");
+    if (dates) dates.hidden = !expanded;
+    return;
+  }
+
   const button = event.target.closest("[data-print-student]");
   if (!button || printing) return;
   const student = reportRows.find(row => String(row.studentId) === String(button.dataset.printStudent));
