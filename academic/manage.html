@@ -97,10 +97,14 @@
   /* ต้นไม้โครงสร้าง 3 ชั้น: หน่วยใหญ่ > หน่วยย่อย > ครั้งที่ */
   .unit-block { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
   .unit-head {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
     padding: 10px 12px; background: var(--teal-soft);
   }
   .unit-head .title { flex: 1; font-weight: 600; font-size: 15px; }
+  .unit-block.not-scored-unit .unit-head .title,
+  .unit-block.not-scored-unit .unit-head .cap,
+  .unit-block.not-scored-unit .node-row,
+  .unit-block.not-scored-unit .add-row { opacity: 0.55; }
   .node-row {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 12px; border-top: 1px solid var(--line);
@@ -529,7 +533,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead } from "../supabase-client.js?v=20260922-4";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead } from "../supabase-client.js?v=20260923-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -626,14 +630,14 @@ const elNewAcademicYearStart = document.getElementById("new-academic-year-start"
 const elNewAcademicYearTerm2 = document.getElementById("new-academic-year-term2");
 const btnYearModalSave = document.getElementById("year-modal-save");
 
-// การสร้างวิชาใหม่ทำได้เฉพาะ admin
-if (!isAdminUser) {
+// หัวหน้าวิชาการและ admin สร้างวิชาใหม่ได้
+if (!canEditAcademicSettings) {
   document.getElementById("btn-new-subject").style.display = "none";
 }
 
-// admin เท่านั้นที่เห็น/แก้ "เจ้าของวิชา" ได้ — โหลดรายชื่อครูทั้งหมดไว้เติม dropdown
+// หัวหน้าวิชาการและ admin เห็น/แก้ "เจ้าของวิชา" ได้
 let allProfiles = [];
-if (isAdminUser) {
+if (canEditAcademicSettings) {
   const { data } = await sb.from("profiles").select("*").order("email");
   allProfiles = data || [];
   fieldOwner.style.display = "block";
@@ -664,6 +668,10 @@ function canEditCurrentSubject() {
   if (isAdminUser) return true;
   if (!currentSubject) return true; // ยังไม่ได้เลือกวิชา (โหมดสร้างใหม่) แก้ได้แน่นอน
   return currentSubject.owner_id === myUserId;
+}
+
+function canEditStructureOf() {
+  return canEditCurrentSubject() || canEditAcademicSettings;
 }
 
 function canEditExamStatus() {
@@ -769,7 +777,7 @@ btnManageToggleExam.addEventListener("click", async () => {
   showToast(closed ? "เปิดแก้ไขคะแนนสอบอีกครั้งแล้ว" : "ปิดคะแนนสอบแล้ว", true);
 });
 
-// ช่องกรอกใน "ข้อมูลวิชา" — ปิด/เปิดพร้อมกันตามสิทธิ์แก้ข้อมูลวิชา (admin เท่านั้น)
+// ช่องกรอกใน "ข้อมูลวิชา" — ปิด/เปิดพร้อมกันตามสิทธิ์หัวหน้าวิชาการ
 const SUBJECT_INFO_FIELDS = ["f-type","f-name","f-code","f-level","f-grade","f-max","f-credits","f-year","f-term","f-owner","f-periods"];
 function setSubjectInfoDisabled(disabled) {
   for (const id of SUBJECT_INFO_FIELDS) {
@@ -778,36 +786,41 @@ function setSubjectInfoDisabled(disabled) {
   }
 }
 
-// สิทธิ์ 2 ระดับ (RLS เป็นตัวกันจริง อันนี้แค่กัน UI สับสน):
-//   - "ข้อมูลวิชา" (ชื่อ/รหัส/คาบ/เจ้าของ ฯลฯ) + ลบวิชา = admin เท่านั้น
-//   - "โครงสร้าง/คะแนน/ลงทะเบียน/สมาชิกบูรณาการ" = admin หรือเจ้าของวิชา (canEditCurrentSubject)
+// RLS เป็นตัวกันจริง: หัวหน้าวิชาการแก้ข้อมูลวิชาและโครงสร้างได้ แต่ลบ/กรอกคะแนนไม่ได้
 function applyEditPermissionUI() {
-  const canEditStructure = canEditCurrentSubject();   // owner หรือ admin
-  const canEditInfo = isAdminUser;                    // admin เท่านั้น
+  const canEditStructure = canEditStructureOf();
+  const canEditSubject = canEditCurrentSubject();
+  const canEditInfo = canEditAcademicSettings;
 
-  // ข้อมูลวิชา: เฉพาะ admin
+  // ข้อมูลวิชา: หัวหน้าวิชาการหรือ admin; ลบวิชา: admin เท่านั้น
   document.getElementById("btn-save-subject").style.display = canEditInfo ? "block" : "none";
   setSubjectInfoDisabled(!canEditInfo);
   elDelSubject.style.display = (isAdminUser && currentSubject) ? "block" : "none";
 
-  // โครงสร้าง/สมาชิก: owner หรือ admin (คงเดิม)
+  // โครงสร้าง: เจ้าของ, หัวหน้าวิชาการ หรือ admin; สมาชิก: เจ้าของหรือ admin
   document.getElementById("btn-add-unit-vicha").style.display = canEditStructure ? "inline-block" : "none";
   document.getElementById("btn-add-unit-competency").style.display = canEditStructure ? "inline-block" : "none";
-  document.getElementById("btn-add-member").style.display = canEditStructure ? "inline-block" : "none";
-  elSelAddMember.style.display = canEditStructure ? "block" : "none";
+  document.getElementById("btn-add-member").style.display = canEditSubject ? "inline-block" : "none";
+  elSelAddMember.style.display = canEditSubject ? "block" : "none";
 
-  // แบนเนอร์อธิบายสิทธิ์ 3 สถานะ
+  // แบนเนอร์อธิบายสิทธิ์
   const banner = document.getElementById("readonly-banner");
   if (isAdminUser) {
     banner.style.display = "none";
-  } else if (canEditStructure) {
-    // เจ้าของวิชา (ครู): แก้โครงสร้าง/คะแนนได้ แต่ข้อมูลวิชาแก้ไม่ได้
-    banner.textContent = "ข้อมูลวิชา (ชื่อ/รหัส/คาบ/เจ้าของ) แก้ได้เฉพาะ admin — คุณเป็นเจ้าของวิชานี้ จึงแก้โครงสร้างและคะแนนด้านล่างได้";
+  } else if (canEditSubject) {
+    banner.textContent = canEditAcademicSettings
+      ? "คุณเป็นหัวหน้าวิชาการและเจ้าของวิชานี้ — แก้ข้อมูลวิชา โครงสร้าง และคะแนนได้ แต่ลบวิชาไม่ได้"
+      : "คุณเป็นเจ้าของวิชานี้ — แก้โครงสร้างและคะแนนได้ · ข้อมูลวิชาให้หัวหน้าวิชาการแก้";
+    banner.style.background = "var(--amber-soft)";
+    banner.style.color = "var(--amber)";
+    banner.style.display = "block";
+  } else if (canEditAcademicSettings) {
+    banner.textContent = "คุณเป็นหัวหน้าวิชาการ — แก้ข้อมูลวิชา โครงสร้าง และติ๊กคิดคะแนนได้ แต่ลบโครงสร้าง ลบวิชา และกรอกคะแนนไม่ได้";
     banner.style.background = "var(--amber-soft)";
     banner.style.color = "var(--amber)";
     banner.style.display = "block";
   } else {
-    banner.textContent = "คุณไม่ใช่เจ้าของวิชานี้ — ดูได้อย่างเดียว (ให้ admin ตั้งเป็นเจ้าของก่อน)";
+    banner.textContent = "คุณไม่ใช่เจ้าของวิชานี้ — ดูโครงสร้างได้อย่างเดียว (ให้หัวหน้าวิชาการตั้งเป็นเจ้าของก่อน)";
     banner.style.background = "var(--danger-soft)";
     banner.style.color = "var(--danger)";
     banner.style.display = "block";
@@ -1397,7 +1410,7 @@ function applyCopySubjectFilter() {
 function syncStructureCopyCard(force = false) {
   const eligible = Boolean(currentSubject) &&
     currentSubject.subject_type === "พื้นฐาน" &&
-    canEditCurrentSubject();
+    canEditStructureOf();
   elStructureCopyCard.style.display = eligible ? "block" : "none";
   if (!eligible) {
     copyTargetSubjectId = null;
@@ -1453,7 +1466,7 @@ async function loadCopySourceSummary() {
 elCopySourceSubject.addEventListener("change", loadCopySourceSummary);
 
 btnCopyStructure.addEventListener("click", async () => {
-  if (!currentSubject || currentSubject.subject_type !== "พื้นฐาน" || !canEditCurrentSubject()) return;
+  if (!currentSubject || currentSubject.subject_type !== "พื้นฐาน" || !canEditStructureOf()) return;
   const targetId = currentSubject.id;
   const sourceId = elCopySourceSubject.value;
   const sourceSubject = allSubjects.find(subject => subject.id === sourceId);
@@ -1511,6 +1524,7 @@ btnCopyStructure.addEventListener("click", async () => {
             kind: unit.kind,
             name: unit.name,
             max_score: unit.max_score,
+            counts_score: unit.counts_score,
             seq: unit.seq
           })
           .select("id").single();
@@ -1671,7 +1685,7 @@ function fillSubjectForm(subj) {
   fYear.value = selectableYears.some(row => row.year === preferredYear) ? preferredYear : "";
   fTerm.value = subj && subj.term ? subj.term : "1";
   fPeriods.value = subj && subj.total_periods ? subj.total_periods : "";
-  if (isAdminUser) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
+  if (canEditAcademicSettings) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
   const isIntegratedSubj = subj && subj.subject_type === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegratedSubj ? "none" : "block";
 }
@@ -1686,7 +1700,7 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
   if (!gradeLevel) { showToast("กรุณาเลือกชั้น", false); return; }
   const year = fYear.value;
   if (!year) { showToast("กรุณาเลือกปีการศึกษา (บังคับ เพื่อกันข้อมูลปนกันข้ามปี)", false); return; }
-  if (isAdminUser && !fOwner.value) { showToast("กรุณาเลือกอีเมลครูเจ้าของวิชา", false); return; }
+  if (canEditAcademicSettings && !fOwner.value) { showToast("กรุณาเลือกอีเมลครูเจ้าของวิชา", false); return; }
   const maxScore = Number(fMax.value);
   if (isNaN(maxScore) || maxScore <= 0) { showToast("คะแนนเต็มวิชาต้องมากกว่า 0", false); return; }
 
@@ -1719,9 +1733,8 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     term: isMatthayom ? fTerm.value : null,
     total_periods: periods
   };
-  // เจ้าของวิชา: admin เลือกเองได้ (รวมถึงเปลี่ยนเจ้าของทีหลัง) ส่วนครูทั่วไปตอนสร้างวิชาใหม่
-  // จะได้เป็นเจ้าของอัตโนมัติ — ตอนแก้ไขวิชาเดิมไม่ต้องส่ง owner_id ไปทับ (ไม่มีสิทธิ์เปลี่ยนอยู่แล้ว)
-  if (isAdminUser) payload.owner_id = fOwner.value;
+  // หัวหน้าวิชาการและ admin เลือกหรือเปลี่ยนเจ้าของวิชาได้
+  if (canEditAcademicSettings) payload.owner_id = fOwner.value;
   else if (!currentSubject) payload.owner_id = myUserId;
 
   if (currentSubject) {
@@ -1877,17 +1890,37 @@ function renderStructure() {
 }
 
 function renderUnit(unit) {
-  const canEdit = canEditCurrentSubject();
+  const canEdit = canEditStructureOf();
+  const canDelete = canEditCurrentSubject();
+  const isUnitNotScored = unit.counts_score === false;
   const block = document.createElement("div");
-  block.className = "unit-block";
+  block.className = "unit-block" + (isUnitNotScored ? " not-scored-unit" : "");
 
   const head = document.createElement("div");
   head.className = "unit-head";
   head.innerHTML =
     "<span class='title'>" + escapeHtml(unit.name) + "</span>" +
     "<span class='cap'>เต็ม " + unit.max_score + "</span>";
+  if (isUnitNotScored) {
+    const badge = document.createElement("span");
+    badge.className = "not-scored-badge";
+    badge.textContent = "ไม่คิดคะแนนทั้งหน่วย";
+    head.appendChild(badge);
+  }
+  const unitToggleLabel = document.createElement("label");
+  unitToggleLabel.className = "score-toggle";
+  const unitToggle = document.createElement("input");
+  unitToggle.type = "checkbox";
+  unitToggle.checked = !isUnitNotScored;
+  unitToggle.disabled = !canEdit;
+  unitToggle.setAttribute("aria-label", "คิดคะแนนทั้งหน่วย " + unit.name);
+  unitToggle.addEventListener("change", () => updateUnitCountsScore(unit, unitToggle));
+  unitToggleLabel.append(unitToggle, document.createTextNode("คิดคะแนน"));
+  head.appendChild(unitToggleLabel);
   if (canEdit) {
     head.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("unit", "edit", unit)));
+  }
+  if (canDelete) {
     head.appendChild(makeIconBtn("🗑", "del", () => deleteUnit(unit)));
   }
   block.appendChild(head);
@@ -1910,13 +1943,15 @@ function renderUnit(unit) {
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.checked = !isNotScored;
-    toggle.disabled = !canEdit;
+    toggle.disabled = !canEdit || isUnitNotScored;
     toggle.setAttribute("aria-label", "คิดคะแนน " + ind.name);
     toggle.addEventListener("change", () => updateIndicatorCountsScore(ind, toggle));
     toggleLabel.append(toggle, document.createTextNode("คิดคะแนน"));
     row.appendChild(toggleLabel);
     if (canEdit) {
       row.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("indicator", "edit", ind)));
+    }
+    if (canDelete) {
       row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
     }
     block.appendChild(row);
@@ -1929,6 +1964,8 @@ function renderUnit(unit) {
         "<span class='cap'>เต็ม " + coll.max_score + "</span>";
       if (canEdit) {
         crow.appendChild(makeIconBtn("✎", "edit", () => openNodeModal("collection", "edit", coll)));
+      }
+      if (canDelete) {
         crow.appendChild(makeIconBtn("🗑", "del", () => deleteCollection(coll)));
       }
       block.appendChild(crow);
@@ -1950,6 +1987,42 @@ function renderUnit(unit) {
   }
 
   return block;
+}
+
+async function updateUnitCountsScore(unit, checkbox) {
+  if (!canEditStructureOf()) { checkbox.checked = unit.counts_score !== false; return; }
+  const nextValue = checkbox.checked;
+  const wasNotScored = unit.counts_score === false;
+  if (nextValue === !wasNotScored) return;
+
+  if (!nextValue) {
+    const scoreCount = countScoresInUnit(unit);
+    if (scoreCount > 0) {
+      const agreed = await window.crsAskConfirm({
+        title: "ตั้งหน่วยใหญ่เป็นไม่คิดคะแนน",
+        message: "หน่วย ‘" + unit.name + "’ มีคะแนนอยู่ " + scoreCount +
+          " ช่อง จะไม่ถูกนำไปคิด\n\nคะแนนไม่ถูกลบ ติ๊กกลับมาได้ตลอด",
+        okLabel: "ไม่คิดคะแนนทั้งหน่วย"
+      });
+      if (!agreed) { checkbox.checked = true; return; }
+    }
+  }
+
+  checkbox.disabled = true;
+  const { data, error } = await sb.from("units")
+    .update({ counts_score: nextValue })
+    .eq("id", unit.id)
+    .select("id,counts_score");
+  if (error || !data || data.length === 0) {
+    checkbox.checked = !wasNotScored;
+    checkbox.disabled = false;
+    showToast("เปลี่ยนสถานะคิดคะแนนทั้งหน่วยไม่สำเร็จ" + (error ? ": " + error.message : ""), false);
+    return;
+  }
+
+  unit.counts_score = nextValue;
+  renderStructure();
+  showToast(nextValue ? "นำหน่วยกลับมาคิดคะแนนแล้ว" : "ตั้งทั้งหน่วยเป็นไม่คิดคะแนนแล้ว · คะแนนเดิมยังอยู่ครบ", true);
 }
 
 async function updateIndicatorCountsScore(indicator, checkbox) {

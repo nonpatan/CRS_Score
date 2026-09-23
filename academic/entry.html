@@ -300,7 +300,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260922-4";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260923-1";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -724,8 +724,10 @@ async function loadUnits() {
     .eq("kind", elKind.value)
     .order("seq");
   if (error) { showToast("โหลดหน่วยใหญ่ไม่สำเร็จ", false); return; }
+  const scoredUnits = (units || []).filter(u => u.counts_score !== false);
   const placeholder = isCoreCompetency ? "— เลือกด้าน —" : "— เลือกหน่วยใหญ่ —";
-  fillSelect(elUnit, units, u => u.name + "  (เต็ม " + u.max_score + ")", placeholder);
+  fillSelect(elUnit, scoredUnits, u => u.name + "  (เต็ม " + u.max_score + ")",
+    scoredUnits.length ? placeholder : "ไม่มีหน่วยที่คิดคะแนน — ติ๊กเลือกได้ที่หน้าจัดการโครงสร้าง");
 }
 
 elUnit.addEventListener("change", async () => {
@@ -738,8 +740,9 @@ elUnit.addEventListener("change", async () => {
     .eq("unit_id", id)
     .order("seq");
   if (error) { showToast("โหลดหน่วยย่อยไม่สำเร็จ", false); return; }
-  fillSelect(elIndicator, data, i => i.name + "  (เต็ม " + i.max_score + ")" +
-    (i.counts_score === false ? " · ไม่คิดคะแนน" : ""), "— เลือกหน่วยย่อย —");
+  const scoredIndicators = (data || []).filter(i => i.counts_score !== false);
+  fillSelect(elIndicator, scoredIndicators, i => i.name + "  (เต็ม " + i.max_score + ")",
+    scoredIndicators.length ? "— เลือกหน่วยย่อย —" : "ไม่มีหน่วยที่คิดคะแนน — ติ๊กเลือกได้ที่หน้าจัดการโครงสร้าง");
 });
 
 elIndicator.addEventListener("change", async () => {

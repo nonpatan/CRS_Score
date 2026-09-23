@@ -586,6 +586,7 @@ export function buildStructureCopyPlan(sourceUnits, options = {}) {
         kind: unit.kind,
         name: unit.name,
         max_score: unit.max_score,
+        counts_score: unit.counts_score === false ? false : true,
         seq: startSeq + (Number.isFinite(sourceSeq) ? sourceSeq : unitIndex + 1),
         indicators
       };
@@ -636,7 +637,7 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
   const units = (unitsTree || []).filter(u => u.core_competency_id === competencyId);
   const scoreByCollection = new Map((scoreRows || []).map(s => [s.collection_id, Number(s.raw_score)]));
   let expectedCount = 0, scoredCount = 0, scaledSum = 0, maxSum = 0;
-  let structureComplete = units.length > 0;
+  let structureComplete = units.some(unit => unit.counts_score !== false);
   // เก็บว่าค้างที่วิชาไหนบ้าง — เกณฑ์ความครบเข้มโดยตั้งใจ (ผู้ใช้เลือกทางเลือก A)
   // แต่ถ้าไม่บอกว่าค้างที่ไหน ฝ่ายวิชาการจะตามครูไม่ถูก ทั้งโรงเรียนค้างโดยหาต้นตอไม่เจอ
   const bySubject = new Map();
@@ -646,6 +647,7 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
   };
 
   for (const unit of units) {
+    if (unit.counts_score === false) continue;
     const stat = subjectStat(unit.subject_id);
     const indicators = unit.indicators || [];
     if (!indicators.length) { structureComplete = false; stat.structureIncomplete = true; }
@@ -1826,15 +1828,23 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   let subjectPartialRaw = 0, subjectPartialCap = 0;
   let expectedCount = 0, scoredCount = 0;
   let notScoredIndicatorCount = 0;
+  let emptyIndicatorCount = 0, emptyUnitCount = 0;
+  const notScoredUnits = [];
 
   for (const unit of unitsTree) {
+    if (unit.counts_score === false) {
+      if (unit.kind === "วิชา") notScoredUnits.push(unit.name);
+      continue;
+    }
     const unitIndicators = unit.indicators || [];
     const notScoredCount = unitIndicators.filter(ind => ind.counts_score === false).length;
+    if (unit.kind === "วิชา" && unitIndicators.length === 0) emptyUnitCount++;
     let unitRaw = 0, unitCap = 0;
     let unitPartialRaw = 0, unitPartialCap = 0;
     let unitExpected = 0, unitScored = 0;
     for (const ind of unitIndicators) {
       if (ind.counts_score === false) continue;
+      if (unit.kind === "วิชา" && !(ind.collections || []).length) emptyIndicatorCount++;
       let indRaw = 0, indCap = 0, indPartialCap = 0;
       for (const coll of (ind.collections || [])) {
         const collectionMax = Number(coll.max_score) || 0;
@@ -1901,10 +1911,13 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
     collectExpectedCount,
     collectScoredCount,
     notScoredIndicatorCount,
+    notScoredUnits,
+    emptyIndicatorCount,
+    emptyUnitCount,
     hasCollectStructure,
     examScored: examUsable,
     examOverCap,
-    complete: hasCollectStructure && scoredCount === expectedCount,
+    complete: hasCollectStructure && scoredCount === expectedCount && emptyIndicatorCount === 0 && emptyUnitCount === 0,
     partialPercent: partialCap > 0 ? (partialEarned / partialCap) * 100 : null
   };
 
@@ -1979,6 +1992,8 @@ export function computeIntegratedResult(studentId, memberDataList) {
   let weightedSum = 0, weightSum = 0;
   let expectedCount = 0, scoredCount = 0;
   let collectExpectedCount = 0, collectScoredCount = 0, notScoredIndicatorCount = 0;
+  let emptyIndicatorCount = 0, emptyUnitCount = 0;
+  const notScoredUnits = [];
   let hasCollectStructure = memberDataList.length > 0;
   let examScored = memberDataList.length > 0;
   let examOverCap = false;
@@ -2003,6 +2018,9 @@ export function computeIntegratedResult(studentId, memberDataList) {
     collectExpectedCount += r.scoring.collectExpectedCount;
     collectScoredCount += r.scoring.collectScoredCount;
     notScoredIndicatorCount += r.scoring.notScoredIndicatorCount;
+    emptyIndicatorCount += r.scoring.emptyIndicatorCount;
+    emptyUnitCount += r.scoring.emptyUnitCount;
+    notScoredUnits.push(...r.scoring.notScoredUnits.map(name => md.subject.name + ": " + name));
     if (!r.scoring.hasCollectStructure) hasCollectStructure = false;
     if (!r.scoring.examScored) examScored = false;
     if (r.scoring.examOverCap) examOverCap = true;
@@ -2058,10 +2076,13 @@ export function computeIntegratedResult(studentId, memberDataList) {
     collectExpectedCount,
     collectScoredCount,
     notScoredIndicatorCount,
+    emptyIndicatorCount,
+    emptyUnitCount,
+    notScoredUnits,
     hasCollectStructure,
     examScored,
     examOverCap,
-    complete: hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount,
+    complete: hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount && emptyIndicatorCount === 0 && emptyUnitCount === 0,
     partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null
   };
   return { memberResults, overall, scoring, totalBase, rawMissed, makeupTotal, noPeriodSubjects };
