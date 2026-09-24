@@ -298,7 +298,7 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getSetting, getDailyAttendanceCutoff, loadMyHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge, loadMyTeachingGap, ackMakeupRejection,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260923-1";
+         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20260924-1";
 
 const session = await requireAuth();
 if (session) {
@@ -714,7 +714,9 @@ if (session) {
           ? ""
           : `<div class="banner warn"><b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>ขณะนี้ใช้วันเริ่มปีการศึกษา ${escapeHtml(fmt(range.start))} เป็นค่าตั้งต้น</div>`;
         if (!row || row.due === 0) {
-          body.innerHTML = `${startNote}<div class="muted-empty">เดือนนี้ยังไม่มีวันที่คุณต้องเช็คชื่อประจำชั้น</div>`;
+          body.innerHTML = `${startNote}<div class="muted-empty">${row?.away > 0
+            ? `เดือนนี้คุณไม่อยู่ ${row.away} วัน (ลา/ออกปฏิบัติหน้าที่) จึงยังไม่มีวันที่ต้องเช็คชื่อ`
+            : "เดือนนี้ยังไม่มีวันที่คุณต้องเช็คชื่อประจำชั้น"}</div>`;
           return;
         }
         const missedHtml = missed.length ? `<div style="margin-top:12px"><b>วันที่ยังไม่มีการเช็คชื่อ</b>` +
@@ -728,7 +730,7 @@ if (session) {
           ? `<div class="field-note" style="margin-top:8px">เวลาเป็นสถานะของห้อง — ห้องของคุณถูกเช็คเลยเวลา ${row.late} ครั้ง</div>`
           : "";
         body.innerHTML = `${startNote}<div class="today"><div><div class="big">เดือนนี้ เช็คแล้ว ${checked}/${row.due} วัน${timingText}</div>` +
-          `<div class="sub">ไม่มีการเช็ค ${row.missed} วัน</div></div></div>${roomTimingNote}${missedHtml}`;
+          `<div class="sub">ไม่มีการเช็ค ${row.missed} วัน${row.away > 0 ? ` · ไม่อยู่ ${row.away} วัน (ไม่นับ)` : ""}</div></div></div>${roomTimingNote}${missedHtml}`;
       } catch {
         card.hidden = false;
         body.innerHTML = '<div class="banner warn">โหลดข้อมูลการเช็คชื่อประจำชั้นของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';

@@ -180,6 +180,11 @@
         <div id="rooms-without-list" class="audit-list"></div>
         <div class="hint" style="margin-top:10px">กำหนดครูได้ที่หน้า <a href="homeroom.html">ครูประจำชั้น</a></div>
       </section>
+      <section id="rooms-unattended-card" class="card rooms-missing" hidden>
+        <div class="section">ครูประจำชั้นไม่อยู่ทั้งห้อง และไม่มีคนแทน</div>
+        <div class="hint">วันเหล่านี้ไม่นับเป็นการไม่เช็คของใคร — ถ้าห้องยังมีเด็กมาเรียน ควรจัดคนแทนที่หน้าจัดคนแทน</div>
+        <div id="rooms-unattended-list" class="audit-list"></div>
+      </section>
     </div>
     <div id="toast" class="toast"></div>
   </main>
@@ -190,7 +195,7 @@ import {
   requireAuth, signOut, getProfile, checkDepartment, applyRestrictedMenuAccess,
   getAcademicYears, academicYearRange, academicYearOf, getSetting, setSetting, getDailyAttendanceCutoff,
   loadHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260923-1";
+} from "../supabase-client.js?v=20260924-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -343,8 +348,9 @@ function renderStaff(report) {
       : "";
     return `<article class="audit-row">
       <div class="audit-head"><div><b>${esc(row.staff.full_name)}</b><div class="meta">${esc(row.rooms.join(" · "))}</div></div>
-      <div class="audit-counts">รับผิดชอบ <strong>${row.due} ครั้ง</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}${row.timingDue > 0 ? ` · ใน ${row.timingDue} วันที่อยู่ในเกณฑ์เวลา: ${CHECK_TIMING_LABEL.ontime} ${row.ontime} · ${CHECK_TIMING_LABEL.late} ${row.late} · ย้อนหลัง ${row.backdated}` : ""}${coveredNote}</div></div>
+      <div class="audit-counts">รับผิดชอบ <strong>${row.due} ครั้ง</strong> · ผู้รับผิดชอบเช็ค ${row.self} · คนอื่นเช็คให้ ${row.byOther} · ไม่มีการเช็ค ${row.missed}${row.away > 0 ? ` · ไม่อยู่ (ลา/ออกปฏิบัติหน้าที่) ${row.away} วัน ไม่นับ` : ""}${row.timingDue > 0 ? ` · ใน ${row.timingDue} วันที่อยู่ในเกณฑ์เวลา: ${CHECK_TIMING_LABEL.ontime} ${row.ontime} · ${CHECK_TIMING_LABEL.late} ${row.late} · ย้อนหลัง ${row.backdated}` : ""}${coveredNote}</div></div>
       ${missedDetails(row.missedDates)}
+      ${missedDetails(row.awayDates, { label:"วันที่ไม่อยู่" })}
       ${row.timingDue > 0 ? missedDetails(row.lateDates, { label:"วันที่ห้องถูกเช็คเลยเวลา", timing:true }) + missedDetails(row.backdatedDates, { label:"วันที่ห้องถูกเช็คย้อนหลัง", timing:true }) : ""}
     </article>`;
   }).join("") : '<div class="empty">ยังไม่มีรายการผู้รับผิดชอบในช่วงนี้</div>';
@@ -400,6 +406,15 @@ function renderRoomsWithoutTeacher(report) {
     <div class="audit-counts">ไม่มีผู้รับผิดชอบ <strong>${row.days} วัน</strong></div></div></article>`).join("");
 }
 
+function renderRoomsUnattended(report) {
+  const card = el("rooms-unattended-card");
+  card.hidden = report.roomsUnattended.length === 0;
+  el("rooms-unattended-list").innerHTML = report.roomsUnattended.map(row => `
+    <article class="audit-row"><div class="audit-head"><b>${esc(row.room)}</b>
+    <div class="audit-counts">ไม่มีผู้รับผิดชอบ <strong>${row.days} วัน</strong></div></div>
+    ${missedDetails(row.dates)}</article>`).join("");
+}
+
 function renderReport(report) {
   currentReport = report;
   if (!report.scheduleConfigured) {
@@ -415,6 +430,7 @@ function renderReport(report) {
   renderStaff(report);
   renderCovers(report);
   renderRoomsWithoutTeacher(report);
+  renderRoomsUnattended(report);
 }
 
 async function loadReport() {
@@ -442,6 +458,7 @@ async function loadReport() {
     el("staff-list").innerHTML = "";
     el("covers-list").innerHTML = "";
     el("rooms-without-card").hidden = true;
+    el("rooms-unattended-card").hidden = true;
   } finally {
     button.disabled = false;
     button.textContent = "แสดงรายงาน";

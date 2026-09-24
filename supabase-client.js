@@ -2993,11 +2993,11 @@ export async function loadHomeroomAuditData(year, from, to) {
   if (!year || !from || !to || from > to) {
     return {
       year, from, to, teachers: [], coverage: [], attendance: [], placements: [],
-      homerooms: [], holidays: [], schedule: [], profiles: [], lateReasons: []
+      homerooms: [], holidays: [], schedule: [], profiles: [], lateReasons: [], absences: []
     };
   }
 
-  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes, lateReasonRes] = await Promise.all([
+  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes, lateReasonRes, absenceRes] = await Promise.all([
     sb.rpc("homeroom_audit_teachers", { p_year: year }),
     sb.rpc("homeroom_audit_coverage", { p_from: from, p_to: to }),
     fetchAllRows(() => sb.from("daily_attendance")
@@ -3012,7 +3012,8 @@ export async function loadHomeroomAuditData(year, from, to) {
     fetchAllRows(() => sb.from("daily_attendance_late_reasons")
       .select("attend_date,year,grade_level,classroom,reason,cutoff_time,kind,recorded_by,recorded_at,updated_at")
       .eq("year", year).gte("attend_date", from).lte("attend_date", to),
-      ["attend_date", "grade_level", "classroom"])
+      ["attend_date", "grade_level", "classroom"]),
+    sb.rpc("homeroom_audit_absences", { p_from: from, p_to: to })
   ]);
 
   const failed = [
@@ -3023,7 +3024,8 @@ export async function loadHomeroomAuditData(year, from, to) {
     [homeroomRes, "ตรวจรายการครูประจำชั้น"],
     [holidayRes, "โหลดวันหยุด"],
     [scheduleRes, "โหลดตารางวันทำงาน"],
-    [lateReasonRes, "โหลดเหตุผลการเช็คหลังเวลา"]
+    [lateReasonRes, "โหลดเหตุผลการเช็คหลังเวลา"],
+    [absenceRes, "โหลดวันลา/ออกปฏิบัติหน้าที่ของครู"]
   ].find(([result]) => result.error);
   if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
 
@@ -3055,7 +3057,8 @@ export async function loadHomeroomAuditData(year, from, to) {
     holidays: holidayRes.data || [],
     schedule: scheduleRes.data || [],
     profiles,
-    lateReasons: lateReasonRes.data || []
+    lateReasons: lateReasonRes.data || [],
+    absences: absenceRes.data || []
   };
 }
 
@@ -3073,11 +3076,11 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
   if (!year || !from || !to || !staffId || !userId || from > to) {
     return {
       year, from, to, teachers: [], coverage: [], attendance: [], placements: [],
-      homerooms: [], holidays: [], schedule: [], profiles: []
+      homerooms: [], holidays: [], schedule: [], profiles: [], absences: []
     };
   }
 
-  const [ownHomeroomRes, homeroomRes, coverageRes, attendanceRes, holidayRes, scheduleRes] = await Promise.all([
+  const [ownHomeroomRes, homeroomRes, coverageRes, attendanceRes, holidayRes, scheduleRes, leaveRes, fieldDutyRes] = await Promise.all([
     sb.from("homeroom_teachers")
       .select("id,year,grade_level,classroom,staff_id,created_at")
       .eq("year", year).eq("staff_id", staffId),
@@ -3092,7 +3095,11 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
       .eq("year", year).gte("attend_date", from).lte("attend_date", to),
       ["attend_date", "student_id"]),
     sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to),
-    sb.from("work_schedule").select("weekday,is_working_day")
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    sb.from("staff_leaves").select("staff_id,start_date,end_date,day_portion")
+      .eq("staff_id", staffId).lte("start_date", to).gte("end_date", from),
+    sb.from("staff_field_duties").select("staff_id,start_date,end_date")
+      .eq("staff_id", staffId).lte("start_date", to).gte("end_date", from)
   ]);
   const failed = [
     [ownHomeroomRes, "โหลดห้องประจำชั้นของคุณ"],
@@ -3100,7 +3107,9 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
     [coverageRes, "โหลดงานแทนประจำชั้นของคุณ"],
     [attendanceRes, "โหลดผลเช็คชื่อ"],
     [holidayRes, "โหลดวันหยุด"],
-    [scheduleRes, "โหลดตารางวันทำงาน"]
+    [scheduleRes, "โหลดตารางวันทำงาน"],
+    [leaveRes, "โหลดวันลาของคุณ"],
+    [fieldDutyRes, "โหลดวันออกปฏิบัติหน้าที่ของคุณ"]
   ].find(([result]) => result.error);
   if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
 
@@ -3144,7 +3153,11 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
     homerooms: [...ownByHomeroomId.values()],
     holidays: holidayRes.data || [],
     schedule: scheduleRes.data || [],
-    profiles: []
+    profiles: [],
+    absences: [
+      ...(leaveRes.data || []).map(row => ({ ...row, source:"ลา" })),
+      ...(fieldDutyRes.data || []).map(row => ({ ...row, day_portion:"full", source:"ออกปฏิบัติหน้าที่" }))
+    ]
   };
 }
 
@@ -3183,6 +3196,12 @@ export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
     createdDate: homeroomAuditBangkokDate(row.created_at)
   }));
   const coverage = Array.isArray(data.coverage) ? data.coverage : [];
+  const absencesByStaff = new Map();
+  for (const absence of (data.absences || [])) {
+    if (!absence.staff_id || !["full", "morning"].includes(absence.day_portion)) continue;
+    if (!absencesByStaff.has(absence.staff_id)) absencesByStaff.set(absence.staff_id, []);
+    absencesByStaff.get(absence.staff_id).push(absence);
+  }
   const homerooms = Array.isArray(data.homerooms) ? data.homerooms : [];
   const roomMap = new Map();
   const addRoom = row => {
@@ -3244,6 +3263,8 @@ export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
   }]));
   const staffStats = new Map();
   const withoutTeacher = new Map();
+  const unattended = new Map();
+  const awayByStaffDate = new Set();
   const coverRows = [];
 
   const ensureStaff = responsibility => {
@@ -3256,7 +3277,7 @@ export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
           full_name: responsibility.full_name || "ไม่ระบุชื่อ",
           user_id: responsibility.user_id || null
         },
-        rooms: [], due: 0, self: 0, byOther: 0, missed: 0, missedDates: [],
+        rooms: [], due: 0, self: 0, byOther: 0, missed: 0, missedDates: [], away: 0, awayDates: [],
         timingDue: 0, ontime: 0, late: 0, lateDates: [], backdated: 0, backdatedDates: []
       });
     }
@@ -3282,6 +3303,21 @@ export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
             kind: "คนแทน"
           });
         } else {
+          const isAway = (absencesByStaff.get(teacher.staff_id) || []).some(absence =>
+            absence.start_date <= date && date <= absence.end_date);
+          if (isAway) {
+            const staffStat = ensureStaff(teacher);
+            if (staffStat) {
+              if (!staffStat.rooms.includes(room.room)) staffStat.rooms.push(room.room);
+              const awayKey = teacher.staff_id + "\u0000" + date;
+              if (!awayByStaffDate.has(awayKey)) {
+                awayByStaffDate.add(awayKey);
+                staffStat.away += 1;
+                staffStat.awayDates.push({ date, room: room.room });
+              }
+            }
+            continue;
+          }
           responsibilities.push({
             staff_id: teacher.staff_id,
             full_name: teacher.full_name,
@@ -3313,9 +3349,16 @@ export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
         reason: lateReasonByRoomDate.get(date + "\u0000" + roomKey) || ""
       } : null;
 
-      if (!responsibilities.length) {
+      if (!activeAssignments.length) {
         if (!withoutTeacher.has(roomKey)) withoutTeacher.set(roomKey, { ...room, days: 0, dates: [] });
         const missing = withoutTeacher.get(roomKey);
+        missing.days += 1;
+        missing.dates.push(date);
+        continue;
+      }
+      if (!responsibilities.length && !hasAttendance) {
+        if (!unattended.has(roomKey)) unattended.set(roomKey, { ...room, days: 0, dates: [] });
+        const missing = unattended.get(roomKey);
         missing.days += 1;
         missing.dates.push(date);
         continue;
@@ -3419,7 +3462,8 @@ export function buildHomeroomAudit(raw, { startDate, cutoff, nowIso } = {}) {
     rooms,
     staff,
     covers: coverRows,
-    roomsWithoutTeacher: [...withoutTeacher.values()].sort(roomCompare)
+    roomsWithoutTeacher: [...withoutTeacher.values()].sort(roomCompare),
+    roomsUnattended: [...unattended.values()].sort(roomCompare)
   };
 }
 

@@ -48,6 +48,8 @@
     .invoice-payments { margin-top:14px; }
     .invoice-payments h2 { margin:0 0 6px; font-size:16px; }
     .invoice-payments table { min-width:0; }
+    .receipt-outstanding { margin-top:14px; }
+    .receipt-outstanding h2 { margin:0 0 6px; font-size:16px; }
     .signature { display:flex; justify-content:flex-end; margin-top:40px; text-align:center; }
     .signature div { width:250px; }
     .signature-line { margin-top:38px; border-top:1px dotted #333; }
@@ -112,6 +114,10 @@
       .has-payer th.rate, .has-payer td.rate { width:13%; }
       .has-payer th.money, .has-payer td.money { width:16%; }
       .meta, .hint { font-size:9.5px; }
+      .receipt-outstanding { margin-top:8px; }
+      .receipt-outstanding h2 { font-size:11px; }
+      .receipt-outstanding th:first-child, .receipt-outstanding td:first-child { width:60%; }
+      .receipt-outstanding th.money, .receipt-outstanding td.money { width:20%; }
       .words { margin-top:6px; padding:5px 6px; }
       .summary { gap:6px; margin-top:6px; }
       .signature { margin-top:14px; break-before:avoid; page-break-before:avoid; }
@@ -167,8 +173,11 @@
         <div id="receipt-table"></div>
         <div id="invoice-payments" class="invoice-payments" hidden></div>
         <div id="paid-words-line" class="words avoid-break"><b>ตัวอักษร</b> <span id="paid-words"></span></div>
-        <div class="summary avoid-break"><span id="outstanding-label">ยอดค้างชำระ</span><b id="outstanding-total"></b></div>
-        <div id="signature" class="signature avoid-break"><div><div class="signature-line"></div><div id="cashier-name" hidden></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
+        <div id="receipt-outstanding" class="receipt-outstanding avoid-break" hidden></div>
+        <div id="receipt-footer">
+          <div class="summary avoid-break"><span id="outstanding-label">ยอดค้างชำระ</span><b id="outstanding-total"></b></div>
+          <div id="signature" class="signature avoid-break"><div><div class="signature-line"></div><div id="cashier-name" hidden></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
+        </div>
       </article>
     </div>
     <div id="toast" class="toast no-print"></div>
@@ -189,7 +198,7 @@
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
   computeFeeOutstanding, chargeLineRemaining, formatMoney, bahtText, fetchAllRows, getStaffNamesByUser
-} from "../supabase-client.js?v=20260923-1";
+} from "../supabase-client.js?v=20260924-1";
 
 const el=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
@@ -221,15 +230,29 @@ function buildReceiptRows(charges,payments){
   }
 }
 
-// ยอดบนใบเสร็จต้องหยุด ณ เวลาจ่ายของใบนั้น แม้ภายหลังจะมีหนี้หรือการจ่ายเพิ่ม
-function receiptOutstandingAt(receipt,charges,allPayments,receiptPayments){
+// ภาพของหนี้และการจ่ายต้องหยุด ณ เวลาจ่ายของใบนั้น
+function receiptSnapshotAt(receipt,charges,allPayments,receiptPayments){
   const dated=receiptPayments.filter(payment=>!payment.voided_at&&payment.paid_at);
   const fallback=dated.length?dated:receiptPayments.filter(payment=>payment.paid_at);
   const cutoff=fallback.reduce((latest,payment)=>String(payment.paid_at)>latest?String(payment.paid_at):latest,"")||String(receipt?.issued_at||"");
-  if(!cutoff)return 0;
-  const dueCharges=charges.filter(charge=>!charge.voided_at&&String(charge.created_at||"")<=cutoff);
-  const paid=allPayments.filter(payment=>!payment.voided_at&&!payment.receipt_voided_at&&String(payment.paid_at||"")<=cutoff);
-  return computeFeeOutstanding(dueCharges,paid).outstanding
+  const dueCharges=cutoff?charges.filter(charge=>!charge.voided_at&&String(charge.created_at||"")<=cutoff):[];
+  const paid=cutoff?allPayments.filter(payment=>!payment.voided_at&&!payment.receipt_voided_at&&String(payment.paid_at||"")<=cutoff):[];
+  return{cutoff,dueCharges,paid}
+}
+
+function receiptOutstandingAt(receipt,charges,allPayments,receiptPayments){
+  const snapshot=receiptSnapshotAt(receipt,charges,allPayments,receiptPayments);
+  return snapshot.cutoff?computeFeeOutstanding(snapshot.dueCharges,snapshot.paid).outstanding:0
+}
+
+function receiptOutstandingRows(snapshot){
+  const outstanding=snapshot.cutoff?computeFeeOutstanding(snapshot.dueCharges,snapshot.paid).outstanding:0;
+  if(outstanding<=0.005)return{rows:[],total:0,outstanding};
+  const rows=buildReceiptRows(snapshot.dueCharges,snapshot.paid).rows
+    .filter(row=>row.full<0||row.remaining>0.005);
+  const total=rows.reduce((sum,row)=>sum+row.remaining,0);
+  if(Math.abs(total-outstanding)>0.005)throw new Error("ยอดรวมรายการค้างไม่ตรงกับยอดค้าง กรุณาหยุดและแจ้งผู้ดูแล");
+  return{rows,total,outstanding}
 }
 
 function activePayerNames(payments){
@@ -312,6 +335,8 @@ function renderDocument({student,charges,receipts,payments,settings,staffNames,y
   el("payer-meta").hidden=invoice||payerNames.length!==1;
   el("payer-name").textContent=invoice?"":payerNames[0]||"—";
   el("paid-words-line").hidden=invoice;
+  el("receipt-outstanding").hidden=invoice;
+  el("receipt-footer").classList.toggle("avoid-break",!invoice);
   el("signature").hidden=invoice;
   el("invoice-payments").hidden=!invoice;
   el("outstanding-label").textContent=invoice?"ยอดค้างชำระ":"ยอดค้างชำระหลังรับเงินครั้งนี้";
@@ -334,7 +359,15 @@ function renderDocument({student,charges,receipts,payments,settings,staffNames,y
       <tfoot><tr><td colspan="3">รวมรับครั้งนี้</td><td class="money">${money(total)}</td></tr></tfoot>
     </table></div>`:'<div class="banner bad">ใบนี้ไม่มีรายการรับเงินที่ยังใช้ได้</div>';
     el("paid-words").textContent=bahtText(total);
-    el("outstanding-total").textContent=money(receiptOutstandingAt(receipt,charges,payments,thisPayments));
+    const snapshot=receiptSnapshotAt(receipt,charges,payments,thisPayments);
+    const outstandingTable=receiptOutstandingRows(snapshot);
+    el("receipt-outstanding").hidden=false;
+    el("receipt-outstanding").innerHTML=outstandingTable.rows.length?`<h2>รายการค้างชำระหลังรับเงินครั้งนี้</h2><div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th class="money">จำนวนเต็ม</th><th class="money">ค้างชำระ</th></tr></thead>
+      <tbody>${outstandingTable.rows.map(row=>`<tr><td><b>${esc(row.description)}</b>${row.note&&row.note!==MANUAL_NOTE_PLACEHOLDER?`<div class="meta">${esc(row.note)}</div>`:""}</td><td class="money ${row.full<0?"negative":""}">${money(row.full)}</td><td class="money ${row.remaining<0?"negative":""}">${money(row.remaining)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td colspan="2">รวมค้างชำระ</td><td class="money">${money(outstandingTable.total)}</td></tr></tfoot>
+    </table></div>`:'<div>ชำระครบแล้ว ไม่มีรายการค้าง</div>';
+    el("outstanding-total").textContent=money(outstandingTable.outstanding);
     el("cashier-name").hidden=!cashierNames.length;
     el("cashier-name").textContent=cashierNames.length?`(${cashierNames.join(" / ")})`:""
   }
