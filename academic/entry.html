@@ -300,7 +300,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20260924-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20260924-2";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -931,12 +931,12 @@ function renderExamStatus() {
   elExamStatusTitle.textContent = closed ? "ปิดคะแนนสอบแล้ว" : "ยังไม่ปิดคะแนนสอบ";
   elExamStatusNote.textContent = closed
     ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) +
-      " · นักเรียนที่ยังไม่มีคะแนนสอบจะติด ร. จากการคำนวณ"
+      " · นักเรียนที่ยังไม่มีคะแนนสอบจะได้ผลตามสถานะ มส./ร. จากการคำนวณ · ปิดแล้วยังกรอก/แก้คะแนนสอบได้ ไม่ต้องยกเลิกการปิด"
     : "ก่อนปิด นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้นว่ายังไม่ครบและยังไม่ตัดสินผลทางการ";
   elExamMissingCount.textContent = missingCount > 0
     ? "ยังไม่มีคะแนนสอบ " + missingCount + " คน"
     : "มีคะแนนสอบครบ " + students.length + " คน";
-  btnToggleExam.textContent = closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ";
+  btnToggleExam.textContent = closed ? "ยกเลิกการปิดคะแนนสอบ" : "ปิดคะแนนสอบ";
   btnToggleExam.className = closed ? "ghost" : "danger";
 }
 
@@ -1085,31 +1085,55 @@ async function saveExamScores() {
 
 btnToggleExam.addEventListener("click", async () => {
   if (!currentSubject || !canEdit(currentSubject) || !isExamMode()) return;
+  const subjectId = currentSubject.id;
   const closed = Boolean(currentSubject.exam_closed_at);
   const scoredIds = new Set(currentExamScores.map(row => row.student_id));
-  const missingCount = students.filter(student => !scoredIds.has(student.id)).length;
+  const missingIds = students.filter(student => !scoredIds.has(student.id)).map(student => student.id);
+  const missingCount = missingIds.length;
+  let message = closed
+    ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
+    : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที";
+  if (memberIdSet.has(subjectId)) {
+    message += " (มส. ตัดสินรวมที่วิชาบูรณาการ)";
+  } else if (missingCount) {
+    try {
+      const subjectData = await loadSubjectData(subjectId);
+      const hypotheticalSubject = { ...subjectData.subject, exam_closed_at: subjectData.subject.exam_closed_at || new Date().toISOString() };
+      const msCount = missingIds.filter(studentId => computeSubjectResult(
+        studentId, hypotheticalSubject, subjectData.units, subjectData.remarksData,
+        subjectData.sessions, subjectData.makeupHours,
+        { examScores: subjectData.examScores, gradeWeight: subjectData.gradeWeight }
+      ).result.type === "มส.").length;
+      const rCount = missingCount - msCount;
+      message = closed
+        ? "นักเรียน " + rCount + " คนที่ยังไม่มีคะแนนสอบจะพ้น ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
+        : rCount + " คนจะติด ร.";
+      if (msCount) message += " · อีก " + msCount + " คนติด มส. อยู่แล้ว (ไม่มีสิทธิ์สอบ) จะยังเป็น มส.";
+    } catch (error) {
+      message += " (ตรวจ มส. ไม่สำเร็จ)";
+    }
+  }
+  if (!currentSubject || currentSubject.id !== subjectId) return;
   const agreed = await window.crsAskConfirm({
-    title: closed ? "เปิดคะแนนสอบอีกครั้ง" : "ปิดคะแนนสอบวิชานี้",
-    message: closed
-      ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
-      : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที",
-    okLabel: closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ",
+    title: closed ? "ยกเลิกการปิดคะแนนสอบ" : "ปิดคะแนนสอบวิชานี้",
+    message,
+    okLabel: closed ? "ยกเลิกการปิด" : "ปิดคะแนนสอบ",
     danger: !closed
   });
   if (!agreed) return;
 
   btnToggleExam.disabled = true;
   const { data, error } = await sb.rpc("set_subject_exam_closed", {
-    p_subject_id: currentSubject.id,
+    p_subject_id: subjectId,
     p_closed: !closed
   });
   btnToggleExam.disabled = false;
-  if (error) { showToast((closed ? "เปิด" : "ปิด") + "คะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
+  if (error) { showToast((closed ? "ยกเลิกการปิด" : "ปิด") + "คะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
   currentSubject.exam_closed_at = closed ? null : data;
-  const sourceSubject = allSubjects.find(subject => subject.id === currentSubject.id);
+  const sourceSubject = allSubjects.find(subject => subject.id === subjectId);
   if (sourceSubject) sourceSubject.exam_closed_at = currentSubject.exam_closed_at;
   renderExamStatus();
-  showToast(closed ? "เปิดแก้ไขคะแนนสอบอีกครั้งแล้ว" : "ปิดคะแนนสอบแล้ว", true);
+  showToast(closed ? "ยกเลิกการปิดคะแนนสอบแล้ว" : "ปิดคะแนนสอบแล้ว", true);
 });
 
 function resetBelow(level) {

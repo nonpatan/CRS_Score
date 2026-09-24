@@ -1921,28 +1921,13 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
     partialPercent: partialCap > 0 ? (partialEarned / partialCap) * 100 : null
   };
 
-  // 1) เช็ค ร. ก่อน
-  const remark = remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
-  if (remark) {
-    return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "ร.", reason: remark.reason } };
-  }
-
-  // ร. ที่ระบบคำนวณจากการไม่มีคะแนนสอบ — เกิดหลังครูปิดคะแนนสอบเท่านั้น
-  // ไม่เขียนลง remarks เพื่อให้หายเองเมื่อเปิดคะแนนหรือกรอกคะแนนย้อนหลัง
-  if (subj.exam_closed_at && !examRow) {
-    return {
-      subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring,
-      result: { type: "ร.", reason: "ไม่มีคะแนนสอบปลายภาค/ปลายปี" }
-    };
-  }
-
   // ชั่วโมงชดเชย (ทำงาน/เรียนเสริม ฯลฯ) ของนักเรียนคนนี้ในวิชานี้ — บวกเข้า attended ตรงๆ
   // ไม่ใช่การข้ามเช็ค มส. แต่เป็นการเติมตัวเลขให้ถึงเกณฑ์ (ยืนยันกับผู้ใช้แล้ว)
   const makeupTotal = (makeupArr || [])
     .filter(m => m.student_id === studentId)
     .reduce((sum, m) => sum + Number(m.periods), 0);
 
-  // 2) เช็ค มส. — ใช้ทั้งประถมและมัธยม (ยืนยันกับผู้ใช้แล้ว) ต้องมีทั้ง total_periods
+  // 1) เช็ค มส. ก่อน ร. — ใช้ทั้งประถมและมัธยม (ยืนยันกับผู้ใช้แล้ว) ต้องมีทั้ง total_periods
   //    กับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้ง ไม่งั้นข้ามไปคิดเกรดตามปกติ (ยัง เช็ค มส. ไม่ได้)
   // มส. มี 2 ระดับ ตาม "จำนวนคาบขาดสะสมจริง" เทียบกับเพดานคาบที่ขาดได้สูงสุด (ไม่ใช่ % ของคาบ
   // เต็มตามรอบวิชาแบบเดิม — เปลี่ยนเพราะเทียบ % ตั้งแต่ช่วงต้นทำให้ติด มส. ง่ายเกินจริง ยืนยันแล้ว
@@ -1967,6 +1952,21 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
       }
       // ชดเชยจนขาดสุทธิไม่เกินเพดานแล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
     }
+  }
+
+  // 2) เช็ค ร. ที่ครูระบุเอง ก่อน ร. จากคะแนนสอบที่ขาด
+  const remark = remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
+  if (remark) {
+    return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "ร.", reason: remark.reason } };
+  }
+
+  // ร. ที่ระบบคำนวณจากการไม่มีคะแนนสอบ — เกิดหลังครูปิดคะแนนสอบเท่านั้น
+  // ไม่เขียนลง remarks เพื่อให้หายเองเมื่อเปิดคะแนนหรือกรอกคะแนนย้อนหลัง
+  if (subj.exam_closed_at && !examRow) {
+    return {
+      subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring,
+      result: { type: "ร.", reason: "ไม่มีคะแนนสอบปลายภาค/ปลายปี" }
+    };
   }
 
   // 3) แปลงเป็นเกรด

@@ -533,7 +533,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead } from "../supabase-client.js?v=20260924-1";
+import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20260924-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -544,7 +544,6 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 
 const myProfile = await getProfile(session.user.id);
 const isAdminUser = !!myProfile && myProfile.role === "admin";
-const canEditWeights = isAdminUser || await checkDepartment("วิชาการ");
 const canEditAcademicSettings = await isAcademicHead();
 const myUserId = session.user.id;
 
@@ -676,7 +675,7 @@ function canEditStructureOf() {
 
 function canEditExamStatus() {
   return Boolean(currentSubject) &&
-    (isAdminUser || canEditWeights || currentSubject.owner_id === myUserId);
+    (canEditAcademicSettings || currentSubject.owner_id === myUserId);
 }
 
 async function loadSubjectStudentIds(tableName, subjectId) {
@@ -719,12 +718,12 @@ async function loadExamControl() {
     elManageExamStatusTitle.textContent = closed ? "ปิดคะแนนสอบแล้ว" : "ยังไม่ปิดคะแนนสอบ";
     elManageExamStatusNote.textContent = closed
       ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) +
-        " · นักเรียนที่ยังไม่มีคะแนนสอบจะติด ร. จากการคำนวณ"
+        " · นักเรียนที่ยังไม่มีคะแนนสอบจะได้ผลตามสถานะ มส./ร. จากการคำนวณ · ปิดแล้วยังกรอก/แก้คะแนนสอบได้ ไม่ต้องยกเลิกการปิด"
       : "ก่อนปิด นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้นว่ายังไม่ครบและยังไม่ตัดสินผลทางการ";
     elManageExamMissingCount.textContent = missingCount > 0
       ? "ยังไม่มีคะแนนสอบ " + missingCount + " คน"
       : "มีคะแนนสอบครบ " + enrolledIds.length + " คน";
-    btnManageToggleExam.textContent = closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ";
+    btnManageToggleExam.textContent = closed ? "ยกเลิกการปิดคะแนนสอบ" : "ปิดคะแนนสอบ";
     btnManageToggleExam.className = closed ? "ghost" : "danger";
     btnManageToggleExam.style.display = canEditExamStatus() ? "inline-block" : "none";
   } catch (error) {
@@ -751,14 +750,40 @@ btnManageToggleExam.addEventListener("click", async () => {
   }
   if (!currentSubject || currentSubject.id !== subjectId) return;
   const scoredSet = new Set(scoredIds);
-  const missingCount = enrolledIds.filter(studentId => !scoredSet.has(studentId)).length;
+  const missingIds = enrolledIds.filter(studentId => !scoredSet.has(studentId));
+  const missingCount = missingIds.length;
   const closed = Boolean(currentSubject.exam_closed_at);
+  let message = closed
+    ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
+    : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที";
+  try {
+    const { data: memberRows, error: memberError } = await sb.from("integration_members")
+      .select("member_subject_id").eq("member_subject_id", subjectId).limit(1);
+    if (memberError) throw new Error(memberError.message);
+    if (memberRows && memberRows.length) {
+      message += " (มส. ตัดสินรวมที่วิชาบูรณาการ)";
+    } else if (missingCount) {
+      const subjectData = await loadSubjectData(subjectId);
+      const hypotheticalSubject = { ...subjectData.subject, exam_closed_at: subjectData.subject.exam_closed_at || new Date().toISOString() };
+      const msCount = missingIds.filter(studentId => computeSubjectResult(
+        studentId, hypotheticalSubject, subjectData.units, subjectData.remarksData,
+        subjectData.sessions, subjectData.makeupHours,
+        { examScores: subjectData.examScores, gradeWeight: subjectData.gradeWeight }
+      ).result.type === "มส.").length;
+      const rCount = missingCount - msCount;
+      message = closed
+        ? "นักเรียน " + rCount + " คนที่ยังไม่มีคะแนนสอบจะพ้น ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
+        : rCount + " คนจะติด ร.";
+      if (msCount) message += " · อีก " + msCount + " คนติด มส. อยู่แล้ว (ไม่มีสิทธิ์สอบ) จะยังเป็น มส.";
+    }
+  } catch (error) {
+    message += " (ตรวจ มส. ไม่สำเร็จ)";
+  }
+  if (!currentSubject || currentSubject.id !== subjectId) return;
   const agreed = await window.crsAskConfirm({
-    title: closed ? "เปิดคะแนนสอบอีกครั้ง" : "ปิดคะแนนสอบวิชานี้",
-    message: closed
-      ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
-      : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที",
-    okLabel: closed ? "เปิดแก้ไขอีกครั้ง" : "ปิดคะแนนสอบ",
+    title: closed ? "ยกเลิกการปิดคะแนนสอบ" : "ปิดคะแนนสอบวิชานี้",
+    message,
+    okLabel: closed ? "ยกเลิกการปิด" : "ปิดคะแนนสอบ",
     danger: !closed
   });
   if (!agreed) return;
@@ -769,12 +794,12 @@ btnManageToggleExam.addEventListener("click", async () => {
     p_closed: !closed
   });
   btnManageToggleExam.disabled = false;
-  if (error) { showToast((closed ? "เปิด" : "ปิด") + "คะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
+  if (error) { showToast((closed ? "ยกเลิกการปิด" : "ปิด") + "คะแนนสอบไม่สำเร็จ: " + error.message, false); return; }
   currentSubject.exam_closed_at = closed ? null : data;
   const sourceSubject = allSubjects.find(subject => subject.id === subjectId);
   if (sourceSubject) sourceSubject.exam_closed_at = currentSubject.exam_closed_at;
   await loadExamControl();
-  showToast(closed ? "เปิดแก้ไขคะแนนสอบอีกครั้งแล้ว" : "ปิดคะแนนสอบแล้ว", true);
+  showToast(closed ? "ยกเลิกการปิดคะแนนสอบแล้ว" : "ปิดคะแนนสอบแล้ว", true);
 });
 
 // ช่องกรอกใน "ข้อมูลวิชา" — ปิด/เปิดพร้อมกันตามสิทธิ์หัวหน้าวิชาการ
