@@ -518,6 +518,13 @@ function renderLines(student){
   const periods=[...new Map(rows.filter(c=>c.year&&c.term).map(c=>[`${c.year}\u0000${c.term}`,{year:c.year,term:c.term}])).values()]
     .sort((a,b)=>String(b.year).localeCompare(String(a.year),"th",{numeric:true})||Number(b.term)-Number(a.term));
   const printLinks=canFinance&&periods.length?`<div class="actions">${periods.map(period=>`<a class="button-link" href="fee-receipt.html?student=${encodeURIComponent(student.placement.student_id)}&year=${encodeURIComponent(period.year)}&term=${encodeURIComponent(period.term)}">พิมพ์ใบแจ้งหนี้ ${esc(period.term)}/${esc(period.year)}</a>`).join("")}</div>`:"";
+  const receiptMap=new Map();
+  if(canFinance)for(const payment of studentPayments){
+    if(payment.voided_at||!payment.receipt_id||!payment.receipt?.receipt_no)continue;
+    if(!receiptMap.has(payment.receipt_id))receiptMap.set(payment.receipt_id,{receipt:payment.receipt,total:0});
+    receiptMap.get(payment.receipt_id).total+=Number(payment.amount||0)
+  }
+  const receiptList=receiptMap.size?`<section class="history"><h3>ใบเสร็จรับเงิน</h3><div class="actions">${[...receiptMap.entries()].sort((a,b)=>String(b[1].receipt.issued_at||"").localeCompare(String(a[1].receipt.issued_at||""))).map(([id,row])=>`<a class="button-link" href="fee-receipt.html?receipt=${encodeURIComponent(id)}">เลขที่ ${esc(row.receipt.receipt_no)} · ${esc(bangkokDateOf(row.receipt.issued_at))} · ${money(row.total)}</a>`).join("")}</div></section>`:"";
   return`<div class="section-head"><div><h2>${esc(studentName(student))}</h2><p>${esc(roomLabel(student.placement))} · รวมรายการด้านล่างต้องเท่ากับยอดค้าง</p></div><div><b class="${total.outstanding>0?"due":"zero"}">${money(total.outstanding)}</b>${printLinks}</div></div>${rows.length?`
     <div class="table-wrap">
       <table>
@@ -527,7 +534,7 @@ function renderLines(student){
         `).join("")}</tbody>
       </table>
     </div>
-  `:'<div class="empty">นักเรียนคนนี้ยังไม่มีรายการ</div>'}`
+  `:'<div class="empty">นักเรียนคนนี้ยังไม่มีรายการ</div>'}${receiptList}`
 }
 
 function renderStudentCard(){
@@ -619,7 +626,7 @@ async function load(){
   const [placementRes,chargeRes,paymentRes]=await Promise.all([
     getStudentPlacements(currentYear),
     fetchAllRows(()=>sb.from("student_charges").select("*,student:student_id(id,student_no,name,graduated,left_school,status)"),["student_id","charge_date","id"]),
-    fetchAllRows(()=>sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,voided_at,void_reason,voided_by,receipt:receipt_id(student_id,voided_at)"),["receipt_id","paid_at","id"])
+    fetchAllRows(()=>sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,voided_at,void_reason,voided_by,receipt:receipt_id(student_id,receipt_no,issued_at,voided_at)"),["receipt_id","paid_at","id"])
   ]);
   if(placementRes.error)throw new Error("โหลดทะเบียนไม่สำเร็จ: "+placementRes.error.message);
   if(chargeRes.error)throw new Error("โหลดค่าใช้จ่ายไม่สำเร็จ: "+chargeRes.error.message);
@@ -631,7 +638,7 @@ async function load(){
   charges=returned.filter(c=>ids.has(c.student_id)||canFinance&&(c.student?.graduated||c.student?.left_school));
   payments=(paymentRes.data||[]).map(row=>{
     const linked=Array.isArray(row.receipt)?row.receipt[0]:row.receipt;
-    return{...row,student_id:linked?.student_id,receipt_voided_at:linked?.voided_at}
+    return{...row,receipt:linked,student_id:linked?.student_id,receipt_voided_at:linked?.voided_at}
   }).filter(row=>row.student_id&&!row.receipt_voided_at);
   render();
   renderRevenue();

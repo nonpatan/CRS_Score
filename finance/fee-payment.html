@@ -58,6 +58,9 @@
     .history h3 { margin:0; font-size:17px; }
     .history-list { display:grid; gap:10px; margin-top:10px; }
     .history-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,.5fr) auto auto; align-items:start; gap:10px; padding:11px 12px; border:1px solid var(--line); border-radius:10px; }
+    .history-receipt { padding:12px; border:1px solid var(--line); border-radius:10px; }
+    .history-receipt-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+    .history-receipt .history-row { margin-top:8px; }
     .history-payer b { display:block; }
     .history-status { display:inline-flex; width:max-content; padding:2px 8px; border-radius:999px; color:var(--teal); background:var(--teal-soft); font-size:12px; font-weight:700; }
     .history-status.voided { color:var(--danger); background:var(--danger-soft); }
@@ -112,7 +115,7 @@
       <section class="card">
         <div class="section-head">
           <div><h2 id="payment-title">รายการค้าง</h2><p>ระบบเติมยอดให้จากรายการเก่าสุดก่อน คุณแก้รายการและจำนวนเงินได้ก่อนบันทึก</p></div>
-          <a id="receipt-link" class="button-link" href="#" hidden>เปิดใบแจ้งหนี้/ใบเสร็จ</a>
+          <a id="receipt-link" class="button-link" href="#" hidden>เปิดใบแจ้งหนี้</a>
         </div>
         <div id="stats" class="stats"></div>
         <div class="field">
@@ -177,13 +180,13 @@
           </div>
         </section>
         <section class="history">
-          <h3>ประวัติรับเงินของเอกสารนี้</h3>
+          <h3>ประวัติรับเงินภาคเรียนนี้</h3>
           <p class="hint">รายการที่ยกเลิกยังอยู่ครบเพื่อให้ตรวจย้อนหลังได้</p>
           <div id="payment-history" class="history-list"></div>
         </section>
         <div class="summary">
           <div><b id="selected-total">รวมที่เลือก 0.00 บาท</b><div id="draft-hint" class="hint">รวมที่เลือกต้องเท่ากับเงินที่รับ</div></div>
-          <div class="summary-actions"><button id="save-payment" class="primary" type="button">บันทึกรับเงิน</button></div>
+          <div class="summary-actions"><a id="new-receipt-link" class="button-link" href="#" hidden>เปิดใบเสร็จ</a><button id="save-payment" class="primary" type="button">บันทึกรับเงิน</button></div>
         </div>
       </section>
     </div>
@@ -264,17 +267,13 @@ function paymentDraftError(received,allocations,outstanding){
   return""
 }
 
-function paymentFailureState(paymentSaved,savingsWritten,scholarshipWritten,requestUncertain){
-  const blocked=Boolean(paymentSaved||savingsWritten||scholarshipWritten||requestUncertain);
+function paymentFailureState(paymentSaved,requestUncertain){
+  const blocked=Boolean(paymentSaved||requestUncertain);
   const prefix=paymentSaved
     ?"รับเงินบันทึกแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่: "
-    :scholarshipWritten
-      ?"ตัดทุนไปแล้วแต่ยังไม่ได้ผูกกับใบเสร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และให้ฝ่ายการเงินตรวจบัญชีทุนก่อน: "
-      :savingsWritten
-        ?"หักออมทรัพย์ไปแล้วแต่ยังไม่ได้ผูกกับใบเสร็จ · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจสมุดออมทรัพย์ก่อน: "
-        :requestUncertain
-          ?"ผลการบันทึกไม่แน่ชัด · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน: "
-          :"รับเงินไม่สำเร็จ: ";
+    :requestUncertain
+      ?"ผลการบันทึกไม่แน่ชัด · ห้ามกดซ้ำ ให้โหลดหน้าใหม่และตรวจรายการก่อน: "
+      :"รับเงินไม่สำเร็จ: ";
   return{blocked,prefix}
 }
 
@@ -299,21 +298,31 @@ function formatThaiDateTime(value){
   return Number.isNaN(date.getTime())?"—":new Intl.DateTimeFormat("th-TH",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"}).format(date)
 }
 
-function renderPaymentHistory(rows,chargeRows,names,canVoid=true){
+function renderPaymentHistory(receiptRows,rows,chargeRows,names,canVoid=true){
   const chargeById=new Map((chargeRows||[]).map(row=>[row.id,row]));
   const nameOf=userId=>names instanceof Map?names.get(userId):names?.[userId];
-  const sorted=[...(rows||[])].sort((a,b)=>String(b.paid_at||"").localeCompare(String(a.paid_at||""))||String(b.id||"").localeCompare(String(a.id||"")));
-  if(!sorted.length)return'<div class="empty">ยังไม่มีประวัติรับเงินในเอกสารนี้</div>';
-  return sorted.map(payment=>{
+  const byReceipt=new Map((receiptRows||[]).map(receipt=>[receipt.id,[]]));
+  for(const payment of rows||[])if(byReceipt.has(payment.receipt_id))byReceipt.get(payment.receipt_id).push(payment);
+  const sorted=[...(receiptRows||[])].sort((a,b)=>String(b.issued_at||"").localeCompare(String(a.issued_at||""))||String(b.receipt_no||"").localeCompare(String(a.receipt_no||"")));
+  if(!sorted.length)return'<div class="empty">ยังไม่มีประวัติรับเงินภาคเรียนนี้</div>';
+  const renderLine=(payment,allowVoid)=>{
     const charge=chargeById.get(payment.charge_id),voided=Boolean(payment.voided_at);
     const trail=voided?`<span class="meta">เหตุผล: ${esc(payment.void_reason||"ไม่พบเหตุผล")} · ยกเลิกโดย ${esc(nameOf(payment.voided_by)||payment.voided_by||"ไม่พบผู้ยกเลิก")} · ${esc(formatThaiDateTime(payment.voided_at))}</span>`:"";
-    return`<div class="history-row" data-payment-row="${esc(payment.id)}"><div><b>${esc(charge?.description||"รายการค่าใช้จ่าย")}</b><span class="meta">${esc(formatThaiDateTime(payment.paid_at))} · ${esc(payment.method)}</span>${trail}</div><div class="history-payer"><span class="meta">ผู้จ่ายเงิน</span><b>${esc(payment.payer_name||"—")}</b></div><b>${money(payment.amount)}</b><div>${voided?'<span class="history-status voided">ยกเลิกแล้ว</span>':`<span class="history-status">รับแล้ว</span>${canVoid?` <button class="danger" type="button" data-void-payment="${esc(payment.id)}">ยกเลิกรายการนี้</button>`:""}`}</div></div>`
+    return`<div class="history-row" data-payment-row="${esc(payment.id)}"><div><b>${esc(charge?.description||"รายการค่าใช้จ่าย")}</b><span class="meta">${esc(formatThaiDateTime(payment.paid_at))} · ${esc(payment.method)}</span>${trail}</div><div class="history-payer"><span class="meta">ผู้จ่ายเงิน</span><b>${esc(payment.payer_name||"—")}</b></div><b>${money(payment.amount)}</b><div>${voided?'<span class="history-status voided">ยกเลิกแล้ว</span>':`<span class="history-status">รับแล้ว</span>${allowVoid?` <button class="danger" type="button" data-void-payment="${esc(payment.id)}">ยกเลิกรายการนี้</button>`:""}`}</div></div>`
+  };
+  return sorted.map(receipt=>{
+    const lines=byReceipt.get(receipt.id)||[];
+    const active=lines.filter(payment=>!payment.voided_at);
+    const first=active[0]||lines[0];
+    const total=active.reduce((sum,payment)=>sum+Number(payment.amount||0),0);
+    const status=receipt.voided_at?`<span class="history-status voided">ยกเลิกแล้ว</span> · เหตุผล: ${esc(receipt.void_reason||"ไม่พบเหตุผล")}`:"";
+    return`<section class="history-receipt" data-receipt-row="${esc(receipt.id)}"><div class="history-receipt-head"><div><b>เลขที่ ${esc(receipt.receipt_no)}</b> · ${esc(formatThaiDateTime(receipt.issued_at))} · ${esc(first?.method||"—")} · ผู้จ่าย ${esc(first?.payer_name||"—")} · รวม ${money(total)}${status?`<div class="meta">${status}</div>`:""}</div><a class="button-link" href="fee-receipt.html?receipt=${encodeURIComponent(receipt.id)}">เปิดใบเสร็จ</a></div>${lines.length?lines.map(line=>renderLine(line,canVoid&&!receipt.voided_at)).join(""):'<div class="empty">ยังไม่มีรายการรับเงินในใบนี้</div>'}</section>`
   }).join("")
 }
 
 let session,currentYear="",placements=[],rooms=[],charges=[],roomPlacements=[];
 let items=[],prices=[],moves=[],promotions=[],subsidies=[],addKind="product",addingLine=false;
-let receipt=null,payments=[],savingsTxns=[],scholarshipTxns=[],saving=false,submissionBlocked=false,loadToken=0;
+let receipts=[],payments=[],savingsTxns=[],scholarshipTxns=[],saving=false,submissionBlocked=false,loadToken=0;
 let activeVoidPayment=null,voidBusy=false,voidBlocked=false;
 let activeVoidCharge=null,voidChargeBusy=false;
 const profileNames=new Map();
@@ -530,10 +539,10 @@ function renderPayment(){
   el("stats").innerHTML=`<div class="stat"><span>ยอดสุทธิ</span><b>${money(summary.charged-summary.credited)}</b></div><div class="stat"><span>ชำระแล้ว</span><b>${money(summary.paid)}</b></div><div class="stat"><span>ค้างชำระ</span><b class="${summary.outstanding>0?"due":""}">${money(summary.outstanding)}</b></div>`;
   renderChargeList();
   renderAddLineForms();
-  el("payment-history").innerHTML=renderPaymentHistory(payments,rows,profileNames,true);
+  el("payment-history").innerHTML=renderPaymentHistory(receipts,payments,rows,profileNames,true);
   el("received").value="";
   el("payer-name").value="";
-  el("receipt-link").hidden=!receipt;
+  el("receipt-link").hidden=!placement;
   el("receipt-link").href=receiptHref();
   updateSavingsHint();
   syncSelectedTotal()
@@ -542,11 +551,12 @@ function renderPayment(){
 async function loadStudent(){
   const placement=selectedPlacement(),token=++loadToken;
   addKind="product";
-  receipt=null;payments=[];savingsTxns=[];scholarshipTxns=[];
+  receipts=[];payments=[];savingsTxns=[];scholarshipTxns=[];
+  el("new-receipt-link").hidden=true;
   if(!placement){renderPayment();return}
   const term=Number(el("term").value);
   const [receiptRes,savingsRes,scholarshipRes]=await Promise.all([
-    sb.from("fee_receipts").select("*").eq("student_id",placement.student_id).eq("year",currentYear).eq("term",term).is("voided_at",null).maybeSingle(),
+    fetchAllRows(()=>sb.from("fee_receipts").select("*").eq("student_id",placement.student_id).eq("year",currentYear).eq("term",term),["issued_at","id"]),
     fetchAllRows(()=>sb.from("savings_txns").select("id,student_id,kind,amount,txn_date").eq("student_id",placement.student_id),["txn_date","id"]),
     fetchAllRows(()=>sb.from("scholarship_txns").select("id,student_id,kind,amount,txn_date,voided_at").eq("student_id",placement.student_id),["txn_date","id"])
   ]);
@@ -554,11 +564,12 @@ async function loadStudent(){
   if(savingsRes.error)throw new Error("โหลดยอดออมทรัพย์ไม่สำเร็จ: "+savingsRes.error.message);
   if(scholarshipRes.error)throw new Error("โหลดยอดทุนไม่สำเร็จ: "+scholarshipRes.error.message);
   if(token!==loadToken)return;
-  receipt=receiptRes.data||null;
+  receipts=receiptRes.data||[];
   savingsTxns=savingsRes.data||[];
   scholarshipTxns=scholarshipRes.data||[];
-  if(receipt){
-    const paymentRes=await fetchAllRows(()=>sb.from("fee_payments").select("*").eq("receipt_id",receipt.id),["paid_at","id"]);
+  if(receipts.length){
+    const ids=receipts.map(row=>row.id);
+    const paymentRes=await fetchAllRows(()=>sb.from("fee_payments").select("*").in("receipt_id",ids),["paid_at","id"]);
     if(paymentRes.error)throw new Error("โหลดรายการรับเงินไม่สำเร็จ: "+paymentRes.error.message);
     if(token!==loadToken)return;
     payments=paymentRes.data||[]
@@ -905,7 +916,7 @@ el("void-payment-form").onsubmit=async event=>{
       ?`ยกเลิกรายการแล้ว · คืนเงิน ${money(result.amount)} เข้าสมุดออมทรัพย์แล้ว`
       :result.scholarship_returned
         ?`ยกเลิกรายการแล้ว · คืนเงิน ${money(result.amount)} เข้าบัญชีทุนแล้ว`
-        :`ยกเลิกรายการ ${money(result.amount)} แล้ว · ไม่มีการคืนเข้าบัญชีภายใน · เลขที่เอกสารคงเดิม`);
+        :`ยกเลิกรายการ ${money(result.amount)} แล้ว · ไม่มีการคืนเข้าบัญชีภายใน`);
     try{await loadStudent()}catch(loadError){toast("ยกเลิกแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ: "+friendly(loadError),true)}
   }catch(voidError){
     voidBlocked=requestUncertain;
@@ -941,64 +952,30 @@ el("save-payment").onclick=async()=>{
   }))return;
   saving=true;
   el("save-payment").disabled=true;
-  let savingsWritten=false,scholarshipWritten=false,requestUncertain=false,paymentSaved=false;
+  let requestUncertain=false,paymentSaved=false;
   try{
-    const receiptRes=await sb.rpc("get_or_create_fee_receipt",{p_student_id:placement.student_id,p_year:currentYear,p_term:Number(el("term").value)});
-    if(receiptRes.error)throw receiptRes.error;
-    const savedReceipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
-    if(!savedReceipt?.id)throw new Error("ฐานข้อมูลไม่คืนเอกสาร กรุณาโหลดใหม่ก่อนลองอีกครั้ง");
-    let savingsByCharge=new Map();
-    let scholarshipByCharge=new Map();
-    if(method==="หักออมทรัพย์"){
-      const today=toDateStr(bangkokNow());
-      const payloads=allocations.map((allocation,index)=>({
-        student_id:placement.student_id,year:currentYear,grade_level:placement.grade_level,classroom:placement.classroom,
-        txn_date:today,kind:"หักค่าใช้จ่าย",amount:allocation.amount,
-        note:`เอกสาร ${savedReceipt.receipt_no} · ลำดับ ${index+1}: ${allocation.description}`,
-        recorded_by:session.user.id
-      }));
-      requestUncertain=true;
-      const savingsRes=await sb.from("savings_txns").insert(payloads).select("id,note");
-      requestUncertain=false;
-      if(savingsRes.error)throw savingsRes.error;
-      savingsWritten=true;
-      const idByNote=new Map((savingsRes.data||[]).map(row=>[row.note,row.id]));
-      savingsByCharge=new Map(allocations.map((allocation,index)=>[allocation.charge_id,idByNote.get(payloads[index].note)]));
-      if([...savingsByCharge.values()].some(id=>!id))throw new Error("ฐานข้อมูลคืนรายการหักออมทรัพย์ไม่ครบ กรุณาหยุดและแจ้งผู้ดูแล")
-    }
-    if(method==="หักทุน"){
-      const today=toDateStr(bangkokNow());
-      const payloads=allocations.map((allocation,index)=>({
-        student_id:placement.student_id,year:placement.year,grade_level:placement.grade_level,classroom:placement.classroom,
-        txn_date:today,kind:"จ่ายค่าใช้จ่าย",amount:allocation.amount,
-        note:`เอกสาร ${savedReceipt.receipt_no} · ลำดับ ${index+1}: ${allocation.description}`,
-        created_by:session.user.id
-      }));
-      requestUncertain=true;
-      const scholarshipRes=await sb.from("scholarship_txns").insert(payloads).select("id,note");
-      requestUncertain=false;
-      if(scholarshipRes.error)throw scholarshipRes.error;
-      scholarshipWritten=true;
-      const idByNote=new Map((scholarshipRes.data||[]).map(row=>[row.note,row.id]));
-      scholarshipByCharge=new Map(allocations.map((allocation,index)=>[allocation.charge_id,idByNote.get(payloads[index].note)]));
-      if([...scholarshipByCharge.values()].some(id=>!id))throw new Error("ฐานข้อมูลคืนรายการหักทุนไม่ครบ กรุณาหยุดและแจ้งผู้ดูแล")
-    }
-    const paymentRows=allocations.map(allocation=>({
-      receipt_id:savedReceipt.id,charge_id:allocation.charge_id,amount:allocation.amount,method,
-      payer_name:payerName,
-      savings_txn_id:method==="หักออมทรัพย์"?savingsByCharge.get(allocation.charge_id):null,
-      scholarship_txn_id:method==="หักทุน"?scholarshipByCharge.get(allocation.charge_id):null,
-      recorded_by:session.user.id
-    }));
     requestUncertain=true;
-    const paymentRes=await sb.from("fee_payments").insert(paymentRows);
+    const receiptRes=await sb.rpc("receive_fee_payment",{
+      p_student_id:placement.student_id,
+      p_year:currentYear,
+      p_term:Number(el("term").value),
+      p_grade_level:placement.grade_level,
+      p_classroom:placement.classroom,
+      p_method:method,
+      p_payer_name:payerName,
+      p_lines:allocations.map(a=>({charge_id:a.charge_id,amount:a.amount,description:a.description}))
+    });
+    if(receiptRes.error){requestUncertain=false;throw receiptRes.error}
+    const savedReceipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
+    if(!savedReceipt?.id||!savedReceipt?.receipt_no)throw new Error("ฐานข้อมูลไม่คืนใบเสร็จครบ กรุณาโหลดใหม่ก่อนลองอีกครั้ง");
     requestUncertain=false;
-    if(paymentRes.error)throw paymentRes.error;
     paymentSaved=true;
-    toast(`รับเงิน ${money(received)} แล้ว · เอกสารเลขที่ ${savedReceipt.receipt_no}`);
-    await loadStudent()
+    await loadStudent();
+    el("new-receipt-link").href=`fee-receipt.html?receipt=${encodeURIComponent(savedReceipt.id)}`;
+    el("new-receipt-link").hidden=false;
+    toast(`รับเงิน ${money(received)} แล้ว · ใบเสร็จเลขที่ ${savedReceipt.receipt_no}`)
   }catch(saveError){
-    const failure=paymentFailureState(paymentSaved,savingsWritten,scholarshipWritten,requestUncertain);
+    const failure=paymentFailureState(paymentSaved,requestUncertain);
     submissionBlocked=failure.blocked;
     toast(failure.prefix+friendly(saveError),true)
   }finally{

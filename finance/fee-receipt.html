@@ -45,6 +45,9 @@
     .meta, .hint { color:var(--muted); font-size:14px; }
     .words { margin-top:12px; padding:10px 12px; border:1px solid #555; }
     .summary { display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:12px; }
+    .invoice-payments { margin-top:14px; }
+    .invoice-payments h2 { margin:0 0 6px; font-size:16px; }
+    .invoice-payments table { min-width:0; }
     .signature { display:flex; justify-content:flex-end; margin-top:40px; text-align:center; }
     .signature div { width:250px; }
     .signature-line { margin-top:38px; border-top:1px dotted #333; }
@@ -148,7 +151,7 @@
           <div class="school"><h2 id="school-name"></h2><p id="school-address"></p></div>
           <div class="receipt-meta">
             <div id="copy-mark" class="copy-mark" hidden>สำเนา</div>
-            <div>เลขที่ <b id="receipt-no"></b></div>
+            <div id="receipt-number-line">เลขที่ <b id="receipt-no"></b></div>
             <div>วันที่ออก <span id="issued-date"></span></div>
           </div>
         </div>
@@ -162,9 +165,10 @@
           <div id="payer-meta" hidden>ผู้จ่ายเงิน <span id="payer-name"></span></div>
         </div>
         <div id="receipt-table"></div>
-        <div class="words avoid-break"><b>ตัวอักษร</b> <span id="paid-words"></span></div>
-        <div class="summary avoid-break"><span>รวมยอดค้างชำระ</span><b id="outstanding-total"></b></div>
-        <div class="signature avoid-break"><div><div class="signature-line"></div><div id="cashier-name" hidden></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
+        <div id="invoice-payments" class="invoice-payments" hidden></div>
+        <div id="paid-words-line" class="words avoid-break"><b>ตัวอักษร</b> <span id="paid-words"></span></div>
+        <div class="summary avoid-break"><span id="outstanding-label">ยอดค้างชำระ</span><b id="outstanding-total"></b></div>
+        <div id="signature" class="signature avoid-break"><div><div class="signature-line"></div><div id="cashier-name" hidden></div><div>ผู้รับเงิน</div><div class="meta">ลงชื่อด้วยลายมือ</div></div></div>
       </article>
     </div>
     <div id="toast" class="toast no-print"></div>
@@ -173,7 +177,7 @@
         <h2 id="void-receipt-title">ยกเลิกเอกสารทั้งใบ</h2>
         <p id="void-receipt-detail"></p>
         <div class="field"><label for="void-receipt-reason">เหตุผลการยกเลิก</label><textarea id="void-receipt-reason" maxlength="500" placeholder="ระบุเหตุผลให้ตรวจย้อนหลังได้"></textarea></div>
-        <label id="paper-returned-field" class="paper-check"><input id="paper-returned" type="checkbox"><span><b>ได้ใบเดิมคืนหรือทำลายแล้ว</b><br>ต้องยืนยันข้อนี้เพื่อป้องกันกระดาษสองใบใช้เลขเดียวกัน</span></label>
+        <label id="paper-returned-field" class="paper-check"><input id="paper-returned" type="checkbox"><span><b>ได้ใบเดิมคืนหรือทำลายแล้ว</b><br>ยืนยันว่าเก็บเอกสารที่พิมพ์ไปแล้วก่อนยกเลิก</span></label>
         <p id="void-receipt-error" class="form-error" role="alert"></p>
         <div class="modal-actions"><button id="void-receipt-cancel" type="button">กลับ</button><button id="void-receipt-submit" class="danger" type="submit">ยืนยันยกเลิกทั้งใบ</button></div>
       </form>
@@ -217,6 +221,17 @@ function buildReceiptRows(charges,payments){
   }
 }
 
+// ยอดบนใบเสร็จต้องหยุด ณ เวลาจ่ายของใบนั้น แม้ภายหลังจะมีหนี้หรือการจ่ายเพิ่ม
+function receiptOutstandingAt(receipt,charges,allPayments,receiptPayments){
+  const dated=receiptPayments.filter(payment=>!payment.voided_at&&payment.paid_at);
+  const fallback=dated.length?dated:receiptPayments.filter(payment=>payment.paid_at);
+  const cutoff=fallback.reduce((latest,payment)=>String(payment.paid_at)>latest?String(payment.paid_at):latest,"")||String(receipt?.issued_at||"");
+  if(!cutoff)return 0;
+  const dueCharges=charges.filter(charge=>!charge.voided_at&&String(charge.created_at||"")<=cutoff);
+  const paid=allPayments.filter(payment=>!payment.voided_at&&!payment.receipt_voided_at&&String(payment.paid_at||"")<=cutoff);
+  return computeFeeOutstanding(dueCharges,paid).outstanding
+}
+
 function activePayerNames(payments){
   return [...new Set((payments||[]).filter(payment=>!payment.voided_at)
     .map(payment=>String(payment.payer_name??"").replace(/\s+/g," ").trim()).filter(Boolean))]
@@ -247,7 +262,7 @@ function receiptVoidError(printedCount,paperReturned,reason){
 
 function formatThaiDate(value){
   const date=new Date(value);
-  return Number.isNaN(date.getTime())?"—":new Intl.DateTimeFormat("th-TH",{day:"numeric",month:"long",year:"numeric"}).format(date)
+  return Number.isNaN(date.getTime())?"—":new Intl.DateTimeFormat("th-TH",{day:"numeric",month:"long",year:"numeric",timeZone:"Asia/Bangkok"}).format(date)
 }
 
 function toast(message,isError=false){
@@ -263,72 +278,102 @@ let receipt=null,printing=false,voiding=false,voidBlocked=false;
 
 function renderReceiptState(){
   const voided=Boolean(receipt?.voided_at);
-  el("void-document").hidden=!voided;
+  el("void-document").hidden=!receipt||!voided;
   if(voided)el("void-document").textContent=`ยกเลิกแล้ว\nเหตุผล: ${receipt.void_reason||"ไม่พบเหตุผล"}`;
-  el("print-button").hidden=voided;
-  el("void-receipt-button").hidden=voided
+  el("print-button").hidden=Boolean(receipt)&&voided;
+  el("void-receipt-button").hidden=!receipt||voided
 }
 
-function renderDocument({student,charges,payments,settings,staffNames}){
-  const required=["receipt_school_name","receipt_address","receipt_doc_title"];
+function renderDocument({student,charges,receipts,payments,settings,staffNames,year,term}){
+  const required=receipt?["receipt_school_name","receipt_address","receipt_doc_title"]:["receipt_school_name","receipt_address"];
   for(const key of required)if(!String(settings.get(key)||"").trim())throw new Error(`ยังไม่ได้ตั้งค่าหัวเอกสาร ${key}`);
-  const table=buildReceiptRows(charges,payments),summary=computeFeeOutstanding(charges,payments),payerNames=activePayerNames(payments),showPayerColumn=payerNames.length>1,cashierNames=activeCashierNames(payments,staffNames);
-  if(Math.abs(table.remaining-summary.outstanding)>0.005)throw new Error("ยอดรวมคอลัมน์คงเหลือไม่ตรงกับยอดค้าง กรุณาหยุดและแจ้งผู้ดูแล");
+  const invoice=!receipt;
+  const activeReceipts=receipts.filter(row=>!row.voided_at);
+  const activeIds=new Set(activeReceipts.map(row=>row.id));
+  const activePayments=payments.filter(row=>activeIds.has(row.receipt_id));
+  const thisPayments=invoice?[]:payments.filter(row=>row.receipt_id===receipt.id);
+  const currentPayments=thisPayments.filter(row=>!row.voided_at);
+  const table=invoice?buildReceiptRows(charges,activePayments):null;
+  const summary=invoice?computeFeeOutstanding(charges,activePayments):null;
+  const payerNames=activePayerNames(currentPayments),cashierNames=activeCashierNames(currentPayments,staffNames);
+  if(invoice&&Math.abs(table.remaining-summary.outstanding)>0.005)throw new Error("ยอดรวมคอลัมน์คงเหลือไม่ตรงกับยอดค้าง กรุณาหยุดและแจ้งผู้ดูแล");
   el("school-name").textContent=settings.get("receipt_school_name");
   el("school-address").textContent=settings.get("receipt_address");
-  el("document-title").textContent=settings.get("receipt_doc_title");
-  el("receipt-no").textContent=receipt.receipt_no;
-  el("issued-date").textContent=formatThaiDate(receipt.issued_at);
-  el("copy-mark").hidden=Number(receipt.printed_count||0)<1;
+  el("document-title").textContent=invoice?"ใบแจ้งหนี้":settings.get("receipt_doc_title");
+  el("receipt-number-line").hidden=invoice;
+  el("receipt-no").textContent=invoice?"":receipt.receipt_no;
+  el("issued-date").textContent=formatThaiDate(invoice?new Date():receipt.issued_at);
+  el("copy-mark").hidden=invoice||Number(receipt.printed_count||0)<1;
   el("student-name").textContent=student.name||"ไม่พบชื่อ";
-  el("student-grade").textContent=receipt.grade_level;
+  el("student-grade").textContent=invoice?(charges.find(row=>!row.voided_at)?.grade_level||charges[0]?.grade_level||"—"):receipt.grade_level;
   el("student-no").textContent=student.student_no||"—";
-  el("receipt-year").textContent=receipt.year;
-  el("receipt-term").textContent=receipt.term;
-  el("payer-meta").hidden=payerNames.length!==1;
-  el("payer-name").textContent=payerNames.length===1?payerNames[0]:"";
-  const payerHeader=showPayerColumn?'<th class="payer">ผู้จ่ายเงิน</th>':"";
-  el("receipt-table").innerHTML=table.rows.length?`<div class="table-wrap"><table class="${showPayerColumn?"has-payer":""}">
-    <thead><tr><th>รายการ</th>${payerHeader}<th class="count">จำนวน</th><th class="rate">ราคา/หน่วย</th><th class="money">จำนวนเต็ม</th><th class="money">จำนวนเงินที่จ่าย</th><th class="money">คงเหลือ</th></tr></thead>
-    <tbody>${table.rows.map(row=>`<tr><td><b>${esc(row.description)}</b>${row.note&&row.note!==MANUAL_NOTE_PLACEHOLDER?`<div class="meta">${esc(row.note)}</div>`:""}</td>${showPayerColumn?`<td class="payer">${esc(payerNamesForCharge(payments,row.id))}</td>`:""}<td class="count">${esc(row.qty)}</td><td class="rate ${row.unit<0?"negative":""}">${money(row.unit)}</td><td class="money ${row.full<0?"negative":""}">${money(row.full)}</td><td class="money">${money(row.paid)}</td><td class="money ${row.remaining<0?"negative":""}">${money(row.remaining)}</td></tr>`).join("")}</tbody>
-    <tfoot><tr><td colspan="${showPayerColumn?4:3}">รวมเงิน</td><td class="money">${money(table.full)}</td><td class="money">${money(table.paid)}</td><td class="money">${money(table.remaining)}</td></tr></tfoot>
-  </table></div>`:'<div class="banner bad">ยังไม่มีรายการค่าใช้จ่ายในเอกสารนี้</div>';
-  el("paid-words").textContent=bahtText(table.paid);
-  el("outstanding-total").textContent=money(table.remaining);
-  el("cashier-name").hidden=!cashierNames.length;
-  el("cashier-name").textContent=cashierNames.length?`(${cashierNames.join(" / ")})`:"";
+  el("receipt-year").textContent=year;
+  el("receipt-term").textContent=term;
+  el("payer-meta").hidden=invoice||payerNames.length!==1;
+  el("payer-name").textContent=invoice?"":payerNames[0]||"—";
+  el("paid-words-line").hidden=invoice;
+  el("signature").hidden=invoice;
+  el("invoice-payments").hidden=!invoice;
+  el("outstanding-label").textContent=invoice?"ยอดค้างชำระ":"ยอดค้างชำระหลังรับเงินครั้งนี้";
+  if(invoice){
+    el("receipt-table").innerHTML=table.rows.length?`<div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th class="count">จำนวน</th><th class="rate">ราคา/หน่วย</th><th class="money">จำนวนเต็ม</th><th class="money">จ่ายแล้ว</th><th class="money">คงเหลือ</th></tr></thead>
+      <tbody>${table.rows.map(row=>`<tr><td><b>${esc(row.description)}</b>${row.note&&row.note!==MANUAL_NOTE_PLACEHOLDER?`<div class="meta">${esc(row.note)}</div>`:""}</td><td class="count">${esc(row.qty)}</td><td class="rate ${row.unit<0?"negative":""}">${money(row.unit)}</td><td class="money ${row.full<0?"negative":""}">${money(row.full)}</td><td class="money">${money(row.paid)}</td><td class="money ${row.remaining<0?"negative":""}">${money(row.remaining)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td colspan="3">รวมเงิน</td><td class="money">${money(table.full)}</td><td class="money">${money(table.paid)}</td><td class="money">${money(table.remaining)}</td></tr></tfoot>
+    </table></div>`:'<div class="banner bad">ยังไม่มีรายการค่าใช้จ่ายในภาคเรียนนี้</div>';
+    const paidByReceipt=new Map();
+    for(const payment of activePayments)if(!payment.voided_at)paidByReceipt.set(payment.receipt_id,(paidByReceipt.get(payment.receipt_id)||0)+Number(payment.amount||0));
+    el("invoice-payments").innerHTML=`<h2>รับเงินแล้ว</h2>${activeReceipts.length?`<div class="table-wrap"><table><thead><tr><th>เลขที่ใบเสร็จ</th><th>วันที่</th><th class="money">ยอด</th></tr></thead><tbody>${activeReceipts.map(row=>`<tr><td>${esc(row.receipt_no)}</td><td>${esc(formatThaiDate(row.issued_at))}</td><td class="money">${money(paidByReceipt.get(row.id)||0)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="meta">ยังไม่มีรายการรับเงิน</div>'}`;
+    el("outstanding-total").textContent=money(summary.outstanding)
+  }else{
+    const chargeById=new Map(charges.map(row=>[row.id,row]));
+    const total=currentPayments.reduce((sum,row)=>sum+Number(row.amount||0),0);
+    el("receipt-table").innerHTML=currentPayments.length?`<div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th class="count">จำนวน</th><th class="rate">ราคา/หน่วย</th><th class="money">จำนวนเงินที่จ่าย</th></tr></thead>
+      <tbody>${currentPayments.map(payment=>{const charge=chargeById.get(payment.charge_id),qty=Number(charge?.qty)||1,full=Number(charge?.amount)||0;return`<tr><td><b>${esc(charge?.description||"รายการค่าใช้จ่าย")}</b>${charge?.note&&charge.note!==MANUAL_NOTE_PLACEHOLDER?`<div class="meta">${esc(charge.note)}</div>`:""}</td><td class="count">${esc(qty)}</td><td class="rate">${money(full/qty)}</td><td class="money">${money(payment.amount)}</td></tr>`}).join("")}</tbody>
+      <tfoot><tr><td colspan="3">รวมรับครั้งนี้</td><td class="money">${money(total)}</td></tr></tfoot>
+    </table></div>`:'<div class="banner bad">ใบนี้ไม่มีรายการรับเงินที่ยังใช้ได้</div>';
+    el("paid-words").textContent=bahtText(total);
+    el("outstanding-total").textContent=money(receiptOutstandingAt(receipt,charges,payments,thisPayments));
+    el("cashier-name").hidden=!cashierNames.length;
+    el("cashier-name").textContent=cashierNames.length?`(${cashierNames.join(" / ")})`:""
+  }
   renderReceiptState()
 }
 
 async function loadDocument(studentId,year,term){
-  const receiptRes=await sb.rpc("get_or_create_fee_receipt",{p_student_id:studentId,p_year:year,p_term:term});
-  if(receiptRes.error)throw receiptRes.error;
-  receipt=Array.isArray(receiptRes.data)?receiptRes.data[0]:receiptRes.data;
-  if(!receipt?.id)throw new Error("ฐานข้อมูลไม่คืนเอกสาร กรุณากลับไปรายงานแล้วลองใหม่");
-  const [studentRes,chargeRes,paymentRes,settingRes,staffNames]=await Promise.all([
+  const [studentRes,chargeRes,receiptRes,settingRes,staffNames]=await Promise.all([
     sb.from("students").select("id,student_no,name").eq("id",studentId).single(),
     fetchAllRows(()=>sb.from("student_charges").select("*").eq("student_id",studentId).eq("year",year).eq("term",term),["charge_date","id"]),
-    fetchAllRows(()=>sb.from("fee_payments").select("*").eq("receipt_id",receipt.id),["paid_at","id"]),
+    fetchAllRows(()=>sb.from("fee_receipts").select("*").eq("student_id",studentId).eq("year",year).eq("term",term),["issued_at","id"]),
     sb.from("app_settings").select("key,value").in("key",["receipt_school_name","receipt_address","receipt_doc_title"]),
     getStaffNamesByUser()
   ]);
-  for(const [label,result] of [["นักเรียน",studentRes],["รายการค่าใช้จ่าย",chargeRes],["รายการรับเงิน",paymentRes],["หัวเอกสาร",settingRes]])if(result.error)throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+  for(const [label,result] of [["นักเรียน",studentRes],["รายการค่าใช้จ่าย",chargeRes],["ใบเสร็จ",receiptRes],["หัวเอกสาร",settingRes]])if(result.error)throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+  const receipts=receiptRes.data||[],ids=receipts.map(row=>row.id);
+  if(receipt&&!ids.includes(receipt.id))throw new Error("ไม่พบใบเสร็จในภาคเรียนนี้");
+  const paymentRes=ids.length?await fetchAllRows(()=>sb.from("fee_payments").select("*").in("receipt_id",ids),["paid_at","id"]):{data:[],error:null};
+  if(paymentRes.error)throw new Error("โหลดรายการรับเงินไม่สำเร็จ: "+paymentRes.error.message);
+  const voidedIds=new Set(receipts.filter(row=>row.voided_at).map(row=>row.id));
+  const payments=(paymentRes.data||[]).map(row=>({...row,receipt_voided_at:voidedIds.has(row.receipt_id)?true:null}));
   const settings=new Map((settingRes.data||[]).map(row=>[row.key,row.value]));
-  renderDocument({student:studentRes.data,charges:chargeRes.data||[],payments:paymentRes.data||[],settings,staffNames});
+  renderDocument({student:studentRes.data,charges:chargeRes.data||[],receipts,payments,settings,staffNames,year,term});
   el("payment-link").href=`fee-payment.html?student=${encodeURIComponent(studentId)}&year=${encodeURIComponent(year)}&term=${term}`
 }
 
 el("print-button").onclick=async()=>{
-  if(printing||!receipt||receipt.voided_at)return;
+  if(printing||receipt?.voided_at)return;
   printing=true;
   el("print-button").disabled=true;
   try{
-    const result=await sb.rpc("mark_fee_receipt_printed",{p_receipt_id:receipt.id});
-    if(result.error)throw result.error;
-    const count=Number(Array.isArray(result.data)?result.data[0]:result.data);
-    if(!Number.isInteger(count)||count<1)throw new Error("ฐานข้อมูลไม่คืนจำนวนครั้งที่พิมพ์");
-    receipt.printed_count=count;
-    el("copy-mark").hidden=count<=1;
+    if(receipt){
+      const result=await sb.rpc("mark_fee_receipt_printed",{p_receipt_id:receipt.id});
+      if(result.error)throw result.error;
+      const count=Number(Array.isArray(result.data)?result.data[0]:result.data);
+      if(!Number.isInteger(count)||count<1)throw new Error("ฐานข้อมูลไม่คืนจำนวนครั้งที่พิมพ์");
+      receipt.printed_count=count;
+      el("copy-mark").hidden=count<=1
+    }
     window.print()
   }catch(error){toast("พิมพ์เอกสารไม่สำเร็จ: "+friendly(error),true)}
   finally{printing=false;el("print-button").disabled=false}
@@ -342,7 +387,7 @@ function closeVoidReceipt(){
 
 el("void-receipt-button").onclick=()=>{
   if(!receipt||receipt.voided_at||voiding||voidBlocked)return;
-  el("void-receipt-detail").textContent=`เลขที่ ${receipt.receipt_no} จะถูกนำกลับมาใช้กับใบถัดไป\nรายการรับเงินทั้งหมดในใบนี้จะถูกยกเลิก และยอดหักออมทรัพย์จะคืนเข้าสมุดโดยอัตโนมัติ`;
+  el("void-receipt-detail").textContent=`ใบเสร็จเลขที่ ${receipt.receipt_no} จะถูกยกเลิก เลขนี้จะไม่ถูกนำกลับมาใช้\nรายการรับเงินทั้งหมดในใบนี้จะถูกยกเลิก และยอดหักออมทรัพย์จะคืนเข้าสมุดโดยอัตโนมัติ`;
   el("void-receipt-reason").value="";
   el("paper-returned").checked=false;
   el("paper-returned-field").hidden=Number(receipt.printed_count||0)<=0;
@@ -375,7 +420,7 @@ el("void-receipt-form").onsubmit=async event=>{
     receipt.voided_at=new Date().toISOString();receipt.void_reason=reason;
     el("void-receipt-overlay").hidden=true;
     renderReceiptState();
-    toast(`ยกเลิกเอกสารเลขที่ ${receipt.receipt_no} แล้ว · ยกเลิก ${result.voided_payments} รายการ${Number(result.savings_returned)>0?` · คืนเงินออมทรัพย์ ${result.savings_returned} รายการ`:""} · เลขนี้พร้อมนำกลับมาใช้กับใบถัดไป`)
+    toast(`ยกเลิกใบเสร็จเลขที่ ${receipt.receipt_no} แล้ว · ยกเลิก ${result.voided_payments} รายการ${Number(result.savings_returned)>0?` · คืนเงินออมทรัพย์ ${result.savings_returned} รายการ`:""}`)
   }catch(error){
     voidBlocked=requestUncertain;
     el("void-receipt-error").textContent=requestUncertain
@@ -397,7 +442,14 @@ if(session){
       el("access-card").hidden=false;
       el("access-card").innerHTML='<div class="readonly"><b>เปิดเอกสารไม่ได้</b><br>หน้านี้สำหรับฝ่ายการเงินและผู้ดูแลระบบเท่านั้น</div>'
     }else{
-      const params=new URLSearchParams(location.search),studentId=params.get("student"),year=params.get("year"),term=Number(params.get("term"));
+      const params=new URLSearchParams(location.search),receiptId=params.get("receipt");
+      let studentId=params.get("student"),year=params.get("year"),term=Number(params.get("term"));
+      if(receiptId){
+        const result=await sb.from("fee_receipts").select("*").eq("id",receiptId).single();
+        if(result.error)throw new Error("โหลดใบเสร็จไม่สำเร็จ: "+result.error.message);
+        receipt=result.data;
+        studentId=receipt.student_id;year=receipt.year;term=Number(receipt.term)
+      }
       if(!studentId||!year||![1,2].includes(term))throw new Error("ลิงก์เอกสารไม่ครบ กรุณาเปิดจากหน้ารับเงินหรือหน้ารายงาน");
       await loadDocument(studentId,year,term);
       el("app").hidden=false
