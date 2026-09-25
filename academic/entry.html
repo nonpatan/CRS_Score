@@ -300,7 +300,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20260924-2";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20260925-1";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -929,7 +929,10 @@ function renderExamStatus() {
   elExamStatus.style.display = canEdit(currentSubject) ? "block" : "none";
   elExamStatus.classList.toggle("closed", closed);
   elExamStatusTitle.textContent = closed ? "ปิดคะแนนสอบแล้ว" : "ยังไม่ปิดคะแนนสอบ";
-  elExamStatusNote.textContent = closed
+  elExamStatusNote.textContent = currentSubject.level === "ประถม"
+    ? (closed ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) + " · นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้น 'ยังไม่ครบ' จนกว่าจะกรอก · ปิดแล้วยังกรอก/แก้คะแนนสอบได้"
+      : "กดปิดเมื่อสอบเสร็จและกรอกคะแนนครบแล้ว · นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้น 'ยังไม่ครบ' จนกว่าจะกรอก")
+    : closed
     ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) +
       " · นักเรียนที่ไม่มีคะแนนสอบติด ร. (ขาดสอบ) ยกเว้นคนที่ติด มส. ซึ่งต้องแก้ มส. ก่อน (เรียนเพิ่มให้ครบเวลา หรือเรียนซ้ำรายวิชา) จึงมีสิทธิ์สอบ · ปิดแล้วยังกรอก/แก้คะแนนสอบได้ ไม่ต้องยกเลิกการปิด เด็กมาสอบทีหลังกรอกคะแนนได้เลย ร. จะหายเอง"
     : "กดปิดเมื่อสอบเสร็จและกรอกคะแนนครบแล้ว · หลังปิด นักเรียนที่ไม่มีคะแนนสอบจะติด ร. (ขาดสอบ) ยกเว้นคนที่ติด มส. ซึ่งต้องแก้ มส. ก่อน (เรียนเพิ่มให้ครบเวลา หรือเรียนซ้ำรายวิชา) จึงมีสิทธิ์สอบ · เด็กมาสอบทีหลังกรอกคะแนนได้ ร. จะหายเอง · ก่อนปิด ยังขึ้นว่ายังไม่ครบ";
@@ -1093,7 +1096,9 @@ btnToggleExam.addEventListener("click", async () => {
   let message = closed
     ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ"
     : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที";
-  if (memberIdSet.has(subjectId)) {
+  if (currentSubject.level === "ประถม") {
+    message = missingCount + " คนยังไม่มีคะแนนสอบ จะขึ้น 'ยังไม่ครบ' จนกว่าจะกรอก";
+  } else if (memberIdSet.has(subjectId)) {
     message += " (มส. ตัดสินรวมที่วิชาบูรณาการ)";
   } else if (missingCount) {
     try {
@@ -1168,7 +1173,7 @@ function hideRemarkSection() {
 }
 
 async function loadRemarkSection() {
-  if (!currentSubject) { elRemarkCard.style.display = "none"; return; }
+  if (!currentSubject || currentSubject.level === "ประถม") { elRemarkCard.style.display = "none"; return; }
   elRemarkCard.style.display = "block";
 
   const { data, error } = await sb
@@ -1222,6 +1227,7 @@ function renderRemarkList() {
 }
 
 document.getElementById("btn-add-remark").addEventListener("click", async () => {
+  if (currentSubject?.level === "ประถม") return;
   const studentId = elRemarkStudent.value;
   const reason = document.getElementById("inp-remark-reason").value.trim();
   if (!currentSubject) { showToast("เลือกวิชาก่อน", false); return; }

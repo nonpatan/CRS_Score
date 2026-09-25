@@ -239,7 +239,7 @@
       <label for="filter-year">ปีการศึกษา</label>
       <select id="filter-year"><option value="">— เลือกชั้นก่อน —</option></select>
     </div>
-    <div class="row2">
+    <div class="row2" id="meeting-fields">
       <div class="field">
         <label for="meet-date">วันนัดพบครูประจำชั้น</label>
         <input type="date" id="meet-date">
@@ -251,7 +251,7 @@
         <div class="hint" id="meet-time-hint"></div>
       </div>
     </div>
-    <div class="hint">ใช้กับนักเรียนที่ติ๊ก 'เชิญมาพบครูประจำชั้น' เท่านั้น</div>
+    <div class="hint" id="meeting-note">ใช้กับนักเรียนที่ติ๊ก 'เชิญมาพบครูประจำชั้น' เท่านั้น</div>
   </div>
 
   <div id="result-area"></div>
@@ -267,12 +267,14 @@ import {
   sb, requireAuth, signOut,
   computeStudentSubjectResults, computeGpa,
   pickCountableSubjects, retentionCoverage, isSubjectResultDecided,
+  isPrimaryGrade, fetchAllRows, loadPrimaryDailyAttendance, computePrimaryDailyAttendance,
+  computePrimaryPromotion, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS,
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter,
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
   loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20260924-2";
+} from "../supabase-client.js?v=20260925-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -495,6 +497,9 @@ function showEmpty(msg) {
 // ตอนสร้างวิชา บางชั้นอาจยังกรอกไม่ครบ — ดึงเฉพาะปีที่มีข้อมูลจริงมาให้เลือก กันเลือกปีมั่ว) ----------
 elGrade.addEventListener("change", async () => {
   const grade = elGrade.value;
+  const meetingDisplay = isPrimaryGrade(grade) ? "none" : "grid";
+  document.getElementById("meeting-fields").style.display = meetingDisplay;
+  document.getElementById("meeting-note").style.display = isPrimaryGrade(grade) ? "none" : "block";
   elYear.innerHTML = "";
   showEmpty("เลือกชั้นและปีการศึกษาเพื่อดูรายงาน");
   if (!grade) {
@@ -526,6 +531,10 @@ elYear.addEventListener("change", () => { setActiveYear(elYear.value); loadRepor
 async function loadReport() {
   const grade = elGrade.value;
   const year = elYear.value;
+  document.querySelector("h1").textContent = isPrimaryGrade(grade) ? "เกณฑ์เลื่อนชั้นประถม" : "เกณฑ์เรียนซ้ำชั้น";
+  document.querySelector("h1 + p").textContent = isPrimaryGrade(grade)
+    ? "แสดงเกณฑ์เลื่อนชั้นและข้อมูลผ่อนผันเพื่อให้คณะกรรมการพิจารณา"
+    : "เลือกชั้นและปีการศึกษา เพื่อดูว่านักเรียนคนไหนเข้าเกณฑ์ต้องเรียนซ้ำชั้น";
   if (!grade || !year) { showEmpty("เลือกชั้นและปีการศึกษาเพื่อดูรายงาน"); return; }
 
   const nextInviteContext = `${grade}|${year}`;
@@ -561,6 +570,11 @@ async function loadReport() {
     showEmpty(e.message); return;
   }
   if (studentResults.size === 0) { showEmpty("ยังไม่มีนักเรียนลงทะเบียนวิชาใดๆ ของชั้น/ปีการศึกษานี้"); return; }
+  if (isPrimaryGrade(grade)) {
+    try { await renderPrimaryReport(studentResults, catalog, grade, year); }
+    catch (error) { showEmpty(error.message); }
+    return;
+  }
   issuedLettersByStudent = new Map((issuedLetters || []).map(letter => [String(letter.student_id), letter]));
   for (const entry of studentResults.values()) {
     const studentId = String(entry.student.id);
@@ -613,6 +627,101 @@ async function loadReport() {
   }
 
   renderReport(rows, grade, year, classCoverage);
+}
+
+async function loadPrimaryActivities(studentIds, year) {
+  const activitiesResult = await fetchAllRows(() => sb.from("competency_assessments")
+    .select("id,name").eq("year", year).eq("source_type", "กิจกรรม"));
+  if (activitiesResult.error) throw new Error("โหลดรายการกิจกรรมไม่สำเร็จ: " + activitiesResult.error.message);
+  const activities = activitiesResult.data || [];
+  const byStudent = new Map(studentIds.map(id => [id, []]));
+  if (!activities.length) return byStudent;
+  const activityIds = activities.map(item => item.id);
+  for (let start = 0; start < studentIds.length; start += 200) {
+    const chunk = studentIds.slice(start, start + 200);
+    const [memberResult, passResult] = await Promise.all([
+      fetchAllRows(() => sb.from("competency_assessment_members").select("assessment_id,student_id")
+        .in("assessment_id", activityIds).in("student_id", chunk)),
+      fetchAllRows(() => sb.from("activity_pass_results").select("assessment_id,student_id,passed")
+        .in("assessment_id", activityIds).in("student_id", chunk))
+    ]);
+    if (memberResult.error || passResult.error) throw new Error("โหลดผลกิจกรรมไม่สำเร็จ: " + (memberResult.error || passResult.error).message);
+    const passByKey = new Map((passResult.data || []).map(row => [row.assessment_id + "|" + row.student_id, row.passed]));
+    const activityById = new Map(activities.map(item => [item.id, item]));
+    for (const member of memberResult.data || []) {
+      const activity = activityById.get(member.assessment_id);
+      if (!activity) continue;
+      byStudent.get(member.student_id)?.push({ name: activity.name,
+        passed: passByKey.get(member.assessment_id + "|" + member.student_id) ?? null });
+    }
+  }
+  return byStudent;
+}
+
+async function renderPrimaryReport(studentResults, catalog, grade, year) {
+  const ids = [...studentResults.keys()];
+  const [dailyRows, activitiesByStudent] = await Promise.all([
+    loadPrimaryDailyAttendance(ids, year), loadPrimaryActivities(ids, year)
+  ]);
+  const rows = [...studentResults.values()].map(entry => {
+    const studentId = entry.student.id;
+    const coverage = retentionCoverage(catalog, entry.subjects.map(item => item.subject));
+    const promotion = computePrimaryPromotion(entry.subjects,
+      computePrimaryDailyAttendance(studentId, dailyRows), activitiesByStudent.get(studentId) || [], coverage);
+    return { ...entry, coverage, promotion };
+  });
+  const rank = { "ส่งคณะกรรมการ": 0, "รอผล": 1, "ผ่านเกณฑ์เลื่อนชั้น": 2 };
+  rows.sort((a, b) => rank[a.promotion.overall] - rank[b.promotion.overall] ||
+    String(a.student.student_no || "").localeCompare(String(b.student.student_no || "")));
+  const counts = Object.fromEntries(Object.keys(rank).map(key => [key, rows.filter(row => row.promotion.overall === key).length]));
+  const head = "ชั้น " + escapeHtml(grade) + " ปีการศึกษา " + escapeHtml(year) +
+    " · ผ่านเกณฑ์เลื่อนชั้น " + counts["ผ่านเกณฑ์เลื่อนชั้น"] +
+    " · ส่งคณะกรรมการ " + counts["ส่งคณะกรรมการ"] + " · รอผล " + counts["รอผล"];
+  elEmptyHint.style.display = "none";
+  elResult.innerHTML = "<div class='card'><div class='summary-line'>" + head +
+    "</div><div class='result-note'>ระบบแสดงข้อมูลประกอบ คณะกรรมการของโรงเรียนเป็นผู้พิจารณา</div></div>" +
+    rows.map(renderPrimaryStudentRow).join("");
+}
+
+function renderPrimaryStudentRow(row) {
+  const { student: stu, subjects, coverage, promotion } = row;
+  const attendance = promotion.attendance;
+  const statusBadge = status => "<span class='badge " + (status === "ผ่าน" ? "good" : "mid") + "'>" + status + "</span>";
+  const subjectRows = subjects.map(item => {
+    const status = !isSubjectResultDecided(item) ? "รอผล" : item.result.grade >= 1 ? "ผ่าน" : "ไม่ผ่าน";
+    return "<div class='score-row'><span>" + escapeHtml(item.subject.name) +
+      "</span><span class='val'>" + statusBadge(status) +
+      (status === "รอผล" ? " ยังไม่ครบ" : " เกรด " + item.result.grade + " (" + item.result.percentScore.toFixed(1) + "%)") + "</span></div>";
+  }).join("");
+  const activityRows = promotion.activities.map(item => "<div class='score-row'><span>" + escapeHtml(item.name) +
+    "</span><span class='val'>" + statusBadge(item.passed === null ? "รอผล" : item.passed ? "ผ่าน" : "ไม่ผ่าน") + "</span></div>").join("");
+  const concessionHtml = !promotion.concessions ? "" :
+    "<div class='section'><div class='section-title'>ข้อมูลประกอบการผ่อนผันตามข้อ 1.4</div>" +
+    "<div class='result-note'>ก. เวลาเรียน: ขาด " + attendance.missedDays + " วัน · ลาป่วย " + attendance.sickLeaveCount +
+      " · ลากิจ " + attendance.personalLeaveCount + " — เหตุจำเป็นหรือไม่ คณะกรรมการตัดสิน</div>" +
+    "<div class='result-note'>ข. วิชาที่ไม่ผ่านและอาจสอนซ่อมเสริม: " + (promotion.failedSubjects.length
+      ? promotion.failedSubjects.map(item => escapeHtml(item.subject.name) + " " + item.result.percentScore.toFixed(1) + "%").join(" · ")
+      : "ไม่มี") + "</div>" +
+    "<div class='result-note'>ค. ภาษาไทย คณิต วิทย์ สังคมฯ: " + promotion.essentials.map(item =>
+      escapeHtml(item.label) + " " + (item.status === "ผ่าน" ? "✓" : item.status === "ไม่ผ่าน" ? "✗" : "?") +
+      " " + item.status).join(" · ") + "</div></div>";
+  return "<div class='card student-card'><div class='student-head'><div class='student-identity'><span class='name'>" +
+    escapeHtml(stu.name) + "</span><span class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
+    (stu.classroom ? " · " + escapeHtml(stu.classroom) : "") + "</span></div></div>" +
+    "<div class='section'><div class='section-title'>เกณฑ์เลื่อนชั้นตามข้อ 1.3</div>" +
+    "<div class='score-row'><span>1. เวลาเรียนทั้งปี " + attendance.percent.toFixed(1) + "% (ขาด " + attendance.missedDays +
+      " วัน จาก " + PRIMARY_SCHOOL_DAYS + "; เกณฑ์ไม่เกิน " + PRIMARY_MAX_MISSED_DAYS + " วัน)</span><span>" + statusBadge(promotion.timeStatus) + "</span></div>" +
+    "<div class='result-note'>ขาด " + attendance.absentCount + " · ลาป่วย " + attendance.sickLeaveCount +
+      " · ลากิจ " + attendance.personalLeaveCount + (attendance.below80 ? " · เวลาเรียนไม่ถึง 80%" : "") + "</div>" +
+    "<div class='score-row'><span>2. ผ่านทุกรายวิชา</span><span>" + statusBadge(promotion.subjectStatus) + "</span></div>" +
+    (coverage.ready ? "" : "<div class='warn-note'>" + escapeHtml(coverage.reason) + "</div>") + subjectRows +
+    "<div class='result-note'>อ่าน คิดวิเคราะห์ และเขียน ประเมินรวมในรายวิชา</div>" +
+    "<div class='score-row'><span>3. กิจกรรมพัฒนาผู้เรียน</span><span>" + statusBadge(promotion.activityStatus) + "</span></div>" +
+    (activityRows || "<div class='result-note'>ยังไม่มีรายการกิจกรรมที่ลงทะเบียน</div>") + "</div>" +
+    concessionHtml + "<div class='section'><div class='result-line'><span>สรุป</span><span class='badge " +
+    (promotion.overall === "ผ่านเกณฑ์เลื่อนชั้น" ? "good" : "mid") + "'>" +
+    (promotion.overall === "ส่งคณะกรรมการ" ? "ไม่ผ่านเกณฑ์เลื่อนชั้น — ส่งคณะกรรมการพิจารณา" : promotion.overall) +
+    "</span></div></div></div>";
 }
 
 function subjBadge(result) {

@@ -369,8 +369,9 @@ import {
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
   computeCombinedCompetencyResult, loadCompetencySettings, computeAttendanceRisk, isPrimaryGrade,
-  MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting
-} from "../supabase-client.js?v=20260924-2";
+  MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting,
+  loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS
+} from "../supabase-client.js?v=20260925-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -439,6 +440,7 @@ let activitySummaryByStudent = new Map(), activitySummaryError = "", activitySco
 // แท็บ "ผลการเรียนรายคน" (GPA)
 let gpaStudents = [], gpaPlacementError = "", selectedGpaStudentId = "";
 let gpaResultsMap = null, gpaResultsKey = "", gpaResultsError = "";
+let primaryDailyRows = [], gpaDailyRows = [];
 // แท็บ "รายละเอียดการเข้าเรียน"
 let attendancePlacements = [], attendancePlacementError = "";
 let attendanceSubject = null, attendanceMembers = [], attendanceRoster = [], attendanceSessions = [];
@@ -687,6 +689,11 @@ elSubject.addEventListener("change", async () => {
   if (placementResult.missing > 0) {
     placementWarning = "นักเรียน " + placementResult.missing + " คนยังไม่มีประวัติชั้น/ห้องของปี " + currentSubject.year + " จึงแสดงได้เมื่อเลือกทุกห้อง";
   }
+  try {
+    primaryDailyRows = currentSubject.level === "ประถม"
+      ? await loadPrimaryDailyAttendance(students.map(student => student.id), currentSubject.year)
+      : [];
+  } catch (error) { showEmpty(error.message); return; }
   await loadActivitySummaries(currentSubject.year, currentSubject.term, students.map(student => student.id));
   await loadClassroomsByGrade(currentSubject.grade_level, currentSubject.year);
 
@@ -824,10 +831,12 @@ function render() {
     }
   } else {
     if (subjectStructureMissing) {
-      html += "<div class='warn-note'>วิชานี้ยังไม่ได้ตั้งโครงสร้างคะแนน — แสดงได้เฉพาะสถานะ มส./ร. · ไปตั้งค่าที่หน้า “จัดการโครงสร้าง”</div>";
+      html += "<div class='warn-note'>" + (currentSubject.level === "ประถม"
+        ? "วิชานี้ยังไม่ได้ตั้งโครงสร้างคะแนน · ไปตั้งค่าที่หน้า “จัดการโครงสร้าง”"
+        : "วิชานี้ยังไม่ได้ตั้งโครงสร้างคะแนน — แสดงได้เฉพาะสถานะ มส./ร. · ไปตั้งค่าที่หน้า “จัดการโครงสร้าง”") + "</div>";
     }
     const missingPeriods = !currentSubject.total_periods;
-    if (missingPeriods) {
+    if (missingPeriods && currentSubject.level !== "ประถม") {
       html += "<div class='warn-note'>วิชานี้ยังไม่ได้กำหนดจำนวนคาบเรียนทั้งหมด (total_periods) เลยเช็ค มส. ให้ไม่ได้ — ผลการเรียนด้านล่างข้ามการเช็ค มส. ไปก่อน</div>";
     }
     for (const stu of targetStudents) {
@@ -837,6 +846,16 @@ function render() {
   }
 
   elResult.innerHTML = html;
+}
+
+function primaryAttendanceHtml(studentId, rows = primaryDailyRows) {
+  const attendance = computePrimaryDailyAttendance(studentId, rows);
+  const detail = "เวลาเรียนทั้งปี " + attendance.percent.toFixed(1) + "% (ขาด " + attendance.missedDays +
+    " วัน จาก " + PRIMARY_SCHOOL_DAYS + ") · ขาด " + attendance.absentCount +
+    " · ลาป่วย " + attendance.sickLeaveCount + " · ลากิจ " + attendance.personalLeaveCount;
+  // ห่อ .section เพราะทุกจุดที่เรียกวางไว้ระหว่าง section ของการ์ด ไม่งั้นบรรทัดนี้ชิดขอบการ์ด
+  return "<div class='section'><div class='" + (attendance.below80 ? "warn-note" : "result-note") + "'>" + detail +
+    (attendance.below80 ? " · เวลาเรียนไม่ถึง 80%" : "") + "</div></div>";
 }
 
 function scoringStructureReason(scoring) {
@@ -861,14 +880,15 @@ function resultBadgeLabel(res, scoring) {
 }
 
 function renderIntegratedCard(stu, ir) {
-  const noPeriodWarning = ir.noPeriodSubjects.length
+  const primary = currentSubject.level === "ประถม";
+  const noPeriodWarning = !primary && ir.noPeriodSubjects.length
     ? "<div class='warn-note'>⚠️ ยังไม่ได้กรอกจำนวนคาบของ: " + escapeHtml(ir.noPeriodSubjects.join(", ")) +
       " — ผลเวลาเรียน/มส. ยังไม่ครบ</div>"
     : "";
   // แสดงคาบขาดรายวิชาย่อยด้วย — ครูจะได้เห็นว่าเด็กขาดหนักที่วิชาไหน แล้วไปตามแก้ที่วิชานั้น
   const memberRows = ir.memberResults.map(m => {
     const weightText = m.weight ? m.weight + " คาบ" : "ไม่มีน้ำหนัก";
-    const missedText = m.missedPeriods > 0 ? " · ขาด " + m.missedPeriods + " คาบ" : "";
+    const missedText = !primary && m.missedPeriods > 0 ? " · ขาด " + m.missedPeriods + " คาบ" : "";
     return "<div class='score-row'><span>" + escapeHtml(m.subject.name) +
       " <span class='hint'>(" + weightText + missedText + ")</span>" +
       (m.scoring.notScoredUnits.length ? "<br><span class='hint'>ไม่คิดคะแนน " + m.scoring.notScoredUnits.length + " หน่วย: " +
@@ -924,7 +944,7 @@ function renderIntegratedCard(stu, ir) {
     overallHtml =
       "<div class='result-line'><span>ผลการเรียน (บูรณาการ)</span><span class='badge " + badgeClass + "'>เกรด " + g + "</span></div>" +
       "<div class='result-note'>ถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียนของวิชาย่อย = " + ir.overall.percentScore.toFixed(1) + "%" +
-      (ir.overall.makeupTotal > 0 ? " · ขาดไม่เกินเพดานแล้วหลังนับชั่วโมงชดเชย " + ir.overall.makeupTotal + " คาบ" : "") + "</div>";
+      (!primary && ir.overall.makeupTotal > 0 ? " · ขาดไม่เกินเพดานแล้วหลังนับชั่วโมงชดเชย " + ir.overall.makeupTotal + " คาบ" : "") + "</div>";
   }
 
   return (
@@ -942,6 +962,7 @@ function renderIntegratedCard(stu, ir) {
         (competencySection || "<div class='hint'>ยังไม่มีวิชาย่อยไหนกรอกสมรรถนะหลักไว้</div>") +
       "</div>" +
       "<div class='section'>" + overallHtml + "</div>" +
+      (primary ? primaryAttendanceHtml(stu.id) : "") +
       renderActivitySummarySection(stu.id) +
       noPeriodWarning +
     "</div>"
@@ -949,6 +970,7 @@ function renderIntegratedCard(stu, ir) {
 }
 
 function renderStudentCard(stu, r) {
+  const primary = currentSubject.level === "ประถม";
   let subjectRows = r.subjectUnits.map(u =>
     "<div class='score-row'><span>" + escapeHtml(u.name) +
     (u.notScoredCount > 0 ? "<br><span class='hint'>ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
@@ -995,7 +1017,7 @@ function renderStudentCard(stu, r) {
     resultHtml =
       "<div class='result-line'><span>ผลการเรียน</span><span class='badge " + badgeClass + "'>เกรด " + g + "</span></div>" +
       "<div class='result-note'>คิดจาก " + r.result.percentScore.toFixed(1) + "% ของคะแนนเต็มวิชา" +
-      (r.result.makeupTotal > 0 ? " · ขาดไม่เกินเพดานแล้วหลังนับชั่วโมงชดเชย " + r.result.makeupTotal + " คาบ" : "") + "</div>";
+      (!primary && r.result.makeupTotal > 0 ? " · ขาดไม่เกินเพดานแล้วหลังนับชั่วโมงชดเชย " + r.result.makeupTotal + " คาบ" : "") + "</div>";
   }
 
   const scoreSection = subjectStructureMissing ? "" :
@@ -1029,6 +1051,7 @@ function renderStudentCard(stu, r) {
       scoreSection +
       competencyScoreSection +
       "<div class='section'>" + resultHtml + "</div>" +
+      (primary ? primaryAttendanceHtml(stu.id) : "") +
       renderActivitySummarySection(stu.id) +
     "</div>"
   );
@@ -1065,10 +1088,18 @@ function attendanceWarnPercent() {
 }
 
 // พาดหัวสรุปการเข้าเรียน: เรียนซ้ำใช้ยอดขาดดิบ ส่วนเกณฑ์อื่นใช้ยอดขาดสุทธิหลังหักชดเชย
-function attendanceAbsenceOverviewHtml(counts, totalPeriods, risk) {
+function attendanceAbsenceOverviewHtml(counts, totalPeriods, risk, primary = false) {
   const missedTimes = ["ขาด", "ลาป่วย", "ลากิจ"]
     .reduce((sum, status) => sum + counts[status].times, 0);
   const leavePeriods = counts["ลาป่วย"].periods + counts["ลากิจ"].periods;
+
+  if (primary) {
+    return "<div class='attendance-absence-overview " + (risk.critical ? "risk-warn" : "risk-safe") + "'>" +
+      "<div class='main'>เวลาเรียนรายวิชา <strong>" + Math.max(0, 100 - risk.rawPercent).toFixed(1) +
+      "%</strong> · ขาด " + formatAttendanceNumber(risk.rawMissed) + " / " + formatAttendanceNumber(totalPeriods) +
+      " คาบ" + (risk.critical ? "<span class='risk-tag'>เวลาเรียนไม่ถึง 80%</span>" : "") + "</div>" +
+      "<div class='risk-basis'>ข้อมูลประกอบจากเช็คชื่อรายวิชา · เวลาเรียนเพื่อเลื่อนชั้นใช้เช็ครายวันรายคน</div></div>";
+  }
 
   const shownMissed = risk.retake ? risk.rawMissed : risk.netMissed;
   const shownPercent = risk.retake ? risk.rawPercent : risk.percent;
@@ -1190,16 +1221,18 @@ function renderAttendanceStudentList() {
 
   elAttStudentList.innerHTML = "";
   for (const student of rows) {
-    const risk = computeAttendanceRisk(student.id, riskDataList, { warnPercent: attendanceWarnPercent() });
+    const primary = isPrimaryGrade(elAttGrade.value);
+    const risk = computeAttendanceRisk(student.id, riskDataList, { warnPercent: attendanceWarnPercent(), primary });
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "student-button" + (risk.critical ? " attendance-critical" : risk.risky ? " attendance-risk" : "");
+    button.className = "student-button" + (!primary && risk.critical ? " attendance-critical" : risk.risky ? " attendance-risk" : "");
     button.dataset.student = student.id;
     button.innerHTML = "<span class='student-name'>" + escapeHtml(student.name) + "</span>" +
       "<span class='student-meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
       (student.classroom ? " · " + escapeHtml(student.classroom) : "") +
       (risk.risky ? "<span class='attendance-risk-label'>" +
-        (risk.retake ? "เรียนซ้ำรายวิชา · ขาดดิบ " + risk.rawPercent.toFixed(1) + "%"
+        (primary ? "เวลาเรียนรายวิชา " + Math.max(0, 100 - risk.rawPercent).toFixed(1) + "% · ขาดดิบ " + risk.rawMissed + " คาบ"
+        : risk.retake ? "เรียนซ้ำรายวิชา · ขาดดิบ " + risk.rawPercent.toFixed(1) + "%"
           : risk.critical ? "เข้าข่าย มส. · ขาดสุทธิ " + risk.percent.toFixed(1) + "%"
           : "เสี่ยง มส. · ขาดสุทธิ " + risk.percent.toFixed(1) + "%") +
         "</span>" : "") +
@@ -1347,7 +1380,7 @@ function renderAttendanceMember(student, subject, { integratedMember = false } =
     subject,
     sessions: sessionsForSubject,
     makeupHours: attendanceMakeupHours.filter(row => row.subject_id === subject.id)
-  }], { warnPercent: attendanceWarnPercent() });
+  }], { warnPercent: attendanceWarnPercent(), primary: isPrimaryGrade(elAttGrade.value) });
   const leavePeriods = counts["ลาป่วย"].periods + counts["ลากิจ"].periods;
   // วิชาย่อยของบูรณาการ: โชว์ยอดขาดของวิชานี้เฉย ๆ ไม่ตัดสิน มส. (มส. คิดรวมที่การ์ดบนสุด)
   const absenceOverview = integratedMember
@@ -1355,7 +1388,7 @@ function renderAttendanceMember(student, subject, { integratedMember = false } =
         " (ขาดล้วน " + formatAttendanceNumber(counts["ขาด"].periods) + " · ลาป่วย/ลากิจ " +
         formatAttendanceNumber(leavePeriods) + " นับครึ่ง)" +
         (risk.makeupTotal > 0 ? " · ชดเชย " + formatAttendanceNumber(risk.makeupTotal) + " คาบ" : "") + "</div>"
-    : attendanceAbsenceOverviewHtml(counts, totalPeriods, risk);
+    : attendanceAbsenceOverviewHtml(counts, totalPeriods, risk, isPrimaryGrade(elAttGrade.value));
   const statHtml = attendanceStatHtml(counts);
   const historyHtml = history.map(item =>
     "<div class='attendance-row'>" +
@@ -1404,8 +1437,9 @@ function renderIntegratedAttendanceOverview(student, subjectsForStudent) {
   const recordedTimes = attendanceStatuses.reduce((sum, status) => sum + counts[status].times, 0);
   const recordedPeriods = attendanceStatuses.reduce((sum, status) => sum + counts[status].periods, 0);
   const totalPeriods = attendanceMembers.reduce((sum, subject) => sum + (Number(subject.total_periods) || 0), 0);
-  const risk = computeAttendanceRisk(student.id, riskDataList, { warnPercent: attendanceWarnPercent() });
-  const absenceOverview = attendanceAbsenceOverviewHtml(counts, totalPeriods, risk);
+  const primary = isPrimaryGrade(elAttGrade.value);
+  const risk = computeAttendanceRisk(student.id, riskDataList, { warnPercent: attendanceWarnPercent(), primary });
+  const absenceOverview = attendanceAbsenceOverviewHtml(counts, totalPeriods, risk, primary);
 
   return "<div class='card attendance-integrated-card'>" +
     "<div class='section-title'>รวมวิชาบูรณาการ · " + escapeHtml(attendanceSubject.name) + "</div>" +
@@ -1415,7 +1449,7 @@ function renderIntegratedAttendanceOverview(student, subjectsForStudent) {
     "</div>" +
     absenceOverview +
     "<div class='attendance-summary'>" + attendanceStatHtml(counts) + "</div>" +
-    "<div class='hint'>ยอดรวมใช้ฐานเวลาเรียนของทุกวิชาสมาชิกชุดเดียวกับหน้าเฝ้าระวัง มส. และแสดงประวัติแยกรายวิชาด้านล่าง</div>" +
+    "<div class='hint'>" + (primary ? "ยอดรวมคาบรายวิชาเป็นข้อมูลประกอบเท่านั้น · เวลาเรียนเพื่อเลื่อนชั้นใช้เช็ครายวันรายคน" : "ยอดรวมใช้ฐานเวลาเรียนของทุกวิชาสมาชิกชุดเดียวกับหน้าเฝ้าระวัง มส. และแสดงประวัติแยกรายวิชาด้านล่าง") + "</div>" +
   "</div>";
 }
 
@@ -1886,7 +1920,7 @@ async function loadGpaPlacements() {
 }
 
 // เปลี่ยนปี/ชั้น/เทอม = ผลที่แคชไว้ใช้ไม่ได้แล้ว ต้องคำนวณใหม่
-function invalidateGpaResults() { gpaResultsMap = null; gpaResultsKey = ""; gpaResultsError = ""; }
+function invalidateGpaResults() { gpaResultsMap = null; gpaResultsKey = ""; gpaResultsError = ""; gpaDailyRows = []; }
 
 function refreshGpaStudentFilters() {
   const grade = elGpaGrade.value;
@@ -1958,6 +1992,8 @@ async function ensureGpaResults() {
   gpaResultsError = "";
   try {
     gpaResultsMap = await computeStudentSubjectResults({ grade, year, term: term || undefined });
+    gpaDailyRows = isPrimaryGrade(grade)
+      ? await loadPrimaryDailyAttendance([...gpaResultsMap.keys()], year) : [];
     gpaResultsKey = key;
   } catch (e) {
     gpaResultsMap = null; gpaResultsKey = ""; gpaResultsError = e.message;
@@ -2016,7 +2052,7 @@ async function loadGpaStudentResult(student) {
   if (pending) {
     verdictHtml =
       "<div class='result-line'><span>เกรดเฉลี่ย (" + scopeText + ")</span><span class='badge mid'>ยังสรุปไม่ได้</span></div>" +
-      "<div class='hint'>" + escapeHtml(pendingReason) + " — ผลทางการยังคิดไม่ได้ (ติด 0/ร./มส. " + failCount + " จาก " + total + " วิชา)</div>" +
+      "<div class='hint'>" + escapeHtml(pendingReason) + " — ผลทางการยังคิดไม่ได้ (" + (isPrimaryGrade(grade) ? "ไม่ผ่าน " : "ติด 0/ร./มส. ") + failCount + " จาก " + total + " วิชา)</div>" +
       (provisionalGpa !== null
         ? "<div class='warn-note'>เกรดเฉลี่ยชั่วคราว " + provisionalGpa.toFixed(2) + " จาก " + countedSubjects + " วิชา — เลขนี้ยังไม่ใช่ของจริง</div>"
         : "");
@@ -2024,7 +2060,7 @@ async function loadGpaStudentResult(student) {
     const cls = gpa >= 3 ? "good" : (gpa >= 1.5 ? "mid" : "bad");
     verdictHtml =
       "<div class='result-line'><span>เกรดเฉลี่ย (" + scopeText + ")</span><span class='badge " + cls + "'>" + gpa.toFixed(2) + "</span></div>" +
-      (failCount ? "<div class='hint'>ติด 0/ร./มส. " + failCount + " จาก " + total + " วิชา</div>" : "");
+      (failCount ? "<div class='hint'>" + (isPrimaryGrade(grade) ? "ไม่ผ่าน " : "ติด 0/ร./มส. ") + failCount + " จาก " + total + " วิชา</div>" : "");
   }
 
   elGpaResult.innerHTML =
@@ -2033,7 +2069,8 @@ async function loadGpaStudentResult(student) {
         "<span class='student-meta'>รหัสประจำตัว " + escapeHtml(student.student_no) +
         (student.classroom ? " · " + escapeHtml(student.classroom) : "") + "</span></div>" +
       "<div class='section'><div class='section-title'>รายวิชา (" + total + " วิชา · " + scopeText + ")</div>" + subjRows + "</div>" +
-      (noPeriodSubjects.length
+      (isPrimaryGrade(grade) ? primaryAttendanceHtml(student.id, gpaDailyRows) : "") +
+      (!isPrimaryGrade(grade) && noPeriodSubjects.length
         ? "<div class='warn-note'>⚠️ ยังไม่ได้กรอกจำนวนคาบของ: " + escapeHtml(noPeriodSubjects.join(", ")) + " — ผลเวลาเรียน/มส. ยังไม่ครบ</div>"
         : "") +
       "<div class='section'>" + verdictHtml + "</div>" +

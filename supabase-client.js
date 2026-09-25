@@ -1658,6 +1658,27 @@ export const MS_RETAKE_RATIO = 0.40;          // ขาดดิบเกิน�
 export const MS_MAKEUP_RATIO = 0.20;          // ขาดสุทธิเกินนี้ = ต้องเรียนเพิ่มให้ครบเวลา
 export const MS_WARN_PERCENT_SECONDARY = 10;  // มัธยม: ขาดสุทธิถึงเท่านี้ = ขึ้นหน้าเฝ้าระวัง
 export const MS_WARN_PERCENT_PRIMARY = 5;     // ประถม: เตือนเร็วกว่าเพราะคาบทั้งปีมากกว่า
+export const PRIMARY_SCHOOL_DAYS = 200;
+export const PRIMARY_MAX_MISSED_DAYS = PRIMARY_SCHOOL_DAYS * MS_MAKEUP_RATIO;
+
+// เวลาเรียนประถมเป็นยอดรายคนทั้งปีจากเช็คชื่อรายวัน ไม่ใช้คาบรายวิชาเป็นผลตัดสิน
+export function computePrimaryDailyAttendance(studentId, dailyRows = []) {
+  let absentCount = 0, sickLeaveCount = 0, personalLeaveCount = 0, recordedDays = 0;
+  for (const row of dailyRows || []) {
+    if (row.student_id !== studentId) continue;
+    recordedDays++;
+    if (row.status === "ขาด") absentCount++;
+    else if (row.status === "ลาป่วย") sickLeaveCount++;
+    else if (row.status === "ลากิจ") personalLeaveCount++;
+  }
+  const leaveCount = sickLeaveCount + personalLeaveCount;
+  const missedDays = absentCount + leaveCount * 0.5;
+  return {
+    missedDays, absentCount, leaveCount, sickLeaveCount, personalLeaveCount, recordedDays,
+    percent: Math.max(0, (PRIMARY_SCHOOL_DAYS - missedDays) / PRIMARY_SCHOOL_DAYS * 100),
+    below80: missedDays > PRIMARY_MAX_MISSED_DAYS
+  };
+}
 
 // เกณฑ์แปลงเปอร์เซ็นต์คะแนนเป็นเกรด (มาตรฐาน 8 ระดับ ตามที่ยืนยันแล้วใน CLAUDE.md)
 export function percentToGrade(p) {
@@ -1710,6 +1731,19 @@ export function computeAttendanceRisk(studentId, subjectDataList, options = {}) 
     makeupTotal += (item.makeupHours || [])
       .filter(row => row.student_id === studentId)
       .reduce((sum, row) => sum + (Number(row.periods) || 0), 0);
+  }
+
+  // หน้าเฝ้าระวังประถมยังดูรายวิชา แต่ใช้คาบขาดดิบเป็นข้อมูลประกอบ ไม่หักชั่วโมงชดเชยเดิม
+  if (options.primary) {
+    const has = totalBase > 0;
+    const percent = has ? rawMissed / totalBase * 100 : 0;
+    const critical = has && rawMissed > totalBase * MS_MAKEUP_RATIO;
+    return {
+      totalBase, rawMissed, makeupTotal: 0, netMissed: rawMissed,
+      percent, rawPercent: percent, retake: false, critical,
+      risky: has && percent >= warnPercent,
+      level: !has ? null : critical ? "critical" : percent >= warnPercent ? "warn" : null
+    };
   }
 
   const netMissed = Math.max(0, rawMissed - makeupTotal);
@@ -1927,7 +1961,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
     .filter(m => m.student_id === studentId)
     .reduce((sum, m) => sum + Number(m.periods), 0);
 
-  // 1) เช็ค มส. ก่อน ร. — ใช้ทั้งประถมและมัธยม (ยืนยันกับผู้ใช้แล้ว) ต้องมีทั้ง total_periods
+  // 1) เช็ค มส. ก่อน ร. เฉพาะมัธยม — ต้องมีทั้ง total_periods
   //    กับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้ง ไม่งั้นข้ามไปคิดเกรดตามปกติ (ยัง เช็ค มส. ไม่ได้)
   // มส. มี 2 ระดับ ตาม "จำนวนคาบขาดสะสมจริง" เทียบกับเพดานคาบที่ขาดได้สูงสุด (ไม่ใช่ % ของคาบ
   // เต็มตามรอบวิชาแบบเดิม — เปลี่ยนเพราะเทียบ % ตั้งแต่ช่วงต้นทำให้ติด มส. ง่ายเกินจริง ยืนยันแล้ว
@@ -1936,7 +1970,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   //   ขาดสะสม > 20% ของคาบเต็มตามรอบวิชา และ <= 40%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชย
   //     ลบยอดขาดสุทธิให้ไม่เกิน 20% ได้
   //   ขาดสะสม > 40% ของคาบเต็มตามรอบวิชา               → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
-  if (!skipMs && subj.total_periods && sessionsArr.length > 0) {
+  if (subj.level !== "ประถม" && !skipMs && subj.total_periods && sessionsArr.length > 0) {
     const rawMissed = computeMissedPeriods(studentId, sessionsArr);
     const maxMissedRetake = subj.total_periods * MS_RETAKE_RATIO;
     const maxMissedMakeup = subj.total_periods * MS_MAKEUP_RATIO;
@@ -1955,14 +1989,14 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   }
 
   // 2) เช็ค ร. ที่ครูระบุเอง ก่อน ร. จากคะแนนสอบที่ขาด
-  const remark = remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
+  const remark = subj.level !== "ประถม" && remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
   if (remark) {
     return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "ร.", reason: remark.reason } };
   }
 
   // ร. ที่ระบบคำนวณจากการไม่มีคะแนนสอบ — เกิดหลังครูปิดคะแนนสอบเท่านั้น
   // ไม่เขียนลง remarks เพื่อให้หายเองเมื่อเปิดคะแนนหรือกรอกคะแนนย้อนหลัง
-  if (subj.exam_closed_at && !examRow) {
+  if (subj.level !== "ประถม" && subj.exam_closed_at && !examRow) {
     return {
       subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring,
       result: { type: "ร.", reason: "ไม่มีคะแนนสอบปลายภาค/ปลายปี" }
@@ -2048,7 +2082,7 @@ export function computeIntegratedResult(studentId, memberDataList) {
 
   // 1) เช็ค มส. รวมก่อน (มส. ชนะ ร.) — ต้องมีฐานเวลากับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้งถึงเช็คได้
   let overall = null;
-  if (totalBase > 0 && anySessions) {
+  if (memberDataList[0]?.subject?.level !== "ประถม" && totalBase > 0 && anySessions) {
     const maxMissedRetake = totalBase * MS_RETAKE_RATIO;
     const maxMissedMakeup = totalBase * MS_MAKEUP_RATIO;
     if (rawMissed > maxMissedRetake) {
@@ -2275,6 +2309,35 @@ export function isSubjectResultDecided(item) {
   return !!(item.scoring && item.scoring.complete);
 }
 
+// เกณฑ์เลื่อนชั้นประถม 1.3 และข้อมูลผ่อนผัน 1.4 — แสดงให้คณะกรรมการพิจารณา
+// activities = รายการที่ลงทะเบียน [{ name, passed: true/false/null }]
+export function computePrimaryPromotion(subjects, attendance, activities, coverage) {
+  const list = Array.isArray(subjects) ? subjects : [];
+  const activityList = Array.isArray(activities) ? activities : [];
+  const timeStatus = attendance.below80 ? "ไม่ผ่าน" : "ผ่าน";
+  const unfinished = !coverage?.ready || !list.length || list.some(item => !isSubjectResultDecided(item));
+  const failedSubjects = list.filter(item => isSubjectResultDecided(item) && item.result.type === "grade" && item.result.grade < 1);
+  const subjectStatus = failedSubjects.length ? "ไม่ผ่าน" : unfinished ? "รอผล" : "ผ่าน";
+  const activityStatus = activityList.some(item => item.passed === false) ? "ไม่ผ่าน"
+    : !activityList.length || activityList.some(item => item.passed !== true) ? "รอผล" : "ผ่าน";
+  const statuses = [timeStatus, subjectStatus, activityStatus];
+  const overall = statuses.includes("ไม่ผ่าน") ? "ส่งคณะกรรมการ"
+    : statuses.includes("รอผล") ? "รอผล" : "ผ่านเกณฑ์เลื่อนชั้น";
+  const essentials = [
+    { label: "ภาษาไทย", items: list.filter(item => item.subject?.subject_type !== "บูรณาการ" && String(item.subject?.code || "").startsWith("ท")) },
+    { label: "คณิตศาสตร์", items: list.filter(item => item.subject?.subject_type !== "บูรณาการ" && String(item.subject?.code || "").startsWith("ค")) },
+    { label: "วิชาบูรณาการ", items: list.filter(item => item.subject?.subject_type === "บูรณาการ") }
+  ].map(group => ({
+    label: group.label,
+    status: !group.items.length ? "หาวิชาไม่พบ"
+      : group.items.some(item => isSubjectResultDecided(item) && item.result.type === "grade" && item.result.grade < 1) ? "ไม่ผ่าน"
+      : group.items.some(item => !isSubjectResultDecided(item)) ? "รอผล" : "ผ่าน"
+  }));
+  return { timeStatus, subjectStatus, activityStatus, overall, failedSubjects,
+    essentials, attendance, activities: activityList,
+    concessions: overall === "ส่งคณะกรรมการ" };
+}
+
 // ============================================================
 // ภาพรวมฝ่ายวิชาการ — ใช้ร่วมกันระหว่าง academic/index.html กับ dashboard.html
 // ------------------------------------------------------------
@@ -2287,9 +2350,8 @@ export function isSubjectResultDecided(item) {
 //
 // เกณฑ์ (ยืนยันกับผู้ใช้ 2026-07-25):
 //   มัธยม → เสี่ยงติด มส. เมื่อขาดสุทธิ >= 10% ของคาบวิชา (เกณฑ์เดิมของ computeAttendanceRisk)
-//   ประถม → "ขาดบ่อย" เมื่อขาดสุทธิ >= 5% (เตือนเร็วกว่า เพราะอยากรู้ตั้งแต่ยังแก้ทัน)
-//   ทั้งสองระดับ วิกฤตที่ > 20% เท่ากัน เพราะกฎ มส. ใช้กับทั้งประถมและมัธยม —
-//   การแยกนี้เป็นแค่ "วิธีนำเสนอ" ไม่ได้เปลี่ยนกฎการตัดสิน มส. ที่ computeSubjectResult()
+//   ประถม → "ขาดบ่อย" เมื่อขาดดิบ >= 5% ของคาบรายวิชา เป็นข้อมูลประกอบเท่านั้น
+//   เวลาเรียนเพื่อเลื่อนชั้นประถมมาจาก daily_attendance รายคนทั้งปี
 // ============================================================
 
 // ชั้นประถมหรือไม่ — ดูจากคำนำหน้าชั้นของ "นักเรียน" (subjects.level ใช้กับวิชา ไม่ใช่คน)
@@ -2332,6 +2394,21 @@ export async function fetchAllRows(makeQuery, orderColumn = "id") {
 // ไม่มีคำว่าห้องในสูตร) ส่วนการ์ดความคืบหน้าเป็นแค่เครื่องมือตามครูที่ยังไม่เริ่มเช็คชื่อ
 // → กลับมาใช้ผลรวมคาบตรง ๆ เหมือนเดิม **ห้ามกลับไปดึง record ทุกสถานะเพื่อหาห้องอีก**
 const ABSENCE_STATUSES = ["ขาด", "ลาป่วย", "ลากิจ"];
+
+// ดึงแถวรายวันทั้งปีให้ครบทุกหน้า เด็กย้ายห้องกลางปีต้องนับด้วย student_id เท่านั้น
+export async function loadPrimaryDailyAttendance(studentIds, year) {
+  const ids = [...new Set((studentIds || []).filter(Boolean))];
+  if (!ids.length || !year) return [];
+  const rows = [];
+  for (let start = 0; start < ids.length; start += 200) {
+    const chunk = ids.slice(start, start + 200);
+    const { data, error } = await fetchAllRows(() => sb.from("daily_attendance")
+      .select("student_id,status").eq("year", year).in("student_id", chunk));
+    if (error) throw new Error("โหลดเวลาเรียนรายวันไม่สำเร็จ: " + error.message);
+    rows.push(...(data || []));
+  }
+  return rows;
+}
 
 async function fetchAttendanceSessions(subjectIds) {
   const base = () => sb.from("attendance_sessions")
@@ -2525,10 +2602,10 @@ export function buildAcademicOverview(raw, options = {}) {
       if (subject.subject_type === "บูรณาการ") {
         const members = membersOf.get(subject.id) || [];
         enrolled = members.some(m => enrolledBySubject.get(m.id)?.has(studentId));
-        risk = computeAttendanceRisk(studentId, members.map(m => subjectDataFor(m, studentId)), { warnPercent });
+        risk = computeAttendanceRisk(studentId, members.map(m => subjectDataFor(m, studentId)), { warnPercent, primary: isPrimaryGrade(entry.grade) });
       } else {
         enrolled = Boolean(enrolledBySubject.get(subject.id)?.has(studentId));
-        risk = computeAttendanceRisk(studentId, [subjectDataFor(subject, studentId)], { warnPercent });
+        risk = computeAttendanceRisk(studentId, [subjectDataFor(subject, studentId)], { warnPercent, primary: isPrimaryGrade(entry.grade) });
       }
       // totalBase = 0 คือวิชาที่ยังไม่ตั้งจำนวนคาบ — ตัดสินความเสี่ยงไม่ได้ ไปขึ้นที่ "ความพร้อมข้อมูล" แทน
       if (!enrolled || risk.totalBase <= 0) continue;
@@ -2570,7 +2647,7 @@ export function buildAcademicOverview(raw, options = {}) {
   const gradeOfStudent = new Map(roster.map(r => [r.student.id, r.grade]));
   const studentOf = new Map(roster.map(r => [r.student.id, r.student]));
   const incompleteRemarks = (data.remarks || [])
-    .filter(r => r.code === "ร.")
+    .filter(r => r.code === "ร." && !isPrimaryGrade(gradeOfStudent.get(r.student_id)))
     .map(r => ({
       student: studentOf.get(r.student_id) || { id: r.student_id, name: "(ไม่พบชื่อนักเรียน)" },
       grade: gradeOfStudent.get(r.student_id) || "",

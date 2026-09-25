@@ -254,7 +254,7 @@
         <option value="1">ภาคเรียนที่ 1</option>
         <option value="2">ภาคเรียนที่ 2</option>
       </select>
-      <div class="hint" id="filter-term-hint" hidden>ประถม/อนุบาลนับคาบเรียนทั้งปี ไม่มีภาคเรียน — หนังสือ มส. จึงออกปีละ 1 ฉบับต่อคน</div>
+      <div class="hint" id="filter-term-hint" hidden>ประถม/อนุบาลนับคาบเรียนทั้งปี ไม่มีภาคเรียน (เฉพาะข้อมูลเฝ้าระวังรายวิชา) — หนังสือติดตามเวลาเรียนออกปีละ 1 ฉบับต่อคน</div>
     </div>
     <div class="field">
       <label for="filter-grade">ระดับชั้น</label>
@@ -294,7 +294,7 @@
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
     loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
     bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-  } from "../supabase-client.js?v=20260924-2";
+  } from "../supabase-client.js?v=20260925-1";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -332,6 +332,11 @@
 
   function updateTermAvailability() {
     const grade = String(elGrade.value || "");
+    const primary = isPrimaryGrade(grade);
+    document.title = primary ? "เฝ้าระวังเวลาเรียน — CRS MIS" : "เฝ้าระวัง มส. — CRS MIS";
+    document.querySelector("h1").textContent = primary ? "เฝ้าระวังเวลาเรียนรายวิชา" : "เฝ้าระวัง มส. (Attendance Warning)";
+    const intro = document.querySelector("h1 + p");
+    if (intro) intro.textContent = primary ? "ข้อมูลประกอบจากเช็คชื่อรายวิชา · เวลาเรียนเพื่อเลื่อนชั้นดูจากเช็คชื่อรายวัน" : "ดูรายชื่อนักเรียนที่เสี่ยงติด มส. เข้าข่าย มส. หรือต้องเรียนซ้ำในทุกรายวิชา";
     const termAvailable = !grade || grade.startsWith("ม.");
     const termChanged = !termAvailable && elTerm.value !== "";
     if (termChanged) elTerm.value = "";
@@ -347,18 +352,21 @@
 
   // วิชาย่อยเป็นเพียงคำอธิบายของยอดรวมบูรณาการ — คำนวณด้วยสูตรกลางทีละวิชา
   // และกรองเฉพาะวิชาที่เด็กลงทะเบียนจริงเท่านั้น
-  function buildIntegratedParts(item, studentId, enrollMap, warnPercent) {
+  function buildIntegratedParts(item, studentId, enrollMap, warnPercent, primary = false) {
     return item.membersData
       .filter(mem => enrollMap[mem.subj.id] && enrollMap[mem.subj.id].has(studentId))
       .map(mem => {
-        const risk = computeAttendanceRisk(studentId, [mem.data], { warnPercent });
+        const risk = primary
+          ? computeAttendanceRisk(studentId, [mem.data], { warnPercent, primary: true })
+          : computeAttendanceRisk(studentId, [mem.data], { warnPercent });
         return { name: mem.subj.code + " " + mem.subj.name, ...risk };
       })
       .sort((a, b) => b.percent - a.percent);
   }
 
-  function formatRiskDetail(risk) {
+  function formatRiskDetail(risk, primary = false) {
     if (risk.totalBase === 0) return "ยังไม่ได้ตั้งจำนวนคาบ";
+    if (primary) return `เวลาเรียน ${(100 - risk.rawPercent).toFixed(1)}% · ขาด ${risk.rawMissed} / ${risk.totalBase} คาบ`;
     const missed = risk.retake ? risk.rawMissed : risk.netMissed;
     const percent = risk.retake ? risk.rawPercent : risk.percent;
     return `ขาด${risk.retake ? "ดิบ" : "สุทธิ"} ${missed} / ${risk.totalBase} คาบ (${percent.toFixed(1)}%)`;
@@ -425,7 +433,7 @@
     }).join("")}</div>`;
   }
 
-  function renderWarningLetter(flagged, { grade, year, term, warnPercent }, letterFields = {}) {
+  function renderWarningLetter(flagged, { grade, year, term, warnPercent, primary = false }, letterFields = {}) {
     const { stu, riskySubjects } = flagged;
     const {
       docNoText = "", issuedDateText = "", homeroomName = "", academicHeadName = "", directorName = "",
@@ -439,7 +447,7 @@
     const deadlineLabel = String(grade || "").startsWith("ม.") ? "ก่อนสิ้นภาคเรียน" : "ก่อนสิ้นปีการศึกษา";
     const subjectRows = riskySubjects.map((subj, index) => {
       const shownMissed = subj.retake ? subj.rawMissed : subj.netMissed;
-      const shownPct = subj.retake ? subj.rawPct : subj.pct;
+      const shownPct = primary ? 100 - subj.rawPct : subj.retake ? subj.rawPct : subj.pct;
       const allowed = Math.floor(subj.total * MS_MAKEUP_RATIO);
       const left = allowed - subj.netMissed;
       const remaining = subj.total === 0 || subj.retake
@@ -447,7 +455,7 @@
         : subj.critical || left < 0
           ? "เกินแล้ว"
           : left + " คาบ";
-      const status = subj.retake
+      const status = primary ? (subj.critical ? "เวลาเรียนไม่ถึง 80%" : "เฝ้าระวัง") : subj.retake
         ? "ต้องเรียนซ้ำรายวิชา"
         : subj.critical
           ? "เข้าข่าย มส."
@@ -457,13 +465,18 @@
         `<td>${remaining}</td><td>${status}</td></tr>`;
     }).join("");
     const actionLines = [];
-    if (riskySubjects.some(subj => subj.retake)) {
+    if (primary) {
+      actionLines.push(riskySubjects.some(subj => subj.critical)
+        ? "<b>เวลาเรียนไม่ถึง 80%</b> ของบางรายวิชา — ขอความร่วมมือติดตามเวลาเรียนของนักเรียน"
+        : "<b>เฝ้าระวัง</b> — ขอความร่วมมือติดตามเวลาเรียนของนักเรียน");
+    }
+    if (!primary && riskySubjects.some(subj => subj.retake)) {
       actionLines.push("<b>ต้องเรียนซ้ำรายวิชา</b> — ขาดเรียนเกินร้อยละ 40 ของเวลาเรียน การเรียนชดเชยไม่สามารถแก้ไขได้แล้ว");
     }
-    if (riskySubjects.some(subj => !subj.retake && subj.critical)) {
+    if (!primary && riskySubjects.some(subj => !subj.retake && subj.critical)) {
       actionLines.push("<b>เข้าข่าย มส.</b> — ขาดเรียนเกินร้อยละ 20 ของเวลาเรียน ต้องเรียนชดเชยให้ครบเวลา จึงจะมีสิทธิ์เข้าสอบ");
     }
-    if (riskySubjects.some(subj => !subj.retake && !subj.critical)) {
+    if (!primary && riskySubjects.some(subj => !subj.retake && !subj.critical)) {
       actionLines.push("<b>เฝ้าระวัง</b> — ยังแก้ไขได้ หากมาเรียนสม่ำเสมอตั้งแต่บัดนี้");
     }
     const closingHtml = inviteMeeting
@@ -481,8 +494,8 @@
       logoSrc: "../logo.png",
       subject: "แจ้งเตือนเวลาเรียนและขอความร่วมมือติดตามนักเรียน",
       recipientName: stu.name,
-      bodyHtml: `<p class="letter-body">ด้วย${escapeHtml(schoolLabel)}ได้ตรวจสอบเวลาเรียนของนักเรียนในความปกครองของท่าน คือ ${escapeHtml(stu.name)} เลขประจำตัว ${escapeHtml(stu.student_no)} ชั้น ${escapeHtml(room)}${termLabel}ปีการศึกษา ${escapeHtml(year)} พบว่ามีเวลาเรียนไม่เพียงพอในบางรายวิชา ซึ่งอาจส่งผลให้ไม่มีสิทธิ์เข้าสอบ (มส.) ดังรายละเอียดต่อไปนี้</p>`,
-      tableHtml: `<table class="letter-table"><thead><tr><th>ที่</th><th>รายวิชา</th><th>ขาด/ทั้งหมด</th><th>ร้อยละ</th><th>ขาดได้อีก</th><th>สถานะ</th></tr></thead><tbody>${subjectRows}</tbody></table>`,
+      bodyHtml: `<p class="letter-body">ด้วย${escapeHtml(schoolLabel)}ได้ตรวจสอบเวลาเรียนของนักเรียนในความปกครองของท่าน คือ ${escapeHtml(stu.name)} เลขประจำตัว ${escapeHtml(stu.student_no)} ชั้น ${escapeHtml(room)}${termLabel}ปีการศึกษา ${escapeHtml(year)} พบว่ามีเวลาเรียนไม่เพียงพอในบางรายวิชา${primary ? " (ข้อมูลประกอบจากเช็คชื่อรายวิชา)" : " ซึ่งอาจส่งผลให้ไม่มีสิทธิ์เข้าสอบ (มส.)"} ดังรายละเอียดต่อไปนี้</p>`,
+      tableHtml: `<table class="letter-table"><thead><tr><th>ที่</th><th>รายวิชา</th><th>ขาด/ทั้งหมด</th><th>${primary ? "เวลาเรียน (%)" : "ร้อยละ"}</th><th>ขาดได้อีก</th><th>สถานะ</th></tr></thead><tbody>${subjectRows}</tbody></table>`,
       summaryHtml: `<div class="letter-summary avoid-break"><b>สิ่งที่นักเรียนต้องดำเนินการ</b><br>${actionLines.join("<br>")}</div>`,
       closingHtml,
       replyOptionsHtml,
@@ -690,9 +703,11 @@
               }
             }
 
-            const risk = computeAttendanceRisk(stu.id, item.membersData.map(mem => mem.data), { warnPercent });
+            const risk = isPrimaryGrade(grade)
+              ? computeAttendanceRisk(stu.id, item.membersData.map(mem => mem.data), { warnPercent, primary: true })
+              : computeAttendanceRisk(stu.id, item.membersData.map(mem => mem.data), { warnPercent });
             if (enrolledInAny && risk.risky) {
-              const parts = buildIntegratedParts(item, stu.id, enrollMap, warnPercent);
+              const parts = buildIntegratedParts(item, stu.id, enrollMap, warnPercent, isPrimaryGrade(grade));
               if (risk.percent > maxPct) maxPct = risk.percent;
               riskySubjects.push({
                 name: s.code + " " + s.name + " (บูรณาการ)",
@@ -710,7 +725,9 @@
             // เช็คว่าลงทะเบียนไหม
             if (!enrollMap[s.id] || !enrollMap[s.id].has(stu.id)) continue;
 
-            const risk = computeAttendanceRisk(stu.id, [d], { warnPercent });
+            const risk = isPrimaryGrade(grade)
+              ? computeAttendanceRisk(stu.id, [d], { warnPercent, primary: true })
+              : computeAttendanceRisk(stu.id, [d], { warnPercent });
             if (risk.risky) {
               if (risk.percent > maxPct) maxPct = risk.percent;
               riskySubjects.push({
@@ -739,13 +756,13 @@
       if (flaggedStudents.length === 0) {
         teachersByRoom = new Map();
         signerByRoom = new Map();
-        elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนที่ถึงเกณฑ์เฝ้าระวังในชั้นนี้ (ขาดสุทธิต่ำกว่า " + warnPercent + "%)</div>";
+        elResults.innerHTML = "<div class='card hint'>ไม่พบนักเรียนที่ถึงเกณฑ์เฝ้าระวังในชั้นนี้ (" + (isPrimaryGrade(grade) ? "ขาดดิบ" : "ขาดสุทธิ") + "ต่ำกว่า " + warnPercent + "%)</div>";
       } else {
         const studentRank = item => item.retake ? 2 : item.critical ? 1 : 0;
         flaggedStudents.sort((a,b) => studentRank(b) - studentRank(a) || b.maxPct - a.maxPct);
         await loadSignerChoices(flaggedStudents.map(item => item.stu), targetStudents, issuedLetters, year, grade);
 
-        const summaryText = `นักเรียนทั้งหมด ${targetStudents.length} คน · เสี่ยงติด มส. <b>${flaggedStudents.length}</b> คน`;
+        const summaryText = `นักเรียนทั้งหมด ${targetStudents.length} คน · ${isPrimaryGrade(grade) ? "ขาดบ่อย" : "เสี่ยงติด มส."} <b>${flaggedStudents.length}</b> คน`;
         const pickerHtml = signerPickerHtml(grade);
         // 🪤 คลาส `summary-line` ต้องอยู่บน .card เสมอ — app-shell.css มีกฎ
         //    `.academic-warning #results > .summary-line:first-child { grid-column: 1 / -1 }`
@@ -756,9 +773,11 @@
           : `<div class='card summary-line'>${summaryText}</div>`;
 
         for (const f of flaggedStudents) {
-          const type = f.critical ? "danger" : "warn";
+          const type = isPrimaryGrade(grade) ? "warn" : f.critical ? "danger" : "warn";
           const issuedLetter = issuedLettersByStudent.get(String(f.stu.id));
-          const badgeHtml = f.retake
+          const badgeHtml = isPrimaryGrade(grade)
+            ? (f.critical ? "<span class='badge mid'>เวลาเรียนไม่ถึง 80%</span>" : "<span class='badge mid'>เฝ้าระวัง</span>")
+            : f.retake
             ? "<span class='badge bad'>เรียนซ้ำรายวิชา (ขาด &gt;40%)</span>"
             : f.critical
               ? "<span class='badge bad'>วิกฤต · เข้าข่าย มส. (&gt;20%)</span>"
@@ -778,21 +797,22 @@
           `;
 
           for (const subj of f.riskySubjects) {
-            const rowType = subj.critical ? "danger-text" : "warn-text";
-            const rowLabel = subj.retake ? "เรียนซ้ำรายวิชา" : subj.critical ? "เข้าข่าย มส." : "เสี่ยง";
+            const rowType = isPrimaryGrade(grade) ? "warn-text" : subj.critical ? "danger-text" : "warn-text";
+            const rowLabel = isPrimaryGrade(grade) ? "เวลาเรียน " + (100 - subj.rawPct).toFixed(1) + "%" : subj.retake ? "เรียนซ้ำรายวิชา" : subj.critical ? "เข้าข่าย มส." : "เสี่ยง";
             const shownMissed = subj.retake ? subj.rawMissed : subj.netMissed;
             const shownPct = subj.retake ? subj.rawPct : subj.pct;
 
             html += `
               <div class='score-row'>
                 <div>${escapeHtml(subj.name)}</div>
-                <div class='val ${rowType}'>${rowLabel} · ขาด${subj.retake ? "ดิบ" : "สุทธิ"} ${shownMissed} / ${subj.total} คาบ (${shownPct.toFixed(1)}%)</div>
+                <div class='val ${rowType}'>${rowLabel} · ${isPrimaryGrade(grade) ? "ขาด " + subj.rawMissed + " / " + subj.total + " คาบ" : "ขาด" + (subj.retake ? "ดิบ" : "สุทธิ") + " " + shownMissed + " / " + subj.total + " คาบ (" + shownPct.toFixed(1) + "%)"}</div>
               </div>
             `;
             if (subj.parts?.length) {
               html += `<div class='kind-group'>${subj.parts.map(part => {
+                const detail = isPrimaryGrade(grade) ? formatRiskDetail(part, true) : formatRiskDetail(part);
                 return `<div class='score-row'><div>${escapeHtml(part.name)}</div>` +
-                  `<div class='val hint'>${escapeHtml(formatRiskDetail(part))}</div></div>`;
+                  `<div class='val hint'>${escapeHtml(detail)}</div></div>`;
               }).join("")}</div>`;
             }
           }
@@ -868,6 +888,7 @@
       elPrintArea.innerHTML = renderWarningLetter(flagged, {
         grade: reportGrade,
         year: reportYear,
+        primary: isPrimaryGrade(reportGrade),
         term: reportTerm,
         warnPercent: reportWarnPercent
       }, {

@@ -206,7 +206,8 @@
       <div class="card">
         <h2>ต้องช่วยด่วน <span class="note" id="threshold-note"></span></h2>
         <!-- วงกลมแสดงเฉพาะสิ่งที่แบ่งกันได้จริงและรวมเป็น 100% คือนักเรียนทั้งหมด
-             แยกเป็น ปกติ/เฝ้าระวัง/เข้าข่าย มส./เรียนซ้ำ — ตัวเลขอีก 3 ตัวด้านล่างเป็นคนละมิติกัน
+             มัธยมแยก ปกติ/เฝ้าระวัง/เข้าข่าย มส./เรียนซ้ำ ส่วนประถมนับในกลุ่มเฝ้าระวัง
+             โดยใช้เช็คชื่อรายวิชาเป็นข้อมูลประกอบ — ตัวเลขอีก 3 ตัวด้านล่างเป็นคนละมิติกัน
              (แยกตามระดับชั้น และเรื่อง ร. ที่ไม่เกี่ยวกับการขาดเรียน) จึงไม่เอามารวมในวงเดียวกัน -->
         <div class="donut-wrap">
           <div class="donut-figure">
@@ -269,7 +270,7 @@ import {
   getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
   getSetting, setSetting,
   loadAcademicOverviewData, buildAcademicOverview
-} from "../supabase-client.js?v=20260924-2";
+} from "../supabase-client.js?v=20260925-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -403,7 +404,7 @@ const WATCH_COLORS = { normal: "#12946f", watch: "#c47f00", critical: "#9e2a35",
 function renderDonut(overview) {
   const total = overview.studentCount;
   const retake = overview.flaggedRows.filter(r => r.retake).length;
-  const critical = overview.flaggedRows.filter(r => r.critical && !r.retake).length;
+  const critical = overview.flaggedRows.filter(r => !r.isPrimary && r.critical && !r.retake).length;
   const watch = overview.flaggedRows.length - critical - retake;
   const normal = Math.max(0, total - overview.flaggedRows.length);
 
@@ -461,14 +462,14 @@ function renderGrades(overview) {
   elGrades.innerHTML = overview.grades.map(group => {
     const flagged = group.flagged.length;
     const criticalOnly = group.criticalCount - group.retakeCount;
-    const pillClass = group.criticalCount > 0 ? "bad" : (flagged > 0 ? "warn" : "ok");
+    const pillClass = !group.isPrimary && group.criticalCount > 0 ? "bad" : (flagged > 0 ? "warn" : "ok");
     const label = group.isPrimary ? "ขาดบ่อย" : "เสี่ยง มส.";
     const pill = "<span class='pill " + pillClass + "'>" + label + " " + flagged + " คน</span>";
     const meta = [
       "นักเรียน " + group.studentCount + " คน",
       "เกณฑ์ " + group.warnPercent + "%",
-      group.retakeCount > 0 ? "เรียนซ้ำรายวิชา " + group.retakeCount + " คน" : null,
-      criticalOnly > 0 ? "เข้าข่าย มส. " + criticalOnly + " คน" : null,
+      !group.isPrimary && group.retakeCount > 0 ? "เรียนซ้ำรายวิชา " + group.retakeCount + " คน" : null,
+      criticalOnly > 0 ? (group.isPrimary ? "เวลาเรียนไม่ถึง 80% " : "เข้าข่าย มส. ") + criticalOnly + " คน" : null,
       group.remarkCount > 0 ? "ร. " + group.remarkCount + " รายการ" : null
     ].filter(Boolean).join(" · ");
 
@@ -479,14 +480,14 @@ function renderGrades(overview) {
           const more = row.subjects.length > 1 ? " และอีก " + (row.subjects.length - 1) + " วิชา" : "";
           const shownPercent = worst.retake ? worst.rawPercent : worst.percent;
           const shownMissed = worst.retake ? worst.rawMissed : worst.netMissed;
-          const riskLabel = worst.retake ? "เรียนซ้ำรายวิชา" : worst.critical ? "เข้าข่าย มส." : "เสี่ยง";
+          const riskLabel = group.isPrimary ? (worst.critical ? "เวลาเรียนไม่ถึง 80%" : "ขาดบ่อย") : worst.retake ? "เรียนซ้ำรายวิชา" : worst.critical ? "เข้าข่าย มส." : "เสี่ยง";
           return "<div class='student-line'>" +
             "<div><div class='who'>" + esc(row.student.name) + "</div>" +
             "<div class='where'>" + esc(row.classroom || row.grade || "") +
             (row.student.student_no ? " · เลขที่ " + esc(row.student.student_no) : "") + "</div>" +
             "<div class='subject-note'>" + subjLabel(worst.subject) + more + "</div></div>" +
-            "<div class='val" + (row.critical ? " critical" : "") + "'>" + esc(riskLabel) + "<br>" +
-            "<span style='font-weight:500'>" + fmtPct(shownPercent) + "% · ขาด" + (worst.retake ? "ดิบ " : "สุทธิ ") + shownMissed + " คาบ</span></div>" +
+            "<div class='val" + (!group.isPrimary && row.critical ? " critical" : "") + "'>" + esc(riskLabel) + "<br>" +
+            "<span style='font-weight:500'>" + (group.isPrimary ? "เวลาเรียน " + fmtPct(100 - worst.rawPercent) + "% · ขาด " + worst.rawMissed : fmtPct(shownPercent) + "% · ขาด" + (worst.retake ? "ดิบ " : "สุทธิ ") + shownMissed) + " คาบ</span></div>" +
             "</div>";
         }).join("");
 
@@ -660,7 +661,7 @@ async function render() {
   renderDonut(overview);
   document.getElementById("threshold-note").textContent =
     "มัธยม ≥" + overview.thresholds.secondaryWarn + "% · ประถม ≥" + overview.thresholds.primaryWarn +
-    "% · เข้าข่าย มส. >" + overview.thresholds.makeupPercent +
+    "% (ขาดดิบรายวิชา) · มัธยมเข้าข่าย มส. >" + overview.thresholds.makeupPercent +
     "% · เรียนซ้ำรายวิชา >" + overview.thresholds.retakePercent + "%";
 
   elScope.innerHTML = "ปีการศึกษา " + esc(overview.year) + " · วิชา " + overview.subjectCount +
