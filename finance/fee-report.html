@@ -350,8 +350,15 @@ button{
                 <select id="year" disabled>
                 </select>
               </div>
-              <label class="check">
-                <input id="current-only" type="checkbox"> แสดงเฉพาะรายการของปีที่เลือก</label>
+              <div class="field">
+                <label for="scope">ช่วงข้อมูล</label>
+                <select id="scope">
+                  <option value="all" selected>ค้างทุกปี</option>
+                  <option value="year">ทั้งปี</option>
+                  <option value="1">ภาคเรียน 1</option>
+                  <option value="2">ภาคเรียน 2</option>
+                </select>
+              </div>
               </div>
               <div id="load-time" class="hint">
               </div>
@@ -484,8 +491,16 @@ function summarizeFeeRevenue(rows,start,end){
 
 let currentYear="",placements=[],charges=[],payments=[],visibleCharges=[],rooms=[],selectedRoom=null,selectedStudentId=null,canFinance=false,reportTab="debt";
 
-function filterCharges(rows,year,onlyCurrent){
-  return(rows||[]).filter(row=>!row.voided_at&&(!onlyCurrent||row.year===year))
+function filterCharges(rows,year,scope){
+  return(rows||[]).filter(row=>!row.voided_at&&(scope==="all"||row.year===year&&(scope==="year"||Number(row.term)===Number(scope))))
+}
+
+function updateScopeLabels(){
+  const scope=el("scope"),selected=scope.value;
+  scope.querySelector('option[value="year"]').textContent=`ทั้งปี ${currentYear}`;
+  scope.querySelector('option[value="1"]').textContent=`ภาคเรียน 1/${currentYear}`;
+  scope.querySelector('option[value="2"]').textContent=`ภาคเรียน 2/${currentYear}`;
+  scope.value=selected
 }
 
 function renderRoomReport(roomRows){
@@ -582,7 +597,12 @@ function renderDeparted(){
 }
 
 function render(){
-  visibleCharges=filterCharges(charges,currentYear,el("current-only").checked);
+  const scope=el("scope").value;
+  visibleCharges=filterCharges(charges,currentYear,scope);
+  if(canFinance)el("overview-note").textContent=scope==="all"
+    ?"ยอดค้างเริ่มต้นแสดงทุกปี หนี้จึงไม่หายเมื่อเปลี่ยนปีการศึกษา"
+    :scope==="year"?`เฉพาะรายการของปีการศึกษา ${currentYear}`
+    :`เฉพาะรายการภาคเรียน ${scope}/${currentYear} · หนี้ภาคอื่นไม่รวมในยอดนี้`;
   const visibleChargeIds=new Set(visibleCharges.map(c=>c.id)),visiblePayments=payments.filter(payment=>visibleChargeIds.has(payment.charge_id));
   rooms=summarizeFeeByRoom(visibleCharges,placements,visiblePayments);
   const visiblePlacementIds=new Set(placements.map(p=>p.student_id));
@@ -664,7 +684,7 @@ el("student-list").onclick=e=>{
   renderStudentCard()
 };
 
-el("current-only").onchange=render;
+el("scope").onchange=render;
 el("debt-tab").onclick=()=>showReportTab("debt");
 el("revenue-tab").onclick=()=>showReportTab("revenue");
 el("revenue-start").onchange=renderRevenue;
@@ -694,6 +714,7 @@ if(session){
       .map(y=>`<option>${esc(y.year)}</option>`)
       .join("");
     el("year").value=currentYear;
+    updateScopeLabels();
     el("year").disabled=false;
     el("report").hidden=false;
     await load()
@@ -705,6 +726,7 @@ if(session){
 
 el("year").onchange=async()=>{
   currentYear=el("year").value;
+  updateScopeLabels();
   try{
     await load()
   }catch(e){
