@@ -3757,20 +3757,23 @@ export function pickCalendarUpcoming(rows, dateStr, defaultLeadDays) {
   );
 }
 
+function dashboardDaysUntil(today, date) {
+  return Math.round(
+    (new Date(date + "T00:00:00Z") - new Date(today + "T00:00:00Z")) / 86_400_000
+  );
+}
+
 export function pickDashboardDeadlines({ calendarRows, projectRows, today, leadDays }) {
   const near = [];
   const ongoing = [];
   if (!today) return { near, ongoing };
   const horizon = addDaysStr(today, resolveCalendarLeadDays(leadDays));
-  const dayDifference = date => Math.round(
-    (new Date(date + "T00:00:00Z") - new Date(today + "T00:00:00Z")) / 86_400_000
-  );
   const deadline = (row, source) => {
     const start = row.start_date;
     const end = row.end_date || start;
     const starting = start >= today;
     const keyDate = starting ? start : end;
-    const remaining = dayDifference(keyDate);
+    const remaining = dashboardDaysUntil(today, keyDate);
     return {
       ...row, source, title:source === "calendar" ? row.title : row.name,
       keyDate,
@@ -3783,14 +3786,23 @@ export function pickDashboardDeadlines({ calendarRows, projectRows, today, leadD
   for (const row of calendarRows || []) near.push(deadline(row, "calendar"));
   for (const row of projectRows || []) {
     const end = row.end_date || row.start_date;
+    if (end < today) continue;
     if ((row.start_date >= today && row.start_date <= horizon) ||
         (end >= today && end <= horizon)) near.push(deadline(row, "project"));
-    else ongoing.push(row);
+    else ongoing.push({
+      ...row,
+      daysLeft:dashboardDaysUntil(today, end),
+      ...(row.start_date > today ? { startsIn:dashboardDaysUntil(today, row.start_date) } : {})
+    });
   }
   near.sort((a, b) => a.keyDate.localeCompare(b.keyDate) ||
     (a.source === "calendar" ? 0 : 1) - (b.source === "calendar" ? 0 : 1) ||
     String(a.title || "").localeCompare(String(b.title || ""), "th"));
-  ongoing.sort((a, b) => Number(b.budget_planned || 0) - Number(a.budget_planned || 0));
+  ongoing.sort((a, b) =>
+    String(a.end_date || a.start_date).localeCompare(String(b.end_date || b.start_date)) ||
+    Number(b.budget_planned || 0) - Number(a.budget_planned || 0) ||
+    String(a.name || "").localeCompare(String(b.name || ""), "th")
+  );
   return { near, ongoing };
 }
 

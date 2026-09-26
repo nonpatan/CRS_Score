@@ -106,17 +106,20 @@
   .deadline-label { display: inline-block; margin-top: 5px; padding: 2px 8px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 12px; font-weight: 700; }
   .deadline-item.warn .deadline-label { color: var(--amber); background: var(--amber-soft); }
   .panel-error { margin: 8px 12px; color: var(--danger); font-size: 13px; }
-  .ongoing-details summary { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 2px 8px; padding: 12px 16px; cursor: pointer; }
+  .ongoing-overview { padding: 10px 16px; color: var(--muted); font-size: 13px; }
+  .ongoing-details[hidden] { display: none; }
+  .ongoing-details summary { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--teal); cursor: pointer; font-weight: 700; }
   .ongoing-details summary::marker { content: ""; }
   .ongoing-details summary::-webkit-details-marker { display: none; }
-  .ongoing-summary-count { grid-column: 1; grid-row: 1; font-weight: 700; }
-  .ongoing-summary-budget { grid-column: 1 / -1; grid-row: 2; color: var(--muted); font-size: 13px; }
-  .ongoing-toggle { grid-column: 2; grid-row: 1; align-self: center; color: var(--teal); font-weight: 700; white-space: nowrap; }
-  .ongoing-toggle::after { content: " ▼"; }
-  .ongoing-details[open] .ongoing-toggle::after { content: " ▲"; }
-  .ongoing-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 16px; border-top: 1px solid var(--line); }
-  .ongoing-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ongoing-budget { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .ongoing-toggle-closed::after { content: " ▼"; }
+  .ongoing-toggle-open { display: none; }
+  .ongoing-toggle-open::after { content: " ▲"; }
+  .ongoing-details[open] .ongoing-toggle-closed { display: none; }
+  .ongoing-details[open] .ongoing-toggle-open { display: inline; }
+  .ongoing-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 2px 10px; align-items: start; padding: 10px 16px; border-top: 1px solid var(--line); }
+  .ongoing-name { min-width: 0; overflow-wrap: anywhere; font-weight: 700; }
+  .ongoing-budget { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ongoing-meta { grid-column: 1 / -1; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .panels { display: grid; gap: 14px; }
   .panel { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--white); box-shadow: var(--shadow); transition: border-color .2s var(--ease); }
   .panel:hover { border-color: rgba(15,110,86,.24); }
@@ -324,7 +327,9 @@
         </article>
         <article class="panel ongoing-panel" id="ongoing-panel" hidden>
           <div class="panel-head"><h2 class="panel-title"><span class="symbol">◆</span>โครงการที่กำลังดำเนินการ</h2><a class="panel-link" href="academic/projects.html">ทั้งหมด →</a></div>
-          <details class="ongoing-details" id="ongoing-details"><summary><span class="ongoing-summary-count" id="ongoing-summary"></span><span class="ongoing-summary-budget" id="ongoing-budget"></span><span class="ongoing-toggle">ดูรายการ</span></summary><div id="ongoing-list"></div></details>
+          <div class="ongoing-overview" id="ongoing-summary"></div>
+          <div id="ongoing-preview"></div>
+          <details class="ongoing-details" id="ongoing-details" hidden><summary><span class="ongoing-toggle-closed" id="ongoing-toggle-count"></span><span class="ongoing-toggle-open">ย่อรายการ</span></summary><div id="ongoing-list"></div></details>
         </article>
       </section>
     </main>
@@ -349,7 +354,7 @@
     loadMyDashboardAlerts, pickMyDashboardAlerts,
     isProjectApprover, isMakeupApprover, listPendingMakeupRequests,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20260926-1";
+  } from "./supabase-client.js?v=20260926-2";
 
   const studentTodayValue = document.getElementById("student-today-value");
   const studentTodayCard = document.getElementById("student-today-card");
@@ -374,7 +379,9 @@
   const deadlineList = document.getElementById("deadline-list");
   const ongoingPanel = document.getElementById("ongoing-panel");
   const ongoingSummary = document.getElementById("ongoing-summary");
-  const ongoingBudget = document.getElementById("ongoing-budget");
+  const ongoingPreview = document.getElementById("ongoing-preview");
+  const ongoingDetails = document.getElementById("ongoing-details");
+  const ongoingToggleCount = document.getElementById("ongoing-toggle-count");
   const ongoingList = document.getElementById("ongoing-list");
   const dashboardMetrics = document.getElementById("dashboard-metrics");
   const holidayBanner = document.getElementById("holiday-banner");
@@ -666,9 +673,20 @@
     ongoingPanel.hidden = !ongoing.length;
     if (!ongoing.length) return;
     const budget = ongoing.reduce((sum, row) => sum + Number(row.budget_planned || 0), 0);
-    ongoingSummary.textContent = `${ongoing.length} รายการ กำลังดำเนินการ`;
-    ongoingBudget.textContent = `งบตั้งไว้รวม ${formatMoney(budget, { minimumFractionDigits:0 })}`;
-    ongoingList.innerHTML = ongoing.map(row => `<div class="ongoing-row"><span class="ongoing-name" title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</span><span class="ongoing-budget">${escapeHtml(formatMoney(row.budget_planned || 0, { minimumFractionDigits:0 }))}</span></div>`).join("");
+    ongoingSummary.textContent = `${ongoing.length} รายการ · งบตั้งไว้รวม ${formatMoney(budget, { minimumFractionDigits:0 })}`;
+    const renderOngoingRow = row => {
+      const responsible = projectResponsibleName(row) || "ยังไม่ระบุ";
+      const timing = row.startsIn != null
+        ? `เริ่ม ${formatShortDate(row.start_date)}`
+        : `เหลือ ${row.daysLeft} วัน`;
+      const meta = `${formatRange(row.start_date, row.end_date)} · ${timing} · ${responsible}`;
+      return `<div class="ongoing-row"><span class="ongoing-name">${escapeHtml(row.name)}</span><span class="ongoing-budget">${escapeHtml(formatMoney(row.budget_planned || 0, { minimumFractionDigits:0 }))}</span><span class="ongoing-meta">${escapeHtml(meta)}</span></div>`;
+    };
+    ongoingPreview.innerHTML = ongoing.slice(0, 3).map(renderOngoingRow).join("");
+    const more = ongoing.slice(3);
+    ongoingDetails.hidden = !more.length;
+    ongoingToggleCount.textContent = `ดูอีก ${more.length} รายการ`;
+    ongoingList.innerHTML = more.map(renderOngoingRow).join("");
   }
 
   function renderStaffSummary(summary) {
