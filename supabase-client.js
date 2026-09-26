@@ -2962,6 +2962,33 @@ export function pickSchoolDays({ holidays, workdays, endDate, days = 5 }) {
   return picked.reverse();
 }
 
+export function pickNextSchoolDay({ holidays, workdays, afterDate, maxDays = 30 }) {
+  if (!afterDate) return null;
+  for (let offset = 1; offset <= maxDays; offset++) {
+    const date = addDaysStr(afterDate, offset);
+    if (workdays?.get(isoWeekday(date)) === true && !holidays?.has(date)) return date;
+  }
+  return null;
+}
+
+export async function loadNextSchoolDay(today) {
+  if (!today) return null;
+  try {
+    const [scheduleRes, holidayRes] = await Promise.all([
+      sb.from("work_schedule").select("weekday,is_working_day"),
+      sb.from("work_holidays").select("holiday_date")
+        .gte("holiday_date", addDaysStr(today, 1))
+        .lte("holiday_date", addDaysStr(today, 30))
+    ]);
+    if (scheduleRes.error || holidayRes.error) return null;
+    return pickNextSchoolDay({
+      workdays:new Map((scheduleRes.data || []).map(row => [row.weekday, row.is_working_day])),
+      holidays:new Set((holidayRes.data || []).map(row => row.holiday_date)),
+      afterDate:today
+    });
+  } catch { return null; }
+}
+
 export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 5 }) {
   const dates = pickSchoolDays({ holidays, workdays, endDate, days });
   const rowsByDate = new Map(dates.map(date => [date, []]));
@@ -3699,16 +3726,18 @@ export async function loadAcademicCalendar(year) {
 
 export const DEFAULT_CALENDAR_LEAD_DAYS = 7;
 
+export function resolveCalendarLeadDays(value) {
+  const configuredLead = Number(value);
+  return value !== null && value !== "" && Number.isFinite(configuredLead) && configuredLead >= 0
+    ? configuredLead : DEFAULT_CALENDAR_LEAD_DAYS;
+}
+
 // คำนวณล้วน — แสดงตั้งแต่วันแจ้งเตือนจนถึงวันสิ้นสุด พร้อมป้ายสถานะ
 export function pickCalendarUpcoming(rows, dateStr, defaultLeadDays) {
   if (!dateStr) return [];
-  const configuredLead = Number(defaultLeadDays);
   // app_settings ยังเป็นความจริงหลักและชนะเสมอ ค่าคงที่นี้ใช้เฉพาะตอนอ่านค่ากลางไม่ได้
   // เพื่อกันรายการที่ lead_days = NULL หายจาก dashboard แบบเงียบ ๆ ไม่ใช่ hardcode ค่าที่ตั้งได้
-  const fallbackLead = defaultLeadDays !== null && defaultLeadDays !== "" &&
-    Number.isFinite(configuredLead) && configuredLead >= 0
-    ? configuredLead
-    : DEFAULT_CALENDAR_LEAD_DAYS;
+  const fallbackLead = resolveCalendarLeadDays(defaultLeadDays);
   return (rows || []).filter(row => {
     if (!row.start_date || !row.end_date) return false;
     const lead = row.lead_days == null ? fallbackLead : Number(row.lead_days);
@@ -3726,6 +3755,43 @@ export function pickCalendarUpcoming(rows, dateStr, defaultLeadDays) {
     String(a.start_date).localeCompare(String(b.start_date)) ||
     String(a.title || "").localeCompare(String(b.title || ""), "th")
   );
+}
+
+export function pickDashboardDeadlines({ calendarRows, projectRows, today, leadDays }) {
+  const near = [];
+  const ongoing = [];
+  if (!today) return { near, ongoing };
+  const horizon = addDaysStr(today, resolveCalendarLeadDays(leadDays));
+  const dayDifference = date => Math.round(
+    (new Date(date + "T00:00:00Z") - new Date(today + "T00:00:00Z")) / 86_400_000
+  );
+  const deadline = (row, source) => {
+    const start = row.start_date;
+    const end = row.end_date || start;
+    const starting = start >= today;
+    const keyDate = starting ? start : end;
+    const remaining = dayDifference(keyDate);
+    return {
+      ...row, source, title:source === "calendar" ? row.title : row.name,
+      keyDate,
+      label:starting
+        ? (remaining === 0 ? "เริ่มวันนี้" : `เริ่มอีก ${remaining} วัน`)
+        : (remaining === 0 ? "ครบกำหนดวันนี้" : `ครบกำหนดอีก ${remaining} วัน`),
+      tone:starting ? "warn" : "info"
+    };
+  };
+  for (const row of calendarRows || []) near.push(deadline(row, "calendar"));
+  for (const row of projectRows || []) {
+    const end = row.end_date || row.start_date;
+    if ((row.start_date >= today && row.start_date <= horizon) ||
+        (end >= today && end <= horizon)) near.push(deadline(row, "project"));
+    else ongoing.push(row);
+  }
+  near.sort((a, b) => a.keyDate.localeCompare(b.keyDate) ||
+    (a.source === "calendar" ? 0 : 1) - (b.source === "calendar" ? 0 : 1) ||
+    String(a.title || "").localeCompare(String(b.title || ""), "th"));
+  ongoing.sort((a, b) => Number(b.budget_planned || 0) - Number(a.budget_planned || 0));
+  return { near, ongoing };
 }
 
 // ชื่อผู้รับผิดชอบโครงการ: ใช้ชื่อสดจาก staff ก่อน ถ้า RLS ทำให้ครูทั่วไปอ่าน staff
