@@ -5711,19 +5711,10 @@ export function computeDayStatus(staff, dateStr, ctx) {
   // 5) มีเวลาเข้า → เทียบกับเวลาที่อนุญาต (วันนี้แสดงผลที่รู้แล้วได้ทันที ไม่ต้องรอปิดวัน)
   const rec = ctx.attendance.get(staff.id + "|" + dateStr);
   if (rec && rec.first_in_local) {
-    const normalCutoff = staff.allowed_late_time
-      ? timeToMinutes(staff.allowed_late_time)
-      : timeToMinutes(sched.start_time) + ctx.settings.lateGraceMinutes;
     const permit = (ctx.latePermissions || []).find(p =>
       p.staff_id === staff.id && p.permit_date === dateStr);
     const permitUntil = permit ? timeToMinutes(permit.until_time) : null;
-    // วันเวรใช้เวลาเวร "แทนที่" ทั้งหมด: ไม่บวก grace · ไม่สนอนุโลมถาวร · ไม่สนใบขอรายวัน
-    // วันปกติยังคง max() เดิม เพื่อไม่ลดสิทธิ์ของคนที่มี allowed_late_time ช้ากว่าใบขอ
-    const cutoff = onDuty
-      ? timeToMinutes(dutyStartTime)
-      : permitUntil === null
-        ? normalCutoff
-        : Math.max(normalCutoff, permitUntil);
+    const cutoff = staffArrivalCutoff(staff, dateStr, ctx);
     const arrived = timeToMinutes(rec.first_in_local);
     const isLate = arrived > cutoff;
     return {
@@ -5732,7 +5723,7 @@ export function computeDayStatus(staff, dateStr, ctx) {
       lateMinutes: isLate ? arrived - cutoff : 0,
       latePermissionUsed: onDuty
         ? false
-        : !isLate && permitUntil !== null && arrived > normalCutoff,
+        : !isLate && permitUntil !== null && arrived > normalArrivalCutoff(staff, sched, ctx),
       onDuty,
       dutyStartTime: onDuty ? dutyStartTime : null
     };
@@ -5748,6 +5739,28 @@ export function computeDayStatus(staff, dateStr, ctx) {
 
   // 7) ไม่มีร่องรอยการลงเวลาเลยหลังปิดวัน
   return { status: "absent", weight: 1, onDuty };
+}
+
+function normalArrivalCutoff(staff, sched, ctx) {
+  return staff.allowed_late_time
+    ? timeToMinutes(staff.allowed_late_time)
+    : timeToMinutes(sched.start_time) + ctx.settings.lateGraceMinutes;
+}
+
+// ใช้เกณฑ์เดียวกับ computeDayStatus ทั้งตอนตัดสินสายและตอนแจ้งเตือนคนยังไม่ลงเวลา
+export function staffArrivalCutoff(staff, dateStr, ctx) {
+  const sched = ctx.schedule.get(isoWeekday(dateStr));
+  if (!sched || !sched.is_working_day) return null;
+  const duty = ctx.attendanceDutyByKey instanceof Map
+    ? ctx.attendanceDutyByKey.get(staff.id + "|" + dateStr)
+    : null;
+  // วันเวรแทนที่ cutoff ทุกชนิด รวมใบขอเข้าสายและเวลาอนุโลมรายคน
+  if (duty) return timeToMinutes(duty.start_time);
+  const normal = normalArrivalCutoff(staff, sched, ctx);
+  const permit = (ctx.latePermissions || []).find(p =>
+    p.staff_id === staff.id && p.permit_date === dateStr);
+  const permitUntil = permit ? timeToMinutes(permit.until_time) : null;
+  return permitUntil === null ? normal : Math.max(normal, permitUntil);
 }
 
 // ---------- สรุปของคนหนึ่งตลอดช่วง ----------
@@ -6472,6 +6485,95 @@ export function coverageRowKey(row) {
   if (row.kind === "เวร") return coverageItemKey("เวร", row.duty_type, row.absent_staff_id);
   if (row.kind === "วิชา") return coverageItemKey("วิชา", row.subject_id);
   return coverageItemKey("ครูประจำชั้น", row.homeroom_id);
+}
+
+// โหลดเฉพาะการจัดคนแทนของวัน ไม่ดึงวิชา/ประวัติเช็คชื่อทั้งปีเหมือนหน้าแก้ไข
+export async function loadCoverageForDay(dateStr) {
+  const { data, error } = await sb.from("coverage_assignments")
+    .select("id,kind,absent_staff_id,substitute_staff_id,arrangement,periods,source,duty_type,subject:subjects(code,name,grade_level),homeroom:homeroom_teachers(grade_level,classroom)")
+    .eq("cover_date", dateStr);
+  if (error) throw new Error("โหลดข้อมูลจัดคนแทนไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+// รายการที่ต้องจัดการวันนี้: เตือนเฉพาะเรื่องที่ฐานข้อมูลและสถานะลงเวลายืนยันได้
+export function pickPersonnelAlerts({ dayRows = [], coverage = [], teachingStaffIds = new Set(),
+  syncWarning = "", nowMinutes = null, cutoffFor = () => null } = {}) {
+  const byStaff = new Map(dayRows.map(row => [row.staff.id, row]));
+  const byAbsent = new Map();
+  const bySubstitute = new Map();
+  for (const row of coverage) {
+    if (!byAbsent.has(row.absent_staff_id)) byAbsent.set(row.absent_staff_id, []);
+    byAbsent.get(row.absent_staff_id).push(row);
+    if (row.arrangement !== "สอนแทน") continue;
+    if (!bySubstitute.has(row.substitute_staff_id)) bySubstitute.set(row.substitute_staff_id, []);
+    bySubstitute.get(row.substitute_staff_id).push(row);
+  }
+  const jobLabel = row => {
+    if (row.kind === "วิชา") {
+      const subject = Array.isArray(row.subject) ? row.subject[0] : row.subject;
+      return [subject?.code, subject?.name, subject?.grade_level].filter(Boolean).join(" ") +
+        (row.periods == null ? "" : ` · ${row.periods} คาบ`);
+    }
+    if (row.kind === "ครูประจำชั้น") {
+      const room = Array.isArray(row.homeroom) ? row.homeroom[0] : row.homeroom;
+      return `ครูประจำชั้น ${room?.grade_level || "?"}/${room?.classroom || "?"}`;
+    }
+    return `เวร ${row.duty_type || "ไม่ระบุ"}`;
+  };
+  const alerts = [], pendingSubs = [];
+  const afterCutoff = row => {
+    if (row.status !== "pending" || row.staff.exempt || !Number.isFinite(nowMinutes)) return false;
+    const cutoff = cutoffFor(row.staff.id);
+    return Number.isFinite(cutoff) && nowMinutes > cutoff;
+  };
+  for (const [staffId, jobs] of bySubstitute) {
+    const person = byStaff.get(staffId);
+    if (!person) continue;
+    if (person.status === "pending" && person.staff.exempt) continue;
+    const item = {
+      kind:person.status === "pending"
+        ? (afterCutoff(person) ? "substitute-pending-late" : "pending-substitute")
+        : "substitute-missing",
+      staff:person.staff, status:person.status, jobs:jobs.map(jobLabel),
+      absentNames:[...new Set(jobs.map(job => byStaff.get(job.absent_staff_id)?.staff.full_name).filter(Boolean))]
+    };
+    if (["absent", "leave", "offsite"].includes(person.status)) alerts.push(item);
+    else if (item.kind === "substitute-pending-late") alerts.push(item);
+    else if (item.kind === "pending-substitute") pendingSubs.push(item);
+  }
+  for (const row of dayRows) {
+    const staffId = row.staff.id;
+    if (row.status === "absent" && !byAbsent.has(staffId)) {
+      alerts.push({ kind:"no-leave", staff:row.staff, status:row.status, jobs:[] });
+    } else if (afterCutoff(row) && !byAbsent.has(staffId) && !bySubstitute.has(staffId)) {
+      alerts.push({ kind:"pending-no-leave", staff:row.staff, status:row.status, jobs:[] });
+    } else if (["leave", "offsite"].includes(row.status) && teachingStaffIds.has(staffId) &&
+      !byAbsent.has(staffId)) {
+      alerts.push({ kind:"no-cover", staff:row.staff, status:row.status,
+        reason:row.leaveType || row.kind || "", jobs:[] });
+    }
+  }
+  if (syncWarning) alerts.push({ kind:"sync", message:syncWarning, jobs:[] });
+  const order = { "substitute-missing":0, "substitute-pending-late":1,
+    "no-leave":2, "pending-no-leave":3, "no-cover":4, sync:5 };
+  alerts.sort((a, b) => order[a.kind] - order[b.kind] ||
+    String(a.staff?.full_name || "").localeCompare(String(b.staff?.full_name || ""), "th"));
+  pendingSubs.sort((a, b) => String(a.staff.full_name).localeCompare(String(b.staff.full_name), "th"));
+  return { alerts, pendingSubs };
+}
+
+// สรุปวันทำงานล่าสุดจากสูตรสถานะเดียวกับหน้ารายคน
+export function summarizeStaffWeek({ ctx, endDate, days = 5 }) {
+  const workdays = new Map([...ctx.schedule].map(([weekday, row]) => [weekday, !!row.is_working_day]));
+  const dates = pickSchoolDays({ holidays:ctx.holidays, workdays, endDate, days });
+  const staff = ctx.staff.filter(row => row.is_active);
+  return dates.map(date => {
+    const statuses = staff.map(person => computeDayStatus(person, date, ctx).status);
+    const offsite = statuses.filter(status => status === "offsite").length;
+    return { date, working:statuses.filter(status => ["present", "late", "offsite"].includes(status)).length,
+      offsite, total:staff.length };
+  });
 }
 
 // หนึ่งงานวิชามีได้หลายแถว: รวมคาบที่สอนแทนกับคาบที่แลกแยกกันเสมอ
