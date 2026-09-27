@@ -1518,12 +1518,16 @@ export async function loadLessonLogCoverage({ userId, year, term, subjectId, fro
     for (let offset = 0; offset < subjectIds.length; offset += 100) {
       const ids = subjectIds.slice(offset, offset + 100);
       const result = await fetchAllRows(() => sb.from("coverage_assignments")
-        .select("id,subject_id,cover_date,source,worksheet_note")
-        .eq("kind", "วิชา").in("subject_id", ids)
+        .select("id,subject_id,cover_date,source,worksheet_note,arrangement")
+        .eq("kind", "วิชา").eq("arrangement", "สอนแทน").in("subject_id", ids)
         .gte("cover_date", dates[0]).lte("cover_date", dates.at(-1)));
       if (result.error) throw new Error("โหลดบริบทสอนแทนไม่สำเร็จ: " + result.error.message);
       for (const row of result.data || []) {
-        coverageByDay.set(row.subject_id + "|" + row.cover_date, { source:row.source, worksheet_note:row.worksheet_note });
+        const key = row.subject_id + "|" + row.cover_date;
+        const previous = coverageByDay.get(key);
+        if (!previous || (!previous.worksheet_note && row.worksheet_note)) {
+          coverageByDay.set(key, { source:row.source, worksheet_note:row.worksheet_note });
+        }
       }
     }
   }
@@ -5862,10 +5866,11 @@ export function summarizeAll(from, to, ctx, { activeOnly = true } = {}) {
 }
 
 // สรุปจำนวนงานที่บุคลากรถูกจัดให้ไปแทนในช่วงที่เลือก
-// coverage_assignments เก็บ 1 แถวต่อ (วัน x งาน) จึงนับเป็น "งาน" ไม่ใช่จำนวนคาบ
+// แถววิชาหลายคนในวันเดียวกันนับคนละงาน ส่วนแถวแลกคาบไม่ใช่งานสอนแทน
 export async function loadCoverageStats(from, to) {
   const { data, error } = await sb.from("coverage_assignments")
-    .select("substitute_staff_id,kind,cover_date")
+    .select("substitute_staff_id,kind,cover_date,arrangement")
+    .eq("arrangement", "สอนแทน")
     .gte("cover_date", from)
     .lte("cover_date", to);
   if (error) throw new Error("โหลดข้อมูลงานแทนไม่สำเร็จ: " + error.message);
@@ -6099,6 +6104,7 @@ export async function loadTeachingGap(year) {
   const coverageRequests = chunks.map(ids => fetchAllRows(() => sb.from("coverage_assignments")
     .select("id,subject_id,cover_date,kind,source,leave_id,periods,substitute_staff_id,leave:staff_leaves(leave_type)")
     .eq("kind", "วิชา")
+    .eq("arrangement", "สอนแทน")
     .in("subject_id", ids)));
   const makeupRequests = chunks.map(ids => fetchAllRows(() => sb.from("teacher_makeups")
     .select("id,staff_id,subject_id,makeup_date,start_time,end_time,periods,note,approval_status,approval_note,approved_by,approved_at,created_by,created_at,updated_at")
@@ -6384,6 +6390,7 @@ async function loadMyTeachingGap({ staffId, year } = {}) {
     fetchAllRows(() => sb.from("coverage_assignments")
       .select("id,subject_id,cover_date,kind,source,leave_id,periods,substitute_staff_id,leave:staff_leaves(leave_type),substitute:staff!coverage_assignments_substitute_staff_id_fkey(full_name)")
       .eq("kind", "วิชา")
+      .eq("arrangement", "สอนแทน")
       .eq("absent_staff_id", staffId)
       .in("subject_id", subjectIds)),
     fetchAllRows(() => sb.from("teacher_makeups")
@@ -6467,6 +6474,22 @@ export function coverageRowKey(row) {
   return coverageItemKey("ครูประจำชั้น", row.homeroom_id);
 }
 
+// หนึ่งงานวิชามีได้หลายแถว: รวมคาบที่สอนแทนกับคาบที่แลกแยกกันเสมอ
+export function summarizeCoverageItem(item, rows = []) {
+  const taughtBySub = rows.filter(row => (row.arrangement || "สอนแทน") === "สอนแทน")
+    .reduce((sum, row) => sum + (Number(row.periods) || 0), 0);
+  const swapped = rows.filter(row => row.arrangement === "แลกคาบ")
+    .reduce((sum, row) => sum + (Number(row.periods) || 0), 0);
+  const planned = item.kind === "วิชา" && item.suggestedPeriods != null
+    ? Number(item.suggestedPeriods) : null;
+  const remaining = planned === null ? null : Math.max(0, planned - taughtBySub - swapped);
+  // คาบที่แนะนำมาจากประวัติเช็คชื่อ ไม่ใช่ตารางสอนของวันนี้; ใช้ช่วยกรอกเท่านั้น
+  const complete = item.kind === "วิชา"
+    ? rows.length > 0 && rows.every(row => row.periods != null && Number(row.periods) > 0)
+    : rows.length > 0;
+  return { taughtBySub, swapped, planned, remaining, complete };
+}
+
 // ---------- สิทธิ์เช็คชื่อของคนแทนในวันที่เลือก ----------
 // ต้องกรอง substitute_staff_id เสมอ: ฝ่ายบุคคลอ่าน coverage_assignments ได้ทุกแถว
 // ถ้าพึ่ง RLS อย่างเดียว หน้าจอของฝ่ายบุคคลจะปลดล็อกวิชา/ห้องของคนอื่นทั้งหมดผิด ๆ
@@ -6485,6 +6508,7 @@ export async function getMyCoverageFor(dateStr) {
   const { data: rows, error: coverageError } = await sb.from("coverage_assignments")
     .select("kind,subject_id,homeroom_teachers(year,grade_level,classroom)")
     .eq("substitute_staff_id", ownStaff.id)
+    .eq("arrangement", "สอนแทน")
     .eq("cover_date", dateStr);
   if (coverageError) throw new Error("โหลดสิทธิ์คนแทนไม่สำเร็จ: " + coverageError.message);
 
@@ -6708,7 +6732,12 @@ export async function loadCoverageDay(dateStr, { extraAbsentIds = [], term } = {
       a.label.localeCompare(b.label, "th"));
   }
 
-  const byKey = new Map(assignments.map(row => [coverageRowKey(row), row]));
+  const byKey = new Map();
+  for (const row of assignments) {
+    const key = coverageRowKey(row);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(row);
+  }
   // dutyRoster ของทั้งวัน (ไม่ใช่เฉพาะคนที่ไม่มา) — หน้าเว็บต้องรู้ว่าคนแทนมีเวรงานนั้น
   // อยู่ก่อนแล้วหรือเปล่า ไม่งั้นตอนยกเลิกการจัดคนแทนจะเผลอถอดเวรของเขาเองทิ้ง
   return { date: dateStr, year, term: resolvedTerm, staff, staffById, dutyTypes, dutyRoster: duties,
@@ -6727,13 +6756,14 @@ export function isCoverageDutyRow(row) {
 // ประกอบแถวจาก item + คนแทน ที่นี่ที่เดียว เพื่อให้ check constraint ฝั่ง DB
 // (kind ไหนต้องมีคอลัมน์ไหน) กับฝั่งเว็บพูดตรงกันเสมอ
 export function buildCoverageRow({ date, item, absentee, substituteStaffId,
-                                   worksheetNote, periods, createdBy }) {
+                                   worksheetNote, periods, arrangement = "สอนแทน", createdBy }) {
   const row = {
     cover_date: date,
     kind: item.kind,
     subject_id: null, homeroom_id: null, duty_type: null,
     absent_staff_id: absentee.staff.id,
     substitute_staff_id: substituteStaffId,
+    arrangement: item.kind === "วิชา" ? arrangement : "สอนแทน",
     source: absentee.source,
     leave_id: absentee.source === "ลา" ? (absentee.leave?.id || null) : null,
     field_duty_id: absentee.source === "ออกปฏิบัติหน้าที่" ? (absentee.fieldDuty?.id || null) : null,
@@ -6750,7 +6780,7 @@ export function buildCoverageRow({ date, item, absentee, substituteStaffId,
 export async function createCoverageAssignment(row) {
   const { data, error } = await sb.from("coverage_assignments").insert(row).select().single();
   if (error) throw new Error(error.code === "23505"
-    ? "รายการนี้มีคนแทนอยู่แล้ว ลองรีเฟรชหน้าจอ"
+    ? "ครูคนนี้ถูกใส่ในวิชานี้ของวันนี้แล้ว"
     : "บันทึกคนแทนไม่สำเร็จ: " + error.message);
   return data;
 }
@@ -6758,7 +6788,9 @@ export async function updateCoverageAssignment(id, fields) {
   const { data, error } = await sb.from("coverage_assignments")
     .update({ ...fields, updated_at: new Date().toISOString() })
     .eq("id", id).select().single();
-  if (error) throw new Error("แก้ไขคนแทนไม่สำเร็จ: " + error.message);
+  if (error) throw new Error(error.code === "23505"
+    ? "ครูคนนี้ถูกใส่ในวิชานี้ของวันนี้แล้ว"
+    : "แก้ไขคนแทนไม่สำเร็จ: " + error.message);
   return data;
 }
 export async function deleteCoverageAssignment(id) {

@@ -78,6 +78,13 @@
   .periods-row label { display:flex; gap:7px; align-items:center; margin:0; }
   .periods-row input.periods { width:82px; min-height:44px; }
   .periods-row .use-hint { min-height:44px; }
+  .coverage-row { border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:9px; }
+  .coverage-row .row-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  .coverage-row .row-tools label { display:inline-flex; gap:4px; align-items:center; min-height:44px; margin:0; }
+  .coverage-row .row-tools input { accent-color:var(--teal); }
+  .coverage-row .row-tools .delete-subject { margin-left:auto; min-height:44px; }
+  .coverage-row .field-note { margin-top:8px; }
+  .add-subject { margin-top:8px; min-height:44px; }
 
   /* บล็อกของ "คน" ต้องหนักกว่าบล็อกของ "งาน" อย่างเห็นได้ชัด */
   .person { padding:18px 0 6px; border-top:2px solid var(--line); }
@@ -139,6 +146,7 @@
         <b>สิทธิ์เช็คชื่อของคนแทนผูกกับวันที่ที่จัดไว้</b><br>
         คนแทนที่มีบัญชีล็อกอินจะเช็คชื่อวิชาหรือห้องนั้นได้เฉพาะวันที่ถูกจัดให้แทน
         และต้องเลือกวันที่ให้ตรงในหน้าเช็คชื่อ ไม่เช่นนั้นจะกดไม่ได้<br>
+        แถวแลกคาบไม่ให้สิทธิ์เช็คชื่อวิชาของอีกคน เพราะครูสอนวิชาของตัวเองในคาบที่แลกแล้ว<br>
         สิทธิ์นี้ไม่รวมการแก้คะแนนหรือการลบผลเช็คชื่อ ซึ่งยังเป็นสิทธิ์ของครูเจ้าของวิชาเหมือนเดิม
       </div>
     </div>
@@ -176,10 +184,10 @@
 <script type="module">
 import {
   requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, personnelAccessDeniedHtml,
-  loadCoverageDay, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
+  loadCoverageDay, summarizeCoverageItem, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20260926-2";
+} from "../supabase-client.js?v=20260927-1";
 
 const session = await requireAuth();
 if (session) {
@@ -206,6 +214,7 @@ if (session) {
 
     let day = null;          // ผลจาก loadCoverageDay()
     let busy = false;
+    const draftRows = new Set();
     // คนที่ฝ่ายบุคคลเพิ่มเองแบบเหตุสุดวิสัยแต่ยังไม่ได้เลือกคนแทน — ยังไม่มีแถวใน DB
     // จึงต้องจำไว้ฝั่งหน้าจอ ไม่งั้นกดเพิ่มแล้วชื่อหายทันทีที่โหลดใหม่
     let pendingUrgent = new Set();
@@ -253,9 +262,9 @@ if (session) {
     // ---------- ตัวเลือกคนแทน ----------
     // ⚠ "ใครเป็นคนแทนก็ได้" เป็นมติของผู้ใช้ — ห้ามกรองเหลือเฉพาะเจ้าของวิชา
     //   กรองแค่ 2 อย่าง: ต้องยังทำงานอยู่ และต้องไม่ใช่คนที่ไม่มาเอง
-    const substituteOptions = (absentStaffId, selectedId) => {
+    const substituteOptions = (absentStaffId, selectedId, excludedIds = new Set()) => {
       const rows = day.staff.filter(s =>
-        s.id !== absentStaffId && (s.is_active || s.id === selectedId));
+        s.id !== absentStaffId && !excludedIds.has(s.id) && (s.is_active || s.id === selectedId));
       return ["<option value=''>— ยังไม่มีคนแทน —</option>"].concat(rows.map(s =>
         "<option value='" + esc(s.id) + "'" + (s.id === selectedId ? " selected" : "") + ">" +
         esc(s.full_name) + (s.is_active ? "" : " (ออกแล้ว)") + "</option>")).join("");
@@ -274,7 +283,7 @@ if (session) {
       box.innerHTML = people.map(entry => {
         const chip = SOURCE_CHIP[entry.source] || "kind";
         const coveredCount = entry.items.reduce((count, item) =>
-          count + (day.byKey.has(item.key) ? 1 : 0), 0);
+          count + (summarizeCoverageItem(item, day.byKey.get(item.key) || []).complete ? 1 : 0), 0);
         const coverageChip = entry.items.length
           ? coveredCount < entry.items.length
             ? "<span class='chip urgent person-left'>ยังไม่มีคนแทน " +
@@ -304,7 +313,67 @@ if (session) {
         ];
         const items = kinds.map(kind => {
           const rows = groups.get(kind).map(item => {
-            const saved = day.byKey.get(item.key) || null;
+            const savedRows = day.byKey.get(item.key) || [];
+            const summary = summarizeCoverageItem(item, savedRows);
+            if (item.kind === "วิชา") {
+              const excluded = new Set(savedRows.map(row => row.substitute_staff_id));
+              const renderSubjectRow = saved => {
+                const sub = saved ? day.staffById.get(saved.substitute_staff_id) : null;
+                const arrangement = saved?.arrangement || "สอนแทน";
+                const periods = saved ? saved.periods : (summary.remaining > 0 ? summary.remaining : null);
+                const rowId = saved?.id || "";
+                return "<div class='coverage-row' data-key='" + esc(item.key) + "' data-staff='" +
+                  esc(entry.staff.id) + "' data-id='" + esc(rowId) + "'>" +
+                  "<div class='row-tools'>" + ["สอนแทน", "แลกคาบ"].map(value =>
+                    "<label><input type='radio' class='arrangement' name='arrangement-" +
+                    esc(rowId || item.key) + "' value='" + value + "'" +
+                    (arrangement === value ? " checked" : "") + ">" + value + "</label>").join("") +
+                  (saved ? "<button type='button' class='danger small delete-subject' data-id='" +
+                    esc(rowId) + "'>ลบ</button>" : "") + "</div>" +
+                  "<select class='subject-select' data-key='" + esc(item.key) +
+                    "' data-staff='" + esc(entry.staff.id) + "'>" +
+                    substituteOptions(entry.staff.id, saved?.substitute_staff_id || "",
+                      new Set([...excluded].filter(id => id !== saved?.substitute_staff_id))) + "</select>" +
+                  "<div class='periods-row'><label>จำนวนคาบ " +
+                    "<input type='number' class='periods' data-id='" + esc(rowId) +
+                    "' min='0.5' max='12' step='0.5' value='" +
+                    (periods == null ? "" : esc(periods)) + "'> คาบ</label>" +
+                    (saved && saved.periods == null
+                      ? "<span class='chip urgent'>ยังไม่ระบุคาบ</span>" +
+                        (savedRows.length === 1 && item.suggestedPeriods
+                          ? "<button type='button' class='ghost use-hint' data-id='" + esc(rowId) +
+                            "' data-periods='" + esc(item.suggestedPeriods) + "'>ใช้ " +
+                            esc(item.suggestedPeriods) + " คาบ</button>" : "")
+                      : "") + "</div>" +
+                  (arrangement === "สอนแทน"
+                    ? "<input type='text' class='worksheet' data-id='" + esc(rowId) +
+                      "' placeholder='ใบงานที่ครูฝากไว้ (ไม่บังคับ)' value='" +
+                      esc(saved?.worksheet_note || "") + "' style='margin-top:8px'>"
+                    : "<div class='field-note'>แลกคาบกับครูคนนี้แล้ว ไม่นับเป็นคาบที่ต้องสอนชด</div>") +
+                  (saved && arrangement === "สอนแทน" && sub && !sub.user_id
+                    ? "<div class='item-foot'><span class='chip nologin'>ไม่มีบัญชีล็อกอิน — กดในระบบไม่ได้</span></div>"
+                    : "") + "</div>";
+              };
+              const status = summary.complete ? "done" : "urgent";
+              const statusText = summary.planned == null
+                ? "จัดแล้ว " + savedRows.length + " คน"
+                : "จัดแล้ว " + (summary.taughtBySub + summary.swapped) + " คาบ" +
+                  (summary.complete ? " ✓" : "");
+              return "<div class='item" + (summary.complete ? " covered" : "") + "'>" +
+                "<div class='item-head'><span class='item-label'>" + esc(item.label) + "</span>" +
+                (item.suggestedPeriods == null ? "" : "<span class='item-sub'>ปกติสอนวันละ " +
+                  esc(item.suggestedPeriods) + " คาบ</span>") +
+                "<span class='chip " + status + "'>" + esc(statusText) + "</span>" +
+                (item.sub ? "<span class='item-sub'>" + esc(item.sub) + "</span>" : "") +
+                (item.integratedParent ? "<span class='item-sub'>ในบูรณาการ · " +
+                  esc([item.integratedParent.code, item.integratedParent.name].filter(Boolean).join(" · ")) +
+                  "</span>" : "") + "</div>" +
+                savedRows.map(row => renderSubjectRow(row)).join("") +
+                (!savedRows.length || draftRows.has(item.key) ? renderSubjectRow(null) :
+                  "<button type='button' class='ghost small add-subject' data-key='" +
+                    esc(item.key) + "'>+ เพิ่มคนแทน</button>") + "</div>";
+            }
+            const saved = savedRows[0] || null;
             const sub = saved ? day.staffById.get(saved.substitute_staff_id) : null;
             const noLogin = sub && !sub.user_id;
             return "<div class='item" + (saved ? " covered" : "") + "'>" +
@@ -319,25 +388,6 @@ if (session) {
                 "<select data-key='" + esc(item.key) + "' data-staff='" + esc(entry.staff.id) + "'>" +
                   substituteOptions(entry.staff.id, saved?.substitute_staff_id || "") +
                 "</select>" +
-                (item.kind === "วิชา" && saved
-                  ? "<div class='periods-row'>" +
-                      "<label>ไม่ได้สอนวันนี้ " +
-                        "<input type='number' class='periods' data-id='" + esc(saved.id) + "' " +
-                          "min='0.5' max='12' step='0.5' value='" +
-                          (saved.periods == null ? "" : esc(saved.periods)) + "'> คาบ</label>" +
-                      (saved.periods == null
-                        ? "<span class='chip urgent'>ยังไม่ระบุคาบ</span>" +
-                          (item.suggestedPeriods
-                            ? "<button type='button' class='ghost use-hint' data-id='" + esc(saved.id) +
-                              "' data-periods='" + esc(item.suggestedPeriods) + "'>ใช้ " +
-                              esc(item.suggestedPeriods) + " คาบ</button>"
-                            : "")
-                        : "") +
-                    "</div>" +
-                    "<input type='text' class='worksheet' data-id='" + esc(saved.id) + "' " +
-                    "placeholder='ใบงานที่ครูฝากไว้ (ไม่บังคับ)' value='" +
-                    esc(saved.worksheet_note || "") + "' style='margin-top:8px'>"
-                  : "") +
               "</div>" +
               (saved
                 ? "<div class='item-foot'>" +
@@ -357,11 +407,19 @@ if (session) {
         return "<div class='person'>" + head + items + "</div>";
       }).join("");
 
-      box.querySelectorAll("select[data-key]").forEach(sel =>
+      box.querySelectorAll("select[data-key]:not(.subject-select)").forEach(sel =>
         sel.addEventListener("change", () => onPick(sel)));
-      box.querySelectorAll("input.worksheet").forEach(input =>
+      box.querySelectorAll("select.subject-select").forEach(sel =>
+        sel.addEventListener("change", () => onSubjectPick(sel)));
+      box.querySelectorAll("input.arrangement").forEach(input =>
+        input.addEventListener("change", () => onArrangement(input)));
+      box.querySelectorAll("button.add-subject").forEach(button =>
+        button.addEventListener("click", () => { draftRows.add(button.dataset.key); render(); }));
+      box.querySelectorAll("button.delete-subject").forEach(button =>
+        button.addEventListener("click", () => onDeleteSubject(button)));
+      box.querySelectorAll("input.worksheet[data-id]:not([data-id=''])").forEach(input =>
         input.addEventListener("change", () => onWorksheet(input)));
-      box.querySelectorAll("input.periods").forEach(input =>
+      box.querySelectorAll("input.periods[data-id]:not([data-id=''])").forEach(input =>
         input.addEventListener("change", () => onPeriods(input)));
       box.querySelectorAll("button.use-hint").forEach(button =>
         button.addEventListener("click", () => onUseHint(button)));
@@ -375,13 +433,118 @@ if (session) {
       return null;
     };
 
+    // วิชาบันทึกแยกแถวตามคน จึงแก้คน/คาบ/วิธีจัดของแต่ละแถวได้อิสระ
+    async function onSubjectPick(sel) {
+      if (busy) return;
+      const found = findItem(sel.dataset.key);
+      if (!found) return;
+      const rowElement = sel.closest(".coverage-row");
+      const saved = rowElement.dataset.id
+        ? day.assignments.find(row => row.id === rowElement.dataset.id) : null;
+      const newId = sel.value || null;
+      if (saved?.substitute_staff_id === newId) return;
+      if (!newId) {
+        if (saved) { toast("ใช้ปุ่มลบเพื่อลบคนแทนแถวนี้", true); render(); }
+        return;
+      }
+      const periodsInput = rowElement.querySelector("input.periods");
+      const raw = periodsInput.value.trim();
+      const periods = raw === "" ? null : Number(raw);
+      if (periods !== null && !isValidPeriods(periods)) {
+        toast(PERIODS_HINT, true); sel.value = saved?.substitute_staff_id || ""; return;
+      }
+      busy = true;
+      sel.disabled = true;
+      try {
+        if (saved) {
+          await updateCoverageAssignment(saved.id, { substitute_staff_id: newId });
+        } else {
+          const arrangement = rowElement.querySelector("input.arrangement:checked").value;
+          await createCoverageAssignment(buildCoverageRow({
+            date: day.date, item: found.item, absentee: found.entry,
+            substituteStaffId: newId, arrangement, periods,
+            worksheetNote: arrangement === "สอนแทน" ? rowElement.querySelector("input.worksheet")?.value.trim() : null,
+            createdBy: session.user.id
+          }));
+          draftRows.delete(found.item.key);
+        }
+        const who = day.staffById.get(newId);
+        toast("บันทึก " + found.item.label + " ให้ " + (who?.full_name || "คนแทน") + " แล้ว");
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+        await reload();
+      } finally {
+        busy = false;
+      }
+    }
+
+    async function onArrangement(input) {
+      if (busy) return;
+      const rowElement = input.closest(".coverage-row");
+      const id = rowElement.dataset.id;
+      if (!id) {
+        const worksheet = rowElement.querySelector("input.worksheet");
+        if (worksheet) worksheet.hidden = input.value === "แลกคาบ";
+        let note = rowElement.querySelector(".swap-note");
+        if (!note) {
+          note = document.createElement("div"); note.className = "field-note swap-note";
+          note.textContent = "แลกคาบกับครูคนนี้แล้ว ไม่นับเป็นคาบที่ต้องสอนชด";
+          rowElement.append(note);
+        }
+        note.hidden = input.value !== "แลกคาบ";
+        return;
+      }
+      busy = true;
+      try {
+        await updateCoverageAssignment(id, {
+          arrangement: input.value,
+          ...(input.value === "แลกคาบ" ? { worksheet_note: null } : {})
+        });
+        toast("บันทึกวิธีจัดคาบแล้ว");
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+        await reload();
+      } finally { busy = false; }
+    }
+
+    async function onDeleteSubject(button) {
+      if (busy) return;
+      const saved = day.assignments.find(row => row.id === button.dataset.id);
+      const found = findItem(button.closest(".coverage-row")?.dataset.key);
+      if (!saved || !found) return;
+      const who = day.staffById.get(saved.substitute_staff_id)?.full_name || "ครูคนนี้";
+      if (!await window.crsAskConfirm({
+        title: "ลบคนแทนวิชา",
+        message: "จะลบ 1 แถว: " + found.item.label + " · " + who +
+          " · " + (saved.arrangement || "สอนแทน") +
+          (saved.periods == null ? "" : " " + saved.periods + " คาบ") +
+          (saved.worksheet_note ? " · ใบงานที่ฝากไว้จะถูกลบด้วย" : "") +
+          (saved.arrangement === "แลกคาบ"
+            ? " จำนวนคาบแลกในสรุปจะลดลง"
+            : " สิทธิ์เช็คชื่อและยอดรายงานที่มาจากแถวนี้จะหายไป"),
+        okLabel: "ลบคนแทน", requireText: saved.worksheet_note ? found.item.label : null,
+        danger: true
+      })) return;
+      busy = true;
+      try {
+        await deleteCoverageAssignment(saved.id);
+        toast("ลบคนแทนของ " + found.item.label + " แล้ว");
+        await reload();
+      } catch (e) {
+        toast(e.message || String(e), true);
+        await reload();
+      } finally { busy = false; }
+    }
+
     // ---------- เลือก/เปลี่ยน/ยกเลิกคนแทน ----------
     async function onPick(sel) {
       if (busy) return;
       const found = findItem(sel.dataset.key);
       if (!found) return;
       const { entry, item } = found;
-      const saved = day.byKey.get(item.key) || null;
+      const saved = day.byKey.get(item.key)?.[0] || null;
       const newId = sel.value || null;
       if (saved && saved.substitute_staff_id === newId) return;
 
