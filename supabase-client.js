@@ -6907,3 +6907,142 @@ export async function getCoverageByRange(from, to) {
   if (error) throw new Error("โหลดประวัติการจัดคนแทนไม่สำเร็จ: " + error.message);
   return data || [];
 }
+
+// ---------- ภาพรวมการเงิน ----------
+// วันส่งเงินของสัปดาห์: วันทำงานสุดท้ายไม่เกินวันศุกร์ (อ้างอิงปฏิทินงานเดียวกับ dashboard)
+export function remitDeadlineFor(dateStr, { workdays, holidays } = {}) {
+  if (!dateStr) return dateStr;
+  const monday = addDaysStr(dateStr, 1 - isoWeekday(dateStr));
+  for (let offset = 4; offset >= 0; offset--) {
+    const date = addDaysStr(monday, offset);
+    if (workdays?.get(isoWeekday(date)) === true && !holidays?.has(date)) return date;
+  }
+  return dateStr;
+}
+
+export function summarizeUnremittedRooms({ savingsRows = [], transportRows = [], today, workdays, holidays, currentYear } = {}) {
+  const groups = new Map();
+  const add = (row, kind, dateField) => {
+    const amount = kind === "savings" ? computeUnremitted([row]) : computeTransportUnremitted([row]);
+    if (amount <= 0) return;
+    const key = [row.year, row.grade_level, row.classroom].join("\u0000");
+    if (!groups.has(key)) groups.set(key, { year:row.year, grade_level:row.grade_level,
+      classroom:row.classroom, savings:0, transport:0, total:0, oldestDate:null,
+      overdueAmount:0, dueTodayAmount:0, firstMissedDeadline:null, status:"pending" });
+    const group = groups.get(key), date = row[dateField];
+    group[kind] += amount;
+    group.total += amount;
+    if (date && (!group.oldestDate || date < group.oldestDate)) group.oldestDate = date;
+    const deadline = remitDeadlineFor(date, { workdays, holidays });
+    if (today && deadline < today) {
+      group.overdueAmount += amount;
+      if (!group.firstMissedDeadline || deadline < group.firstMissedDeadline) group.firstMissedDeadline = deadline;
+    } else if (today && deadline === today) group.dueTodayAmount += amount;
+  };
+  savingsRows.forEach(row => add(row, "savings", "txn_date"));
+  transportRows.forEach(row => add(row, "transport", "pay_date"));
+  return [...groups.values()].map(group => ({ ...group,
+    status:group.overdueAmount > 0 ? "overdue" : group.dueTodayAmount > 0 ? "due-today" : "pending"
+  })).sort((a, b) => String(a.oldestDate || "").localeCompare(String(b.oldestDate || "")) ||
+    `${a.grade_level}/${a.classroom}`.localeCompare(`${b.grade_level}/${b.classroom}`, "th", { numeric:true }));
+}
+
+function financeShortDate(dateStr) {
+  return dateStr ? new Intl.DateTimeFormat("th-TH", { day:"numeric", month:"short", timeZone:"Asia/Bangkok" })
+    .format(new Date(dateStr + "T00:00:00+07:00")) : "—";
+}
+
+export function pickFinanceAlerts({ rooms = [], pendingWithdrawals = [], departedWithBalance = 0 } = {}) {
+  const alerts = [];
+  const overdue = rooms.filter(room => room.overdueAmount > 0);
+  if (overdue.length) {
+    const latest = overdue.map(room => room.firstMissedDeadline).filter(Boolean).sort().at(-1);
+    alerts.push({ kind:"remit-overdue", label:"เลยกำหนดส่ง", tone:"danger", rooms:overdue,
+      summary:`${overdue.length} ห้อง · รวม ${formatMoney(overdue.reduce((sum, row) => sum + row.overdueAmount, 0))} · ไม่ส่งเมื่อ ${financeShortDate(latest)}` });
+  }
+  const pending = pendingWithdrawals.filter(row => row.status === "รอจ่าย");
+  if (pending.length) alerts.push({ kind:"withdraw-pending", label:"รอจ่ายเงิน", tone:"amber", rows:pending,
+    summary:`คำขอเบิกออมทรัพย์รอจ่าย ${pending.length} ราย · ${formatMoney(pending.reduce((sum, row) => sum + Number(row.amount || 0), 0))}` });
+  const departed = Array.isArray(departedWithBalance) ? departedWithBalance.length : Number(departedWithBalance || 0);
+  if (departed > 0) alerts.push({ kind:"departed-balance", label:"ปิดบัญชี", tone:"amber",
+    summary:`นักเรียนที่ออกแล้วยังมีเงินออม ${departed} คน` });
+  const due = rooms.filter(room => room.dueTodayAmount > 0);
+  if (due.length) alerts.push({ kind:"remit-due-today", label:"ครบกำหนดวันนี้", tone:"amber", rooms:due,
+    summary:`${due.length} ห้อง · รวม ${formatMoney(due.reduce((sum, row) => sum + row.dueTodayAmount, 0))} ต้องส่งภายในวันนี้` });
+  return { alerts, countable:alerts.filter(row => row.kind !== "remit-due-today").length };
+}
+
+export function summarizeFinanceDay({ savingsRows = [], transportRows = [], feeRows = [] } = {}) {
+  const deposits = savingsRows.filter(row => row.kind === "ฝาก");
+  const byOtherMethod = {}, byMethod = {}, receipts = new Set();
+  let cash = 0, feeAmount = 0;
+  for (const row of transportRows) {
+    const amount = Number(row.amount || 0);
+    if (row.method === "เงินสด") cash += amount;
+    else byOtherMethod[row.method || "อื่น ๆ"] = (byOtherMethod[row.method || "อื่น ๆ"] || 0) + amount;
+  }
+  for (const row of feeRows) {
+    if (row.voided_at || row.receipt_voided_at) continue;
+    const amount = Number(row.amount || 0);
+    feeAmount += amount;
+    byMethod[row.method || "อื่น ๆ"] = (byMethod[row.method || "อื่น ๆ"] || 0) + amount;
+    if (row.receipt_id) receipts.add(row.receipt_id);
+  }
+  return { savings:{ amount:deposits.reduce((sum, row) => sum + Number(row.amount || 0), 0), count:deposits.length },
+    transport:{ cash, byOtherMethod, count:transportRows.length },
+    fee:{ amount:feeAmount, receipts:receipts.size, byMethod } };
+}
+
+export function summarizeFinanceWeek({ savingsRows = [], transportRows = [], feeRows = [], dates = [] } = {}) {
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" });
+  const thaiDate = value => {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(value)).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+  return dates.map(date => ({ date, ...summarizeFinanceDay({
+    savingsRows:savingsRows.filter(row => row.txn_date === date),
+    transportRows:transportRows.filter(row => row.pay_date === date),
+    feeRows:feeRows.filter(row => row.paid_at && thaiDate(row.paid_at) === date)
+  }) }));
+}
+
+// ใช้สูตรเดียวกับ transport-report.html buildStudents/outstandingStudents; จำกัดข้อมูลที่ห้องครู
+export async function loadRoomTransportDebtors({ year, yearRange, today, grade_level, classroom }) {
+  const placementRes = await fetchAllRows(() => sb.from("student_year_placements")
+    .select("student_id").eq("year", year).eq("grade_level", grade_level).eq("classroom", classroom), "student_id");
+  if (placementRes.error) throw new Error("โหลดรายชื่อนักเรียนใช้รถไม่สำเร็จ: " + placementRes.error.message);
+  const ids = [...new Set((placementRes.data || []).map(row => row.student_id))];
+  if (!ids.length) return { count:0, unknown:0 };
+  const [periodRes, attendanceRes, overrideRes, paymentRes, openingRes] = await Promise.all([
+    fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date")
+      .eq("year", year).in("student_id", ids), ["student_id","start_date","id"]),
+    fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status")
+      .eq("year", year).in("student_id", ids).gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_day_overrides").select("id,student_id,charge_date,amount")
+      .eq("year", year).in("student_id", ids).gte("charge_date", yearRange.start).lte("charge_date", today), ["charge_date","student_id","id"]),
+    fetchAllRows(() => sb.from("transport_payments").select("id,student_id,amount")
+      .eq("year", year).in("student_id", ids), ["student_id","id"]),
+    fetchAllRows(() => sb.from("transport_opening_debts").select("student_id,amount")
+      .eq("year", year).in("student_id", ids), "student_id")
+  ]);
+  for (const [label, result] of [["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["รายการรับเงิน",paymentRes],["หนี้ยกมา",openingRes]]) {
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+  }
+  const periods = periodRes.data || [];
+  if (!periods.length) return { count:0, unknown:0 };
+  const zones = [...new Set(periods.map(row => row.zone_id).filter(Boolean))];
+  const rateRes = zones.length ? await fetchAllRows(() => sb.from("transport_month_rates")
+    .select("year,ym,zone_id,trip_mode,amount").eq("year", year).in("zone_id", zones), ["year","ym","zone_id","trip_mode"]) : { data:[], error:null };
+  if (rateRes.error) throw new Error("โหลดอัตราค่ารถไม่สำเร็จ: " + rateRes.error.message);
+  let count = 0, unknown = 0;
+  for (const studentId of new Set(periods.map(row => row.student_id))) {
+    const mine = rows => (rows || []).filter(row => row.student_id === studentId);
+    const charges = computeTransportCharges({ periods:mine(periods), attendance:mine(attendanceRes.data),
+      overrides:mine(overrideRes.data), monthRates:rateRes.data || [],
+      openingDebt:mine(openingRes.data)[0]?.amount || 0, from:yearRange.start, to:today });
+    const notKnown = charges.unannouncedMonths.length > 0;
+    if (notKnown) unknown++;
+    if (notKnown || computeTransportOutstanding(charges, mine(paymentRes.data)) > 0) count++;
+  }
+  return { count, unknown };
+}
