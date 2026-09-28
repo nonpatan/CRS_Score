@@ -2954,6 +2954,88 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
   return result;
 }
 
+// แยกห้องที่ต้องตามจากสถานะจริงและเวลาแรกที่บันทึก โดยใช้เกณฑ์รายระดับเดิม
+export function pickAttendanceRoomIssues({ rooms = [], rows = [], cutoff, dateStr, nowIso, streaks = [] } = {}) {
+  const roomRows = new Map();
+  for (const row of rows) {
+    const key = homeroomAuditRoomKey(row);
+    if (!roomRows.has(key)) roomRows.set(key, []);
+    roomRows.get(key).push(row);
+  }
+  const firstByRoom = firstCheckTimeByRoom(rows);
+  const streakCounts = new Map();
+  for (const streak of streaks) {
+    const key = homeroomAuditRoomKey({ grade_level:streak.gradeLevel, classroom:streak.classroom });
+    streakCounts.set(key, (streakCounts.get(key) || 0) + 1);
+  }
+  const issueRooms = [], normalRooms = [];
+  rooms.forEach((room, order) => {
+    const key = homeroomAuditRoomKey(room);
+    const entries = roomRows.get(key) || [];
+    const checked = entries.length > 0;
+    const firstAt = firstByRoom.get(key) || null;
+    const roomCutoff = cutoffForGrade(cutoff, room.grade_level);
+    const timing = classifyCheckTiming(checked ? firstAt : nowIso, dateStr, roomCutoff);
+    const counts = countAttendanceStatuses(entries);
+    const issues = [];
+    if (!checked && timing === "late") issues.push("unchecked-late");
+    if (checked && timing === "late") issues.push("checked-late");
+    if (counts.absent > 0) issues.push("absent");
+    const item = { grade_level:room.grade_level, classroom:room.classroom, checked, firstAt,
+      timing, counts, total:Number(room.studentCount || 0), streakCount:streakCounts.get(key) || 0,
+      cutoffTime:roomCutoff?.time || null, issues, order };
+    (issues.length ? issueRooms : normalRooms).push(item);
+  });
+  const priority = room => room.issues.includes("unchecked-late") ? 0
+    : room.issues.includes("checked-late") ? 1 : 2;
+  issueRooms.sort((a,b) => priority(a)-priority(b) || b.counts.absent-a.counts.absent || a.order-b.order);
+  for (const room of [...issueRooms,...normalRooms]) delete room.order;
+  return { issueRooms, normalRooms };
+}
+
+// แจ้งเตือนเป็นข้อมูลสรุปเท่านั้น ชื่อนักเรียนต้องผ่านกฎ showNames ตอนเรนเดอร์รายคน
+export function pickGeneralAffairsAlerts({ issueRooms = [], streaks = [], missingPlacement = 0,
+  teachersByRoom = new Map(), year } = {}) {
+  const alerts = [];
+  const unchecked = issueRooms.filter(room => room.issues.includes("unchecked-late"));
+  if (unchecked.length) {
+    const times = [...new Set(unchecked.map(room => room.cutoffTime).filter(Boolean))];
+    const details = unchecked.map(room => {
+      const teachers = teachersByRoom instanceof Map
+        ? teachersByRoom.get(homeroomAuditRoomKey(room)) : teachersByRoom[homeroomAuditRoomKey(room)];
+      const teacherNames = (teachers || []).map(teacher => String(teacher?.fullName || teacher || "").trim()).filter(Boolean);
+      return { room:homeroomAuditRoomLabel(room), teachers:teacherNames.length ? teacherNames.join(", ") : "ยังไม่กำหนดครูประจำชั้น" };
+    });
+    alerts.push({ kind:"unchecked", label:"ยังไม่เช็คชื่อ", tone:"danger", rooms:unchecked, details,
+      summary:`${unchecked.length} ห้อง · ${times.length === 1 ? `เลยเวลา ${times[0]} แล้ว` : "เลยเวลาของระดับแล้ว"}` });
+  }
+  if (streaks.length) {
+    const groups = new Map();
+    for (const row of streaks) {
+      const room = { grade_level:row.gradeLevel, classroom:row.classroom };
+      const key = homeroomAuditRoomKey(room);
+      if (!groups.has(key)) groups.set(key,{ room:homeroomAuditRoomLabel(room), count:0 });
+      groups.get(key).count += 1;
+    }
+    alerts.push({ kind:"streak", label:"ขาดติดต่อกัน", tone:"danger", rooms:[...groups.values()],
+      summary:`${streaks.length} คน · ${groups.size} ห้อง · นานสุด ${Math.max(...streaks.map(row => Number(row.days) || 0))} วัน` });
+  }
+  if (missingPlacement > 0) alerts.push({ kind:"no-placement", label:"ยังไม่มีห้อง", tone:"amber",
+    summary:`นักเรียน ${missingPlacement} คนยังไม่มีชั้น/ห้องในปี ${year || "ปัจจุบัน"}` });
+  const checkedLate = issueRooms.filter(room => room.issues.includes("checked-late"));
+  if (checkedLate.length) {
+    const room = checkedLate[0];
+    const time = Date.parse(room.firstAt);
+    const checkedAt = Number.isFinite(time)
+      ? new Date(time + 7*60*60*1000).toISOString().slice(11,16) : "—";
+    alerts.push({ kind:"checked-late", label:"เช็คเลยเวลา", tone:"slate", rooms:checkedLate,
+      summary:checkedLate.length === 1
+        ? `${homeroomAuditRoomLabel(room)} เช็คเมื่อ ${checkedAt} (กำหนด ${room.cutoffTime || "—"})`
+        : `${checkedLate.length} ห้อง เช็คหลังเวลากำหนด` });
+  }
+  return { alerts, countable:alerts.filter(alert => alert.kind !== "checked-late").length };
+}
+
 export function pickSchoolDays({ holidays, workdays, endDate, days = 5 }) {
   const target = Math.max(0, Math.floor(Number(days) || 0));
   if (!endDate || !target) return [];
