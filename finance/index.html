@@ -162,7 +162,7 @@
       <a href="savings-withdraw.html">แจ้งเบิกออมทรัพย์</a><a href="transport-entry.html">รับเงินค่ารถ</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20260921-1"></script>
+    <script src="../app-shell.js?v=20260929-2"></script>
   </header>
   <main class="academic-content">
     <section class="holiday-banner" id="holiday-banner" hidden>
@@ -210,7 +210,7 @@ import {
   pickSchoolDays, pickNextSchoolDay, remitDeadlineFor, summarizeUnremittedRooms, pickFinanceAlerts,
   summarizeFinanceDay, summarizeFinanceWeek, loadRoomTransportDebtors, summarizeSavingsByStudent,
   computeFeeOutstanding, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs
-} from "../supabase-client.js?v=20260928-2";
+} from "../supabase-client.js?v=20260929-3";
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 // จำนวนเต็มไม่ต่อ .00; ยอดติดลบใช้เครื่องหมายเดียวกับรายงานค่าใช้จ่าย
@@ -226,8 +226,8 @@ function setFreshness(today) {
   const now = bangkokNow();
   el("today-updated").textContent = "ข้อมูล ณ "+String(now.getUTCHours()).padStart(2,"0")+":"+String(now.getUTCMinutes()).padStart(2,"0")+" น.";
 }
-function renderAlerts(rooms, withdrawals, departed, year) {
-  const picked = pickFinanceAlerts({rooms,pendingWithdrawals:withdrawals,departedWithBalance:departed});
+function renderAlerts(rooms, withdrawals, departed, year, specialOrders) {
+  const picked = pickFinanceAlerts({rooms,pendingWithdrawals:withdrawals,departedWithBalance:departed,specialOrders});
   el("action-count").textContent = picked.countable ? picked.countable+" เรื่อง" : "ไม่มีเรื่องค้าง";
   el("action-count").classList.toggle("ok", picked.countable === 0);
   el("action-list").innerHTML = picked.alerts.map(item => {
@@ -236,9 +236,9 @@ function renderAlerts(rooms, withdrawals, departed, year) {
       " ตั้งแต่ "+esc(shortDate(room.oldestDate))+" · ออมทรัพย์ "+baht(room.savings)+
       " · ค่ารถ "+baht(room.transport)+"</li>").join("")+"</ul>";
     const href = item.kind === "remit-overdue" || item.kind === "remit-due-today" ? "savings-remit.html" :
-      item.kind === "withdraw-pending" ? "savings-payout.html" : "savings-payout.html#departed-card";
+      item.kind === "withdraw-pending" ? "savings-payout.html" : item.kind === "special-order" ? "special-orders.html" : "savings-payout.html#departed-card";
     const link = item.kind === "remit-overdue" ? "ไปรับเงินส่งจากครู →" :
-      item.kind === "withdraw-pending" ? "ไปจ่ายเงิน →" : item.kind === "departed-balance" ? "ไปปิดบัญชี →" : "รับเงินส่ง →";
+      item.kind === "withdraw-pending" ? "ไปจ่ายเงิน →" : item.kind === "departed-balance" ? "ไปปิดบัญชี →" : item.kind === "special-order" ? "ดูใบสั่งพิเศษ →" : "รับเงินส่ง →";
     return '<details class="action-row '+esc(item.tone)+'"><summary><span class="alert-kind '+esc(item.tone)+'">'+esc(item.label)+'</span><span class="action-summary">'+esc(item.summary)+'</span><span class="action-toggle"><span class="closed">ดู ▼</span><span class="opened">ย่อ ▲</span></span></summary><div class="action-detail">'+detail+'<a href="'+href+'">'+link+"</a></div></details>";
   }).join("") || '<div class="action-empty">วันนี้ไม่มีเรื่องที่ต้องจัดการ</div>';
 }
@@ -310,7 +310,7 @@ function renderFees(charges, payments, year) {
 async function loadFinance(today, year, workdays, holidays, holiday) {
   const dates = pickSchoolDays({holidays,workdays,endDate:today,days:5});
   const start = dates[0] || today;
-  const [placementRes,savingsRes,transportRes,daySavingsRes,dayTransportRes,withdrawRes,departedRes,chargeRes,feeRes] = await Promise.all([
+  const [placementRes,savingsRes,transportRes,daySavingsRes,dayTransportRes,withdrawRes,departedRes,chargeRes,feeRes,waitingRes,arrivedRes] = await Promise.all([
     getStudentPlacements(year),
     fetchAllRows(() => sb.from("savings_txns").select("id,year,grade_level,classroom,txn_date,kind,amount,remittance_id").eq("kind","ฝาก").is("remittance_id",null),["year","grade_level","classroom","id"]),
     fetchAllRows(() => sb.from("transport_payments").select("id,year,grade_level,classroom,pay_date,method,amount,remittance_id").eq("method","เงินสด").is("remittance_id",null),["year","grade_level","classroom","pay_date","id"]),
@@ -319,7 +319,9 @@ async function loadFinance(today, year, workdays, holidays, holiday) {
     fetchAllRows(() => sb.from("savings_withdrawals").select("id,status,amount").eq("status","รอจ่าย"),"id"),
     fetchAllRows(() => sb.from("students").select("id,graduated,left_school").or("graduated.eq.true,left_school.eq.true"),"id"),
     fetchAllRows(() => sb.from("student_charges").select("id,student_id,year,term,amount,voided_at").eq("year",year),["student_id","id"]),
-    fetchAllRows(() => sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,voided_at,receipt:receipt_id(student_id,voided_at)"),["paid_at","id"])
+    fetchAllRows(() => sb.from("fee_payments").select("id,receipt_id,charge_id,amount,method,paid_at,voided_at,receipt:receipt_id(student_id,voided_at)"),["paid_at","id"]),
+    sb.from("special_orders").select("id",{count:"exact",head:true}).eq("status","รอสั่ง"),
+    sb.from("special_orders").select("id",{count:"exact",head:true}).eq("status","ของมาแล้ว")
   ]);
   const placements = ensure("รายชื่อห้อง",placementRes), pendingSavings = ensure("เงินออมค้างส่ง",savingsRes);
   const pendingTransport = ensure("ค่ารถค้างส่ง",transportRes), daySavings = ensure("เงินออมรายวัน",daySavingsRes);
@@ -339,7 +341,8 @@ async function loadFinance(today, year, workdays, holidays, holiday) {
     const balances = summarizeSavingsByStudent(ensure("ยอดเงินนักเรียนที่ออก",txnRes));
     departed = departedIds.filter(id => (balances.get(id) || 0) > 0).length;
   }
-  renderAlerts(rooms,withdrawals,departed,year);
+  if(waitingRes.error||arrivedRes.error)throw waitingRes.error||arrivedRes.error;
+  renderAlerts(rooms,withdrawals,departed,year,{waiting:waitingRes.count,arrived:arrivedRes.count});
   renderUnremitted(rooms,holiday,year);
   // fee-report ช่วง "ทั้งปี" ใช้เฉพาะ active placement ปัจจุบัน และตัดใบเสร็จที่ยกเลิก
   renderFees(charges.filter(row => activeIds.has(row.student_id)),feeRows,year);

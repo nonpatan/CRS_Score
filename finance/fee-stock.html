@@ -94,7 +94,7 @@
     <h1>คลังสินค้า</h1>
     <p>เพิ่มสินค้า ตั้งราคา รับเข้า และดูยอดคงเหลือได้จากที่เดียว</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20260921-1"></script>
+    <script src="../app-shell.js?v=20260929-2"></script>
   </header>
 
   <main class="academic-content">
@@ -117,6 +117,7 @@
         <div class="field"><label for="product-variants">เบอร์/สี/แบบ — คั่นด้วยจุลภาค</label><textarea id="product-variants" placeholder="เบอร์ S, เบอร์ M, เบอร์ L"></textarea><div class="hint">ถ้าไม่มีเบอร์/สี/แบบ เว้นว่างได้ · พิมพ์คั่นด้วยจุลภาค · เว้นวรรคเกินได้ · ใส่ซ้ำกันระบบจะไม่สร้างซ้ำให้</div></div>
         <div class="row2">
           <label class="field-label"><input id="product-track" type="checkbox" checked> คุมสต๊อกสินค้า</label>
+          <label class="field-label"><input id="product-special" type="checkbox"> สั่งพิเศษ (วัดตัว · รับเข้าผ่านหน้าสั่งพิเศษ · ราคาตามใบสั่ง)</label>
           <div class="field"><label for="product-threshold">เตือนเมื่อเหลือน้อยกว่า</label><input id="product-threshold" type="number" min="0" step="1" inputmode="numeric" placeholder="เว้นว่าง = ไม่เตือน"></div>
         </div>
         <div id="new-product-fields">
@@ -169,8 +170,8 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs, fetchAllRows,
-  getAcademicYears, academicYearOf, bangkokNow, toDateStr, formatMoney, computeStockBalance
-} from "../supabase-client.js?v=20260928-2";
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, formatMoney, computeStockBalance, latestUnitCostAt
+} from "../supabase-client.js?v=20260929-3";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -179,7 +180,7 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
 
 function stockAlerts(items, moves) {
   const opened = new Set((moves || []).filter(move => move.kind === "ยอดยกมา").map(move => move.item_id));
-  return (items || []).filter(item => item.track_stock === true && !opened.has(item.id));
+  return (items || []).filter(item => item.track_stock === true && !item.special_order && !opened.has(item.id));
 }
 
 // ตัดหัวท้าย + บีบช่องว่างซ้อนให้เหลือช่องเดียว
@@ -195,11 +196,6 @@ function parseVariantList(value) {
   });
 }
 
-function latestUnitCost(itemMoves) {
-  return [...(itemMoves || [])]
-    .filter(move => ["ยอดยกมา", "รับเข้า"].includes(move.kind) && move.unit_cost != null && Number.isFinite(Number(move.unit_cost)))
-    .sort((a, b) => String(b.recorded_at || "").localeCompare(String(a.recorded_at || "")) || String(b.id || "").localeCompare(String(a.id || "")))[0]?.unit_cost ?? null;
-}
 
 function inventoryValue(balance, unitCost) {
   return unitCost == null ? null : Number(balance || 0) * Number(unitCost);
@@ -278,10 +274,10 @@ function renderStock() {
   el("stock-list").innerHTML = `<div class="table-wrap"><table><thead><tr><th>สินค้า</th><th class="number">ราคา (${esc(currentYear)})</th><th class="number">คงเหลือ</th><th class="number">จุดเตือน</th><th class="number">มูลค่าคงคลัง</th><th>จัดการ</th></tr></thead><tbody>${items.map(item => {
     const balance = computeStockBalance(movesFor(item.id));
     const opening = openingFor(item.id);
-    const cost = latestUnitCost(movesFor(item.id));
+    const cost = latestUnitCostAt(moves, item.id);
     const value = inventoryValue(balance, cost);
     if (value != null) { totalValue += value; valuedCount++; }
-    return `<tr id="stock-${item.id}"><td><b>${esc(item.display_name)}</b><span class="meta">หน่วย ${esc(item.unit)} · ${item.active ? "เปิดใช้งาน" : "ปิดใช้งานแล้ว"} · ${item.track_stock ? "คุมสต๊อก" : "ไม่คุมสต๊อก"}</span>${item.track_stock ? (opening ? '<span class="status">ตั้งยอดยกมาแล้ว</span>' : '<span class="status pending">ยังไม่ตั้งยอดยกมา</span>') : ""}</td><td><input class="money-input" type="number" min="0" step="0.01" inputmode="decimal" data-price-item="${item.id}" aria-label="ราคาของ ${esc(item.display_name)}" value="${currentPrice(item.id) == null ? "" : esc(currentPrice(item.id))}" placeholder="ว่าง"></td><td class="number"><span class="balance">${esc(balance)}</span> ${esc(item.unit)}</td><td><input class="money-input" type="number" min="0" step="1" inputmode="numeric" data-threshold-item="${item.id}" aria-label="จุดเตือนของ ${esc(item.display_name)}" value="${item.low_stock_threshold == null ? "" : esc(item.low_stock_threshold)}" placeholder="ไม่เตือน" ${item.track_stock ? "" : "disabled"}></td><td class="number">${value == null ? "—" : formatMoney(value)}${cost == null ? "" : `<span class="meta">ทุนล่าสุด ${formatMoney(cost)}</span>`}</td><td><div class="actions">${item.track_stock && !opening ? `<button class="ghost" type="button" data-move="opening" data-item-id="${item.id}">ตั้งยอดยกมา</button>` : ""}${item.track_stock ? `<button class="primary" type="button" data-move="receive" data-item-id="${item.id}">รับเข้า</button><button class="ghost" type="button" data-move="adjust" data-item-id="${item.id}">ปรับยอด</button><button class="ghost" type="button" data-history="${item.id}">ประวัติ</button>` : ""}<button class="ghost" type="button" data-edit-product="${item.id}">แก้สินค้า</button><button class="${item.active ? "danger" : "ghost"}" type="button" data-toggle-product="${item.id}">${item.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button>${canAdmin ? `<button class="icon-btn" type="button" data-delete-product="${item.id}" aria-label="ลบ ${esc(item.display_name)}">🗑</button>` : ""}</div></td></tr>`;
+    return `<tr id="stock-${item.id}"><td><b>${esc(item.display_name)}</b><span class="meta">หน่วย ${esc(item.unit)} · ${item.active ? "เปิดใช้งาน" : "ปิดใช้งานแล้ว"} · ${item.track_stock ? "คุมสต๊อก" : "ไม่คุมสต๊อก"}</span>${item.special_order ? '<span class="status">สั่งพิเศษ</span>' : item.track_stock ? (opening ? '<span class="status">ตั้งยอดยกมาแล้ว</span>' : '<span class="status pending">ยังไม่ตั้งยอดยกมา</span>') : ""}</td><td>${item.special_order ? "ราคาตามใบสั่ง" : `<input class="money-input" type="number" min="0" step="0.01" inputmode="decimal" data-price-item="${item.id}" aria-label="ราคาของ ${esc(item.display_name)}" value="${currentPrice(item.id) == null ? "" : esc(currentPrice(item.id))}" placeholder="ว่าง">`}</td><td class="number"><span class="balance">${esc(balance)}</span> ${esc(item.unit)}</td><td><input class="money-input" type="number" min="0" step="1" inputmode="numeric" data-threshold-item="${item.id}" aria-label="จุดเตือนของ ${esc(item.display_name)}" value="${item.low_stock_threshold == null ? "" : esc(item.low_stock_threshold)}" placeholder="ไม่เตือน" ${item.track_stock ? "" : "disabled"}></td><td class="number">${value == null ? "—" : formatMoney(value)}${cost == null ? "" : `<span class="meta">ทุนล่าสุด ${formatMoney(cost)}</span>`}</td><td><div class="actions">${item.track_stock && !item.special_order && !opening ? `<button class="ghost" type="button" data-move="opening" data-item-id="${item.id}">ตั้งยอดยกมา</button>` : ""}${item.track_stock && !item.special_order ? `<button class="primary" type="button" data-move="receive" data-item-id="${item.id}">รับเข้า</button>` : ""}${item.track_stock ? `<button class="ghost" type="button" data-move="adjust" data-item-id="${item.id}">ปรับยอด</button><button class="ghost" type="button" data-history="${item.id}">ประวัติ</button>` : ""}<button class="ghost" type="button" data-edit-product="${item.id}">แก้สินค้า</button><button class="${item.active ? "danger" : "ghost"}" type="button" data-toggle-product="${item.id}">${item.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button>${canAdmin ? `<button class="icon-btn" type="button" data-delete-product="${item.id}" aria-label="ลบ ${esc(item.display_name)}">🗑</button>` : ""}</div></td></tr>`;
   }).join("")}</tbody><tfoot><tr><td colspan="4">รวมมูลค่าคงคลัง${valuedCount < items.length ? ` · คำนวณได้ ${valuedCount}/${items.length} รายการ` : ""}</td><td class="number">${valuedCount ? formatMoney(totalValue) : "—"}</td><td></td></tr></tfoot></table></div>`;
 }
 
@@ -304,6 +300,8 @@ function openProductForm(item = null) {
   el("product-unit").value = item?.unit || "ตัว";
   el("product-sort").value = item?.sort_order ?? 0;
   el("product-track").checked = item ? !!item.track_stock : true;
+  el("product-special").checked = !!item?.special_order;
+  syncSpecialProduct();
   el("product-threshold").value = item?.low_stock_threshold ?? "";
   el("product-threshold").disabled = item ? !item.track_stock : false;
   el("product-price").value = "";
@@ -321,6 +319,19 @@ function closeProductForm() {
   el("product-form").hidden = true;
 }
 
+function syncSpecialProduct() {
+  const special = el("product-special").checked;
+  if (special) el("product-track").checked = true;
+  el("product-track").disabled = special;
+  el("product-threshold").disabled = special || !el("product-track").checked;
+  el("product-price").disabled = special;
+  el("product-opening").disabled = special;
+  el("product-cost").disabled = special;
+  el("product-supplier").disabled = special;
+  el("product-doc").disabled = special;
+  if (special) for (const id of ["product-price","product-opening","product-cost","product-supplier","product-doc"]) el(id).value = "";
+}
+
 async function saveProduct(event) {
   event.preventDefault();
   const groupName = squash(el("product-group").value);
@@ -328,7 +339,8 @@ async function saveProduct(event) {
   const variants = parsedVariants.length ? parsedVariants : [""];
   const unit = squash(el("product-unit").value);
   const sortStart = Number(el("product-sort").value || 0);
-  const trackStock = el("product-track").checked;
+  const specialOrder = el("product-special").checked;
+  const trackStock = specialOrder || el("product-track").checked;
   const threshold = parseOptionalNumber(el("product-threshold"), { integer:true });
   if (!groupName) return toast("กรุณากรอกชื่อกลุ่มสินค้า", true);
   if (!unit) return toast("กรุณากรอกหน่วย", true);
@@ -338,7 +350,7 @@ async function saveProduct(event) {
     if (variants.length !== 1) return toast("ตอนแก้สินค้าให้ใส่เบอร์/สี/แบบเพียง 1 รายการ", true);
     const { error } = await sb.from("fee_items").update({
       group_name:groupName, variant_label:variants[0], unit, sort_order:sortStart,
-      track_stock:trackStock, low_stock_threshold:trackStock ? threshold : null,
+      track_stock:trackStock, special_order:specialOrder, low_stock_threshold:trackStock ? threshold : null,
       updated_at:new Date().toISOString()
     }).eq("id", editingProductId);
     if (error) return toast(friendlyError(error), true);
@@ -357,7 +369,7 @@ async function saveProduct(event) {
   if (opening == null && (unitCost != null || supplier || docNo)) return toast("กรุณาใส่ยอดยกมาก่อน จึงจะบันทึกราคาทุน ผู้ขาย หรือเลขที่ใบส่งของได้", true);
   const payloads = variants.map((variant, index) => ({
     category:"ค่าสินค้า", group_name:groupName, variant_label:variant, unit,
-    track_stock:trackStock, low_stock_threshold:trackStock ? threshold : null,
+    track_stock:trackStock, special_order:specialOrder, low_stock_threshold:trackStock ? threshold : null,
     sort_order:sortStart + index, created_by:session.user.id, updated_at:new Date().toISOString()
   }));
   const created = await sb.from("fee_items").insert(payloads).select("id,display_name");
@@ -365,14 +377,14 @@ async function saveProduct(event) {
   const createdItems = created.data || [];
   const results = [`สร้างสินค้า ${createdItems.length} รายการแล้ว`];
   const failures = [];
-  if (price != null) {
+  if (!specialOrder && price != null) {
     const savedPrices = await sb.from("fee_product_prices").insert(createdItems.map(item => ({
       year:currentYear, item_id:item.id, amount:price, updated_by:session.user.id, updated_at:new Date().toISOString()
     })));
     if (savedPrices.error) failures.push(`ราคาไม่สำเร็จ: ${friendlyError(savedPrices.error)}`);
     else results.push("บันทึกราคาแล้ว");
   }
-  if (opening != null) {
+  if (!specialOrder && opening != null) {
     const savedOpening = await sb.from("fee_stock_moves").insert(createdItems.map(item => ({
       item_id:item.id, kind:"ยอดยกมา", qty:opening, unit_cost:unitCost,
       supplier, doc_no:docNo, recorded_by:session.user.id
@@ -493,7 +505,7 @@ function renderHistory(itemId, shouldScroll = true) {
   const after = cumulativeBalances(itemMoves);
   const ordered = [...itemMoves].sort((a, b) => String(b.recorded_at).localeCompare(String(a.recorded_at)) || String(b.id).localeCompare(String(a.id)));
   el("history-name").textContent = `ประวัติ · ${item.display_name}`;
-  el("history-list").innerHTML = ordered.length ? `<div class="table-wrap"><table><thead><tr><th>ชนิด / ที่มา</th><th class="number">จำนวน</th><th class="number">ยอดหลังรายการ</th><th>ผู้บันทึก / เวลา</th>${canAdmin ? "<th>ลบ</th>" : ""}</tr></thead><tbody>${ordered.map(move => `<tr><td><b>${esc(move.kind)}</b>${move.unit_cost != null ? `<span class="meta">ราคาทุน ${formatMoney(move.unit_cost)}</span>` : ""}${move.supplier ? `<span class="meta">ผู้ขาย: ${esc(move.supplier)}</span>` : ""}${move.doc_no ? `<span class="meta">ใบส่งของ: ${esc(move.doc_no)}</span>` : ""}${move.reason ? `<span class="meta">เหตุผล: ${esc(move.reason)}</span>` : ""}${move.note ? `<span class="meta">หมายเหตุ: ${esc(move.note)}</span>` : ""}</td><td class="number"><b class="qty ${Number(move.qty) > 0 ? "in" : "out"}">${Number(move.qty) > 0 ? "+" : ""}${esc(move.qty)}</b> ${esc(item.unit)}</td><td class="number">${esc(after.get(move.id))} ${esc(item.unit)}</td><td>${esc(recordedBy(move))}<span class="meta">${esc(thaiDateTime(move.recorded_at))}</span></td>${canAdmin ? `<td><button class="icon-btn" type="button" data-delete-move="${move.id}" aria-label="ลบรายการ ${esc(move.kind)}">🗑</button></td>` : ""}</tr>`).join("")}</tbody></table></div>` : '<div class="empty">ยังไม่มีประวัติของสินค้านี้</div>';
+  el("history-list").innerHTML = ordered.length ? `<div class="table-wrap"><table><thead><tr><th>ชนิด / ที่มา</th><th class="number">จำนวน</th><th class="number">ยอดหลังรายการ</th><th>ผู้บันทึก / เวลา</th>${canAdmin ? "<th>ลบ</th>" : ""}</tr></thead><tbody>${ordered.map(move => `<tr><td><b>${esc(move.kind)}</b>${move.unit_cost != null ? `<span class="meta">ราคาทุน ${formatMoney(move.unit_cost)}</span>` : ""}${move.supplier ? `<span class="meta">ผู้ขาย: ${esc(move.supplier)}</span>` : ""}${move.doc_no ? `<span class="meta">ใบส่งของ: ${esc(move.doc_no)}</span>` : ""}${move.special_order_id ? `<span class="meta">จากใบสั่งพิเศษ</span>` : ""}${move.reason ? `<span class="meta">เหตุผล: ${esc(move.reason)}</span>` : ""}${move.note ? `<span class="meta">หมายเหตุ: ${esc(move.note)}</span>` : ""}</td><td class="number"><b class="qty ${Number(move.qty) > 0 ? "in" : "out"}">${Number(move.qty) > 0 ? "+" : ""}${esc(move.qty)}</b> ${esc(item.unit)}</td><td class="number">${esc(after.get(move.id))} ${esc(item.unit)}</td><td>${esc(recordedBy(move))}<span class="meta">${esc(thaiDateTime(move.recorded_at))}</span></td>${canAdmin ? `<td>${move.special_order_id ? "" : `<button class="icon-btn" type="button" data-delete-move="${move.id}" aria-label="ลบรายการ ${esc(move.kind)}">🗑</button>`}</td>` : ""}</tr>`).join("")}</tbody></table></div>` : '<div class="empty">ยังไม่มีประวัติของสินค้านี้</div>';
   el("history-card").hidden = false;
   if (shouldScroll) el("history-title").scrollIntoView({ behavior:"smooth", block:"start" });
 }
@@ -501,6 +513,7 @@ function renderHistory(itemId, shouldScroll = true) {
 function openMove(mode, itemId, trigger = null) {
   const item = items.find(row => row.id === itemId);
   if (!item) return toast("ไม่พบสินค้านี้ กรุณาโหลดหน้าใหม่", true);
+  if (item.special_order && mode !== "adjust") return toast("สินค้าสั่งพิเศษรับเข้าได้จากหน้าสั่งพิเศษเท่านั้น", true);
   if (mode === "opening" && openingFor(itemId)) return toast("สินค้านี้ตั้งยอดยกมาไปแล้ว กรุณาโหลดข้อมูลล่าสุด", true);
   moveMode = mode;
   currentItemId = itemId;
@@ -542,6 +555,7 @@ async function saveMove(event) {
   const unitCost = moveMode === "adjust" ? null : parseOptionalNumber(el("move-cost"));
   if (!Number.isInteger(qty) || qty === 0) return toast("จำนวนต้องเป็นจำนวนเต็มและไม่เป็น 0", true);
   if (moveMode !== "adjust" && qty < 0) return toast("ยอดยกมาและรับเข้าต้องเป็นจำนวนมากกว่า 0", true);
+  if (item.special_order && moveMode !== "adjust") return toast("สินค้าสั่งพิเศษรับเข้าได้จากหน้าสั่งพิเศษเท่านั้น", true);
   if (moveMode === "adjust" && !reason) return toast("กรุณากรอกเหตุผลการปรับยอดก่อนบันทึก", true);
   const nextBalance = computeStockBalance(movesFor(currentItemId)) + qty;
   if (nextBalance < 0) return toast(`ปรับไม่ได้ เพราะยอดจะติดลบ ${nextBalance} ${item.unit}`, true);
@@ -564,7 +578,7 @@ async function saveMove(event) {
 }
 
 async function deleteMove(move) {
-  if (!canAdmin) return;
+  if (!canAdmin || move.special_order_id) return;
   const item = items.find(row => row.id === move.item_id);
   const current = computeStockBalance(movesFor(move.item_id));
   const afterDelete = current - Number(move.qty);
@@ -594,8 +608,8 @@ async function loadProfiles() {
 
 async function loadStock() {
   const [itemsRes, movesRes, pricesRes] = await Promise.all([
-    sb.from("fee_items").select("id,category,group_name,variant_label,display_name,unit,track_stock,low_stock_threshold,active,sort_order").eq("category", "ค่าสินค้า").order("sort_order").order("display_name"),
-    fetchAllRows(() => sb.from("fee_stock_moves").select("id,item_id,kind,qty,charge_id,reason,note,unit_cost,supplier,doc_no,recorded_by,recorded_at"), ["item_id", "recorded_at", "id"]),
+    sb.from("fee_items").select("id,category,group_name,variant_label,display_name,unit,track_stock,low_stock_threshold,active,sort_order,special_order").eq("category", "ค่าสินค้า").order("sort_order").order("display_name"),
+    fetchAllRows(() => sb.from("fee_stock_moves").select("id,item_id,kind,qty,charge_id,reason,note,unit_cost,supplier,doc_no,recorded_by,recorded_at,special_order_id"), ["item_id", "recorded_at", "id"]),
     sb.from("fee_product_prices").select("year,item_id,amount").eq("year", currentYear)
   ]);
   if (itemsRes.error) throw new Error("โหลดรายการสินค้าไม่สำเร็จ: " + itemsRes.error.message);
@@ -636,6 +650,7 @@ el("low-stock-alert").addEventListener("click", event => {
 el("add-product").addEventListener("click", () => openProductForm());
 el("cancel-product").addEventListener("click", closeProductForm);
 el("product-form").addEventListener("submit", event => saveProduct(event).catch(error => toast(friendlyError(error), true)));
+el("product-special").addEventListener("change", syncSpecialProduct);
 el("product-track").addEventListener("change", () => {
   el("product-threshold").disabled = !el("product-track").checked;
   if (!el("product-track").checked) el("product-threshold").value = "";

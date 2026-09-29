@@ -7034,7 +7034,7 @@ function financeShortDate(dateStr) {
     .format(new Date(dateStr + "T00:00:00+07:00")) : "—";
 }
 
-export function pickFinanceAlerts({ rooms = [], pendingWithdrawals = [], departedWithBalance = 0 } = {}) {
+export function pickFinanceAlerts({ rooms = [], pendingWithdrawals = [], departedWithBalance = 0, specialOrders = {} } = {}) {
   const alerts = [];
   const overdue = rooms.filter(room => room.overdueAmount > 0);
   if (overdue.length) {
@@ -7048,11 +7048,140 @@ export function pickFinanceAlerts({ rooms = [], pendingWithdrawals = [], departe
   const departed = Array.isArray(departedWithBalance) ? departedWithBalance.length : Number(departedWithBalance || 0);
   if (departed > 0) alerts.push({ kind:"departed-balance", label:"ปิดบัญชี", tone:"amber",
     summary:`นักเรียนที่ออกแล้วยังมีเงินออม ${departed} คน` });
+  const waiting = Number(specialOrders.waiting || 0), arrived = Number(specialOrders.arrived || 0);
+  if (waiting || arrived) alerts.push({ kind:"special-order", label:"สั่งพิเศษ", tone:"amber",
+    summary:[waiting ? `รอสั่ง ${waiting} ใบ` : "", arrived ? `ของมาแล้วรอส่งมอบ ${arrived} ใบ` : ""].filter(Boolean).join(" · ") });
   const due = rooms.filter(room => room.dueTodayAmount > 0);
   if (due.length) alerts.push({ kind:"remit-due-today", label:"ครบกำหนดวันนี้", tone:"amber", rooms:due,
     summary:`${due.length} ห้อง · รวม ${formatMoney(due.reduce((sum, row) => sum + row.dueTodayAmount, 0))} ต้องส่งภายในวันนี้` });
   return { alerts, countable:alerts.filter(row => row.kind !== "remit-due-today").length };
 }
+
+export function formatSpecialOrderSize(order = {}) {
+  return [["อก", "chest_cm"], ["เอว", "waist_cm"], ["สะโพก", "hip_cm"], ["ยาว", "length_cm"]]
+    .filter(([, key]) => order[key] != null && order[key] !== "")
+    .map(([label, key]) => `${label} ${Number(order[key])}`).join(" · ");
+}
+
+export function countSpecialOrdersByStatus(orders = []) {
+  const counts = { "รอสั่ง":0, "สั่งแล้ว":0, "ของมาแล้ว":0, "ส่งมอบแล้ว":0, "ยกเลิก":0 };
+  for (const order of orders) if (Object.hasOwn(counts, order.status)) counts[order.status]++;
+  return counts;
+}
+
+export function groupSpecialOrdersByItem(orders = [], items = []) {
+  const byId = new Map(items.map(item => [item.id, item]));
+  const groups = new Map();
+  for (const order of orders) {
+    if (!groups.has(order.item_id)) groups.set(order.item_id, { item:byId.get(order.item_id) || {id:order.item_id}, orders:[], totalQty:0 });
+    const group = groups.get(order.item_id);
+    group.orders.push(order);
+    group.totalQty += Number(order.qty || 0);
+  }
+  for (const group of groups.values()) group.orders.sort((a,b) =>
+    (GRADE_ORDER.indexOf(a.grade_level) < 0 ? GRADE_ORDER.length : GRADE_ORDER.indexOf(a.grade_level)) -
+    (GRADE_ORDER.indexOf(b.grade_level) < 0 ? GRADE_ORDER.length : GRADE_ORDER.indexOf(b.grade_level)) ||
+    String(a.classroom || "").localeCompare(String(b.classroom || ""), "th", {numeric:true}) ||
+    String(a.student_number || "").localeCompare(String(b.student_number || ""), "th", {numeric:true}));
+  return [...groups.values()].sort((a,b) => Number(a.item.sort_order || 0) - Number(b.item.sort_order || 0) ||
+    String(a.item.display_name || "").localeCompare(String(b.item.display_name || ""), "th"));
+}
+
+export function latestUnitCostAt(moves = [], itemId, atIso = null) {
+  const raw = [...moves].filter(move => move.item_id === itemId && ["ยอดยกมา", "รับเข้า"].includes(move.kind) &&
+    move.unit_cost != null && Number.isFinite(Number(move.unit_cost)) && (!atIso || move.recorded_at <= atIso))
+    .sort((a,b) => String(b.recorded_at || "").localeCompare(String(a.recorded_at || "")) ||
+      String(b.id || "").localeCompare(String(a.id || "")))[0]?.unit_cost ?? null;
+  return raw == null ? null : Number(raw);
+}
+
+export function computeGoodsProfit({ charges = [], payments = [], moves = [], specialOrders = [], items = [], from, to } = {}) {
+  const inPeriod = iso => {
+    if (!iso) return false;
+    const date = new Date(new Date(iso).getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return (!from || date >= from) && (!to || date <= to);
+  };
+  const validPayments = payments.filter(p => !p.voided_at && !p.receipt_voided_at && !p.receipt?.voided_at);
+  const paymentsByCharge = new Map();
+  for (const payment of validPayments) {
+    const list = paymentsByCharge.get(payment.charge_id) || [];
+    list.push(payment);
+    paymentsByCharge.set(payment.charge_id, list);
+  }
+  const itemById = new Map(items.map(item => [item.id, item]));
+  const orderById = new Map(specialOrders.map(order => [order.id, order]));
+  const saleByCharge = new Map();
+  const costMovesByItem = new Map();
+  for (const move of moves) if (move.kind === "ขาย" && move.charge_id) {
+    const previous = saleByCharge.get(move.charge_id);
+    if (!previous || String(move.recorded_at).localeCompare(String(previous.recorded_at)) < 0)
+      saleByCharge.set(move.charge_id, move);
+  }
+  for (const move of moves) if (["ยอดยกมา", "รับเข้า"].includes(move.kind)) {
+    const list = costMovesByItem.get(move.item_id) || [];
+    list.push(move);
+    costMovesByItem.set(move.item_id, list);
+  }
+  const rowsByItem = new Map();
+  let zeroPriceCount = 0;
+  for (const charge of charges) {
+    if (charge.kind !== "ค่าสินค้า" || charge.voided_at) continue;
+    const item = itemById.get(charge.item_id) || { id: charge.item_id, display_name: "ไม่พบสินค้า", group_name: "ไม่ระบุกลุ่ม", sort_order: 999999 };
+    const key = item.id || `missing:${charge.id}`;
+    let row = rowsByItem.get(key);
+    if (!row) {
+      row = { item, isSpecial: Boolean(item.special_order || charge.special_order_id), qtyPaidFull: 0,
+        revenue: 0, cost: 0, profit: 0, marginPct: null, revenueUnknownCost: 0, outstanding: 0 };
+      rowsByItem.set(key, row);
+    }
+    const amount = Number(charge.amount || 0);
+    const qty = Number(charge.qty ?? 1);
+    const paid = (paymentsByCharge.get(charge.id) || []).sort((a,b) =>
+      String(a.paid_at || "").localeCompare(String(b.paid_at || "")) || String(a.id || "").localeCompare(String(b.id || "")));
+    const totalPaid = paid.reduce((sum,p) => sum + Number(p.amount || 0), 0);
+    row.outstanding += Math.max(0, amount - totalPaid);
+    if (amount === 0) {
+      if (inPeriod(charge.created_at)) zeroPriceCount++;
+      continue;
+    }
+    let unitCost = null;
+    if (charge.special_order_id) {
+      const raw = orderById.get(charge.special_order_id)?.unit_cost;
+      if (raw != null && Number.isFinite(Number(raw))) unitCost = Number(raw);
+    } else {
+      const saleAt = saleByCharge.get(charge.id)?.recorded_at || charge.created_at;
+      const raw = latestUnitCostAt(costMovesByItem.get(charge.item_id) || [], charge.item_id, saleAt);
+      if (raw != null) unitCost = Number(raw);
+    }
+    let cumulative = 0;
+    for (const payment of paid) {
+      const amountPaid = Number(payment.amount || 0);
+      const before = cumulative;
+      cumulative += amountPaid;
+      if (!inPeriod(payment.paid_at)) continue;
+      if (unitCost == null) row.revenueUnknownCost += amountPaid;
+      else {
+        row.revenue += amountPaid;
+        const paymentCost = unitCost * qty * amountPaid / amount;
+        row.cost += paymentCost;
+      }
+      if (before < amount - 0.000001 && cumulative >= amount - 0.000001)
+        row.qtyPaidFull += qty;
+    }
+  }
+  const rows = [...rowsByItem.values()].map(row => ({
+    ...row, profit: row.revenue - row.cost,
+    marginPct: row.revenue ? (row.revenue - row.cost) / row.revenue * 100 : null
+  })).sort((a,b) => Number(a.item.sort_order || 0) - Number(b.item.sort_order || 0) ||
+    String(a.item.display_name || "").localeCompare(String(b.item.display_name || ""), "th"));
+  const totals = { revenue:0, cost:0, profit:0, marginPct:null, revenueUnknownCost:0, outstanding:0 };
+  for (const row of rows) for (const key of ["revenue", "cost", "revenueUnknownCost", "outstanding"])
+    totals[key] += row[key];
+  totals.profit = totals.revenue - totals.cost;
+  totals.marginPct = totals.revenue ? totals.profit / totals.revenue * 100 : null;
+  return { rows, totals, zeroPriceCount };
+}
+
 
 export function summarizeFinanceDay({ savingsRows = [], transportRows = [], feeRows = [] } = {}) {
   const deposits = savingsRows.filter(row => row.kind === "ฝาก");

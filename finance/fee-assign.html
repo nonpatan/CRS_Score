@@ -363,7 +363,7 @@ th{
         <p>ตั้งค่าบริการ สินค้า เงินอุดหนุนค่าเครื่องแบบ และส่วนลดเป็นรายคน ยกเลิกได้และเก็บประวัติไว้</p>
         <div class="nav">
         </div>
-        <script src="../app-shell.js?v=20260921-1">
+        <script src="../app-shell.js?v=20260929-2">
         </script>
       </header>
       <main class="academic-content">
@@ -588,7 +588,7 @@ import {
   computeFeeOutstanding,
   chargeLineRemaining,
   formatMoney
-} from "../supabase-client.js?v=20260928-2";
+} from "../supabase-client.js?v=20260929-3";
 
 const el=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({
@@ -731,7 +731,7 @@ function renderPromo(){
 
 function productItems(){
   const group=el("product-group").value;
-  return items.filter(i=>i.category==="ค่าสินค้า"&&i.active&&i.group_name===group)
+  return items.filter(i=>i.category==="ค่าสินค้า"&&!i.special_order&&i.active&&i.group_name===group)
 }
 function syncProductStock(){
   const item=items.find(i=>i.id===el("product-item").value),stock=computeStockBalance(moves.filter(m=>m.item_id===item?.id)),qty=Number(el("product-qty").value),price=prices.find(p=>p.item_id===item?.id);
@@ -778,7 +778,7 @@ function resetPersonForm(){
 
 function personProductItems(){
   const group=el("person-product-group").value;
-  return items.filter(item=>item.category==="ค่าสินค้า"&&item.active&&item.group_name===group)
+  return items.filter(item=>item.category==="ค่าสินค้า"&&!item.special_order&&item.active&&item.group_name===group)
 }
 
 function syncPersonProduct(){
@@ -853,7 +853,7 @@ function renderPerson(){
   el("person-student").innerHTML=roomPlacements.map(placement=>`<option value="${placement.student_id}">${esc(placement.student?.student_no||"—")} · ${esc(nameOf(placement))}</option>`).join("");
   personStudentId=roomPlacements.some(placement=>placement.student_id===previous)?previous:roomPlacements[0]?.student_id||null;
   el("person-student").value=personStudentId||"";
-  const groups=[...new Set(items.filter(item=>item.category==="ค่าสินค้า"&&item.active).map(item=>item.group_name))];
+  const groups=[...new Set(items.filter(item=>item.category==="ค่าสินค้า"&&!item.special_order&&item.active).map(item=>item.group_name))];
   el("person-product-group").innerHTML=groups.map(group=>`<option value="${esc(group)}">${esc(group)}</option>`).join("");
   el("person-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${promo.id}">${esc(promo.name)} · ${money(promo.amount)}</option>`).join("");
   renderPersonBill();
@@ -870,7 +870,7 @@ function renderGuard(){
     .filter(i=>i.active&&i.category==="ค่าบริการ"&&!rates.some(r=>r.item_id===i.id&&r.grade_level===room.grade_level&&Number(r.term)===Number(el("term").value)))
     .map(i=>i.display_name);
   const missingProducts=items
-    .filter(i=>i.active&&i.category==="ค่าสินค้า"&&!prices.some(p=>p.item_id===i.id))
+    .filter(i=>i.active&&i.category==="ค่าสินค้า"&&!i.special_order&&!prices.some(p=>p.item_id===i.id))
     .map(i=>i.display_name);
   const missingSubsidy=!subsidies.some(s=>s.grade_level===room.grade_level);
   const parts=[];
@@ -904,7 +904,7 @@ function renderAll(){
   el("admin-item").innerHTML=adminItems.map(i=>`<option value="${i.id}">${esc(i.display_name)}</option>`).join("");
   const students=roomPlacements;
   el("product-student").innerHTML=students.map(p=>`<option value="${p.student_id}">${esc(nameOf(p))}</option>`).join("");
-  const groups=[...new Set(items.filter(i=>i.category==="ค่าสินค้า"&&i.active).map(i=>i.group_name))];
+  const groups=[...new Set(items.filter(i=>i.category==="ค่าสินค้า"&&!i.special_order&&i.active).map(i=>i.group_name))];
   el("product-group").innerHTML=groups.map(g=>`<option value="${esc(g)}">${esc(g)}</option>`).join("");
   el("promo-select").innerHTML=promotions.filter(p=>p.active).map(p=>`<option value="${p.id}">${esc(p.name)} · ${money(p.amount)}</option>`).join("");
   renderGuard();

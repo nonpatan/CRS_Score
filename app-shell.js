@@ -408,12 +408,13 @@
       moduleHome: ["index.html", "ภาพรวมบริหารทั่วไป"],
       // รายงานนี้มีข้อมูลการทำงานรายครู — ซ่อนไว้ก่อน แล้วให้หน้าเว็บเปิดเฉพาะ
       // admin / ฝ่ายบริหารทั่วไป / ฝ่ายบุคลากรผ่าน applyRestrictedMenuAccess()
-      reportOnly: ["homeroom-audit.html", "absence-follow.html"],
+      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html"],
       groups: [
         {
           label: "บันทึก",
           items: [
-            ["daily-attendance.html", "เช็คชื่อรายวัน"]
+            ["daily-attendance.html", "เช็คชื่อรายวัน"],
+            ["special-order.html", "สั่งพิเศษ (วัดตัว)"]
           ]
         },
         {
@@ -431,6 +432,7 @@
         }
       ],
       workflows: {
+        "special-order.html": { title:"สั่งพิเศษ (วัดตัว)", description:"วัดขนาดนักเรียนเพื่อส่งรายการให้ฝ่ายการเงินสั่งร้าน", steps:["เลือกนักเรียน","กรอกขนาด","บันทึก"] },
         "daily-attendance.html": {
           title: "เช็คชื่อประจำวัน",
           description: "เลือกวันที่และห้อง แล้วเปลี่ยนเฉพาะนักเรียนที่ไม่ได้มา ก่อนบันทึกทั้งห้อง",
@@ -460,7 +462,7 @@
       home: "index.html",
       moduleHome: ["index.html", "ภาพรวมการเงิน"],
       // งานที่เห็นภาพรวม/ถือเงินสด — ซ่อนก่อนแล้วให้หน้าเว็บเปิดเฉพาะฝ่ายการเงิน
-      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-opening.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html", "scholarship-grant.html", "scholarship-sources.html"],
+      financeOnly: ["savings-payout.html", "savings-remit.html", "savings-opening.html", "savings-report.html", "transport-settings.html", "transport-opening.html", "transport-remit.html", "transport-report.html", "fee-assign.html", "fee-payment.html", "fee-settings.html", "fee-stock.html", "special-orders.html", "fee-profit.html", "scholarship-grant.html", "scholarship-sources.html"],
       groups: [
         {
           label: "บันทึก",
@@ -478,6 +480,7 @@
             ["transport-remit.html", "รับเงินค่ารถจากครู"],
             ["fee-assign.html", "ตั้งหนี้นักเรียน"],
             ["fee-payment.html", "รับเงินค่าใช้จ่ายนักเรียน"],
+            ["special-orders.html", "สั่งพิเศษ"],
             ["scholarship-grant.html", "บันทึกทุนการศึกษา"]
           ]
         },
@@ -487,6 +490,7 @@
             ["savings-report.html", "รายงานออมทรัพย์"],
             ["transport-report.html", "รายงานค่ารถ"],
             ["fee-report.html", "รายงานค่าใช้จ่ายนักเรียน"],
+            ["fee-profit.html", "รายงานกำไรสินค้า"],
             ["scholarship-report.html", "รายงานทุนการศึกษา"]
           ]
         },
@@ -587,6 +591,11 @@
           title: "รายงานค่าใช้จ่ายนักเรียน",
           description: "ดูยอดเรียกเก็บ ส่วนลด และยอดค้างจากระดับห้องถึงรายการรายคน",
           steps: ["ดูรายห้อง", "ดูรายคน", "ตรวจรายการ"]
+        },
+        "fee-profit.html": {
+          title: "รายงานกำไรสินค้า",
+          description: "ดูยอดรับจริง ทุน กำไร และยอดค้างเก็บของสินค้าคลังปกติกับสั่งพิเศษ",
+          steps: ["เลือกช่วงเวลา", "เลือกชนิดสินค้า", "ตรวจผลรายสินค้า"]
         },
         "scholarship-grant.html": {
           title: "บันทึกทุนการศึกษา",
