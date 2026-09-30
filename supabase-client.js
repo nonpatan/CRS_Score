@@ -2788,13 +2788,13 @@ export function roomsFromPlacements(placements, year) {
 // isHoliday อิงตารางงาน/วันหยุดชุดเดียวกับฝ่ายบุคคล; ถ้ายังไม่มีตารางงานจะไม่เดาว่าเป็นวันหยุด
 export async function loadDailyAttendanceToday(year, dateStr, academicYears = null) {
   if (!year || !dateStr) {
-    return { year, dateStr, rows: [], rooms: [], isHoliday: false };
+    return { year, dateStr, rows: [], rooms: [], isHoliday: false, isBreak: false };
   }
 
   const weekday = isoWeekday(dateStr);
   const yearsRequest = Array.isArray(academicYears)
     ? Promise.resolve({ data: academicYears, error: null })
-    : sb.from("academic_years").select("year,start_date").order("year");
+    : sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year");
   const [rowsRes, placementsRes, scheduleRes, holidayRes, yearsRes] = await Promise.all([
     fetchAllRows(() => sb.from("daily_attendance")
       .select("id,attend_date,year,grade_level,classroom,student_id,status,note,recorded_by,recorded_at,updated_at")
@@ -2822,14 +2822,16 @@ export async function loadDailyAttendanceToday(year, dateStr, academicYears = nu
     : placementsRes.data;
   const rooms = roomsFromPlacements(roomPlacements, year);
   const hasSchedule = !!scheduleRes.data;
-  const isHoliday = !!holidayRes.data || (hasSchedule && scheduleRes.data.is_working_day !== true);
+  const isBreak = isSchoolBreak(dateStr, yearsRes.data || []);
+  const isHoliday = isBreak || !!holidayRes.data || (hasSchedule && scheduleRes.data.is_working_day !== true);
 
   return {
     year,
     dateStr,
     rows: rowsRes.data || [],
     rooms,
-    isHoliday
+    isHoliday,
+    isBreak
   };
 }
 
@@ -3040,7 +3042,7 @@ export function pickSchoolDays({ holidays, workdays, endDate, days = 5 }) {
   const target = Math.max(0, Math.floor(Number(days) || 0));
   if (!endDate || !target) return [];
   const picked = [];
-  for (let offset = 0; offset <= 60 && picked.length < target; offset++) {
+  for (let offset = 0; offset <= 120 && picked.length < target; offset++) {
     const date = addDaysStr(endDate, -offset);
     if (workdays?.get(isoWeekday(date)) !== true || holidays?.has(date)) continue;
     picked.push(date);
@@ -3048,7 +3050,7 @@ export function pickSchoolDays({ holidays, workdays, endDate, days = 5 }) {
   return picked.reverse();
 }
 
-export function pickNextSchoolDay({ holidays, workdays, afterDate, maxDays = 30 }) {
+export function pickNextSchoolDay({ holidays, workdays, afterDate, maxDays = 120 }) {
   if (!afterDate) return null;
   for (let offset = 1; offset <= maxDays; offset++) {
     const date = addDaysStr(afterDate, offset);
@@ -3060,16 +3062,20 @@ export function pickNextSchoolDay({ holidays, workdays, afterDate, maxDays = 30 
 export async function loadNextSchoolDay(today) {
   if (!today) return null;
   try {
-    const [scheduleRes, holidayRes] = await Promise.all([
+    const until = addDaysStr(today, 120);
+    const [scheduleRes, holidayRes, yearsRes] = await Promise.all([
       sb.from("work_schedule").select("weekday,is_working_day"),
       sb.from("work_holidays").select("holiday_date")
         .gte("holiday_date", addDaysStr(today, 1))
-        .lte("holiday_date", addDaysStr(today, 30))
+        .lte("holiday_date", until),
+      sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year")
     ]);
-    if (scheduleRes.error || holidayRes.error) return null;
+    if (scheduleRes.error || holidayRes.error || yearsRes.error) return null;
+    const holidays = new Set((holidayRes.data || []).map(row => row.holiday_date));
+    for (const date of schoolBreakDates(yearsRes.data || [], addDaysStr(today, 1), until)) holidays.add(date);
     return pickNextSchoolDay({
       workdays:new Map((scheduleRes.data || []).map(row => [row.weekday, row.is_working_day])),
-      holidays:new Set((holidayRes.data || []).map(row => row.holiday_date)),
+      holidays,
       afterDate:today
     });
   } catch { return null; }
@@ -3094,15 +3100,18 @@ export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 
 
 export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
   if (!year || !endDate) return [];
-  const [scheduleRes, holidayRes] = await Promise.all([
+  const from = addDaysStr(endDate, -120);
+  const [scheduleRes, holidayRes, yearsRes] = await Promise.all([
     sb.from("work_schedule").select("weekday,is_working_day"),
     sb.from("work_holidays").select("holiday_date")
-      .gte("holiday_date", addDaysStr(endDate, -60)).lte("holiday_date", endDate)
+      .gte("holiday_date", from).lte("holiday_date", endDate),
+    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year")
   ]);
-  if (scheduleRes.error || holidayRes.error) return [];
+  if (scheduleRes.error || holidayRes.error || yearsRes.error) return [];
 
   const workdays = new Map((scheduleRes.data || []).map(row => [row.weekday, row.is_working_day]));
   const holidays = new Set((holidayRes.data || []).map(row => row.holiday_date));
+  for (const date of schoolBreakDates(yearsRes.data || [], from, endDate)) holidays.add(date);
   const dates = pickSchoolDays({ holidays, workdays, endDate, days });
   if (!dates.length) return [];
 
@@ -3187,7 +3196,7 @@ export async function loadHomeroomAuditData(year, from, to) {
     };
   }
 
-  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes, lateReasonRes, absenceRes] = await Promise.all([
+  const [teacherRes, coverageRes, attendanceRes, placementRes, homeroomRes, holidayRes, scheduleRes, lateReasonRes, absenceRes, yearsRes] = await Promise.all([
     sb.rpc("homeroom_audit_teachers", { p_year: year }),
     sb.rpc("homeroom_audit_coverage", { p_from: from, p_to: to }),
     fetchAllRows(() => sb.from("daily_attendance")
@@ -3203,7 +3212,8 @@ export async function loadHomeroomAuditData(year, from, to) {
       .select("attend_date,year,grade_level,classroom,reason,cutoff_time,kind,recorded_by,recorded_at,updated_at")
       .eq("year", year).gte("attend_date", from).lte("attend_date", to),
       ["attend_date", "grade_level", "classroom"]),
-    sb.rpc("homeroom_audit_absences", { p_from: from, p_to: to })
+    sb.rpc("homeroom_audit_absences", { p_from: from, p_to: to }),
+    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year")
   ]);
 
   const failed = [
@@ -3215,7 +3225,8 @@ export async function loadHomeroomAuditData(year, from, to) {
     [holidayRes, "โหลดวันหยุด"],
     [scheduleRes, "โหลดตารางวันทำงาน"],
     [lateReasonRes, "โหลดเหตุผลการเช็คหลังเวลา"],
-    [absenceRes, "โหลดวันลา/ออกปฏิบัติหน้าที่ของครู"]
+    [absenceRes, "โหลดวันลา/ออกปฏิบัติหน้าที่ของครู"],
+    [yearsRes, "โหลดช่วงปีการศึกษา"]
   ].find(([result]) => result.error);
   if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
 
@@ -3244,7 +3255,7 @@ export async function loadHomeroomAuditData(year, from, to) {
     attendance: collapseHomeroomAuditAttendance(attendanceRes.data || [], profileById),
     placements: placementRes.data || [],
     homerooms,
-    holidays: holidayRes.data || [],
+    holidays: [...(holidayRes.data || []), ...[...schoolBreakDates(yearsRes.data || [], from, to)].map(holiday_date => ({ holiday_date }))],
     schedule: scheduleRes.data || [],
     profiles,
     lateReasons: lateReasonRes.data || [],
@@ -3270,7 +3281,7 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
     };
   }
 
-  const [ownHomeroomRes, homeroomRes, coverageRes, attendanceRes, holidayRes, scheduleRes, leaveRes, fieldDutyRes] = await Promise.all([
+  const [ownHomeroomRes, homeroomRes, coverageRes, attendanceRes, holidayRes, scheduleRes, leaveRes, fieldDutyRes, yearsRes] = await Promise.all([
     sb.from("homeroom_teachers")
       .select("id,year,grade_level,classroom,staff_id,created_at")
       .eq("year", year).eq("staff_id", staffId),
@@ -3289,7 +3300,8 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
     sb.from("staff_leaves").select("staff_id,start_date,end_date,day_portion")
       .eq("staff_id", staffId).lte("start_date", to).gte("end_date", from),
     sb.from("staff_field_duties").select("staff_id,start_date,end_date")
-      .eq("staff_id", staffId).lte("start_date", to).gte("end_date", from)
+      .eq("staff_id", staffId).lte("start_date", to).gte("end_date", from),
+    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year")
   ]);
   const failed = [
     [ownHomeroomRes, "โหลดห้องประจำชั้นของคุณ"],
@@ -3299,7 +3311,8 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
     [holidayRes, "โหลดวันหยุด"],
     [scheduleRes, "โหลดตารางวันทำงาน"],
     [leaveRes, "โหลดวันลาของคุณ"],
-    [fieldDutyRes, "โหลดวันออกปฏิบัติหน้าที่ของคุณ"]
+    [fieldDutyRes, "โหลดวันออกปฏิบัติหน้าที่ของคุณ"],
+    [yearsRes, "โหลดช่วงปีการศึกษา"]
   ].find(([result]) => result.error);
   if (failed) throw new Error(failed[1] + "ไม่สำเร็จ: " + failed[0].error.message);
 
@@ -3341,7 +3354,7 @@ export async function loadMyHomeroomAuditData(year, from, to, staff) {
     attendance: collapseHomeroomAuditAttendance(attendanceRes.data || []),
     placements: [],
     homerooms: [...ownByHomeroomId.values()],
-    holidays: holidayRes.data || [],
+    holidays: [...(holidayRes.data || []), ...[...schoolBreakDates(yearsRes.data || [], from, to)].map(holiday_date => ({ holiday_date }))],
     schedule: scheduleRes.data || [],
     profiles: [],
     absences: [
@@ -6038,7 +6051,7 @@ export async function clearHrYearStart(year) {
 // คืนค่าเรียงจากใหม่ไปเก่า และติด registered=false เพื่อให้หน้าจอเตือนโดยไม่ทำค่าปีเดิมหาย
 export async function listSelectableYears(extraYears = []) {
   const { data, error } = await sb.from("academic_years")
-    .select("year,start_date,term2_start_date").order("year");
+    .select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year");
   if (error) throw new Error("โหลดรายการปีการศึกษาไม่สำเร็จ: " + error.message);
 
   const byYear = new Map();
@@ -6048,13 +6061,16 @@ export async function listSelectableYears(extraYears = []) {
       year: String(row.year),
       start_date: row.start_date || null,
       term2_start_date: row.term2_start_date || null,
+      term1_end_date: row.term1_end_date || null,
+      term2_end_date: row.term2_end_date || null,
       registered: true
     });
   }
   for (const item of (extraYears || [])) {
     const year = String(typeof item === "string" ? item : (item && item.year) || "").trim();
     if (!year || byYear.has(year)) continue;
-    byYear.set(year, { year, start_date: null, term2_start_date: null, registered: false });
+    byYear.set(year, { year, start_date: null, term2_start_date: null,
+      term1_end_date: null, term2_end_date: null, registered: false });
   }
   return [...byYear.values()].sort((a, b) =>
     b.year.localeCompare(a.year, "th", { numeric: true })
@@ -6062,7 +6078,7 @@ export async function listSelectableYears(extraYears = []) {
 }
 
 // เพิ่ม/แก้ปีการศึกษาจากจุดสร้างข้อมูล — วันเริ่มปีต้องมาจากปฏิทินโรงเรียนจริงเสมอ
-export async function saveAcademicYear(year, startDate, term2StartDate) {
+export async function saveAcademicYear(year, startDate, term2StartDate, term1EndDate, term2EndDate) {
   const normalizedYear = String(year == null ? "" : year).trim();
   const normalizedStartDate = String(startDate == null ? "" : startDate).trim();
   if (!/^\d{4}$/.test(normalizedYear)) {
@@ -6076,9 +6092,15 @@ export async function saveAcademicYear(year, startDate, term2StartDate) {
   if (term2StartDate !== undefined) {
     payload.term2_start_date = String(term2StartDate == null ? "" : term2StartDate).trim() || null;
   }
+  if (term1EndDate !== undefined) {
+    payload.term1_end_date = String(term1EndDate == null ? "" : term1EndDate).trim() || null;
+  }
+  if (term2EndDate !== undefined) {
+    payload.term2_end_date = String(term2EndDate == null ? "" : term2EndDate).trim() || null;
+  }
   const { data, error } = await sb.from("academic_years")
     .upsert(payload, { onConflict: "year" })
-    .select("year,start_date,term2_start_date")
+    .select("year,start_date,term2_start_date,term1_end_date,term2_end_date")
     .single();
   if (error) throw new Error("บันทึกปีการศึกษาไม่สำเร็จ: " + error.message);
   return data;
@@ -6102,6 +6124,28 @@ export function academicYearOf(dateStr, years) {
   const list = [...years].sort((a, b) => b.start_date.localeCompare(a.start_date));
   const found = list.find(y => y.start_date <= dateStr);
   return found ? found.year : null;
+}
+
+// ช่วงปิดภาคของนักเรียนเท่านั้น — ค่าไม่ครบให้ถือว่าไม่ปิดภาค ไม่อนุมานจากปฏิทินครู
+export function isSchoolBreak(dateStr, years) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || "")) || !Array.isArray(years)) return false;
+  const year = academicYearOf(dateStr, years);
+  const row = years.find(item => String(item.year) === String(year));
+  if (!row?.start_date) return false;
+  const range = academicYearRange(row.year, years);
+  if (!range || dateStr < range.start || dateStr > range.end) return false;
+  return !!((row.term1_end_date && row.term2_start_date &&
+    row.term1_end_date < dateStr && dateStr < row.term2_start_date) ||
+    (row.term2_end_date && dateStr > row.term2_end_date));
+}
+
+export function schoolBreakDates(years, from, to) {
+  const dates = new Set();
+  if (!from || !to || from > to) return dates;
+  for (let date = from; date <= to; date = addDaysStr(date, 1)) {
+    if (isSchoolBreak(date, years)) dates.add(date);
+  }
+  return dates;
 }
 
 // ภาคเรียนที่ระบบเสนอเป็นค่าตั้งต้นให้ผู้ใช้ — ถ้ายังไม่ได้ตั้งวันเปิดภาค 2 ให้ตอบไม่ได้แทนการเดา

@@ -188,7 +188,7 @@
     display: none; align-items: center; justify-content: center; padding: 16px; z-index: 10;
   }
   .overlay.show { display: flex; }
-  .modal { background: var(--white); border-radius: 12px; padding: 20px; width: 100%; max-width: 400px; }
+  .modal { background: var(--white); border-radius: 12px; padding: 20px; width: 100%; max-width: 400px; max-height:calc(100dvh - 32px); overflow-y:auto; }
   .modal h3 { margin: 0 0 14px; font-size: 17px; }
   .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
   .modal-actions button { flex: 1; }
@@ -464,11 +464,11 @@
   <div class="card" id="academic-years-card">
     <div class="section-title">ปีการศึกษา</div>
     <div class="field-note" style="margin-bottom:10px">
-      รายการกลางของทั้งโรงเรียน วันเริ่มปีมีผลต่อปฏิทิน เช็คชื่อ เวลาทำงาน และวันลา
+      รายการกลางของทั้งโรงเรียน วันเริ่มปีมีผลต่อปฏิทิน เช็คชื่อ เวลาทำงาน และวันลา · วันที่ภาคเรียนมีผลต่อการเช็คชื่อนักเรียน
     </div>
     <div id="academic-year-list"><div class="field-note">กำลังโหลดรายการปีการศึกษา…</div></div>
     <div class="weight-readonly" id="academic-years-readonly" style="display:none; margin-top:12px; margin-bottom:0">
-      คุณดูรายการได้อย่างเดียว เฉพาะ admin หรือหัวหน้าฝ่ายวิชาการเท่านั้นที่เพิ่มหรือแก้วันเริ่มปีได้
+      คุณดูรายการได้อย่างเดียว เฉพาะ admin หรือหัวหน้าฝ่ายวิชาการเท่านั้นที่เพิ่มหรือแก้วันที่ของปีและภาคเรียนได้
     </div>
     <button type="button" class="primary" id="btn-add-academic-year">เพิ่มปีการศึกษา</button>
   </div>
@@ -520,9 +520,19 @@
       <input type="date" id="new-academic-year-start">
     </div>
     <div class="field">
+      <label for="new-academic-year-term1-end">วันเรียนวันสุดท้าย ภาคเรียนที่ 1</label>
+      <input type="date" id="new-academic-year-term1-end">
+      <div class="field-note">วันถัดไปเริ่มปิดภาค ระบบจะไม่ทวงเช็คชื่อนักเรียน · เว้นว่างได้</div>
+    </div>
+    <div class="field">
       <label for="new-academic-year-term2">วันเปิดภาคเรียนที่ 2</label>
       <input type="date" id="new-academic-year-term2">
       <div class="field-note">เว้นว่างได้ถ้ายังไม่รู้ — ระบบจะแสดงวิชาทุกภาคเรียนไปก่อน ไม่เดาให้</div>
+    </div>
+    <div class="field">
+      <label for="new-academic-year-term2-end">วันเรียนวันสุดท้าย ภาคเรียนที่ 2</label>
+      <input type="date" id="new-academic-year-term2-end">
+      <div class="field-note">วันถัดไปเริ่มปิดภาค ระบบจะไม่ทวงเช็คชื่อนักเรียน · เว้นว่างได้</div>
     </div>
     <div class="year-start-note">ดูจากปฏิทินโรงเรียนจริง อย่ากรอกวันที่ 1 โดยอัตโนมัติ</div>
     <div class="modal-actions">
@@ -533,7 +543,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20260929-3";
+import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20260930-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -626,7 +636,9 @@ const elYearOverlay = document.getElementById("year-overlay");
 const elYearModalTitle = document.getElementById("year-modal-title");
 const elNewAcademicYear = document.getElementById("new-academic-year");
 const elNewAcademicYearStart = document.getElementById("new-academic-year-start");
+const elNewAcademicYearTerm1End = document.getElementById("new-academic-year-term1-end");
 const elNewAcademicYearTerm2 = document.getElementById("new-academic-year-term2");
+const elNewAcademicYearTerm2End = document.getElementById("new-academic-year-term2-end");
 const btnYearModalSave = document.getElementById("year-modal-save");
 
 // หัวหน้าวิชาการและ admin สร้างวิชาใหม่ได้
@@ -982,6 +994,12 @@ function formatAcademicYearStart(startDate) {
   });
 }
 
+function formatAcademicTermDate(dateStr) {
+  return dateStr ? new Date(dateStr + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day: "numeric", month: "short", year: "numeric", timeZone: "UTC"
+  }) : "ยังไม่ได้ตั้ง";
+}
+
 async function deleteAcademicYear(row) {
   if (!isAdminUser || !row.registered) return;
   const { data: references, error: countError } = await sb.rpc("academic_year_reference_counts", { p_year: row.year });
@@ -1028,12 +1046,22 @@ function renderAcademicYears() {
     start.style.margin = "0";
     start.textContent = formatAcademicYearStart(row.start_date);
     detail.append(name, start);
+    for (const [label, first, last] of [
+      ["ภาคเรียนที่ 1", row.start_date, row.term1_end_date],
+      ["ภาคเรียนที่ 2", row.term2_start_date, row.term2_end_date]
+    ]) {
+      const term = document.createElement("div");
+      term.className = "field-note";
+      term.style.margin = "0";
+      term.textContent = `${label} · ${formatAcademicTermDate(first)} – ${formatAcademicTermDate(last)}`;
+      detail.appendChild(term);
+    }
     wrapper.appendChild(detail);
     if (canEditAcademicSettings) {
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "ghost";
-      edit.textContent = row.registered ? "แก้วันเริ่ม" : "ลงทะเบียนปีนี้";
+      edit.textContent = row.registered ? "แก้วันที่" : "ลงทะเบียนปีนี้";
       edit.addEventListener("click", () => openYearModal(row));
       wrapper.appendChild(edit);
     }
@@ -1094,18 +1122,22 @@ function closeYearModal() {
   elNewAcademicYear.disabled = false;
   elNewAcademicYear.value = "";
   elNewAcademicYearStart.value = "";
+  elNewAcademicYearTerm1End.value = "";
   elNewAcademicYearTerm2.value = "";
+  elNewAcademicYearTerm2End.value = "";
 }
 
 function openYearModal(row = null) {
   editingAcademicYear = row && row.registered ? row : null;
   elYearModalTitle.textContent = row
-    ? (row.registered ? "แก้วันเริ่มปีการศึกษา " + row.year : "ลงทะเบียนปีการศึกษา " + row.year)
+    ? (row.registered ? "แก้วันที่ปีการศึกษา " + row.year : "ลงทะเบียนปีการศึกษา " + row.year)
     : "เพิ่มปีการศึกษา";
   elNewAcademicYear.value = row?.year || "";
   elNewAcademicYear.disabled = !!row;
   elNewAcademicYearStart.value = row?.start_date || "";
+  elNewAcademicYearTerm1End.value = row?.term1_end_date || "";
   elNewAcademicYearTerm2.value = row?.term2_start_date || "";
+  elNewAcademicYearTerm2End.value = row?.term2_end_date || "";
   elYearOverlay.classList.add("show");
   setTimeout(() => (row ? elNewAcademicYearStart : elNewAcademicYear).focus(), 0);
 }
@@ -1119,8 +1151,26 @@ btnYearModalSave.addEventListener("click", async () => {
   btnYearModalSave.disabled = true;
   try {
     const enteredYear = String(elNewAcademicYear.value || "").trim();
+    const startDate = elNewAcademicYearStart.value;
+    const term1End = elNewAcademicYearTerm1End.value;
+    const term2Start = elNewAcademicYearTerm2.value;
+    const term2End = elNewAcademicYearTerm2End.value;
+    if (term1End && startDate && term1End < startDate) throw new Error("วันเรียนวันสุดท้าย ภาคเรียนที่ 1 ต้องไม่ก่อนวันเริ่มปี");
+    if (term2Start && startDate && term2Start < startDate) throw new Error("วันเปิดภาคเรียนที่ 2 ต้องไม่ก่อนวันเริ่มปี");
+    if (term1End && term2Start && term1End >= term2Start) throw new Error("วันเรียนวันสุดท้าย ภาคเรียนที่ 1 ต้องก่อนวันเปิดภาคเรียนที่ 2");
+    if (term2End && term2Start && term2End < term2Start) throw new Error("วันเรียนวันสุดท้าย ภาคเรียนที่ 2 ต้องไม่ก่อนวันเปิดภาคเรียนที่ 2");
     const registeredYear = selectableYears.find(row => row.registered && row.year === enteredYear) || editingAcademicYear;
-    if (registeredYear) {
+    const nextYear = selectableYears.filter(row => row.registered && row.start_date && row.start_date > startDate)
+      .sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+    if (term2End && nextYear && term2End >= nextYear.start_date) {
+      const agreed = await window.crsAskConfirm({
+        title: "ตรวจวันเรียนวันสุดท้าย ภาคเรียนที่ 2",
+        message: `วันที่ ${formatAcademicTermDate(term2End)} ไม่ก่อนวันเริ่มปีถัดไป (${formatAcademicTermDate(nextYear.start_date)}) กรุณาตรวจปฏิทินโรงเรียน`,
+        okLabel: "บันทึกวันที่นี้", danger: false
+      });
+      if (!agreed) return;
+    }
+    if (registeredYear && registeredYear.start_date !== startDate) {
       const agreed = await window.crsAskConfirm({
         title: "ยืนยันแก้วันเริ่มปี " + registeredYear.year,
         message: "การเปลี่ยนวันเริ่มปีจะเปลี่ยนช่วงเวลาของทั้งโรงเรียนย้อนหลัง " +
@@ -1133,8 +1183,10 @@ btnYearModalSave.addEventListener("click", async () => {
     const preferredSubjectYear = fYear.value;
     const saved = await saveAcademicYear(
       elNewAcademicYear.value,
-      elNewAcademicYearStart.value,
-      elNewAcademicYearTerm2.value
+      startDate,
+      term2Start,
+      term1End,
+      term2End
     );
     await refreshSelectableYears(preferredSubjectYear);
     closeYearModal();
