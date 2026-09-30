@@ -43,6 +43,11 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 .collection-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; } .tree-button { text-align:left; background:var(--white); border:1px solid var(--line); padding:8px 10px; min-height:52px; }
 .tree-button.done { border-color:var(--teal); background:var(--teal-soft); } .tree-button.part { border-color:var(--amber); background:var(--amber-soft); } .tree-button.empty { color:var(--muted); }
 .tree-button.selected { outline:2px solid var(--teal); } .tree-button small { display:block; font-size:12px; }
+.collection-note { display:block; max-width:160px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--muted); font-size:12px; font-weight:400; }
+.entry-note-row { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.entry-note-text { flex:1 1 160px; min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); font-size:14px; }
+.score-table .collection-note { max-width:120px; }
+.score-table .note-edit { min-height:34px; padding:3px 7px; }
 .entry-head { position:sticky; top:0; z-index:3; background:var(--bg); padding:8px 0; } .entry-head .card { margin:0 0 10px; }
 .student-row { display:grid; grid-template-columns:minmax(0,1fr) 100px; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--line); }
 .student-row .name { font-weight:600; } .student-row input { text-align:center; } .student-row.changed { background:var(--teal-soft); } .student-row.removing { background:var(--amber-soft); } .student-row.invalid,.student-row.exam-over-cap { background:var(--danger-soft); }
@@ -83,9 +88,9 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
   <div class="card"><div class="toolbar"><button id="back-subjects" class="ghost">‹ วิชาของฉัน</button><select id="desktop-subject-select" class="desktop-only" aria-label="เปลี่ยนวิชา"></select></div><h2 id="subject-title"></h2><div id="subject-meta" class="meta"></div><div id="room-chips" class="room-chips"></div></div>
   <div class="entry-grid"><div class="tree-pane"><div class="card"><div class="tabs" role="tablist"><button data-tab="วิชา" class="active">คะแนนเก็บ</button><button data-tab="สมรรถนะหลัก">สมรรถนะหลัก</button><button data-tab="สอบ">สอบ · ร.</button></div><div id="structure-tree"></div></div></div><div id="right-pane"><div class="card empty">เลือกครั้งที่จากต้นไม้เพื่อกรอกคะแนน</div></div></div>
 </section>
-<section id="entry-view" hidden><div class="entry-head"><div class="card"><div class="toolbar"><button id="back-structure" class="ghost">‹ ชื่อวิชา</button><button id="delete-mobile" class="danger mobile-only">ลบครั้งนี้</button></div><h2 id="entry-title"></h2><div id="entry-path" class="meta"></div><div id="entry-progress" class="hint"></div><div class="progress"><span id="entry-progress-bar"></span></div></div></div><div id="mobile-score-list" class="card"></div><div class="toolbar card"><button id="prev-collection" class="ghost">‹ ครั้งก่อน</button><button id="next-collection" class="ghost">ครั้งถัดไป ›</button></div></section>
+<section id="entry-view" hidden><div class="entry-head"><div class="card"><div class="toolbar"><button id="back-structure" class="ghost">‹ ชื่อวิชา</button><button id="delete-mobile" class="danger mobile-only">ลบครั้งนี้</button></div><h2 id="entry-title"></h2><div id="entry-path" class="meta"></div><div id="entry-note-row" class="entry-note-row"><div id="entry-note" class="entry-note-text"></div><button id="edit-mobile-note" class="ghost">+ เพิ่มหมายเหตุ</button></div><div id="entry-progress" class="hint"></div><div class="progress"><span id="entry-progress-bar"></span></div></div></div><div id="mobile-score-list" class="card"></div><div class="toolbar card"><button id="prev-collection" class="ghost">‹ ครั้งก่อน</button><button id="next-collection" class="ghost">ครั้งถัดไป ›</button></div></section>
 <div id="save-bar" class="save-bar" hidden><div id="save-status" class="hint"></div><button id="save-scores" class="primary">บันทึกคะแนน</button></div>
-<div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" hidden><label id="confirm-type-label" for="confirm-type-input"></label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="modal-actions"><button id="confirm-cancel" class="ghost">ยกเลิก</button><button id="confirm-ok" class="primary">ยืนยัน</button></div></div></div>
+<div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" hidden><label id="confirm-type-label" for="confirm-type-input"></label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="field" id="confirm-note-field" hidden><label id="confirm-note-label" for="confirm-note-input">หมายเหตุ (ไม่บังคับ)</label><input id="confirm-note-input" type="text" maxlength="100" placeholder="เช่น ใบงานที่ 3 · 12 ก.ย." autocomplete="off"></div><div class="modal-actions"><button id="confirm-cancel" class="ghost">ยกเลิก</button><button id="confirm-ok" class="primary">ยืนยัน</button></div></div></div>
 <div id="toast" class="toast"></div>
 </main></div>
 <script type="module">
@@ -119,23 +124,25 @@ function currentIndicator() { return (subjectData?.units || []).flatMap(u => u.i
 function currentCollection() { return allCollections().find(c => c.id === selection?.collectionId); }
 function subjectLabel(s) { return [s.code || "(ไม่มีรหัส)", s.name, "ปี " + s.year, s.term ? "เทอม " + s.term : ""].filter(Boolean).join(" · "); }
 function showToast(message, ok = false) { const el = $("toast"); el.textContent = message; el.className = "toast " + (ok ? "ok" : "err"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => el.className = "toast", 4500); }
-function askConfirm({ title, message, requireText = null, okLabel = "ยืนยัน", cancelLabel = "ยกเลิก", numberInput = null }) {
+function askConfirm({ title, message, requireText = null, okLabel = "ยืนยัน", cancelLabel = "ยกเลิก", numberInput = null, textInput = null }) {
   return new Promise(resolve => {
-    const overlay = $("confirm-overlay"), input = $("confirm-type-input"), ok = $("confirm-ok"), cancel = $("confirm-cancel");
+    const overlay = $("confirm-overlay"), input = $("confirm-type-input"), noteInput = $("confirm-note-input"), ok = $("confirm-ok"), cancel = $("confirm-cancel");
     $("confirm-title").textContent = title; $("confirm-message").textContent = message;
     $("confirm-type-field").hidden = !(requireText || numberInput);
     $("confirm-type-label").textContent = numberInput ? numberInput.label : "พิมพ์ “" + requireText + "” เพื่อยืนยัน";
     input.type = numberInput ? "number" : "text"; input.value = numberInput ? String(numberInput.value ?? "") : "";
     if (numberInput) { input.min = "1"; input.step = "1"; } else { input.removeAttribute("min"); input.removeAttribute("step"); }
+    $("confirm-note-field").hidden = !textInput;
+    $("confirm-note-label").textContent = textInput?.label || "หมายเหตุ (ไม่บังคับ)";
+    noteInput.value = String(textInput?.value ?? "");
     ok.textContent = okLabel; cancel.textContent = cancelLabel;
     const sync = () => { const n = Number(input.value); ok.disabled = numberInput ? !(input.value !== "" && Number.isInteger(n) && n > 0) : requireText ? input.value.trim() !== requireText : false; };
     const close = result => { overlay.classList.remove("show"); ok.onclick = cancel.onclick = input.oninput = overlay.onclick = null; document.removeEventListener("keydown", onKey); resolve(result); };
     const onKey = event => { if (event.key === "Escape") close(false); };
-    ok.onclick = () => close(numberInput ? Number(input.value) : true); cancel.onclick = () => close(false);
-    overlay.onclick = event => { if (event.target === overlay) close(false); }; input.oninput = sync; document.addEventListener("keydown", onKey); sync(); overlay.classList.add("show"); setTimeout(() => (requireText || numberInput ? input : ok).focus(), 0);
+    ok.onclick = () => close(numberInput && textInput ? { maxScore:Number(input.value), note:noteInput.value } : numberInput ? Number(input.value) : textInput ? noteInput.value : true); cancel.onclick = () => close(false);
+    overlay.onclick = event => { if (event.target === overlay) close(false); }; input.oninput = sync; document.addEventListener("keydown", onKey); sync(); overlay.classList.add("show"); setTimeout(() => (requireText || numberInput ? input : textInput ? noteInput : ok).focus(), 0);
   });
 }
-function askNumber(options) { return askConfirm({ ...options, numberInput:{ label:options.label, value:options.value }, okLabel:"สร้าง" }).then(value => value === false ? null : value); }
 function filterSubjects() {
   const year = $("filter-year").value, term = $("filter-term").value;
   return allSubjects.filter(s => s.subject_type !== "บูรณาการ" && (!year || s.year === year) && (!term || !s.term || s.term === term) && (showAll ? isAdminUser : s.owner_id === session.user.id))
@@ -266,7 +273,7 @@ function renderTree() {
   if (tab === "สอบ") { $("structure-tree").innerHTML = "<div class='hint'>คะแนนสอบและ ร. แสดงในรายการถัดไป</div>"; return; }
   const units = progress().kinds[tab] || [];
   if (!units.length) { $("structure-tree").innerHTML = "<div class='empty'>ไม่มีหน่วยที่คิดคะแนน — ติ๊กเลือกได้ที่หน้าจัดการโครงสร้าง</div>"; return; }
-  $("structure-tree").innerHTML = units.map(unit => `<div class="unit"><div class="unit-title">${escapeHtml(unit.name)} · เต็ม ${escapeHtml(unit.max_score)}</div>${unit.indicators.map(indicator => `<div class="indicator"><div class="indicator-title">${escapeHtml(indicator.name)} <span class="badge">${indicator.doneCount}/${indicator.collectionCount}</span></div><div class="collection-list">${indicator.collections.map(collection => `<button class="tree-button ${collection.state} ${selection?.collectionId === collection.id ? "selected" : ""}" data-collection="${escapeHtml(collection.id)}">ครั้งที่ ${escapeHtml(collection.seq)}<small>${collection.state === "done" ? "✓ ครบ " + collection.total : collection.state === "part" ? collection.filled + "/" + collection.total : "ยังไม่กรอก"}</small></button>`).join("")}<button class="ghost" data-add="${escapeHtml(indicator.id)}">+ เพิ่มครั้ง</button></div></div>`).join("")}</div>`).join("");
+  $("structure-tree").innerHTML = units.map(unit => `<div class="unit"><div class="unit-title">${escapeHtml(unit.name)} · เต็ม ${escapeHtml(unit.max_score)}</div>${unit.indicators.map(indicator => `<div class="indicator"><div class="indicator-title">${escapeHtml(indicator.name)} <span class="badge">${indicator.doneCount}/${indicator.collectionCount}</span></div><div class="collection-list">${indicator.collections.map(collection => `<button class="tree-button ${collection.state} ${selection?.collectionId === collection.id ? "selected" : ""}" data-collection="${escapeHtml(collection.id)}">ครั้งที่ ${escapeHtml(collection.seq)}<small>${collection.state === "done" ? "✓ ครบ " + collection.total : collection.state === "part" ? collection.filled + "/" + collection.total : "ยังไม่กรอก"}</small>${collection.note ? `<small class="collection-note" title="${escapeHtml(collection.note)}">${escapeHtml(collection.note)}</small>` : ""}</button>`).join("")}<button class="ghost" data-add="${escapeHtml(indicator.id)}">+ เพิ่มครั้ง</button></div></div>`).join("")}</div>`).join("");
   $("structure-tree").querySelectorAll("[data-collection]").forEach(button => button.addEventListener("click", async () => { if (!await allowLeave()) return; resetInputs(); selectCollection(button.dataset.collection); }));
   $("structure-tree").querySelectorAll("[data-add]").forEach(button => button.addEventListener("click", () => addCollection(button.dataset.add)));
 }
@@ -298,6 +305,10 @@ function renderMobileEntry() {
   const indicator = currentIndicator(), unit = subjectData.units.find(u => u.id === selection?.unitId), max = exam ? Number(currentGradeWeight?.exam_weight) : Number(collection.max_score);
   $("entry-title").textContent = exam ? "คะแนนสอบ · เต็ม " + max : "ครั้งที่ " + collection.seq + " · เต็ม " + max;
   $("entry-path").textContent = exam ? currentSubject.name : unit.name + " › " + indicator.name;
+  $("entry-note-row").hidden = exam;
+  $("entry-note").hidden = !collection?.note;
+  $("entry-note").innerHTML = escapeHtml(collection?.note || "");
+  $("edit-mobile-note").textContent = collection?.note ? "✎ หมายเหตุ" : "+ เพิ่มหมายเหตุ";
   $("back-structure").textContent = "‹ " + currentSubject.name;
   $("delete-mobile").hidden = exam;
   const p = exam ? progress().exam : progress().kinds[tab].flatMap(u => u.indicators).flatMap(i => i.collections).find(c => c.id === collection.id);
@@ -312,14 +323,16 @@ function renderMobileEntry() {
 $("prev-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at-1].id); });
 $("next-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at+1].id); });
 $("delete-mobile").addEventListener("click", () => deleteCollection(selection?.collectionId));
+$("edit-mobile-note").addEventListener("click", () => editCollectionNote(selection?.collectionId));
 function renderRightPane() {
   if (tab === "สอบ") { renderExamPane(); return; }
   if (!selection) { $("right-pane").innerHTML = "<div class='card empty'>เลือกครั้งที่จากต้นไม้เพื่อกรอกคะแนน</div>"; return; }
   const indicator = currentIndicator(); if (!indicator) return;
   const collections = [...indicator.collections].sort((a,b) => Number(a.seq)-Number(b.seq)); fillInputs(collections.map(c => c.id));
   const totalMax = collections.reduce((sum,c) => sum+Number(c.max_score),0);
-  $("right-pane").innerHTML = `<div class="card"><div class="toolbar"><h2>${escapeHtml(indicator.name)}</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div><div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวม<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div></div>`;
+  $("right-pane").innerHTML = `<div class="card"><div class="toolbar"><h2>${escapeHtml(indicator.name)}</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div><div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span>${c.note ? `<span class="collection-note" title="${escapeHtml(c.note)}">${escapeHtml(c.note)}</span>` : ""}<button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้หมายเหตุครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวม<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div></div>`;
   $("add-desktop").addEventListener("click", () => addCollection(indicator.id));
+  $("right-pane").querySelectorAll("[data-edit-note]").forEach(button => button.addEventListener("click", () => editCollectionNote(button.dataset.editNote)));
   $("right-pane").querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteCollection(button.dataset.delete)));
   bindScoreInputs($("right-pane")); updateInputStyles();
 }
@@ -477,11 +490,22 @@ async function addCollection(indicatorId) {
   if (!canEdit(currentSubject) || !await allowLeave()) return;
   const indicator = subjectData.units.flatMap(u => u.indicators || []).find(i => i.id === indicatorId); if (!indicator) return;
   const seq = (indicator.collections || []).reduce((max,c) => Math.max(max,Number(c.seq)||0),0)+1;
-  const maxScore = await askNumber({ title:"เพิ่มครั้งที่ " + seq, message:"กำหนดคะแนนเต็มของครั้งนี้", label:"คะแนนเต็ม (จำนวนเต็มมากกว่า 0)", value:10 });
-  if (maxScore === null) return;
-  const { data,error } = await sb.from("collections").insert({ indicator_id:indicatorId, seq, max_score:maxScore }).select().single();
+  const details = await askConfirm({ title:"เพิ่มครั้งที่ " + seq, message:"กำหนดคะแนนเต็มของครั้งนี้", numberInput:{ label:"คะแนนเต็ม (จำนวนเต็มมากกว่า 0)", value:10 }, textInput:{ label:"หมายเหตุ (ไม่บังคับ)" }, okLabel:"สร้าง" });
+  if (details === false) return;
+  const { data,error } = await sb.from("collections").insert({ indicator_id:indicatorId, seq, max_score:details.maxScore, note:details.note.trim() || null }).select().single();
   if (error || !data) { showToast("สร้างครั้งที่ไม่สำเร็จ: " + (error?.message || ""),false); return; }
   indicator.collections.push({ ...data, scores:[] }); resetInputs(); selectCollection(data.id); showToast("สร้างครั้งที่ " + seq + " แล้ว",true);
+}
+async function editCollectionNote(id) {
+  if (!id || !canEdit(currentSubject)) return;
+  const collection = allCollections().find(row => row.id === id); if (!collection) return;
+  const value = await askConfirm({ title:"แก้หมายเหตุครั้งที่ " + collection.seq, message:"หมายเหตุนี้แสดงเฉพาะหน้ากรอกคะแนน", textInput:{ label:"หมายเหตุ (ไม่บังคับ)", value:collection.note || "" }, okLabel:"บันทึก" });
+  if (value === false) return;
+  const note = value.trim() || null;
+  const { data,error } = await sb.from("collections").update({ note }).eq("id",id).select("id");
+  if (error || data?.length !== 1) { showToast("บันทึกหมายเหตุไม่สำเร็จ — ตรวจสิทธิ์วิชา", false); return; }
+  collection.note = note;
+  renderWorkspace(); showToast("บันทึกหมายเหตุแล้ว", true);
 }
 async function deleteCollection(id) {
   if (!id || !canEdit(currentSubject) || !await allowLeave()) return;
