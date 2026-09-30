@@ -497,6 +497,8 @@
       <div class="field">
         <label for="m-max" id="m-max-label">คะแนนเต็ม</label>
         <input type="number" id="m-max" min="1" step="1" value="10">
+        <div class="field-note" id="collection-max-note" style="display:none">ลดคะแนนเต็มได้ไม่ต่ำกว่าคะแนนที่นักเรียนได้ไปแล้ว</div>
+        <div class="field-note" id="collection-max-error" role="alert" style="display:none; color:var(--danger); font-weight:600"></div>
       </div>
     </div>
     <div class="field-note" id="modal-note" style="display:none"></div>
@@ -959,6 +961,16 @@ const mMax = document.getElementById("m-max");
 const mMaxLabel = document.getElementById("m-max-label");
 const mMaxField = mMax.closest(".field");
 const mNote = document.getElementById("modal-note");
+const mMaxError = document.getElementById("collection-max-error");
+function showCollectionMaxError(message) {
+  mMaxError.textContent = message;
+  mMaxError.style.display = "block";
+}
+function clearCollectionMaxError() {
+  mMaxError.textContent = "";
+  mMaxError.style.display = "none";
+}
+mMax.addEventListener("input", clearCollectionMaxError);
 
 // state
 let currentSubject = null;    // object วิชาที่เลือกอยู่ (null = โหมดสร้างใหม่)
@@ -2173,6 +2185,8 @@ document.getElementById("btn-add-unit-competency").addEventListener("click", () 
 // context เก็บ: type (unit/indicator/collection), mode (add/edit), node (ตอนแก้), parent/kind (ตอนเพิ่ม)
 function openNodeModal(type, mode, ref) {
   modalContext = { type, mode };
+  clearCollectionMaxError();
+  document.getElementById("collection-max-note").style.display = type === "collection" && mode === "edit" ? "block" : "none";
   mNote.style.display = "none";
   mCoreField.style.display = "none";
 
@@ -2324,6 +2338,17 @@ async function saveNode() {
     table = "collections";
     payload = { max_score: max, seq };
     if (mode === "add") payload.indicator_id = modalContext.parent.id;
+  }
+
+  if (type === "collection" && mode === "edit" && max < Number(modalContext.node.max_score)) {
+    const { data: over, error: overErr } = await sb.from("scores")
+      .select("raw_score").eq("collection_id", modalContext.node.id).gt("raw_score", max);
+    if (overErr) { showCollectionMaxError("ตรวจคะแนนที่กรอกไว้ไม่สำเร็จ: " + overErr.message); return; }
+    if (over.length > 0) {
+      const top = Math.max(...over.map(score => Number(score.raw_score)));
+      showCollectionMaxError("บันทึกไม่ได้ — มีนักเรียน " + over.length + " คนได้คะแนนเกิน " + max + " (สูงสุด " + top + ") ให้แก้คะแนนที่หน้ากรอกคะแนนก่อน");
+      return;
+    }
   }
 
   let error;
