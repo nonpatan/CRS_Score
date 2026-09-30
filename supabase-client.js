@@ -1388,6 +1388,72 @@ export async function getRosterForSubject(subjectId) {
     .sort((a, b) => (a.student_no || "").localeCompare(b.student_no || ""));
 }
 
+// ความคืบหน้าหน้ากรอกคะแนนนับเฉพาะนักเรียนที่อยู่ใน roster และห้องที่เลือก
+export function computeEntryProgress({ units = [], roster = [], examScores = [], roomFilter = "" }) {
+  const visible = (roster || []).filter(student => !roomFilter || attendanceRoomLabel(student.grade_level, student.classroom) === roomFilter);
+  const ids = new Set(visible.map(student => student.id));
+  const kinds = { "วิชา": [], "สมรรถนะหลัก": [] };
+  let collectDone = 0, collectTotal = 0, partCount = 0;
+  for (const unit of (units || []).filter(u => u.counts_score !== false)) {
+    const indicators = [];
+    for (const indicator of (unit.indicators || []).filter(i => i.counts_score !== false)) {
+      const collections = (indicator.collections || []).map(collection => {
+        const filled = new Set((collection.scores || []).filter(score => ids.has(score.student_id)).map(score => score.student_id)).size;
+        const total = visible.length;
+        const state = total > 0 && filled === total ? "done" : filled > 0 ? "part" : "empty";
+        if (unit.kind === "วิชา") {
+          collectTotal++;
+          if (state === "done") collectDone++;
+          if (state === "part") partCount++;
+        }
+        return { ...collection, collectionId: collection.id, seq: collection.seq, max: Number(collection.max_score), filled, total, state };
+      });
+      indicators.push({ ...indicator, collections, doneCount:collections.filter(c => c.state === "done").length, collectionCount:collections.length });
+    }
+    if (kinds[unit.kind]) kinds[unit.kind].push({ ...unit, indicators });
+  }
+  const scored = new Set((examScores || []).filter(score => ids.has(score.student_id)).map(score => score.student_id));
+  return { kinds, units:kinds, collectDone, collectTotal, partCount, exam:{ filled:scored.size, total:visible.length } };
+}
+
+// ห้องจาก roster จริงเท่านั้น เด็กเรียนซ้ำอยู่ในห้องของตัวเอง
+export function buildEntryRooms(roster = [], subject = {}) {
+  const byRoom = new Map();
+  for (const student of roster || []) {
+    if (!String(student.classroom || "").trim()) continue;
+    const classroom = attendanceRoomLabel(student.grade_level, student.classroom);
+    const row = byRoom.get(classroom) || { classroom, count:0, retakeCount:0 };
+    row.count++;
+    if (student.grade_level && subject.grade_level && student.grade_level !== subject.grade_level) row.retakeCount++;
+    byRoom.set(classroom, row);
+  }
+  const rank = classroom => {
+    const grade = classroom.match(/^(อ\.[1-3]|ป\.[1-6]|ม\.[1-6])\//)?.[1] || classroom;
+    const index = GRADE_ORDER.indexOf(grade);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  return [...byRoom.values()].sort((a, b) => rank(a.classroom) - rank(b.classroom) ||
+    a.classroom.localeCompare(b.classroom, "th", { numeric:true }));
+}
+
+// คำนวณการเปลี่ยนคะแนนโดยไม่ทำให้เลข 0 กลายเป็นช่องว่าง
+export function diffScoreInputs({ original = new Map(), next = new Map(), max }) {
+  const upserts = [], deletes = [], invalid = [];
+  for (const [key, raw] of next) {
+    const value = String(raw ?? "").trim();
+    const previous = String(original.get(key) ?? "").trim();
+    if (value === "") {
+      if (previous !== "") deletes.push(key);
+      continue;
+    }
+    const number = Number(value);
+    const reason = !Number.isFinite(number) ? "nan" : number < 0 ? "negative" : number > Number(max) ? "over" : null;
+    if (reason) { invalid.push({ key, reason }); continue; }
+    if (previous === "" || Number(previous) !== number) upserts.push({ key, value:number });
+  }
+  return { upserts, deletes, invalid };
+}
+
 // ============================================================
 // บันทึกหลังสอน — 1 บันทึกผูกได้หลายครั้งที่เช็คชื่อ
 // ------------------------------------------------------------
