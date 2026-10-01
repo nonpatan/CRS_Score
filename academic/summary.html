@@ -101,6 +101,25 @@
     font-size: 14px;
   }
   .score-row .val { color: var(--muted); }
+  .member-detail > summary {
+    display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 8px; min-height: 44px;
+    cursor: pointer; list-style: none;
+  }
+  .member-detail > summary::-webkit-details-marker { display: none; }
+  .member-detail > summary::before { content: "▸"; color: var(--muted); grid-column: 1; grid-row: 1; }
+  .member-detail[open] > summary::before { content: "▾"; }
+  .member-detail > summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .member-detail > summary > span { grid-column: 2; min-width: 0; overflow-wrap: normal; word-break: normal; }
+  .member-name-word, .member-periods { white-space: nowrap; }
+  .member-detail > summary > .val { text-align: left; font-size: 13px; }
+  .member-detail-body { margin: 4px 0 12px 16px; padding-left: 12px; border-left: 1px solid var(--line); }
+  .member-detail-body .score-row { gap: 8px; }
+  .member-detail-body .score-row > span { min-width: 0; overflow-wrap: anywhere; }
+  .member-detail-body .score-row > .val { flex-shrink: 0; text-align: right; }
+  .member-toggles { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; grid-column: 1 / -1; }
+  .member-toggles label { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0; cursor: pointer; }
+  .member-toggles input { width: 18px; height: 18px; accent-color: var(--teal); }
+  .member-toggles input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
   .score-row.total { font-weight: 600; font-size: 15px; color: var(--ink); margin-top: 4px; padding-top: 8px; border-top: 1px dashed var(--line); }
   .score-row.total .val { color: var(--ink); }
 
@@ -429,6 +448,7 @@ let makeupHours = [];         // ใช้กับวิชาพื้นฐ�
 let examScores = [];           // ใช้กับวิชาพื้นฐาน: คะแนนสอบรายคน (ไม่มีแถว = ยังไม่กรอก)
 let currentGradeWeight = null; // อัตราส่วนคะแนนเก็บ:สอบของระดับวิชาที่กำลังดู
 let integrationMembers = [];  // ใช้กับวิชาบูรณาการ: แถว integration_members พร้อมข้อมูลวิชาพื้นฐานสมาชิก
+let openMemberIds = new Set(); // จำวิชาย่อยที่เลือกเปิดทั้งห้อง จนกว่าจะเปลี่ยนวิชา
 let memberDataList = [];      // ใช้กับวิชาบูรณาการ: ข้อมูลเต็มของวิชาพื้นฐานสมาชิกแต่ละตัว (units/remarks/sessions)
 let allSubjects = [];         // วิชาทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
 let memberIdSet = new Set();  // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown)
@@ -623,6 +643,7 @@ function populateStudentDropdown() {
 // ---------- เลือกวิชา: โหลดข้อมูลนักเรียนและคำนวณผล ----------
 elSubject.addEventListener("change", async () => {
   const id = elSubject.value;
+  openMemberIds = new Set();
   if (!id) { currentSubject = null; showEmpty("เลือกวิชาเพื่อดูสรุปคะแนน"); return; }
 
   showEmpty("กำลังโหลดข้อมูล...");
@@ -648,6 +669,9 @@ elSubject.addEventListener("change", async () => {
       .eq("integrated_subject_id", id);
     if (memErr) { showEmpty("โหลดวิชาย่อยไม่สำเร็จ: " + memErr.message); return; }
     integrationMembers = memberRows || [];
+    openMemberIds = new Set(integrationMembers
+      .filter(m => m.member.owner_id === session.user.id)
+      .map(m => m.member_subject_id));
     try {
       memberDataList = await Promise.all(integrationMembers.map(m => loadSubjectData(m.member_subject_id, sharedGradeWeights)));
     } catch (error) {
@@ -800,6 +824,36 @@ function computeIntegratedStudent(studentId) {
   return computeIntegratedResult(studentId, memberDataList);
 }
 
+// ใช้ options เดียวกับวิชาย่อยในสูตรบูรณาการ เพื่อให้รายละเอียดตรงกับป้ายเดิม
+function computeMemberDetail(studentId, md) {
+  return computeSubjectResult(studentId, md.subject, md.units, md.remarksData, md.sessions, md.makeupHours, {
+    skipMs: true, examScores: md.examScores, gradeWeight: md.gradeWeight
+  });
+}
+
+// เปิด/ปิดรายละเอียดที่มีอยู่โดยตรง เพื่อไม่วาดการ์ดหรือโหลดข้อมูลใหม่เมื่อครูติ๊ก
+function toggleMemberDetails(id, open) {
+  if (open) openMemberIds.add(id);
+  else openMemberIds.delete(id);
+  for (const detail of elResult.querySelectorAll("details[data-member-id]")) {
+    if (detail.dataset.memberId === id) detail.open = open;
+  }
+}
+
+elResult.addEventListener("change", event => {
+  const checkbox = event.target;
+  if (!checkbox.matches("input[data-member-toggle]")) return;
+  toggleMemberDetails(checkbox.dataset.memberToggle, checkbox.checked);
+});
+
+function memberTogglesHtml() {
+  return "<div class='card member-toggles'><span class='hint'>เปิดรายละเอียดของ:</span>" +
+    integrationMembers.map(m => "<label><input type='checkbox' data-member-toggle=\"" +
+      escapeHtml(m.member_subject_id).replace(/\"/g, "&quot;") + "\" " +
+      (openMemberIds.has(m.member_subject_id) ? "checked" : "") + ">" + escapeHtml(m.member.name) + "</label>").join("") +
+    "</div>";
+}
+
 // ---------- วาดผลลัพธ์ ----------
 function render() {
   if (!currentSubject) return;
@@ -820,6 +874,7 @@ function render() {
   if (placementWarning) html += "<div class='warn-note'>" + escapeHtml(placementWarning) + "</div>";
 
   if (currentSubject.subject_type === "บูรณาการ") {
+    if (integrationMembers.length > 0) html += memberTogglesHtml();
     if (integrationMembers.length === 0) {
       html += "<div class='warn-note'>วิชาบูรณาการนี้ยังไม่มีวิชาพื้นฐานประกอบเลย ไปเพิ่มที่หน้า \"จัดการโครงสร้าง\" ก่อน</div>";
     } else if (integrationMembers.every(m => !m.member.total_periods)) {
@@ -889,22 +944,37 @@ function renderIntegratedCard(stu, ir) {
   const memberRows = ir.memberResults.map(m => {
     const weightText = m.weight ? m.weight + " คาบ" : "ไม่มีน้ำหนัก";
     const missedText = !primary && m.missedPeriods > 0 ? " · ขาด " + m.missedPeriods + " คาบ" : "";
-    return "<div class='score-row'><span>" + escapeHtml(m.subject.name) +
+    const rowContent = "<span>" + escapeHtml(m.subject.name) +
       " <span class='hint'>(" + weightText + missedText + ")</span>" +
       (m.scoring.notScoredUnits.length ? "<br><span class='hint'>ไม่คิดคะแนน " + m.scoring.notScoredUnits.length + " หน่วย: " +
         escapeHtml(m.scoring.notScoredUnits.join(", ")) + "</span>" : "") +
       "</span><span class='val'>" +
-      resultBadgeLabel(m.result, m.scoring) + "</span></div>";
+      resultBadgeLabel(m.result, m.scoring) + "</span>";
+    const md = memberDataList.find(md => md.subject.id === m.subject.id);
+    if (!md) return "<div class='score-row'>" + rowContent + "</div>";
+    const r = computeMemberDetail(stu.id, md);
+    // ห่อแต่ละคำเพื่อให้ชื่อไทยตัดได้เฉพาะช่องว่าง และแยกป้ายออกจากบรรทัดชื่อ
+    const memberName = m.subject.name.split(/(\s+)/).map(word => /\s/.test(word) ? word :
+      "<span class='member-name-word'>" + escapeHtml(word) + "</span>").join("");
+    const summaryContent = "<span class='member-title'>" + memberName +
+      " <span class='hint member-periods'>(" + weightText + missedText + ")</span></span>" +
+      "<span class='val'>" + resultBadgeLabel(m.result, m.scoring) + "</span>" +
+      (m.scoring.notScoredUnits.length ? "<span class='hint'>ไม่คิดคะแนน " + m.scoring.notScoredUnits.length + " หน่วย: " +
+        escapeHtml(m.scoring.notScoredUnits.join(", ")) + "</span>" : "");
+    const detailHtml = !r.scoring.hasCollectStructure
+      ? "<div class='hint'>ยังไม่ได้ตั้งโครงสร้างคะแนน · ไปตั้งที่หน้า “จัดการโครงสร้าง”</div>"
+      : subjectScoreRowsHtml(r, md.subject, md.gradeWeight, md.units, stu.id);
+    return "<details class='member-detail' data-member-id=\"" + escapeHtml(m.subject.id).replace(/\"/g, "&quot;") + "\" " +
+      (elStudent.value || openMemberIds.has(m.subject.id) ? "open" : "") + ">" +
+      "<summary class='score-row'>" + summaryContent + "</summary>" +
+      "<div class='member-detail-body'>" + detailHtml + "</div></details>";
   }).join("");
 
   // สมรรถนะหลัก: แสดงแยกตามวิชาย่อยที่มีข้อมูลจริง (ไม่ถัวเฉลี่ยรวม เพราะมักกรอกแค่บางวิชา)
   const membersWithComp = ir.memberResults.filter(m => m.competencyUnits.length > 0);
   const competencySection = membersWithComp.map(m => {
-    const grid = m.competencyUnits.map(u =>
-      "<div class='comp-item'>" + escapeHtml(u.name) +
-      (u.notScoredCount > 0 ? "<br><span class='hint'>ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
-      "<br><span class='val'>" + u.scaled.toFixed(1) + " / " + u.max + "</span></div>"
-    ).join("");
+    const md = memberDataList.find(md => md.subject.id === m.subject.id);
+    const grid = competencyItemsHtml(m.competencyUnits, md ? md.units : [], stu.id);
     return "<div class='hint' style='margin:8px 0 4px'>" + escapeHtml(m.subject.name) + "</div>" +
       "<div class='comp-grid'>" + grid + "</div>";
   }).join("");
@@ -958,7 +1028,7 @@ function renderIntegratedCard(stu, ir) {
         (memberRows || "<div class='hint'>ไม่มีวิชาย่อย</div>") +
       "</div>" +
       "<div class='section'>" +
-        "<div class='section-title'>สมรรถนะหลัก 6 ด้าน (ตามวิชาย่อยที่กรอกไว้)</div>" +
+        "<div class='section-title'>สมรรถนะหลัก (ตามวิชาย่อยที่กรอกไว้)</div>" +
         (competencySection || "<div class='hint'>ยังไม่มีวิชาย่อยไหนกรอกสมรรถนะหลักไว้</div>") +
       "</div>" +
       "<div class='section'>" + overallHtml + "</div>" +
@@ -969,20 +1039,80 @@ function renderIntegratedCard(stu, ir) {
   );
 }
 
-function renderStudentCard(stu, r) {
-  const primary = currentSubject.level === "ประถม";
-  let subjectRows = r.subjectUnits.map(u =>
-    "<div class='score-row'><span>" + escapeHtml(u.name) +
-    (u.notScoredCount > 0 ? "<br><span class='hint'>ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
-    "</span><span class='val'>" +
-    u.scaled.toFixed(1) + " / " + u.max + "</span></div>"
-  ).join("");
+// นับครั้งที่กรอกตามลำดับและตัวกรองเดียวกับสูตรกลาง โดยคะแนนศูนย์ที่บันทึกแล้วถือว่ากรอก
+function unitEntryCounts(unitsTree, studentId, kind) {
+  return (unitsTree || []).filter(unit => unit.counts_score !== false &&
+    (kind === "วิชา" ? unit.kind === "วิชา" : unit.kind !== "วิชา")).map(unit => {
+    let expected = 0, scored = 0;
+    for (const ind of (unit.indicators || [])) {
+      if (ind.counts_score === false) continue;
+      for (const coll of (ind.collections || [])) {
+        expected++;
+        if ((coll.scores || []).some(row => row.student_id === studentId)) scored++;
+      }
+    }
+    return { expected, scored };
+  });
+}
 
-  let compGrid = r.competencyUnits.map(u =>
+function unitScoreText(u, entry) {
+  const score = entry && entry.expected === 0 ? "ยังไม่มีครั้งที่" :
+    entry && entry.scored === 0 ? "ยังไม่ได้กรอก" : u.scaled.toFixed(1);
+  return score + " / " + u.max;
+}
+
+function unitEntryHint(entry) {
+  return entry && entry.scored > 0 && entry.scored < entry.expected
+    ? "<br><span class='hint'>กรอกแล้ว " + entry.scored + "/" + entry.expected +
+      " ครั้ง — ครั้งที่ยังไม่กรอกนับเป็น 0</span>" : "";
+}
+
+function competencyItemsHtml(competencyUnits, unitsTree, studentId) {
+  const counts = unitEntryCounts(unitsTree, studentId, "สมรรถนะหลัก");
+  // ถ้าสูตรกลางเปลี่ยนจำนวนหน่วย ให้แสดงเลขเดิมทั้งหมดแทนการจับคู่ผิดหน่วย
+  const entries = counts.length === competencyUnits.length ? counts : [];
+  return competencyUnits.map((u, i) =>
     "<div class='comp-item'>" + escapeHtml(u.name) +
     (u.notScoredCount > 0 ? "<br><span class='hint'>ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
-    "<br><span class='val'>" + u.scaled.toFixed(1) + " / " + u.max + "</span></div>"
+    unitEntryHint(entries[i]) + "<br><span class='val'>" + unitScoreText(u, entries[i]) + "</span></div>"
   ).join("");
+}
+
+// รายหน่วยและคะแนนเก็บ/สอบใช้หน้าตาเดียวกันทั้งวิชาเดี่ยวและส่วนขยายวิชาย่อย
+function subjectScoreRowsHtml(r, subject, gradeWeight, unitsTree, studentId) {
+  const counts = unitEntryCounts(unitsTree, studentId, "วิชา");
+  const entries = counts.length === r.subjectUnits.length ? counts : [];
+  const subjectRows = r.subjectUnits.map((u, i) =>
+    "<div class='score-row'><span>" + escapeHtml(u.name) +
+    (u.notScoredCount > 0 ? "<br><span class='hint'>ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
+    unitEntryHint(entries[i]) + "</span><span class='val'>" +
+    unitScoreText(u, entries[i]) + "</span></div>"
+  ).join("");
+
+  return (
+    (subjectRows || "<div class='hint'>ยังไม่มีหน่วยคะแนนวิชา</div>") +
+    (r.scoring.notScoredUnits.length ? "<div class='hint'>ไม่คิดคะแนน " + r.scoring.notScoredUnits.length + " หน่วย: " +
+      escapeHtml(r.scoring.notScoredUnits.join(", ")) + "</div>" : "") +
+    "<div class='score-row total'><span>คะแนนเก็บก่อนคิดสัดส่วน</span><span class='val'>" +
+      (r.scoring.collectScoredCount === 0 ? "ยังไม่ได้กรอก" : r.subjectScaled.toFixed(1)) + " / " + subject.max_score + "</span></div>" +
+    "<div class='score-row'><span>คะแนนเก็บหลังคิดสัดส่วน</span><span class='val'>" +
+      (r.scoring.collectScoredCount === 0 ? "ยังไม่ได้กรอก" : r.collectPart.toFixed(1)) + " / " + Number(gradeWeight.collect_weight).toFixed(0) + "</span></div>" +
+    "<div class='score-row'><span>คะแนนสอบปลายภาค/ปลายปี</span><span class='val" +
+      (r.scoring.examOverCap ? " score-over-cap" : "") + "'>" +
+      (r.scoring.examOverCap
+        ? r.examPart.toFixed(1) + " / " + Number(gradeWeight.exam_weight).toFixed(0) + " · เกินเพดาน"
+        : (r.scoring.examScored ? r.examPart.toFixed(1) : "ยังไม่ได้กรอก") + " / " + Number(gradeWeight.exam_weight).toFixed(0)) + "</span></div>" +
+    (!r.scoring.complete && r.scoring.partialPercent !== null
+      ? "<div class='score-row'><span>คะแนนชั่วคราว <span class='hint'>(คิดเฉพาะที่กรอกแล้ว: เก็บ " +
+        r.scoring.collectScoredCount + "/" + r.scoring.collectExpectedCount + " ครั้ง" +
+        (r.scoring.examScored ? " + สอบ" : "") + ")</span></span><span class='val'>" +
+        r.scoring.partialPercent.toFixed(1) + "%</span></div>" : "")
+  );
+}
+
+function renderStudentCard(stu, r) {
+  const primary = currentSubject.level === "ประถม";
+  const compGrid = competencyItemsHtml(r.competencyUnits, units, stu.id);
 
   let resultHtml;
   if (r.result.type === "ร.") {
@@ -1023,22 +1153,11 @@ function renderStudentCard(stu, r) {
   const scoreSection = subjectStructureMissing ? "" :
     "<div class='section'>" +
       "<div class='section-title'>คะแนนวิชา</div>" +
-      (subjectRows || "<div class='hint'>ยังไม่มีหน่วยคะแนนวิชา</div>") +
-      (r.scoring.notScoredUnits.length ? "<div class='hint'>ไม่คิดคะแนน " + r.scoring.notScoredUnits.length + " หน่วย: " +
-        escapeHtml(r.scoring.notScoredUnits.join(", ")) + "</div>" : "") +
-      "<div class='score-row total'><span>คะแนนเก็บก่อนคิดสัดส่วน</span><span class='val'>" +
-        r.subjectScaled.toFixed(1) + " / " + currentSubject.max_score + "</span></div>" +
-      "<div class='score-row'><span>คะแนนเก็บหลังคิดสัดส่วน</span><span class='val'>" +
-        r.collectPart.toFixed(1) + " / " + Number(currentGradeWeight.collect_weight).toFixed(0) + "</span></div>" +
-      "<div class='score-row'><span>คะแนนสอบปลายภาค/ปลายปี</span><span class='val" +
-        (r.scoring.examOverCap ? " score-over-cap" : "") + "'>" +
-        (r.scoring.examOverCap
-          ? r.examPart.toFixed(1) + " / " + Number(currentGradeWeight.exam_weight).toFixed(0) + " · เกินเพดาน"
-          : (r.scoring.examScored ? r.examPart.toFixed(1) : "ยังไม่ได้กรอก") + " / " + Number(currentGradeWeight.exam_weight).toFixed(0)) + "</span></div>" +
+      subjectScoreRowsHtml(r, currentSubject, currentGradeWeight, units, stu.id) +
     "</div>";
   const competencyScoreSection = subjectStructureMissing ? "" :
     "<div class='section'>" +
-      "<div class='section-title'>สมรรถนะหลัก 6 ด้าน</div>" +
+      "<div class='section-title'>สมรรถนะหลัก</div>" +
       (compGrid ? "<div class='comp-grid'>" + compGrid + "</div>" : "<div class='hint'>ยังไม่มีข้อมูลสมรรถนะหลัก</div>") +
     "</div>";
 
