@@ -67,7 +67,7 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 @media(min-width:1200px) { .wrap { max-width:none; width:100%; } .entry-grid { display:grid; grid-template-columns:minmax(280px,310px) minmax(0,1fr); gap:16px; align-items:start; } .entry-grid>div { min-width:0; } .tree-pane { max-height:calc(100vh - 220px); overflow:auto; } .mobile-only { display:none!important; } }
 @media(max-width:1199px) { .desktop-only,#right-pane { display:none!important; } #subject-view.exam-tab #right-pane { display:block!important; } }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20260820-2">
+<link rel="stylesheet" href="../app-shell.css?v=20261002-1">
 </head>
 <body>
 <div class="wrap">
@@ -76,7 +76,7 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 <div class="nav">
 <a href="entry.html">กรอกคะแนน</a><a href="competency-manage.html">กำหนดกิจกรรม/กิจวัตร</a><a href="competency-core.html">กำหนดสมรรถนะหลัก</a><a href="competency-entry.html">กรอกคะแนนกิจกรรม/กิจวัตร</a><a href="attendance.html">เช็คชื่อ</a><a href="summary.html">สรุปผลการเรียน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="students.html">นักเรียน</a><a href="retention.html">เรียนซ้ำชั้น</a><a href="warning.html">เฝ้าระวัง มส.</a><a href="rollover.html">ขึ้นปีใหม่</a><a href="#" id="btn-signout">ออกจากระบบ</a>
 </div>
-<script src="../app-shell.js?v=20261001-1"></script>
+<script src="../app-shell.js?v=20261002-1"></script>
 </header>
 <main class="academic-content">
 <section id="subjects-view">
@@ -94,7 +94,7 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 <div id="toast" class="toast"></div>
 </main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs } from "../supabase-client.js?v=20260930-3";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs } from "../supabase-client.js?v=20261002-1";
 const $ = id => document.getElementById(id);
 function escapeHtml(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const session = await requireAuth();
@@ -158,7 +158,11 @@ function setView(next, push = true) {
 function viewUrl(target) { return target === "subjects" ? location.pathname : "?subject=" + encodeURIComponent(currentSubject.id) + (selection?.collectionId ? "&collection=" + encodeURIComponent(selection.collectionId) : ""); }
 function dirtyCount() { const diff = collectDiff(); return diff.upserts.length + diff.deletes.length + diff.invalid.filter(row => String(inputNext.get(row.key) ?? "") !== String(inputOriginal.get(row.key) ?? "")).length; }
 async function allowLeave() { const count = dirtyCount(); return !count || await askConfirm({ title:"มีคะแนนยังไม่บันทึก", message:"มี " + count + " ช่องยังไม่บันทึก", okLabel:"ทิ้ง", cancelLabel:"กลับไปบันทึก" }); }
-window.addEventListener("beforeunload", event => { if (dirtyCount()) { event.preventDefault(); event.returnValue = ""; } });
+window.crsHasUnsavedChanges = () => dirtyCount() > 0;
+window.addEventListener("beforeunload", event => {
+  if (window.crsLeavingConfirmed) return;
+  if (dirtyCount()) { event.preventDefault(); event.returnValue = ""; }
+});
 window.addEventListener("popstate", async event => {
   if (!await allowLeave()) { history.pushState({ view, subjectId:currentSubject?.id, collectionId:selection?.collectionId }, "", viewUrl(view)); return; }
   resetInputs();

@@ -266,10 +266,33 @@ export async function requireAuth() {
   return session;
 }
 
-// ออกจากระบบ แล้วเด้งกลับไปหน้า login
+// ถามก่อนตัดเซสชัน และกันกดซ้ำตั้งแต่กล่องยืนยันยังเปิดอยู่
+let signingOut = false;
 export async function signOut() {
-  await sb.auth.signOut();
-  location.href = new URL("login.html", APP_ROOT_URL).href;
+  if (signingOut) return;
+  signingOut = true;
+  try {
+    const dirty = typeof window.crsHasUnsavedChanges === "function" && window.crsHasUnsavedChanges() === true;
+    if (typeof window.crsAskConfirm === "function") {
+      const ok = await window.crsAskConfirm({
+        title: "ออกจากระบบ?",
+        message: dirty
+          ? "หน้านี้มีข้อมูลที่ยังไม่ได้บันทึก — ถ้าออกตอนนี้ ข้อมูลที่แก้ไว้จะหายทั้งหมด"
+          : "ต้องเข้าสู่ระบบใหม่ก่อนใช้งานครั้งถัดไป",
+        okLabel: "ออกจากระบบ",
+        cancelLabel: dirty ? "กลับไปบันทึกก่อน" : "ยกเลิก",
+        danger: true
+      });
+      if (!ok) { signingOut = false; return; }
+    }
+    window.crsLeavingConfirmed = true;
+    await sb.auth.signOut();
+    location.href = new URL("login.html", APP_ROOT_URL).href;
+  } catch (error) {
+    signingOut = false;
+    window.crsLeavingConfirmed = false;
+    throw error;
+  }
 }
 
 // โปรไฟล์ของผู้ใช้ที่ล็อกอินอยู่ (มี role: admin/teacher)

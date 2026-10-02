@@ -56,6 +56,7 @@
     message = "",
     requireText = null,
     okLabel = "ยืนยัน",
+    cancelLabel = "ยกเลิก",
     danger = true
   } = {}) {
     return new Promise(resolve => {
@@ -123,6 +124,7 @@
       label.textContent = required == null ? "" : `พิมพ์ “${required}” เพื่อยืนยัน`;
       input.value = "";
       ok.textContent = okLabel;
+      cancel.textContent = cancelLabel;
       // ⚠ ห้ามใช้ชื่อคลาส "danger" ตรง ๆ — app-shell.css มีกฎ `button.danger,.danger{...!important}`
       // ที่จะทับปุ่มนี้ให้กลายเป็นพื้นอ่อน ทำให้ปุ่มยืนยันการลบไม่เด่นกว่าปุ่มยกเลิก
       ok.classList.toggle("crs-confirm-danger", Boolean(danger));
@@ -627,7 +629,6 @@
   const mod = MODULES[moduleKey];
 
   nav.setAttribute("aria-label", "เมนู" + mod.label);
-  if (header) header.dataset.shellKicker = "CRS MIS  /  " + mod.kicker;
 
   const current = (path.endsWith("/") ? "" : segments[segments.length - 1]) || mod.home;
   const pageName = current.replace(/\.html$/i, "").replace(/[^a-z0-9-]/gi, "-");
@@ -644,20 +645,66 @@
     const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || []), ...(mod.reportOnly || [])].includes(href)
       ? ' data-restricted="1" hidden'
       : "";
-    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${restricted}>${label}</a>`;
+    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}>${label}</a>`;
   };
 
-  const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link${current === "dashboard.html" ? " active" : ""}">ภาพรวม</a>`;
-  // ฝ่ายที่มีหน้าภาพรวมของตัวเอง ให้ขึ้นถัดจากภาพรวมส่วนกลาง (ฝ่ายวิชาการไม่มี = ไม่แสดงอะไร)
+  // ไอคอนภาพรวมใช้ชุดเดียวกับ dashboard — ลิงก์งานอื่นคงข้อความเดิม
+  const icon = paths => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  const dashboardIcon = icon('<rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/>');
+  const moduleIcons = {
+    academic: icon('<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M7 9v5c0 1.7 2.2 3 5 3s5-1.3 5-3V9"/>'),
+    finance: icon('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/>'),
+    personnel: icon('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3 3-5 6-5s5.4 2 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.5c1.6.7 2.6 2.3 3 4.5"/>'),
+    "general-affairs": icon('<path d="M4 21V10l8-6 8 6v11"/><path d="M9 21v-6h6v6"/>')
+  };
+  const signoutIcon = icon('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/>');
+  const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link">${dashboardIcon}ภาพรวม</a>`;
   const moduleHomeLink = mod.moduleHome
-    ? buildLink(mod.moduleHome[0], mod.moduleHome[1], "dashboard-link")
+    ? buildLink(mod.moduleHome[0], moduleIcons[moduleKey] + mod.moduleHome[1], "dashboard-link")
     : "";
 
   nav.innerHTML = dashboardLink + moduleHomeLink + mod.groups.map(group => {
     const isCurrent = group.items.some(([href]) => href === current);
     const links = group.items.map(([href, label]) => buildLink(href, label)).join("");
-    return `<div class="nav-group${isCurrent ? " current" : ""}"><span class="nav-group-label">${group.label}</span><div class="nav-group-links">${links}</div></div>`;
-  }).join("") + `<a href="#" id="btn-signout">ออกจากระบบ</a>`;
+    return `<span class="shell-nav-sep" aria-hidden="true"></span><div class="nav-group${isCurrent ? " current" : ""}"><span class="nav-group-label">${group.label}</span><div class="nav-group-links">${links}</div></div>`;
+  }).join("") + `<div class="shell-side-foot"><a href="#" id="btn-signout">${signoutIcon}ออกจากระบบ</a></div>`;
+
+  // แบรนด์ไม่ใช้ heading และ crumb ไม่ใช้ p เพื่อคง selector ของหน้าเดิม
+  const brandMarkup = `<a class="shell-brand" href="${dashboardUrl}"><span class="shell-badge"><img src="${new URL("logo.png", appRootUrl).href}" alt=""></span><span><b>โรงเรียนเจริญศึกษา</b><span class="shell-brand-module">${mod.label}</span></span></a>`;
+  if (header) {
+    const top = document.createElement("div");
+    top.className = "shell-top";
+    top.innerHTML = brandMarkup;
+    header.insertBefore(top, header.firstChild);
+    const crumb = document.createElement("div");
+    crumb.className = "shell-crumb";
+    const group = mod.groups.find(group => group.items.some(([href]) => href === current));
+    crumb.textContent = mod.label + (group ? " · " + group.label : "");
+    top.insertAdjacentElement("afterend", crumb);
+    const stars = document.createElement("span");
+    stars.className = "shell-stars";
+    stars.setAttribute("aria-hidden", "true");
+    header.appendChild(stars);
+  }
+
+  // ย้าย node เมนูเดิมไป-กลับ จึงรักษา listener และสิทธิ์ hidden ของแต่ละหน้า
+  const initializeSidebar = () => {
+    const wrap = header && header.parentElement;
+    if (!wrap || !wrap.classList.contains("wrap")) return;
+    const sidebar = document.createElement("aside");
+    sidebar.className = "shell-sidebar emerald";
+    sidebar.setAttribute("aria-label", mod.label);
+    sidebar.innerHTML = '<div class="shell-top">' + brandMarkup + '</div>';
+    wrap.insertBefore(sidebar, header);
+    const desktop = window.matchMedia("(min-width: 1200px)");
+    const moveNav = () => {
+      sidebar.hidden = !desktop.matches;
+      if (desktop.matches) sidebar.appendChild(nav);
+      else header.appendChild(nav);
+    };
+    desktop.addEventListener("change", moveNav);
+    moveNav();
+  };
 
   // บนมือถือ/แท็บเล็ต เมนูเป็นแถบเลื่อนแนวนอน จึงเลื่อนปุ่มหน้าปัจจุบันให้เห็นเอง
   const active = nav.querySelector("a.active");
@@ -732,6 +779,7 @@
   const initializeWorkspace = () => {
     wrapAcademicContent();
     decorateWorkspace();
+    initializeSidebar();
     preparePageReveal();
   };
   if (document.readyState === "loading") {
