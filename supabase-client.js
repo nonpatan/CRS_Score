@@ -2841,11 +2841,23 @@ export function buildAcademicOverview(raw, options = {}) {
   const coverage = countableSubjects.map(subject => {
     const parts = subject.subject_type === "บูรณาการ" ? (membersOf.get(subject.id) || []) : [subject];
     let checked = 0, total = 0;
+    const memberCoverage = [];
     for (const part of parts) {
-      checked += (sessionsBySubject.get(part.id) || []).reduce((sum, s) => sum + (Number(s.periods_covered) || 0), 0);
-      total += Number(part.total_periods) || 0;
+      const partChecked = (sessionsBySubject.get(part.id) || []).reduce((sum, s) => sum + (Number(s.periods_covered) || 0), 0);
+      const partTotal = Number(part.total_periods) || 0;
+      checked += partChecked;
+      total += partTotal;
+      if (subject.subject_type === "บูรณาการ") {
+        memberCoverage.push({ subject: part, checked: partChecked, total: partTotal, percent: partTotal > 0 ? (partChecked / partTotal) * 100 : null });
+      }
     }
-    return { subject, checked, total, percent: total > 0 ? (checked / total) * 100 : null };
+    memberCoverage.sort((a, b) => {
+      if (a.percent === null && b.percent === null) return 0;
+      if (a.percent === null) return -1;
+      if (b.percent === null) return 1;
+      return a.percent - b.percent;
+    });
+    return { subject, checked, total, percent: total > 0 ? (checked / total) * 100 : null, parts: memberCoverage };
   }).sort((a, b) => {
     if (a.percent === null && b.percent === null) return 0;
     if (a.percent === null) return -1;

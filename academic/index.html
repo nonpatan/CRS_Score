@@ -238,6 +238,13 @@
   .coverage-row .issue-why { font-size:13px; }
   .coverage-row .pill { margin-left:5px; }
   .bar.over > span { background:var(--danger); }
+  .member-progress { margin:6px 0 0 12px; font-size:13px; }
+  .member-progress > summary { min-height:44px; padding:10px 0; box-sizing:border-box; overflow-wrap:anywhere; }
+  .member-progress .member-warning { color:var(--amber); }
+  .member-progress .member-row { padding:8px 0 8px 12px; border-top:1px solid var(--line); }
+  .member-progress .issue-name { overflow-wrap:anywhere; font-size:13px; }
+  .member-progress .subject-note { font-size:12px; }
+  .member-progress .bar { height:5px; }
   .term-head.waiting { opacity:.65; }
   @media (max-width:519px) {
     .scope-row { align-items:flex-start; }
@@ -330,7 +337,7 @@ import {
   listSelectableYears, academicYearOf, academicTermOf, bangkokNow, toDateStr,
   getSetting, setSetting,
   loadAcademicOverviewData, buildAcademicOverview
-} from "../supabase-client.js?v=20261002-2";
+} from "../supabase-client.js?v=20261002-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -679,13 +686,34 @@ function renderCoverage(overview, term2Open, members) {
     return;
   }
   const noEnrollmentIds = new Set(overview.readiness.noEnrollment.map(s => s.id));
+  const memberHtml = c => {
+    if (!c.parts?.length) return "";
+    const unchecked = c.parts.filter(part => part.checked === 0).length;
+    const lowest = c.parts[0];
+    const note = unchecked
+      ? "<span class='member-warning'>" + esc(" · ยังไม่เคยเช็ค " + unchecked + " วิชา") + "</span>"
+      : esc(" · น้อยสุด " + lowest.subject.name + (lowest.percent === null ? " · ยังไม่ตั้งจำนวนคาบ" : " " + fmtPct(lowest.percent) + "%"));
+    return "<details class='member-progress'><summary>" + esc("วิชาย่อย " + c.parts.length + " วิชา") + note + "</summary>" +
+      c.parts.map(part => {
+        const over = part.percent !== null && part.percent > 100;
+        const badges = (part.checked === 0 ? "<span class='pill warn'>ยังไม่เคยเช็ค</span>" : "") +
+          (noEnrollmentIds.has(part.subject.id) ? "<span class='pill warn'>ยังไม่มีนักเรียน</span>" : "");
+        const progress = part.percent === null ? "ยังไม่ตั้งจำนวนคาบ" :
+          part.checked + "/" + part.total + " คาบ · " + fmtPct(part.percent) + "%";
+        const pct = Math.min(100, part.percent);
+        return "<div class='member-row'><div class='issue-row'><div class='issue-name'>" + subjLabel(part.subject) + badges +
+          "</div><span class='subject-note'>" + esc(progress) + "</span></div>" +
+          (part.percent === null ? "" : "<div class='bar " + (over ? "over" : pct < 50 ? "low" : "") +
+            "'><span style='width:" + esc(pct) + "%'></span></div>") + "</div>";
+      }).join("") + "</details>";
+  };
   const rowHtml = (c, label = "", noStudents = false) => {
     const over = c.percent !== null && c.percent > 100;
     const badges = (label ? "<span class='pill " + (over ? "bad" : c.percent < 50 ? "warn" : "ok") + "'>" + label + "</span>" : "") +
       (noStudents ? "<span class='pill warn'>ยังไม่มีนักเรียน</span>" : "");
     if (c.percent === null) {
       return "<div class='coverage-row'><div class='issue-row'><div class='issue-name'>" + subjLabel(c.subject) + badges +
-        "<span class='issue-why'>ยังไม่ตั้งจำนวนคาบ จึงคิดความคืบหน้าไม่ได้</span></div><span class='pill warn'>—</span></div></div>";
+        "<span class='issue-why'>ยังไม่ตั้งจำนวนคาบ จึงคิดความคืบหน้าไม่ได้</span></div><span class='pill warn'>—</span></div>" + memberHtml(c) + "</div>";
     }
     const pct = Math.min(100, c.percent);
     const cls = pct < 50 ? "low" : "";
@@ -694,7 +722,7 @@ function renderCoverage(overview, term2Open, members) {
         "<div class='issue-name'>" + subjLabel(c.subject) + badges +
           (over ? "<span class='issue-why'>เช็คเกินคาบทั้งหมด " + (c.checked - c.total) + " คาบ</span>" : "") + "</div>" +
         "<span class='subject-note'>" + c.checked + "/" + c.total + " คาบ · " + fmtPct(c.percent) + "%</span>" +
-      "</div><div class='bar " + (over ? "over" : cls) + "'><span style='width:" + pct + "%'></span></div></div>";
+      "</div><div class='bar " + (over ? "over" : cls) + "'><span style='width:" + pct + "%'></span></div>" + memberHtml(c) + "</div>";
   };
 
   const listHtml = (list, waiting) => {
