@@ -767,13 +767,16 @@
     const primaryCard = document.querySelector(".wrap .card:not(.report-tabs)");
     if (!primaryCard || primaryCard.querySelector(".workspace-card-heading")) return;
     primaryCard.classList.add("workspace-primary-card");
+    const normalize = text => text.trim().replace(/\s+/g, " ");
+    const pageTitle = document.querySelector("header h1");
+    const heading = !pageTitle || normalize(workflow.title) !== normalize(pageTitle.textContent)
+      ? '<h2>' + workflow.title + '</h2>' : "";
     const steps = workflow.steps.map((label, index) =>
-      '<span class="workspace-step' + (index === 0 ? " active" : "") + '"><b>' + (index + 1) + '</b>' + label + '</span>'
+      '<li class="workspace-step"><b>' + (index + 1) + '</b>' + label + '</li>'
     ).join("");
     primaryCard.insertAdjacentHTML("afterbegin",
-      '<div class="workspace-card-heading"><div><span class="workspace-eyebrow">WORKFLOW</span><h2>' +
-      workflow.title + '</h2><p>' + workflow.description + '</p></div><div class="workspace-steps" aria-label="ลำดับการทำงาน">' +
-      steps + '</div></div>'
+      '<div class="workspace-card-heading workspace-rail">' + heading +
+      '<ol class="workspace-steps" aria-label="ลำดับงาน">' + steps + '</ol></div>'
     );
   };
   const initializeWorkspace = () => {
