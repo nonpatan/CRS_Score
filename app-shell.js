@@ -170,6 +170,24 @@
   // ---------- นิยามฝ่าย: เมนู + หน้าเริ่มต้น + workflow ของแต่ละหน้า ----------
   // workflow แยกตามฝ่าย เพื่อไม่ให้ชื่อไฟล์ซ้ำข้ามฝ่ายแล้วหยิบคำอธิบายผิดอัน
   const MODULES = {
+    system: {
+      label: "ระบบ",
+      groups: [
+        { label: "ฝ่ายงาน", items: [
+          ["academic/index.html", "ฝ่ายวิชาการ"], ["finance/index.html", "ฝ่ายการเงิน"],
+          ["personnel/index.html", "ฝ่ายบุคคล"], ["general-affairs/index.html", "บริหารทั่วไป"]
+        ] },
+        { label: "ผู้ดูแลระบบ", items: [
+          ["permissions.html", "จัดการสิทธิ์ผู้ใช้"], ["handover.html", "ส่งมอบงานครูที่ออก"]
+        ] },
+        { label: "บัญชีของฉัน", items: [["profile.html", "ข้อมูลส่วนตัว"]] }
+      ],
+      adminOnly: ["permissions.html", "handover.html"],
+      workflows: {
+        "permissions.html": { title: "จัดการสิทธิ์ผู้ใช้", steps: ["ค้นหาคน", "กำหนดสิทธิ์รายฝ่าย"] },
+        "handover.html": { title: "ส่งมอบงานครูที่ออก", steps: ["เลือกครู", "โอนงานค้าง", "ปิดการล็อกอิน"] }
+      }
+    },
     academic: {
       label: "ฝ่ายวิชาการ",
       kicker: "วิชาการ",
@@ -353,7 +371,8 @@
         "leave.html": {
           title: "บันทึกการลา",
           description: "เลือกบุคลากร ช่วงวันที่ และประเภทการลา ก่อนบันทึก",
-          steps: ["เลือกคน", "ระบุวันลา", "บันทึก"]
+          steps: ["เลือกคน", "ระบุวันลา", "บันทึก"],
+          card: "#form-card"
         },
         "field-duty.html": {
           title: "บันทึกออกปฏิบัติหน้าที่",
@@ -562,7 +581,8 @@
         "transport-opening.html": {
           title: "หนี้ค่ารถยกมา",
           description: "เลือกปี ชั้น และห้อง แล้วบันทึกเฉพาะหนี้ค่ารถที่แก้จากข้อมูลต้นทางไม่ได้",
-          steps: ["เลือกห้อง", "ตรวจยอดระบบ", "บันทึกหนี้ยกมา"]
+          steps: ["เลือกห้อง", "ตรวจยอดระบบ", "บันทึกหนี้ยกมา"],
+          card: "#selector-card"
         },
         "fee-settings.html": {
           title: "ตั้งค่าค่าใช้จ่าย",
@@ -583,11 +603,6 @@
           title: "รับเงินค่าใช้จ่ายนักเรียน",
           description: "เลือกนักเรียน ตรวจรายการค้าง แล้วผูกเงินที่รับเข้ากับแต่ละบรรทัด",
           steps: ["เลือกนักเรียน", "จัดยอดที่รับ", "ยืนยันและเปิดเอกสาร"]
-        },
-        "fee-receipt.html": {
-          title: "ใบแจ้งหนี้และใบเสร็จรับเงิน",
-          description: "ตรวจรายการ snapshot ยอดที่จ่าย และยอดคงเหลือก่อนพิมพ์เอกสาร A4",
-          steps: ["ตรวจเอกสาร", "นับการพิมพ์", "พิมพ์"]
         },
         "fee-report.html": {
           title: "รายงานค่าใช้จ่ายนักเรียน",
@@ -625,7 +640,9 @@
   const folder = path.endsWith("/")
     ? segments[segments.length - 1]
     : segments[segments.length - 2];
-  const moduleKey = Object.prototype.hasOwnProperty.call(MODULES, folder) ? folder : "academic";
+  const systemPages = MODULES.system.groups.flatMap(group => group.items.map(([href]) => href)).filter(href => !href.includes("/"));
+  const moduleKey = Object.prototype.hasOwnProperty.call(MODULES, folder) ? folder
+    : systemPages.includes(segments[segments.length - 1]) ? "system" : "academic";
   const mod = MODULES[moduleKey];
 
   nav.setAttribute("aria-label", "เมนู" + mod.label);
@@ -637,12 +654,12 @@
   document.body.classList.add("academic-shell", "academic-" + pageName, "shell-module-" + moduleKey);
 
   const buildLink = (href, label, extraClass) => {
-    const target = new URL(moduleKey + "/" + href, appRootUrl);
+    const target = new URL((moduleKey === "system" ? "" : moduleKey + "/") + href, appRootUrl);
     // ส่ง cache version ไปกับลิงก์หน้า HTML ด้วย เพื่อให้การนำทางหลัง deploy
     // ไม่ดึง document รุ่นเก่าจาก browser/GitHub Pages cache
     if (shellVersion) target.searchParams.set("v", shellVersion);
     const classes = [extraClass, href === current ? "active" : ""].filter(Boolean).join(" ");
-    const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || []), ...(mod.reportOnly || [])].includes(href)
+    const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || []), ...(mod.reportOnly || []), ...(mod.adminOnly || [])].includes(href)
       ? ' data-restricted="1" hidden'
       : "";
     return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}>${label}</a>`;
@@ -764,9 +781,13 @@
   const decorateWorkspace = () => {
     // หน้าที่ไม่ได้นิยาม workflow ไว้ ก็ยังต้องได้ layout wrapper + reveal ตามปกติ
     if (!workflow) return;
-    const primaryCard = document.querySelector(".wrap .card:not(.report-tabs)");
-    if (!primaryCard || primaryCard.querySelector(".workspace-card-heading")) return;
-    primaryCard.classList.add("workspace-primary-card");
+    const gridCard = document.querySelector(".wrap .card:not(.report-tabs)");
+    if (!gridCard || document.querySelector(".wrap .workspace-card-heading")) return;
+    gridCard.classList.add("workspace-primary-card");
+    const railCard = (workflow.card && document.querySelector(".wrap " + workflow.card))
+      || Array.from(document.querySelectorAll(".wrap .card:not(.report-tabs)"))
+      .find(element => !element.hidden && element.style.display !== "none");
+    if (!railCard) return;
     const normalize = text => text.trim().replace(/\s+/g, " ");
     const pageTitle = document.querySelector("header h1");
     const heading = !pageTitle || normalize(workflow.title) !== normalize(pageTitle.textContent)
@@ -774,7 +795,7 @@
     const steps = workflow.steps.map((label, index) =>
       '<li class="workspace-step"><b>' + (index + 1) + '</b>' + label + '</li>'
     ).join("");
-    primaryCard.insertAdjacentHTML("afterbegin",
+    railCard.insertAdjacentHTML("afterbegin",
       '<div class="workspace-card-heading workspace-rail">' + heading +
       '<ol class="workspace-steps" aria-label="ลำดับงาน">' + steps + '</ol></div>'
     );
