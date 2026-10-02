@@ -253,6 +253,71 @@ function appRelativeLocation() {
   return location.pathname.split("/").pop() + location.search;
 }
 
+let sessionListenersRegistered = false;
+let revokedSessionHandled = false;
+let verifyingSession = false;
+let lastSessionVerification = null;
+
+function skipSessionCheck() {
+  return location.pathname === new URL("login.html", APP_ROOT_URL).pathname ||
+    signingOut || window.crsLeavingConfirmed === true;
+}
+
+async function handleRevokedSession() {
+  if (skipSessionCheck() || revokedSessionHandled) return;
+  revokedSessionHandled = true;
+  const dirty = typeof window.crsHasUnsavedChanges === "function" && window.crsHasUnsavedChanges() === true;
+  if (dirty && typeof window.crsAskConfirm === "function") {
+    const ok = await window.crsAskConfirm({
+      title: "เซสชันหมดอายุ",
+      message: "บัญชีนี้ออกจากระบบจากที่อื่นแล้ว — ข้อมูลที่ยังไม่ได้บันทึกในหน้านี้บันทึกไม่ได้ เข้าสู่ระบบใหม่แล้วกรอกอีกครั้ง",
+      okLabel: "ไปหน้าเข้าสู่ระบบ",
+      cancelLabel: "อยู่หน้านี้ก่อน",
+      danger: false
+    });
+    if (!ok) return;
+  }
+  window.crsLeavingConfirmed = true;
+  try {
+    await sb.auth.signOut({ scope: "local" });
+  } catch { /* เซสชันใช้ไม่ได้แล้ว — ยังไปเข้าสู่ระบบได้แม้ล้างผ่านเซิร์ฟเวอร์ไม่สำเร็จ */ }
+  const loginUrl = new URL("login.html", APP_ROOT_URL);
+  loginUrl.searchParams.set("next", appRelativeLocation());
+  location.href = loginUrl.href;
+}
+
+async function verifySessionWithServer() {
+  const now = Date.now();
+  if (skipSessionCheck() || revokedSessionHandled || verifyingSession ||
+      (lastSessionVerification !== null && now - lastSessionVerification < 60000)) return;
+  verifyingSession = true;
+  lastSessionVerification = now;
+  try {
+    let error;
+    try { ({ error } = await sb.auth.getUser()); }
+    catch (caught) { error = caught; }
+    if (error && !/issued at future/i.test(error.message || "") && ([401, 403].includes(error.status) ||
+        ["session_not_found", "bad_jwt", "user_not_found"].includes(error.code))) {
+      await handleRevokedSession();
+    }
+  } finally {
+    verifyingSession = false;
+  }
+}
+
+function registerSessionListeners() {
+  if (skipSessionCheck() || sessionListenersRegistered) return;
+  sessionListenersRegistered = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void verifySessionWithServer();
+  });
+  sb.auth.onAuthStateChange(event => {
+    if (event !== "SIGNED_OUT" || skipSessionCheck()) return;
+    // ออกจาก callback ก่อนเรียก Auth ซ้ำ เพื่อไม่รอ lock ของ supabase-js ตัวเอง
+    setTimeout(() => { void handleRevokedSession(); }, 0);
+  });
+}
+
 // เช็คว่าล็อกอินอยู่ไหม ถ้าไม่ได้ล็อกอิน เด้งไปหน้า login (จำหน้าปัจจุบันไว้ กลับมาได้หลังล็อกอิน)
 // เรียกตอนต้นสคริปต์ของทุกหน้าที่ต้องล็อกอินก่อนใช้งาน
 export async function requireAuth() {
@@ -263,6 +328,8 @@ export async function requireAuth() {
     location.href = loginUrl.href;
     return null;
   }
+  registerSessionListeners();
+  void verifySessionWithServer();
   return session;
 }
 
@@ -286,7 +353,7 @@ export async function signOut() {
       if (!ok) { signingOut = false; return; }
     }
     window.crsLeavingConfirmed = true;
-    await sb.auth.signOut();
+    await sb.auth.signOut({ scope: "local" });
     location.href = new URL("login.html", APP_ROOT_URL).href;
   } catch (error) {
     signingOut = false;
@@ -441,7 +508,9 @@ export async function syncJibble(scope, options = {}) {
       const body = await error.context?.json();
       if (body?.error) detail = body.error;
     } catch { /* อ่านเนื้อไม่ได้ก็ใช้ข้อความเดิม */ }
-    throw new Error(detail);
+    const syncError = new Error(detail);
+    if (error.context?.status === 401) syncError.sessionExpired = true;
+    throw syncError;
   }
   if (data && data.ok === false) throw new Error(data.error || "ซิงก์ไม่สำเร็จ");
   return data;
