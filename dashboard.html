@@ -184,10 +184,7 @@
   .bottom-nav svg { width: 22px; height: 22px; }
   .bottom-nav a.active { color: var(--emerald-night); background: var(--mint); }
   .bottom-nav a:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
-  .dashboard-signout-mobile { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 44px; margin: 24px 0 env(safe-area-inset-bottom); padding: 10px 16px; border: 1px solid var(--teal); border-radius: 12px; background: transparent; color: var(--teal); font: inherit; font-weight: 600; cursor: pointer; }
-  .dashboard-signout-mobile svg { width: 20px; height: 20px; }
-  .dashboard-signout-mobile:hover { background: var(--teal-soft); }
-  .dashboard-signout-mobile:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  main button[data-dashboard-signout] { width: 100%; margin: 24px 0 env(safe-area-inset-bottom); }
 
   @media (max-width: 519px) {
     #staff-today-card, #rooms-checked-card { padding: 14px 13px; }
@@ -207,9 +204,9 @@
   }
   /* ================= จอ ≥ 900px: sidebar มรกต ================= */
   @media (min-width: 900px) {
-    .dashboard-signout-mobile { display: none; }
-    .side-link.dashboard-signout-side { margin-top: auto; }
-    .dashboard-signout-side + .side-footer { margin-top: 0; }
+    main button[data-dashboard-signout] { display: none; }
+    .sidebar [data-dashboard-signout] { width: 100%; margin-top: auto; }
+    [data-dashboard-signout] + .side-footer { margin-top: 0; }
     .app { display: grid; grid-template-columns: 248px minmax(0, 1fr); }
     .sidebar { position: sticky; top: 0; display: flex; flex-direction: column; height: 100svh; padding: 22px 14px 18px; }
     .sidebar .g1 { width: 320px; height: 320px; left: -140px; top: -120px; background: #1fb58f; opacity: .35; }
@@ -382,7 +379,7 @@
     <nav class="bottom-nav" aria-label="เมนูด้านล่าง"></nav>
   </div>
 </div>
-<script src="app-shell.js?v=20261003-2"></script>
+<script src="app-shell.js?v=20261003-3"></script>
 <script>
   (() => {
     const menu = window.crsShellMenu;
@@ -427,12 +424,12 @@
     });
     bottomNav.append(link(menu.dashboard, true, true), ...menu.departments.map(item => link(item, true)));
     const sideSignout = link({ ...menu.signout, href: "#" });
-    sideSignout.classList.add("dashboard-signout-side");
+    sideSignout.className = menu.signout.className;
     sideSignout.setAttribute("data-dashboard-signout", "");
     sidebar.insertBefore(sideSignout, footer);
     const mobileSignout = document.createElement("button");
     mobileSignout.type = "button";
-    mobileSignout.className = "dashboard-signout-mobile";
+    mobileSignout.className = `${menu.signout.className} crs-signout--light`;
     mobileSignout.setAttribute("data-dashboard-signout", "");
     mobileSignout.innerHTML = menu.signout.icon;
     mobileSignout.append(document.createTextNode(menu.signout.label));
@@ -448,10 +445,10 @@
     loadTodayStaffSummary,
     loadAcademicCalendar, pickCalendarUpcoming, resolveCalendarLeadDays, pickDashboardDeadlines,
     loadAcademicProjects, filterProjectsInMonth, countPendingProjects, projectResponsibleName,
-    loadMyDashboardAlerts, pickMyDashboardAlerts,
+    loadMyDashboardAlerts, pickMyDashboardAlerts, loadDutyMonthReminders,
     isProjectApprover, isMakeupApprover, listPendingMakeupRequests,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20261002-3";
+  } from "./supabase-client.js?v=20261003-1";
 
   document.querySelectorAll("[data-dashboard-signout]").forEach(button => {
     button.addEventListener("click", event => {
@@ -511,14 +508,14 @@
   }
 
   function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver,
-    pendingMakeups = 0, makeupApproverFlag = false) {
+    pendingMakeups = 0, makeupApproverFlag = false, dutyMonths = []) {
     try {
       const loaded = resultValue(alertsResult) || {};
       let daily = null;
       try { daily = resultValue(dailyResult); } catch { daily = null; }
       const rows = pickMyDashboardAlerts({
         ...loaded, daily, today, pendingApprovals, isApprover:approver,
-        pendingMakeups, isMakeupApprover:makeupApproverFlag
+        pendingMakeups, isMakeupApprover:makeupApproverFlag, dutyMonths
       });
       if (!rows.length) {
         hideMyAlerts();
@@ -963,7 +960,7 @@
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
     const [dailyResult, calendarResult, projectResult, approverResult, makeupApproverResult,
-      myAlertsResult] = await Promise.all([
+      myAlertsResult, dutyMonths] = await Promise.all([
       capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
@@ -972,7 +969,8 @@
       capture(loadAcademicProjects(year)),
       capture(isProjectApprover()),
       capture(isMakeupApprover()),
-      me ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today })) : Promise.resolve({ value:null })
+      me ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today })) : Promise.resolve({ value:null }),
+      loadDutyMonthReminders(today).catch(() => [])
     ]);
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
@@ -1011,7 +1009,7 @@
       pendingApprovals = 0;
     }
     renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-      pendingMakeups, makeupApprover);
+      pendingMakeups, makeupApprover, dutyMonths);
 
     let upcomingResult;
     let leadDays = resolveCalendarLeadDays(null);
@@ -1060,11 +1058,12 @@
         if (syncPending) return;
         syncPending = true;
         try {
-          const [freshProjectsResult, freshAlertsResult] = await Promise.all([
+          const [freshProjectsResult, freshAlertsResult, freshDutyMonths] = await Promise.all([
             isApprover ? capture(loadAcademicProjects(year)) : Promise.resolve(null),
             me
               ? capture(loadMyDashboardAlerts({ staffId:me.id, year, today }))
-              : Promise.resolve({ value:{} })
+              : Promise.resolve({ value:{} }),
+            loadDutyMonthReminders(today).catch(() => [])
           ]);
           // คิวสอนชดนับใหม่ทุกครั้งที่มีสัญญาณ — ครูส่งคำขอเพิ่มหรือถูกตัดสินไปแล้วก็ได้
           if (makeupApprover) pendingMakeups = (await listPendingMakeupRequests()).length;
@@ -1080,7 +1079,7 @@
           }
           renderMyAlerts(
             freshAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-            pendingMakeups, makeupApprover
+            pendingMakeups, makeupApprover, freshDutyMonths
           );
           if ((!freshProjectsResult || !freshProjectsResult.error) && !freshAlertsResult.error) {
             updateFreshTime();

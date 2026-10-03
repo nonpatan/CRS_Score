@@ -100,7 +100,7 @@
     .add-row button { width:100%; }
   }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20261002-2">
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
 <body>
 <div class="wrap">
@@ -117,7 +117,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261003-2"></script>
+    <script src="../app-shell.js?v=20261003-3"></script>
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
@@ -157,8 +157,8 @@ import {
   loadWorkContext, computeDayStatus, getDutyTypes, getDutyPattern,
   saveDutyPattern, removeDutyPattern, saveDutyRosterEntry, removeDutyRosterEntry,
   listDutySwaps, hrSwapDuty,
-  generateDutyRosterFromPattern, bangkokNow, toDateStr, eachDate, isoWeekday
-} from "../supabase-client.js?v=20261002-3";
+  generateDutyRosterFromPattern, schoolBreakDates, bangkokNow, toDateStr, eachDate, isoWeekday
+} from "../supabase-client.js?v=20261003-1";
 
 const session = await requireAuth();
 if (session) {
@@ -185,9 +185,12 @@ if (session) {
     const today = toDateStr(bangkokNow());
     const THAI_DAY = { 1:"จันทร์", 2:"อังคาร", 3:"พุธ", 4:"พฤหัสบดี", 5:"ศุกร์" };
     let ctx, dutyTypes = [], pattern = [], dutySwaps = [], range, monthSync = null, swapState = null;
-    let holidayNames = new Map(), openDays = new Set();
+    let holidayNames = new Map(), openDays = new Set(), breakDates = new Set();
     let staffById = new Map(), typeByCode = new Map(), activeStaff = [], dutySwapByRosterKey = new Map();
-    el("month").value = today.slice(0, 7);
+    const requestedMonth = new URLSearchParams(location.search).get("month") || "";
+    el("month").value = /^\d{4}-\d{2}$/.test(requestedMonth) &&
+      Number(requestedMonth.slice(5)) >= 1 && Number(requestedMonth.slice(5)) <= 12
+      ? requestedMonth : today.slice(0, 7);
 
     const monthRange = yearMonth => {
       if (!/^\d{4}-\d{2}$/.test(yearMonth)) return null;
@@ -323,9 +326,12 @@ if (session) {
             " · ไม่มีเวรและไม่นับเวลาทำงาน</div>";
         }
         const total = (ctx.dutyRoster || []).filter(row => row.duty_date === date).length;
+        if (breakDates.has(date) && !total) {
+          return `<div class="holiday-row">${esc(label)} · ปิดภาคเรียน · ไม่มีเวร (ครูยังนับเวลาทำงานตามปกติ)</div>`;
+        }
         const shouldOpen = date === today || openDays.has(date) || swapState?.date === date;
         return `<details class="day${date === today ? " today" : ""}" data-date="${date}" ${shouldOpen ? "open" : ""}>
-          <summary>${esc(label)} · ${total} รายการ${date === today ? " · วันนี้" : ""}</summary>
+          <summary>${esc(label)} · ${total} รายการ${date === today ? " · วันนี้" : ""}${breakDates.has(date) ? " · ปิดภาคเรียน" : ""}</summary>
           ${dutyTypes.map(type => {
             const rows = rosterFor(date, type.code);
             const excluded = new Set(rows.map(row => row.staff_id));
@@ -396,14 +402,17 @@ if (session) {
       if (!range) return;
       el("days").innerHTML = '<div class="empty">กำลังโหลด…</div>';
       try {
-        const [syncRes, holidayRes] = await Promise.all([
+        const [syncRes, holidayRes, yearsRes] = await Promise.all([
           sb.from("duty_month_sync").select("*")
             .eq("year_month", el("month").value).maybeSingle(),
           sb.from("work_holidays").select("holiday_date,name")
-            .gte("holiday_date", range.from).lte("holiday_date", range.to)
+            .gte("holiday_date", range.from).lte("holiday_date", range.to),
+          sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date")
         ]);
         if (syncRes.error) throw new Error("ตรวจสถานะเดือนที่สร้างไม่สำเร็จ: " + syncRes.error.message);
         if (holidayRes.error) throw new Error("โหลดชื่อวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+        if (yearsRes.error) throw new Error("โหลดปฏิทินปีการศึกษาไม่สำเร็จ: " + yearsRes.error.message);
+        breakDates = schoolBreakDates(yearsRes.data || [], range.from, range.to);
         monthSync = syncRes.data;
         holidayNames = new Map((holidayRes.data || []).map(row => [row.holiday_date, row.name]));
         let swapHistoryFailed = false;
@@ -460,7 +469,8 @@ if (session) {
       try {
         const result = await generateDutyRosterFromPattern(range.from, range.to, session.user.id);
         await loadData();
-        toast(`สร้างใหม่ ${result.inserted} แถว · ช่องที่มีคนอยู่แล้วไม่ถูกแตะ`);
+        const breakMessage = result.skippedBreakDays ? ` · ข้ามช่วงปิดภาค ${result.skippedBreakDays} วัน` : "";
+        toast(`สร้างใหม่ ${result.inserted} แถว${breakMessage} · ช่องที่มีคนอยู่แล้วไม่ถูกแตะ`);
       } catch (error) { toast(error.message || "สร้างเวรไม่สำเร็จ", true); }
       finally { button.disabled = false; }
     });

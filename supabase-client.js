@@ -4419,9 +4419,9 @@ const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุ�
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
   pendingApprovals = 0, isApprover = false, pendingMakeups = 0, isMakeupApprover = false,
-  cutoff = null, nowIso = new Date().toISOString()
+  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = []
 } = {}) {
-  const alerts = [];
+  const alerts = [...dutyMonths];
 
   if (isApprover && pendingApprovals > 0) {
     alerts.push({
@@ -5638,22 +5638,10 @@ export async function hrSwapDuty(dutyDate, dutyType, fromStaffId, toStaffId,
   return data;
 }
 
-export async function generateDutyRosterFromPattern(from, to, createdBy) {
-  const [pattern, existing, activeDutyTypes, scheduleRes, holidayRes] = await Promise.all([
-    getDutyPattern(),
-    getDutyRoster(from, to),
-    getDutyTypes(),
-    sb.from("work_schedule").select("weekday,is_working_day"),
-    sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to)
-  ]);
-  if (scheduleRes.error) throw new Error("โหลดวันทำงานไม่สำเร็จ: " + scheduleRes.error.message);
-  if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
-
-  const workingWeekdays = new Set((scheduleRes.data || [])
-    .filter(row => row.is_working_day)
-    .map(row => Number(row.weekday)));
-  const holidays = new Set((holidayRes.data || []).map(row => row.holiday_date));
-  const activeDutyCodes = new Set(activeDutyTypes.map(row => row.code));
+// คำนวณสำหรับสร้างจริงและ dry-run — ไม่มีการอ่านหรือเขียนฐานข้อมูล
+export function dutyRosterCandidates({ from, to, pattern = [], existing = [],
+  activeDutyCodes = new Set(), workingWeekdays = new Set(), holidays = new Set(),
+  breaks = new Set(), createdBy = null }) {
   const patternByWeekday = new Map();
   for (const row of pattern) {
     if (!activeDutyCodes.has(row.duty_type)) continue;
@@ -5666,9 +5654,14 @@ export async function generateDutyRosterFromPattern(from, to, createdBy) {
   const occupiedSlots = new Set(existing.map(row => row.duty_date + "|" + row.duty_type));
 
   const candidates = [];
+  let skippedBreakDays = 0;
   for (const dutyDate of eachDate(from, to)) {
     const weekday = isoWeekday(dutyDate);
     if (!workingWeekdays.has(weekday) || holidays.has(dutyDate)) continue;
+    if (breaks.has(dutyDate)) {
+      skippedBreakDays++;
+      continue;
+    }
     for (const row of (patternByWeekday.get(weekday) || [])) {
       if (occupiedSlots.has(dutyDate + "|" + row.duty_type)) continue;
       candidates.push({
@@ -5679,6 +5672,30 @@ export async function generateDutyRosterFromPattern(from, to, createdBy) {
       });
     }
   }
+  return { candidates, skippedBreakDays };
+}
+
+export async function generateDutyRosterFromPattern(from, to, createdBy) {
+  const [pattern, existing, activeDutyTypes, scheduleRes, holidayRes, yearsRes] = await Promise.all([
+    getDutyPattern(),
+    getDutyRoster(from, to),
+    getDutyTypes(),
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    sb.from("work_holidays").select("holiday_date").gte("holiday_date", from).lte("holiday_date", to),
+    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date")
+  ]);
+  if (scheduleRes.error) throw new Error("โหลดวันทำงานไม่สำเร็จ: " + scheduleRes.error.message);
+  if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+  if (yearsRes.error) throw new Error("โหลดปฏิทินปีการศึกษาไม่สำเร็จ: " + yearsRes.error.message);
+
+  const { candidates, skippedBreakDays } = dutyRosterCandidates({
+    from, to, pattern, existing, createdBy,
+    workingWeekdays: new Set((scheduleRes.data || [])
+      .filter(row => row.is_working_day).map(row => Number(row.weekday))),
+    holidays: new Set((holidayRes.data || []).map(row => row.holiday_date)),
+    activeDutyCodes: new Set(activeDutyTypes.map(row => row.code)),
+    breaks: schoolBreakDates(yearsRes.data || [], from, to)
+  });
   let inserted = 0;
   if (candidates.length) {
     // คีย์ใหม่ทำให้คนเดียวมีได้หลายงานในวันเดียว
@@ -5700,7 +5717,70 @@ export async function generateDutyRosterFromPattern(from, to, createdBy) {
     rows_created: inserted
   }, { onConflict: "year_month" });
   if (syncError) throw new Error("บันทึกสถานะการสร้างเวรไม่สำเร็จ: " + syncError.message);
-  return { candidates: candidates.length, inserted };
+  return { candidates: candidates.length, inserted, skippedBreakDays };
+}
+
+// ============================================================
+// เตือนสร้างเวรรายเดือน — อ่านอย่างเดียว ไม่สร้างเวรอัตโนมัติ
+// ใช้เกณฑ์วันของ dutyRosterCandidates ชุดเดียวกับปุ่มสร้างเวร
+// ============================================================
+export function pickDutyMonthReminders({ today, syncedMonths = new Set(),
+  workingWeekdays = new Set(), holidays = new Set(), years = [] }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(today || ""))) return [];
+  const [year, month, day] = today.split("-").map(Number);
+  const monthEnd = toDateStr(new Date(Date.UTC(year, month, 0)));
+  const nextStart = toDateStr(new Date(Date.UTC(year, month, 1)));
+  const nextEnd = toDateStr(new Date(Date.UTC(year, month + 1, 0)));
+  const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  // รูปแบบสมมติหนึ่งแถวต่อวัน ใช้ตรวจว่ามีวันที่ต้องมีเวรอย่างน้อยหนึ่งวัน
+  // ไม่มีข้อมูลคนจริง และผลนี้ไม่ถูกนำไปเขียนฐานข้อมูล
+  const pattern = [...workingWeekdays].map(weekday => ({ weekday, duty_type:"reminder", staff_id:null }));
+  const hasDutyDays = (from, to) => dutyRosterCandidates({
+    from, to, pattern, workingWeekdays, holidays,
+    activeDutyCodes:new Set(["reminder"]), breaks:schoolBreakDates(years, from, to)
+  }).candidates.length > 0;
+  const reminders = [];
+  const currentMonth = today.slice(0, 7);
+  if (!syncedMonths.has(currentMonth) && hasDutyDays(today, monthEnd)) {
+    reminders.push({
+      kind:"ค้าง", text:`ยังไม่ได้สร้างตารางเวรเดือน ${thaiMonths[month - 1]} ${year + 543}`,
+      href:`personnel/duty.html?month=${currentMonth}`, linkLabel:"ไปสร้างเวร"
+    });
+  }
+  const nextMonth = nextStart.slice(0, 7);
+  if (day >= Number(monthEnd.slice(8)) - 6 && !syncedMonths.has(nextMonth) && hasDutyDays(nextStart, nextEnd)) {
+    const [nextYear, nextMonthNumber] = nextMonth.split("-").map(Number);
+    reminders.push({
+      kind:"รอคุณ", text:`ใกล้สิ้นเดือน — ยังไม่ได้สร้างตารางเวรเดือน ${thaiMonths[nextMonthNumber - 1]} ${nextYear + 543}`,
+      href:`personnel/duty.html?month=${nextMonth}`, linkLabel:"ไปสร้างเวร"
+    });
+  }
+  return reminders;
+}
+
+export async function loadDutyMonthReminders(today) {
+  // duty_month_sync ของคนไม่มีสิทธิ์จะคืน [] แม้มีข้อมูลจริง — ต้องตรวจสิทธิ์ก่อน
+  if (!await checkDepartment("บุคลากร")) return [];
+  const [year, month] = today.split("-").map(Number);
+  const currentMonth = today.slice(0, 7);
+  const nextMonth = toDateStr(new Date(Date.UTC(year, month, 1))).slice(0, 7);
+  const nextEnd = toDateStr(new Date(Date.UTC(year, month + 1, 0)));
+  const [syncRes, scheduleRes, holidayRes, yearsRes] = await Promise.all([
+    sb.from("duty_month_sync").select("year_month").in("year_month", [currentMonth, nextMonth]),
+    sb.from("work_schedule").select("weekday,is_working_day"),
+    sb.from("work_holidays").select("holiday_date").gte("holiday_date", today).lte("holiday_date", nextEnd),
+    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date")
+  ]);
+  if (syncRes.error) throw new Error("ตรวจเดือนที่สร้างเวรไม่สำเร็จ: " + syncRes.error.message);
+  if (scheduleRes.error) throw new Error("โหลดวันทำงานไม่สำเร็จ: " + scheduleRes.error.message);
+  if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+  if (yearsRes.error) throw new Error("โหลดปฏิทินปีการศึกษาไม่สำเร็จ: " + yearsRes.error.message);
+  return pickDutyMonthReminders({
+    today, syncedMonths:new Set((syncRes.data || []).map(row => row.year_month)),
+    workingWeekdays:new Set((scheduleRes.data || []).filter(row => row.is_working_day).map(row => Number(row.weekday))),
+    holidays:new Set((holidayRes.data || []).map(row => row.holiday_date)), years:yearsRes.data || []
+  });
 }
 
 // ============================================================

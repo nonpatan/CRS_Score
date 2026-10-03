@@ -653,7 +653,7 @@
   // เปิดข้อมูลก่อน guard: dashboard ใช้หน้าตาเดิม แต่เมนูมาจาก MODULES ที่เดียว
   Object.defineProperty(window, "crsShellMenu", { value: Object.freeze({
     dashboard: Object.freeze({ href: menuUrl("dashboard.html"), label: "ภาพรวม", icon: dashboardIcon }),
-    signout: Object.freeze({ label: signoutLabel, icon: signoutIcon }),
+    signout: Object.freeze({ label: signoutLabel, icon: signoutIcon, className: "crs-signout" }),
     departmentsLabel: departmentGroup.label,
     departments: Object.freeze(departmentGroup.items.map(([href, label, metadata]) => Object.freeze({
       href: menuUrl(href), label, short: metadata.short, icon: moduleIcons[href.split("/")[0]]
@@ -662,6 +662,23 @@
       id: metadata.id, href: menuUrl(href), label, icon: adminIcons[metadata.id]
     }))) })
   }) });
+
+  // ปุ่มกลางใช้ได้ทั้ง shell และ dashboard ที่ไม่มี header .nav
+  if (!document.getElementById("crs-signout-style")) {
+    const style = document.createElement("style");
+    style.id = "crs-signout-style";
+    style.textContent = `
+      a.crs-signout, button.crs-signout { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 0 0 auto; min-height: 44px; margin: 0; padding: 0 12px; border: 1px solid rgba(255,140,130,.35); border-radius: 11px; color: #ffc9c4; background: rgba(163,45,45,.22); font: 600 14px/1.6 Sarabun, sans-serif; text-decoration: none; white-space: nowrap; cursor: pointer; transition: color .16s ease, background .16s ease; }
+      .academic-shell .nav a.crs-signout { color: #ffc9c4 !important; background: rgba(163,45,45,.22) !important; border: 1px solid rgba(255,140,130,.35); }
+      a.crs-signout:hover, button.crs-signout:hover, .academic-shell .nav a.crs-signout:hover { background: rgba(163,45,45,.42) !important; color: #fff !important; }
+      a.crs-signout svg, button.crs-signout svg, .academic-shell .nav a.crs-signout svg { width: 18px; height: 18px; flex: 0 0 auto; color: currentColor; }
+      a.crs-signout--light, button.crs-signout--light { color: var(--danger,#a32d2d); background: var(--danger-soft,#fceaea); border-color: rgba(163,45,45,.28); }
+      a.crs-signout--light:hover, button.crs-signout--light:hover { background: #f7dada !important; color: var(--danger,#a32d2d) !important; }
+      a.crs-signout:focus-visible, button.crs-signout:focus-visible { outline: 2px solid var(--mint,#7fe0c4); outline-offset: 2px; }
+      a.crs-signout--light:focus-visible, button.crs-signout--light:focus-visible { outline-color: var(--danger,#a32d2d); }
+    `;
+    document.head.appendChild(style);
+  }
 
   const nav = document.querySelector("header .nav");
   if (!nav) return;
@@ -708,7 +725,7 @@
     const isCurrent = group.items.some(([href]) => href === current);
     const links = group.items.map(([href, label]) => buildLink(href, label)).join("");
     return `<span class="shell-nav-sep" aria-hidden="true"></span><div class="nav-group${isCurrent ? " current" : ""}"><span class="nav-group-label">${group.label}</span><div class="nav-group-links">${links}</div></div>`;
-  }).join("") + `<div class="shell-side-foot"><a href="#" id="btn-signout">${signoutIcon}${signoutLabel}</a></div>`;
+  }).join("") + `<div class="shell-side-foot"><a href="#" id="btn-signout" class="crs-signout">${signoutIcon}${signoutLabel}</a></div>`;
 
   // แบรนด์ไม่ใช้ heading และ crumb ไม่ใช้ p เพื่อคง selector ของหน้าเดิม
   const brandMarkup = `<a class="shell-brand" href="${dashboardUrl}"><span class="shell-badge"><img src="${new URL("logo.png", appRootUrl).href}" alt=""></span><span><b>โรงเรียนเจริญศึกษา</b><span class="shell-brand-module">${mod.label}</span></span></a>`;
