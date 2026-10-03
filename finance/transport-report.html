@@ -52,6 +52,19 @@
   [hidden] { display:none !important; }
   @media (max-width:820px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .student-grid { grid-template-columns:1fr; } }
   @media (max-width:560px) { .filters, .metric-grid, .ledger-summary { grid-template-columns:1fr; } .ledger-row { grid-template-columns:1fr auto; } .section-head { display:block; } }
+  .range-chips { display:flex; gap:6px; flex-wrap:wrap; grid-column:1/-1; }
+  .range-chips button { min-height:44px; }
+  .range-chips [aria-pressed="true"] { background:var(--teal)!important; color:#fff!important; }
+  .metric-grid { gap:8px; }
+  .metric { padding:10px; }
+  @media(max-width:560px) { .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .metric b { font-size:18px; } .filters { gap:8px; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -63,6 +76,7 @@
       <section class="card"><div class="section-head"><div><h2>ช่วงรายงาน</h2><p id="year-note">กำลังตรวจปีการศึกษา…</p></div></div><div class="filters">
         <div><label for="from-date">จากวันที่</label><input id="from-date" type="date"></div>
         <div><label for="to-date">ถึงวันที่</label><input id="to-date" type="date"></div>
+        <div class="range-chips" role="group" aria-label="ช่วงวันที่ลัด"><button type="button" class="ghost" data-report-range="month">เดือนนี้</button><button type="button" class="ghost" data-report-range="year">ทั้งปี</button></div>
         <button id="apply-range" class="primary" type="button">ดูรายงาน</button>
       </div></section>
       <div id="unannounced-warning" class="banner warn" hidden></div>
@@ -236,6 +250,16 @@ function renderLedger() {
     : "";
   el("ledger").innerHTML = `<b>${esc(row.student?.name || "นักเรียน")}</b>${openingLine}<div class="ledger-summary"><div><span>ยอดตามระบบถึงวันนี้</span><b>${row.outstandingKnown ? formatMoney(row.charges.total) : "ยังคำนวณไม่ได้"}</b></div><div><span>ชำระสะสมทั้งหมด</span><b>${formatMoney(paidLifetime)}</b></div><div><span>ยอดค้างชำระ</span><b>${row.outstandingKnown ? formatMoney(row.outstandingLifetime) : "ยังคำนวณไม่ได้"}</b></div></div>` + (history.map(payment => `<div class="ledger-row"><span>${thaiDate(payment.pay_date)}</span><span>${esc(payment.method)}${payment.note ? ` · ${esc(payment.note)}` : ""}</span><strong>${formatMoney(payment.amount)}</strong></div>`).join("") || '<div class="empty">ยังไม่มีรายการชำระค่ารถ</div>');
 }
+let reportYearStart = "";
+new MutationObserver(() => { if (!reportYearStart && el("from-date").value) reportYearStart = el("from-date").value; }).observe(el("year-note"), {childList:true});
+document.querySelectorAll("[data-report-range]").forEach(button => button.addEventListener("click", () => {
+  if (!reportYearStart) return;
+  el("from-date").value = button.dataset.reportRange === "month" ? today.slice(0,7) + "-01" : reportYearStart;
+  el("to-date").value = today;
+  document.querySelectorAll("[data-report-range]").forEach(chip => chip.setAttribute("aria-pressed", String(chip === button)));
+  renderReport();
+}));
+
 function renderReport() {
   buildStudents(); buildRooms(); renderSchool();
   selectedRoom = selectedRoom ? roomSummaries.find(row => row.key === selectedRoom.key) || null : null;
@@ -324,4 +348,22 @@ if (session) {
     el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารายงานค่ารถไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
   }
 }
-</script></body></html>
+</script><script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
+</script>
+</body></html>

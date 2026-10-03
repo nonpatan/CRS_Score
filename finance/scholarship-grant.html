@@ -51,6 +51,27 @@
   [hidden] { display:none !important; }
   @media (max-width:820px) { .work-grid { grid-template-columns:1fr; } }
   @media (max-width:620px) { .selector-grid, .row2 { grid-template-columns:1fr; } .history-main { grid-template-columns:1fr auto; } .history-main > :first-child { grid-column:1/-1; } .void-box { grid-template-columns:1fr; } }
+  .student-picker-row { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .student-picker-row > button { min-height:44px; text-align:left; color:var(--ink); background:transparent; }
+  .student-picker-row .balance-label { color:var(--muted); font-size:13px; }
+  #student-work { width:100%; }
+  #student-work .balance { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; }
+  #student-work .balance b { font-size:18px; }
+  #student-work > .card:first-child { overflow:visible; }
+  #save-txn { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:10; }
+  .work-grid { display:block; }
+  @media(max-width:680px) { .student-picker-row { gap:4px; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .student-picker-row > button { flex:1 1 0; min-width:0; font-size:14px; line-height:1.45; padding:5px 0; }
+  .student-picker-row .balance-label { flex:0 0 auto; font-size:12px; }
+  #student-work { flex:1 0 100%; }
+  input,button,select { scroll-margin-bottom:150px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -67,6 +88,7 @@
           <div class="field"><label for="student-select">นักเรียน</label><select id="student-select" disabled><option value="">— เลือกห้องก่อน —</option></select></div>
         </div>
       </section>
+      <section id="scholarship-students" class="card" hidden></section><div id="scholarship-parking"></div>
       <div id="student-work" class="work-grid" hidden>
         <section class="card">
           <div class="section-head"><div><h2 id="student-title">บันทึกรายการ</h2><p id="placement-note"></p></div></div>
@@ -150,6 +172,11 @@ function renderHistory() {
     </div>`;
   }).join("") || '<div class="empty">นักเรียนคนนี้ยังไม่มีประวัติทุน</div>';
   syncMode();
+  const row = [...el("scholarship-students").querySelectorAll("[data-scholarship-student]")].find(item => item.dataset.scholarshipStudent === el("student-select").value);
+  if (row) {
+    row.querySelector(".balance-label").textContent = `ทุนคงเหลือ ${el("student-balance").textContent}`;
+    row.appendChild(el("student-work"));
+  }
 }
 async function loadStudentHistory() {
   const studentId = el("student-select").value;
@@ -166,10 +193,13 @@ async function loadStudentHistory() {
   renderHistory();
 }
 function syncStudents() {
+  el("scholarship-parking").appendChild(el("student-work"));
   const room = rooms[Number(el("room-select").value)] || null;
   const roster = room ? activePlacements(placements).filter(placement => placement.year === room.year && placement.grade_level === room.grade_level && placement.classroom === room.classroom).sort(studentCompare) : [];
   el("student-select").innerHTML = '<option value="">— เลือกนักเรียน —</option>' + roster.map(placement => `<option value="${escapeHtml(placement.student_id)}">${escapeHtml(placement.student?.student_no || "—")} · ${escapeHtml(placement.student?.name || "ไม่พบชื่อ")}</option>`).join("");
   el("student-select").disabled = !roster.length;
+  el("scholarship-students").hidden = !roster.length;
+  el("scholarship-students").innerHTML = roster.map(placement => `<div class="student-picker-row" data-scholarship-student="${escapeHtml(placement.student_id)}"><button type="button" data-select-scholarship="${escapeHtml(placement.student_id)}">${escapeHtml(placement.student?.name || "ไม่พบชื่อ")}</button><span class="balance-label">ดูยอดทุน</span></div>`).join("");
   el("student-work").hidden = true;
   if (roster.length === 1) { el("student-select").value = roster[0].student_id; loadStudentHistory().catch(error => toast(friendlyError(error), true)); }
 }
@@ -201,6 +231,12 @@ async function loadContext() {
   el("txn-date").value = today;
 }
 
+el("scholarship-students").addEventListener("click", event => {
+  const button = event.target.closest("[data-select-scholarship]");
+  if (!button) return;
+  el("student-select").value = button.dataset.selectScholarship;
+  el("student-select").dispatchEvent(new Event("change", {bubbles:true}));
+});
 el("year-select").addEventListener("change", () => loadYear().catch(error => toast(friendlyError(error), true)));
 el("room-select").addEventListener("change", syncStudents);
 el("student-select").addEventListener("change", () => loadStudentHistory().catch(error => toast(friendlyError(error), true)));
@@ -269,6 +305,24 @@ if (session) {
     el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าบันทึกทุนไม่สำเร็จ</b><br>${escapeHtml(friendlyError(error))}</div>`;
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

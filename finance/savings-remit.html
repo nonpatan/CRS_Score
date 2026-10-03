@@ -80,6 +80,33 @@
   [hidden] { display:none !important; }
   @media (max-width:820px) { .room-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .detail-grid { grid-template-columns:1fr; } .history-row { grid-template-columns:1fr 1fr; } .history-trail { grid-column:1 / -1; } }
   @media (max-width:560px) { .room-grid { grid-template-columns:1fr; } .history-row { grid-template-columns:1fr; } .history-trail { grid-column:1; } .section-head, .view-head { display:block; } .view-toggle { margin-top:10px; } .view-toggle button { flex:1; } .daily-row { grid-template-columns:1fr auto; } .daily-row .txn-edit { grid-column:1 / -1; width:100%; } .modal-actions { display:grid; grid-template-columns:1fr 1fr; } }
+  .room-grid { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+  .room-card { min-width:0; padding:10px; }
+  .room-card strong { display:block; font-size:22px; }
+  .room-card.active { border-color:var(--teal); box-shadow:0 0 0 2px var(--teal-soft); }
+  .detail-grid { display:flex; flex-direction:column-reverse; gap:12px; }
+  .count-box { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 12px; align-items:start; }
+  .count-box > * { min-width:0; }
+  .count-box > :nth-child(n+3) { grid-column:1/-1; }
+  .count-box .expected { margin:0; }
+  .count-box:has(.match.bad) #counted-total { background:var(--amber-soft)!important; border-color:var(--amber)!important; }
+  details.txn-details { padding:8px 12px; border:1px solid var(--line); border-radius:10px; }
+  details.txn-details > summary { min-height:44px; padding:10px 0; color:var(--teal); }
+  .history-filters { display:flex; flex-wrap:wrap; align-items:end; gap:8px; margin-bottom:10px; }
+  .history-filters .field { flex:1 1 150px; margin:0; }
+  #history-more { display:block; margin:12px auto 0; min-height:44px; color:var(--teal); background:var(--teal-soft); }
+  .history-row { padding:8px; gap:8px; }
+  .history-row button { min-height:36px; padding:6px 8px; font-size:13px; }
+  @media(max-width:560px) { .room-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .count-box { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .history-filters select { width:100%; min-height:44px; }
+  .room-card[data-kpi-tone] > b { color:var(--ink)!important; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -91,7 +118,7 @@
     <div class="nav"></div>
     <script src="../app-shell.js?v=20261003-3"></script>
   </header>
-  <main class="academic-content">
+  <main class="academic-content" data-kpi-remit-rooms="true">
     <section id="access-card" class="card" hidden></section>
     <section class="card">
       <div class="section-head"><div><h2>ห้องที่มียอดค้างส่ง</h2><p>เรียงยอดมากไปน้อย · ยอดมาจากรายการฝากที่ยังไม่ผูกรอบส่งเงิน</p></div></div>
@@ -100,7 +127,7 @@
     <section id="detail-card" class="card" hidden>
       <div class="section-head"><div><h2 id="detail-title">ตรวจรับเงิน</h2><p id="detail-note"></p></div></div>
       <div class="detail-grid">
-        <div>
+        <details class="txn-details"><summary>รายการรายคน / รายวันของห้องนี้ · ดูรายละเอียด</summary>
           <div class="view-head">
             <p>ตรวจเทียบกับสมุดครูตามรายคน หรือสลับดูรายการตามวัน</p>
             <div class="view-toggle" role="group" aria-label="มุมมองรายการฝาก">
@@ -109,7 +136,7 @@
             </div>
           </div>
           <div id="txn-list" class="table-wrap"></div>
-        </div>
+        </details>
         <div class="count-box">
           <div class="expected"><span>ยอดตามระบบ</span><b id="expected-total">0.00 บาท</b><span id="expected-count">0 รายการ</span></div>
           <div class="field"><label for="counted-total">นับเงินได้จริง</label><input id="counted-total" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
@@ -122,7 +149,9 @@
     </section>
     <section class="card">
       <div class="section-head"><div><h2>ประวัติการรับเงิน</h2><p id="history-note">ทุกห้อง · เรียงจากใหม่ไปเก่า</p></div></div>
+      <div class="history-filters"><div class="field"><label for="history-room">ห้อง</label><select id="history-room"><option value="">ทุกห้อง</option></select></div><div class="field"><label for="history-month">เดือน</label><select id="history-month"><option value="">ทุกเดือน</option></select></div></div>
       <div id="history-list"><div class="empty">ยังไม่มีประวัติการรับเงิน</div></div>
+      <button id="history-more" type="button" hidden>ดูเพิ่มอีก 10 รอบ</button>
     </section>
     <div id="action-overlay" class="overlay" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="action-title" aria-describedby="action-summary">
@@ -184,9 +213,33 @@ function renderRooms() {
     <span class="meta">ค้าง ${group.pendingDays} วัน · ${group.rows.length} รายการ</span><span class="meta">เก่าสุด ${thaiDate(group.oldest)} · ปีการศึกษา ${esc(group.year)}</span>
   </button>`).join("") || '<div class="empty">ไม่มียอดค้างส่ง — ครูส่งเงินครบทุกห้องแล้ว</div>';
 }
+let historyLimit = 10;
+function remittanceMonth(row) {
+  const parts = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Bangkok",year:"numeric",month:"2-digit"}).formatToParts(new Date(row.confirmed_at));
+  return `${parts.find(part => part.type === "year").value}-${parts.find(part => part.type === "month").value}`;
+}
+function visibleRemittances() {
+  const room = el("history-room").value, month = el("history-month").value;
+  return remittances.filter(row => (!room || `${row.grade_level}/${row.classroom}` === room) && (!month || remittanceMonth(row) === month));
+}
+function syncHistoryFilters() {
+  const room = el("history-room").value, month = el("history-month").value;
+  const rooms = [...new Set(remittances.map(row => `${row.grade_level}/${row.classroom}`))].sort((a,b) => a.localeCompare(b,"th",{numeric:true}));
+  const months = [...new Set(remittances.map(remittanceMonth))].sort().reverse();
+  el("history-room").innerHTML = '<option value="">ทุกห้อง</option>' + rooms.map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join("");
+  el("history-month").innerHTML = '<option value="">ทุกเดือน</option>' + months.map(value => `<option value="${value}">${value}</option>`).join("");
+  el("history-room").value = rooms.includes(room) ? room : "";
+  el("history-month").value = months.includes(month) ? month : "";
+}
 function renderHistory() {
-  el("history-note").textContent = `ทุกห้อง · ${remittances.length} รอบ · เรียงจากใหม่ไปเก่า`;
-  el("history-list").innerHTML = remittances.map(row => {
+  syncHistoryFilters();
+  const filtered = visibleRemittances();
+  const visible = filtered.slice(0, historyLimit);
+  const remaining = filtered.length - visible.length;
+  el("history-more").hidden = remaining <= 0;
+  el("history-more").textContent = `ดูเพิ่มอีก 10 รอบ (เหลือ ${remaining})`;
+  el("history-note").textContent = `แสดง ${visible.length}/${filtered.length} รอบ · ทั้งหมด ${remittances.length} รอบ · เรียงจากใหม่ไปเก่า`;
+  el("history-list").innerHTML = visible.map(row => {
     const status = row.status || "ยืนยันแล้ว";
     const unlocked = status === "ปลดล็อก";
     const unlocker = profileNames.get(row.unlocked_by) || "ไม่พบชื่อผู้ปลด";
@@ -324,6 +377,8 @@ function openUnlockModal(remittance) {
   setTimeout(() => el("action-reason").focus(), 0);
 }
 
+for (const id of ["history-room","history-month"]) el(id).addEventListener("change", () => { historyLimit = 10; renderHistory(); });
+el("history-more").addEventListener("click", () => { historyLimit += 10; renderHistory(); });
 el("room-grid").addEventListener("click", event => {
   const button = event.target.closest(".room-card");
   if (!button) return;
@@ -437,6 +492,24 @@ if (session) {
     await loadData();
   } catch (error) { el("access-card").hidden = false; el("access-card").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินส่งจากครูไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; el("room-grid").innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>'; }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

@@ -70,6 +70,29 @@
     .request-row { grid-template-columns:1fr; }
     .cancel-box { grid-column:auto; }
   }
+  .student-row { display:flex; flex-wrap:wrap; gap:4px 12px; padding:8px 0; align-items:center; }
+  .student-row .student-name { flex:1 1 150px; }
+  .money-cell { display:flex; gap:4px; align-items:baseline; font-size:13px; }
+  .money-cell b,.money-cell span { display:inline; margin:0; }
+  .student-row .student-name .meta { display:inline; font-size:12px; }
+  .student-pick { color:var(--ink); background:transparent; padding:0 4px; text-align:left; }
+  #request-card { overflow:visible; width:100%; }
+  #request-card:has(#student-select option:first-child:checked) { display:none; }
+  #submit-button { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:10; box-shadow:0 4px 16px rgba(31,42,46,.14); }
+  @media(max-width:680px) { .student-row { display:flex; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .student-row > .money-cell:nth-child(2),.student-row > .money-cell:nth-child(3) { display:none; }
+  .student-row > .student-name { flex:1 1 0; min-width:0; font-size:14px; }
+  .student-row > .money-cell { flex:0 0 auto; font-size:13px; gap:4px; }
+  .student-pick { font-size:14px; padding:5px 0; line-height:1.45; }
+  input,button,select { scroll-margin-bottom:150px; }
+  .student-name .meta { margin-left:6px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -97,6 +120,7 @@
       <div id="student-list" class="student-list"></div>
     </section>
 
+    <div id="request-parking"></div>
     <section id="request-card" class="card" hidden>
       <div class="section">บันทึกคำขอเบิก</div>
       <div class="field">
@@ -254,11 +278,12 @@ function studentNumbers(studentId) {
 }
 
 function renderStudents() {
+  el("request-parking").appendChild(el("request-card"));
   el("student-list").innerHTML = roster.map(placement => {
     const student = placement.student || {};
     const values = studentNumbers(placement.student_id);
-    return `<div class="student-row">
-      <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")}</span></div>
+    return `<div class="student-row" data-withdraw-student="${esc(placement.student_id)}">
+      <div class="student-name"><button type="button" class="student-pick" data-select-withdraw="${esc(placement.student_id)}">${esc(student.name || "ไม่พบชื่อนักเรียน")}</button><span class="meta">รหัส ${esc(student.student_no || "—")}</span></div>
       <div class="money-cell"><span>คงเหลือ</span><b>${formatMoney(values.balance)}</b></div>
       <div class="money-cell pending"><span>รอจ่าย</span><b>${formatMoney(values.pending)}</b></div>
       <div class="money-cell"><span>เบิกได้</span><b>${formatMoney(values.available)}</b></div>
@@ -392,7 +417,15 @@ el("room-select").addEventListener("change", async () => {
   try { await loadRoom(el("room-select").value); }
   catch (error) { toast(friendlyError(error), true); }
 });
+el("student-list").addEventListener("click", event => {
+  const button = event.target.closest("[data-select-withdraw]");
+  if (!button) return;
+  el("student-select").value = button.dataset.selectWithdraw;
+  el("student-select").dispatchEvent(new Event("change", {bubbles:true}));
+});
 el("student-select").addEventListener("change", () => {
+  const row = [...el("student-list").querySelectorAll("[data-withdraw-student]")].find(item => item.dataset.withdrawStudent === el("student-select").value);
+  (row || el("request-parking")).appendChild(el("request-card"));
   updateAvailableNote();
   el("payout-method").value = "เงินสด";
   el("transfer-fields").hidden = true;
@@ -503,6 +536,24 @@ if (session) {
     el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้าแจ้งเบิกไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

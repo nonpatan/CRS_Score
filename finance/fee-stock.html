@@ -85,6 +85,36 @@
     .actions { justify-content:flex-start; }
     .modal-actions { flex-direction:column-reverse; }
   }
+  #stock-list { padding-bottom:100px; }
+  .card:has(#stock-list) { overflow:visible; }
+  .stock-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  .stock-filters input[type="search"] { flex:2 1 200px; width:auto; min-height:44px; font:inherit; padding:10px; border:1px solid var(--line); border-radius:8px; }
+  .stock-filters select { flex:1 1 160px; width:auto; }
+  .stock-filters label { display:flex; gap:6px; align-items:center; margin:0; min-height:44px; }
+  .stock-filters input[type="checkbox"] { width:20px; height:20px; min-height:20px; }
+  .stock-group { margin:8px 0; border:1px solid var(--line); border-radius:10px; }
+  .stock-group > summary { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; min-height:44px; padding:10px; cursor:pointer; font-weight:600; }
+  .stock-group > summary span { font-size:13px; color:var(--muted); }
+  #stock-list td,#stock-list th { padding:4px 8px; font-size:13px; }
+  #stock-list .actions { display:flex; flex-wrap:nowrap; gap:4px; }
+  #stock-list .actions button { min-height:36px; padding:4px 7px; font-size:13px; white-space:nowrap; }
+  #stock-list .money-input { min-width:68px; width:80px; min-height:44px; padding:6px; }
+  #stock-list td:first-child { min-width:240px; line-height:1.35; }
+  #stock-list .meta { font-size:11px; line-height:1.4; white-space:nowrap; }
+  .save-bar { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:10; padding:10px; background:var(--white); border:1px solid var(--line); border-radius:10px; }
+  @media(max-width:640px) { .stock-filters { align-items:stretch; } .stock-group > summary { display:block; } .stock-group > summary span { display:block; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .stock-group > summary { display:list-item; list-style-position:inside; }
+  .stock-group > summary span { float:right; }
+  @media(max-width:640px) { .stock-group > summary span { float:none; } }
+  input,button,select { scroll-margin-bottom:150px; }
+  #stock-list .status { font-size:11px; min-height:18px; padding:1px 4px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -138,6 +168,8 @@
       <section id="low-stock-alert" class="banner bad" hidden></section>
       <section class="card">
         <div class="section-head"><div><h2>รายการสินค้า</h2><p>ยอดคงเหลือมาจากการบวกลบรายการรับเข้าและตัดออกทั้งหมด · แก้ตัวเลขนี้ตรง ๆ ไม่ได้ ต้องบันทึกรับเข้าหรือปรับยอด</p></div></div>
+        <div class="stock-filters"><input id="stock-search" type="search" aria-label="ค้นหาสินค้าตามชื่อ หมวด หรือไซส์" placeholder="ค้นหาชื่อ หมวด หรือไซส์"><select id="stock-category" aria-label="หมวดสินค้า"><option value="">ทุกหมวด</option></select><label><input id="stock-low-only" type="checkbox">เฉพาะที่ใกล้หมด</label></div>
+        <p id="stock-visible-note" class="hint" aria-live="polite"></p>
         <div id="stock-list"></div>
         <div class="save-bar"><span class="hint">ช่องราคาเป็นของปีที่เลือก · จุดเตือนใช้กับสินค้าที่คุมสต๊อก</span><button id="save-product-settings" class="primary" type="button">บันทึกราคาและจุดเตือน</button></div>
       </section>
@@ -259,6 +291,58 @@ function renderLowStockAlert() {
   if (!low.length) return;
   el("low-stock-alert").innerHTML = `<b>ของใกล้หมด ${low.length} รายการ</b><br>ยอดคงเหลือถึงจุดเตือนแล้ว ควรตรวจของจริงและเตรียมรับเข้า<div class="alert-links">${low.map(item => `<a href="#stock-${item.id}" data-alert-low="${item.id}">${esc(item.display_name)} เหลือ ${esc(computeStockBalance(movesFor(item.id)))} ${esc(item.unit)} →</a>`).join("")}</div>`;
 }
+
+function filterStockRows() {
+  const search = el("stock-search").value.trim().toLocaleLowerCase("th"), category = el("stock-category").value, lowOnly = el("stock-low-only").checked;
+  let visible = 0;
+  for (const group of el("stock-list").querySelectorAll(".stock-group")) {
+    let count = 0;
+    for (const row of group.querySelectorAll("tbody tr")) {
+      const item = items.find(item => `stock-${item.id}` === row.id);
+      row.hidden = !item || Boolean(search && !`${item.display_name} ${item.group_name || ""} ${item.variant_label || ""}`.toLocaleLowerCase("th").includes(search)) || Boolean(category && (item.group_name || "ไม่ระบุกลุ่ม") !== category) || Boolean(lowOnly && row.dataset.low !== "true");
+      if (!row.hidden) count++;
+    }
+    group.hidden = count === 0;
+    if (count && (search || category || lowOnly)) group.open = true;
+    else if (!search && !category && !lowOnly) group.open = group.dataset.defaultOpen === "true";
+    visible += count;
+  }
+  el("stock-visible-note").textContent = `แสดง ${visible}/${items.length} รายการ · ช่องราคาและจุดเตือนยังคงอยู่ครบ`;
+}
+function groupStockRows() {
+  const host = el("stock-list");
+  if (host.querySelector(".stock-group")) return;
+  const table = host.querySelector("table");
+  if (!table) return;
+  const rows = [...table.tBodies[0].rows], groups = new Map();
+  for (const row of rows) {
+    const item = items.find(item => `stock-${item.id}` === row.id);
+    if (!item) continue;
+    const name = item.group_name || "ไม่ระบุกลุ่ม", group = groups.get(name) || {rows:[],balance:0,value:0,valued:0,low:false};
+    const balance = computeStockBalance(movesFor(item.id)), value = inventoryValue(balance, latestUnitCostAt(moves, item.id));
+    const low = item.track_stock === true && item.low_stock_threshold != null && balance <= Number(item.low_stock_threshold);
+    row.dataset.low = String(low); group.rows.push(row); group.balance += balance;
+    if (value != null) { group.value += value; group.valued++; }
+    group.low ||= low; groups.set(name,group);
+  }
+  const fragment = document.createDocumentFragment();
+  for (const [name,group] of groups) {
+    const details = document.createElement("details"); details.className = "stock-group"; details.open = group.low; details.dataset.defaultOpen = String(group.low);
+    const summary = document.createElement("summary"); summary.innerHTML = `${esc(name)} · ${group.rows.length} รายการ <span>คงเหลือ ${group.balance} · มูลค่า ${group.valued ? formatMoney(group.value) : "—"}${group.valued < group.rows.length ? ` (${group.valued}/${group.rows.length} รายการ)` : ""}</span>`;
+    const wrap = document.createElement("div"); wrap.className = "table-wrap";
+    const groupedTable = document.createElement("table"), body = document.createElement("tbody");
+    groupedTable.appendChild(table.tHead.cloneNode(true)); group.rows.forEach(row => body.appendChild(row)); groupedTable.appendChild(body); wrap.appendChild(groupedTable);
+    details.append(summary,wrap); fragment.appendChild(details);
+  }
+  if (table.tFoot) { const wrap = document.createElement("div"); wrap.className = "table-wrap"; const total = document.createElement("table"); total.appendChild(table.tFoot); wrap.appendChild(total); fragment.appendChild(wrap); }
+  host.replaceChildren(fragment);
+  const selectedCategory = el("stock-category").value;
+  el("stock-category").innerHTML = '<option value="">ทุกหมวด</option>' + [...groups.keys()].map(name => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
+  el("stock-category").value = groups.has(selectedCategory) ? selectedCategory : "";
+  filterStockRows();
+}
+for (const id of ["stock-search","stock-category","stock-low-only"]) el(id).addEventListener("input", filterStockRows);
+new MutationObserver(groupStockRows).observe(el("stock-list"), {childList:true});
 
 function renderStock() {
   renderOpeningAlert();
@@ -702,6 +786,24 @@ if (session) {
     toast(friendlyError(error), true);
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

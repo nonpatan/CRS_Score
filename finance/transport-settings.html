@@ -93,6 +93,22 @@
     .section-head, .save-bar { align-items:stretch; flex-direction:column; }
     .actions { justify-content:flex-start; }
   }
+  #zones-list th,#zones-list td { padding:7px 8px; }
+  #zones-list .actions { flex-wrap:nowrap; gap:4px; }
+  #zones-list .actions button { min-height:36px; padding:5px 8px; white-space:nowrap; }
+  .tabs { flex-wrap:nowrap; overflow-x:auto; }
+  .tabs button { flex:0 0 auto; min-height:44px; white-space:nowrap; }
+  #zone-form .field { margin-bottom:8px; }
+  .student-row { padding:8px 0; }
+
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  #zones-list .icon-btn { width:44px; min-width:44px; min-height:44px!important; padding:0!important; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -126,7 +142,7 @@
         <div class="card">
           <div class="section-head">
             <div><h2>โซนและอัตรา</h2><p>อัตราขาเดียวกรอกแยกเอง และการแก้เรตไม่เปลี่ยนเรตที่แช่ไว้กับนักเรียนแล้ว</p></div>
-            <button id="add-zone" class="primary" type="button">เพิ่มโซน</button>
+            <button id="add-zone" class="primary" type="button">+ เพิ่มโซน</button>
           </div>
           <div id="zones-list"></div>
         </div>
@@ -325,7 +341,7 @@ function renderZones() {
       <td><b>${esc(zone.name)}</b><span class="meta"><span class="status ${zone.active ? "" : "off"}">${zone.active ? "ใช้งาน" : "ปิดใช้งาน"}</span></span></td>
       <td class="money">${formatMoney(zone.daily_round)}</td><td class="money">${formatMoney(zone.daily_one_way)}</td>
       <td class="money">${formatMoney(zone.monthly_round)}</td><td class="money">${formatMoney(zone.monthly_one_way)}</td>
-      <td><div class="actions"><button class="ghost" type="button" data-edit-zone="${zone.id}">แก้</button><button class="${zone.active ? "danger" : "ghost"}" type="button" data-toggle-zone="${zone.id}">${zone.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button></div></td>
+      <td><div class="actions"><button class="ghost icon-btn" type="button" data-edit-zone="${zone.id}" aria-label="แก้โซน ${esc(zone.name)}">✎</button><button class="${zone.active ? "danger" : "ghost"}" type="button" data-toggle-zone="${zone.id}">${zone.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}</button></div></td>
     </tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -767,6 +783,24 @@ if (session) {
     toast(friendlyError(error), true);
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

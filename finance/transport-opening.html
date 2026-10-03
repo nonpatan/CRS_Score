@@ -60,6 +60,32 @@
   [hidden] { display:none !important; }
   @media (max-width:860px) { .student-row { grid-template-columns:minmax(180px,1fr) minmax(130px,.7fr) 48px; } .input-wrap { grid-row:2; } .amount-wrap { grid-column:1/2; } .reason-wrap { grid-column:2/4; } }
   @media (max-width:620px) { .row3, .student-row { grid-template-columns:1fr; } .student-row > *, .amount-wrap, .reason-wrap { grid-column:1; grid-row:auto; } .student-row button { width:100%; } .section-head { display:block; } .progress { display:inline-block; margin-top:8px; } .save-bar { align-items:stretch; flex-direction:column; } .save-bar button { width:100%; } }
+  #opening-card { overflow:visible; }
+  .student-row { padding:8px 0; gap:8px; align-items:center; }
+  .student-name { font-size:15px; }
+  .student-name .meta { font-size:12px; }
+  .amount-wrap label,.input-wrap label { font-size:12px; margin-bottom:2px; }
+  .amount-wrap input { min-height:44px; }
+  .save-bar { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:10; background:var(--white); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  #student-list { padding-bottom:100px; }
+  @media(max-width:560px) { .student-row { grid-template-columns:minmax(0,1fr) 110px 44px; } .student-row .system-debt { grid-column:1; } .student-row .reason-wrap { grid-column:1/-1; } .student-row .student-name { grid-column:1; } .student-row .amount-wrap { grid-column:2; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .student-row input,.student-row button { scroll-margin-bottom:140px; }
+  @media(max-width:560px) {
+    .student-row { grid-template-columns:minmax(0,1fr) 96px 44px; }
+    .student-row > .student-name { grid-column:1; grid-row:1; font-size:14px; line-height:1.45; }
+    .student-row > .student-name .meta { font-size:11px; line-height:1.35; }
+    .student-row > .amount-wrap { grid-column:2; grid-row:1; }
+    .student-row > .icon-btn { grid-column:3; grid-row:1; width:44px!important; min-width:44px; padding:0!important; }
+    .student-row > .system-debt { grid-column:1/-1; grid-row:2; display:flex; gap:8px; font-size:12px; }
+    .student-row > .reason-wrap { grid-column:1/-1; grid-row:3; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -326,6 +352,24 @@ if (session) {
     el("error-card").innerHTML = `<div class="banner bad"><b>เปิดหน้าหนี้ค่ารถยกมาไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

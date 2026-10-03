@@ -58,6 +58,47 @@
   [hidden] { display:none !important; }
   @media (max-width:980px) { .student-row { grid-template-columns:minmax(180px,1.4fr) repeat(2,minmax(120px,.8fr)); } .actions { grid-column:1/-1; grid-template-columns:minmax(150px,.7fr) 1fr; } }
   @media (max-width:680px) { .selector, .student-row { grid-template-columns:1fr; } .actions { grid-template-columns:1fr 1fr; } .room-actions button { width:100%; } .date-list { columns:2 130px; } }
+  #roster-card { overflow:visible; }
+  #stopped-list { padding-bottom:20px; }
+  #student-list { padding-bottom:150px; }
+  .student-row { grid-template-columns:minmax(0,1fr); gap:5px; padding:10px; scroll-margin-block:170px; }
+  .student-name { font-size:14px; }
+  .student-name > .meta:first-child { display:inline; margin-left:6px; font-size:12px; }
+  .money-line { font-size:13px; color:var(--muted); }
+  .money-line .debt { color:var(--danger); }
+  .actions { grid-template-columns:minmax(0,1fr); gap:5px; }
+  .method-buttons { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; }
+  .method-buttons button { min-height:44px; padding:5px 2px; font-size:13px; }
+  .method-buttons [aria-checked="true"] { color:var(--white); background:var(--teal); border-color:var(--teal); }
+  .method-buttons button:disabled { text-decoration:line-through; }
+  .amount-line { display:flex; gap:5px; flex-wrap:wrap; }
+  .amount-line .amount { flex:1 1 100px; min-width:90px; width:100px; }
+  .transport-shortcut { min-width:44px; min-height:44px; padding:5px; font-size:12px; color:var(--teal); background:var(--teal-soft); }
+  .action-note { font-size:12px; }
+  .room-actions { bottom:calc(12px + env(safe-area-inset-bottom)); padding:10px; border:1px solid var(--line); border-radius:12px; z-index:10; }
+  #transport-summary { display:block; margin-bottom:6px; font-size:13px; text-align:left; }
+  button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  @media(min-width:1000px) { .student-row { grid-template-columns:minmax(0,1fr) minmax(280px,1fr); } .student-name,.money-line { grid-column:1; } .actions { grid-column:2; grid-row:1/3; } }
+  @media(max-width:680px) { .student-row,.actions { grid-template-columns:minmax(0,1fr); } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .student-row { padding:8px; gap:4px; }
+  .student-name > .meta { font-size:11px; line-height:1.4; margin:0; }
+  .student-name > .status-bad,.student-name > .status-ok { display:none; }
+  .actions { grid-template-columns:84px minmax(0,1fr); gap:4px; }
+  .method-buttons { grid-column:2; grid-row:1; }
+  .amount-line { display:contents; }
+  .amount-line .amount { grid-column:1; grid-row:1; width:84px; min-width:0; padding:6px; }
+  .transport-shortcuts { grid-column:1/-1; }
+  .transport-shortcuts:empty { display:none; }
+  .method-buttons button { font-size:12px; }
+  .action-note { white-space:nowrap; overflow-x:auto; text-overflow:clip; font-size:12px; line-height:1.5; margin:0; }
+  input,button,select { scroll-margin-bottom:150px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -85,7 +126,7 @@
         <summary id="stopped-summary">เลิกใช้รถแล้ว · ยังค้าง 0 คน</summary>
         <div id="stopped-list" class="student-list"></div>
       </details>
-      <div id="room-actions" class="room-actions"><button id="save-room" class="primary" type="button" disabled>บันทึกทั้งห้อง</button></div>
+      <div id="room-actions" class="room-actions"><span id="transport-summary" aria-live="polite"></span><button id="save-room" class="primary" type="button" disabled>บันทึกทั้งห้อง</button></div>
     </section>
 
     <div id="toast" class="toast"></div>
@@ -320,6 +361,56 @@ function suggestedAmount(state, period) {
   return Math.min(Math.round(Number(charge.amount) * 100) / 100, state.outstanding);
 }
 
+function syncPaymentControls(row, available) {
+  const select = row.querySelector(".method");
+  const selected = select.value;
+  const group = row.querySelector(".method-buttons"), options = [...select.options].filter(option => option.value);
+  const enabled = options.filter(option => !select.disabled && !option.disabled);
+  const tabValue = enabled.find(option => option.value === selected)?.value || enabled[0]?.value;
+  const focused = group.contains(document.activeElement) ? document.activeElement.dataset.paymentMethod : null;
+  const markup = options.map(option => `<button type="button" role="radio" aria-checked="${option.value === selected}" tabindex="${option.value === tabValue ? 0 : -1}" data-payment-method="${esc(option.value)}"${select.disabled || option.disabled ? " disabled" : ""}>${esc(option.value)}</button>`).join("");
+  if (group.innerHTML !== markup) {
+    group.innerHTML = markup;
+    if (focused) [...group.querySelectorAll("button")].find(button => button.dataset.paymentMethod === focused && !button.disabled)?.focus();
+  }
+  const note = row.querySelector(".action-note"), text = note.textContent.replace(/บาท\s+บาท/g, "บาท");
+  if (note.textContent !== text) note.textContent = text;
+  note.title = text; note.tabIndex = 0;
+  const state = stateByStudent.get(row.dataset.studentId);
+  const charge = state.period?.billing_mode === "รายเดือน" ? state.charges.months.find(item => item.ym === currentYm) : state.charges.days.find(item => item.date === today);
+  const previous = payments.filter(item => item.student_id === row.dataset.studentId).filter(item => item.pay_date < today).sort((a,b) => String(b.pay_date).localeCompare(String(a.pay_date)) || String(b.created_at || "").localeCompare(String(a.created_at || "")))[0];
+  const choices = [{amount:charge?.announced === false ? 0 : Number(charge?.amount),label:state.period?.billing_mode === "รายเดือน" ? "เดือนนี้" : "วันนี้"},{amount:Number(previous?.amount),label:"เท่าครั้งก่อน"},{amount:available.max,label:"ทั้งหมด"}];
+  row.querySelector(".transport-shortcuts").innerHTML = choices.filter(item => !select.disabled && Number.isFinite(item.amount) && item.amount > 0 && item.amount <= available.max).map(item => `<button type="button" class="transport-shortcut" data-transport-shortcut="${item.amount}">${item.label} ${item.amount}</button>`).join("");
+}
+function handlePaymentControl(event) {
+  const button = event.target.closest("[data-payment-method], [data-transport-shortcut]");
+  if (!button || button.disabled || savingRoom) return;
+  const row = button.closest(".student-row");
+  const method = row.querySelector(".method");
+  if (button.dataset.paymentMethod !== undefined) {
+    method.value = method.value === button.dataset.paymentMethod ? "" : button.dataset.paymentMethod;
+    method.dispatchEvent(new Event("change", {bubbles:true}));
+  } else {
+    const input = row.querySelector(".amount");
+    if (input.disabled) return;
+    input.value = button.dataset.transportShortcut;
+    input.dispatchEvent(new Event("input", {bubbles:true}));
+  }
+}
+function handlePaymentArrow(event) {
+  const button = event.target.closest("[data-payment-method]");
+  if (!button || !["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"].includes(event.key)) return;
+  const buttons = [...button.closest(".method-buttons").querySelectorAll("button:not(:disabled)")];
+  if (!buttons.length) return;
+  event.preventDefault();
+  const index = buttons.indexOf(button);
+  const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length-1 : (index + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length;
+  const row = button.closest(".student-row"),value = buttons[next].dataset.paymentMethod;
+  row.querySelector(".method").value = value;
+  row.querySelector(".method").dispatchEvent(new Event("change", {bubbles:true}));
+  row.querySelector(`[data-payment-method="${value}"]`).focus();
+}
+
 function renderStudentRows(rows) {
   return rows.map(placement => {
     const student = placement.student || {};
@@ -348,19 +439,18 @@ function renderStudentRows(rows) {
         ? `<span class="meta">นำส่งแล้ว ${formatMoney(state.todayRemitted)} วันนี้ · แก้ไม่ได้ ${state.todayPayment ? "แก้ได้เฉพาะยอดที่ยังไม่นำส่ง" : "ยอดที่กรอกใหม่จะเป็นการรับเพิ่ม"}</span>` : "");
     return `<div class="student-row" data-student-id="${esc(placement.student_id)}">
       <div class="student-name">${esc(student.name || "ไม่พบชื่อนักเรียน")}<span class="meta">รหัส ${esc(student.student_no || "—")} · ${esc(period?.billing_mode || "—")} / ${esc(period?.trip_mode || "—")}${stopped && period?.end_date ? ` · สิ้นสุด ${thaiDate(period.end_date)}` : ""}</span><span class="meta ${cashAllowed ? "status-ok" : "status-bad"}">${esc(cashReason)}</span>${openingWarning}${paymentStatus}${historyWarning}</div>
-      <div class="money-cell ${unknown ? "unknown" : ""}"><span>ค้างทั้งหมด (รวมวันนี้)</span><b>${unknown ? "ยังคำนวณไม่ได้" : formatMoney(state.outstanding)}</b></div>
-      <div class="money-cell ${currentCharge?.announced === false ? "unknown" : ""}"><span>${stopped ? "ของวันนี้" : period?.billing_mode === "รายเดือน" ? "ในนั้นเป็นของเดือนนี้" : "ในนั้นเป็นของวันนี้"}</span><b>${currentText}</b></div>
-      <div class="money-cell"><span>ออมทรัพย์คงเหลือ</span><b>${formatMoney(state.balance)}</b></div>
-      <div class="money-cell"><span>ทุนคงเหลือ</span><b>${showsScholarship(state) ? formatMoney(state.scholarshipBalance) : "—"}</b></div>
+      <div class="money-line"><span class="${state.outstanding > 0 ? "debt" : ""}">ค้าง ${unknown ? "ยังคำนวณไม่ได้" : formatMoney(state.outstanding)}</span> (${period?.billing_mode === "รายเดือน" ? "เดือนนี้" : "วันนี้"} ${currentText}) · ออมเหลือ ${formatMoney(state.balance)} · ทุน ${showsScholarship(state) ? formatMoney(state.scholarshipBalance) : "—"}</div>
       <div class="actions">
-        <input class="amount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(suggested || '')}" placeholder="ยอดรับ/ยอดหัก (บาท)" aria-label="ยอดที่รับของ ${esc(student.name || "นักเรียน")}">
-        <select class="method" aria-label="วิธีรับเงินของ ${esc(student.name || "นักเรียน")}">
+        <div class="method-buttons" role="radiogroup" aria-label="วิธีรับเงินของ ${esc(student.name || "นักเรียน")}"></div>
+        <div class="amount-line"><input class="amount" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(suggested || '')}" placeholder="ยอดรับ/ยอดหัก (บาท)" aria-label="ยอดที่รับของ ${esc(student.name || "นักเรียน")}">
+        <span class="transport-shortcuts"></span></div>
+        <select class="method" hidden aria-hidden="true" aria-label="วิธีรับเงินของ ${esc(student.name || "นักเรียน")}">
           <option value=""></option>
           <option value="เงินสด"${state.todayPayment?.method === "เงินสด" ? " selected" : ""}>เงินสด</option>
           <option value="หักออมทรัพย์"${state.todayPayment?.method === "หักออมทรัพย์" ? " selected" : ""}>หักออมทรัพย์</option>
           <option value="หักทุน"${state.todayPayment?.method === "หักทุน" ? " selected" : ""}>หักทุน</option>
         </select>
-        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${showsScholarship(state) ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`}</span>
+        <span class="meta action-note">${unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)}${showsScholarship(state) ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)}` : ""}`}</span>
       </div>
     </div>`;
   }).join("");
@@ -402,8 +492,8 @@ function updateActionRow(row) {
     resetReason = available.unknown ? "ยังไม่ประกาศยอด" : method.value === "เงินสด" ? "สถานะเช็คชื่อรับเงินสดไม่ได้" : method.value === "หักออมทรัพย์" ? "ยอดออมทรัพย์ไม่พอ" : "ยอดทุนไม่พอ";
     method.value = "";
   }
-  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)} บาท${showsScholarship(state) ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)} บาท` : ""}`;
-  if (Number.isFinite(amount) && amount > available.max) note = `เกินยอดที่ค้างอยู่ · ${state.todayPayment ? "แก้ทับได้ไม่เกิน" : "เก็บได้สูงสุด"} ${formatMoney(available.max)} บาท (รวมค่ารถวันนี้แล้ว) · ถ้าเด็กค้างมากกว่านี้ ให้ตรวจว่าวันที่ค้างนั้นเช็คชื่อไว้ว่าอะไร`;
+  let note = available.unknown ? "รอฝ่ายการเงินประกาศยอดก่อนรับชำระ" : `เก็บได้สูงสุด ${formatMoney(available.max)} (รวมค่ารถวันนี้แล้ว) · ออมเหลือ ${formatMoney(state.balance)}${showsScholarship(state) ? ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)}` : ""}`;
+  if (Number.isFinite(amount) && amount > available.max) note = `เกินยอดที่ค้างอยู่ · ${state.todayPayment ? "แก้ทับได้ไม่เกิน" : "เก็บได้สูงสุด"} ${formatMoney(available.max)} (รวมค่ารถวันนี้แล้ว) · ถ้าเด็กค้างมากกว่านี้ ให้ตรวจว่าวันที่ค้างนั้นเช็คชื่อไว้ว่าอะไร`;
   if (Number.isFinite(amount) && amount > available.savingsAvailable) note += ` · ออมทรัพย์เหลือ ${formatMoney(state.balance)}${state.todayPayment?.method === "หักออมทรัพย์" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.savingsAvailable)}` : ""} · ตัวเลือกหักออมทรัพย์ถูกปิด`;
   if (showsScholarship(state) && Number.isFinite(amount) && amount > available.scholarshipAvailable) note += ` · ทุนเหลือ ${formatMoney(state.scholarshipBalance)}${state.todayPayment?.method === "หักทุน" ? ` · รวมยอดหักเดิมแก้ได้ไม่เกิน ${formatMoney(available.scholarshipAvailable)}` : ""} · ตัวเลือกหักทุนถูกปิด`;
   if (!TRANSPORT_CHARGE_STATUSES.includes(available.cashStatus)) note += ` · เงินสดปิดเพราะสถานะ ${available.cashStatus || "ยังไม่เช็คชื่อ"}`;
@@ -640,6 +730,8 @@ async function loadContext() {
 el("room-select").addEventListener("change", async () => { try { await loadRoom(el("room-select").value); } catch (error) { toast(friendlyError(error), true); } });
 for (const listId of ["student-list", "stopped-list"]) {
   const list = el(listId);
+  list.addEventListener("click", handlePaymentControl);
+  list.addEventListener("keydown", handlePaymentArrow);
   for (const eventName of ["input", "change"]) {
     list.addEventListener(eventName, event => {
       const row = event.target.closest(".student-row");
@@ -647,6 +739,15 @@ for (const listId of ["student-list", "stopped-list"]) {
     });
   }
 }
+function syncTransportPresentation() {
+  document.querySelectorAll("#student-list .student-row, #stopped-list .student-row").forEach(row => syncPaymentControls(row, actionAvailability(row.dataset.studentId, Number(row.querySelector(".amount").value))));
+  const items = collectIntents();
+  el("transport-summary").textContent = ["เงินสด","หักออมทรัพย์","หักทุน"].map(method => `${method} ${formatMoney(items.filter(item => item.method === method).reduce((sum,item) => sum + item.amount, 0))}`).join(" · ");
+}
+const transportPresentationObserver = new MutationObserver(records => {
+  if (records.some(record => record.target.matches?.("#student-list, #stopped-list, #save-room, .action-note, .method, .method option, .amount"))) syncTransportPresentation();
+});
+for (const id of ["student-list","stopped-list","save-room"]) transportPresentationObserver.observe(el(id), {childList:true,subtree:true,attributes:true,attributeFilter:["disabled"]});
 el("save-room").addEventListener("click", saveRoom);
 el("stopped-group").addEventListener("toggle", () => {
   if (!el("stopped-group").open && [...el("stopped-list").querySelectorAll(".method")].some(method => method.value)) el("stopped-group").open = true;
@@ -661,6 +762,24 @@ if (session) {
   }
   catch (error) { el("access-warning").hidden = false; el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับเงินค่ารถไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`; }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

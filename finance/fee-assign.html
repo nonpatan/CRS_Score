@@ -353,6 +353,17 @@ th{
     grid-template-columns:1fr
   }
 }
+  .charge-group { border:1px solid var(--line); border-radius:10px; margin:8px 0; }
+  .charge-group > summary { min-height:44px; padding:10px 12px; cursor:pointer; display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; justify-content:space-between; }
+  .charge-group > summary span { color:var(--muted); font-size:13px; }
+  .charge-group td { padding:7px 10px; }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
 </style>
     <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
   </head>
@@ -883,20 +894,15 @@ function renderGuard(){
 
 function renderCharges(){
   const ids=new Set(roomPlacements.map(p=>p.student_id));
-  const rows=charges
-    .filter(c=>ids.has(c.student_id))
-    .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
-  el("charge-list").innerHTML=rows.length
-    ?`<div class="table-wrap">
-      <table>
-        <thead><tr><th>นักเรียน / รายการ</th><th>ชนิด</th><th class="money">จำนวน</th><th>สถานะ</th></tr></thead>
-        <tbody>${rows.map(c=>{
+  const rows=charges.filter(c=>ids.has(c.student_id)).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+  const groups=new Map();
+  for(const row of rows){const name=row.description||"ไม่ระบุรายการ",group=groups.get(name)||[];group.push(row);groups.set(name,group)}
+  el("charge-list").innerHTML=rows.length?[...groups].map(([description,group])=>`<details class="charge-group"><summary><b>${esc(description)}</b><span>คนละ ${[...new Set(group.map(c=>money(c.amount).replace(/\s*บาท$/, "")))].join(" / ")} บาท · ${new Set(group.map(c=>c.student_id)).size} คน · ยกเลิกแล้ว ${group.filter(c=>c.voided_at).length} คน · ดูรายคน ▸</span></summary><div class="table-wrap"><table><thead><tr><th>นักเรียน / รายการ</th><th>ชนิด</th><th class="money">จำนวน</th><th>สถานะ</th></tr></thead>
+        <tbody>${group.map(c=>{
           const p=roomPlacements.find(p=>p.student_id===c.student_id);
           return`<tr><td><b>${esc(nameOf(p))}</b><span class="meta">${esc(c.description)}${c.note?` · ${esc(c.note)}`:""}</span></td><td>${esc(c.kind)}</td><td class="money">${money(c.amount)}</td><td>${c.voided_at?`<span class="status">ยกเลิกแล้ว</span><span class="meta">${esc(c.void_reason)}</span>`:`<button class="danger" data-void="${c.id}">ยกเลิก</button>`}</td></tr>`
         }).join("")}</tbody>
-      </table>
-    </div>`
-    :'<div class="empty">ยังไม่มีรายการของห้องนี้</div>'
+      </table></div></details>`).join(""):'<div class="empty">ยังไม่มีรายการของห้องนี้</div>'
 }
 
 function renderAll(){
@@ -1240,5 +1246,23 @@ el("year").onchange=async()=>{
     toast(friendly(e),true)
   }
 };
-</script></body>
+</script><script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
+</script>
+</body>
   </html>

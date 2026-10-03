@@ -87,7 +87,33 @@
       .history-row { grid-template-columns:1fr; }
       .modal-actions { flex-direction:column-reverse; }
     }
-  </style>
+    .card:has(#charge-list) { overflow:visible; }
+  #charge-list { padding-bottom:130px; }
+  #charge-list table { min-width:0; table-layout:fixed; }
+  #charge-list th,#charge-list td { padding:6px 4px; font-size:13px; }
+  #charge-list th:first-child { width:36px; }
+  #charge-list th:nth-child(3) { width:82px; }
+  #charge-list th:nth-child(4) { width:100px; }
+  #charge-list th:last-child { width:74px; }
+  #charge-list .payment-input { min-width:0; width:100%; padding:6px 3px; }
+  #charge-list td:nth-child(2) { overflow-wrap:anywhere; }
+  #charge-list .meta { font-size:12px; }
+  #charge-list .manage button { min-height:36px; padding:5px; font-size:12px; }
+  .summary { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:10; padding:10px; background:var(--white); border:1px solid var(--line); border-radius:12px; }
+  .add-line-fold > summary { min-height:44px; color:var(--teal); cursor:pointer; padding:6px 0; font-weight:600; }
+  @media(max-width:600px) { #charge-list th:first-child { width:26px; } #charge-list th:nth-child(3) { width:62px; } #charge-list th:nth-child(4) { width:70px; } #charge-list th:last-child { width:52px; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .add-line-fold:has(> #add-line-card[hidden]) { display:none; }
+  #charge-list td .meta { display:block; font-size:12px; margin-top:2px; }
+  @media(max-width:560px) { .stats { grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; } .stat { padding:8px; } .stat b { font-size:16px; } }
+  input,button,select { scroll-margin-bottom:150px; }
+</style>
   <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
 <body>
@@ -136,7 +162,7 @@
         <div class="actions"><button id="auto-fill" class="ghost" type="button">เติมยอดเก่าสุดก่อน</button></div>
         <div id="savings-hint" class="banner info" hidden></div>
         <div id="charge-list"></div>
-        <section id="add-line-card" class="card add-line-card" hidden>
+        <section id="add-line-card" class="card add-line-card" hidden><details class="add-line-fold"><summary>+ เพิ่มรายการให้เด็กคนนี้</summary>
           <div class="section-head">
             <div><h2>เพิ่มรายการให้เด็กคนนี้</h2><p>เพิ่มรายการเฉพาะรายก่อนรับเงินและพิมพ์เอกสาร</p></div>
           </div>
@@ -178,7 +204,7 @@
             <div id="add-subsidy-status" class="banner info"></div>
             <div class="actions"><button id="add-subsidy-submit" class="ghost" type="button">บันทึกเงินอุดหนุนค่าเครื่องแบบ</button></div>
           </div>
-        </section>
+        </details></section>
         <section class="history">
           <h3>ประวัติรับเงินภาคเรียนนี้</h3>
           <p class="hint">รายการที่ยกเลิกยังอยู่ครบเพื่อให้ตรวจย้อนหลังได้</p>
@@ -1017,6 +1043,24 @@ el("year").onchange=async()=>{
   currentYear=el("year").value;
   try{await loadYear(preferred)}catch(error){toast(friendly(error),true)}
 };
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

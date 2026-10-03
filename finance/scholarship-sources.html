@@ -44,6 +44,19 @@
   .toast.err { background:var(--danger); }
   [hidden] { display:none !important; }
   @media (max-width:560px) { .row2 { grid-template-columns:1fr; } .source-row { grid-template-columns:1fr; } .source-row .actions { justify-content:flex-start; } .section-head { display:block; } }
+  #source-editor > summary { min-height:44px; padding:8px 0; cursor:pointer; color:var(--teal); font-weight:600; }
+  .source-row { padding:9px 0; gap:8px; align-items:center; }
+  .source-row .actions { flex-wrap:nowrap; gap:4px; }
+  .source-row .actions button { min-height:36px; padding:5px 8px; white-space:nowrap; }
+  @media(max-width:560px) { .source-row { grid-template-columns:minmax(0,1fr) auto; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  .source-row .icon-btn { width:44px; min-width:44px; min-height:44px!important; padding:0!important; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -58,7 +71,7 @@
   <main class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <div id="content" hidden>
-      <section class="card">
+      <details id="source-editor" class="card"><summary>+ เพิ่มแหล่งทุน</summary>
         <div class="section-head"><div><h2 id="form-title">เพิ่มแหล่งทุน</h2><p>ชื่อเดียวกันซ้ำได้เมื่ออยู่คนละประเภท</p></div></div>
         <div class="row2">
           <div class="field"><label for="source-name">ชื่อแหล่งทุน</label><input id="source-name" type="text" maxlength="200" autocomplete="off" placeholder="เช่น มูลนิธิเด็กดี"></div>
@@ -67,7 +80,7 @@
         <div class="field"><label for="source-note">หมายเหตุ</label><textarea id="source-note" maxlength="500" placeholder="ชื่อผู้ติดต่อ เบอร์โทร หรือรายละเอียดเพิ่มเติม (ถ้ามี)"></textarea></div>
         <div class="field"><label><input id="source-active" type="checkbox" checked> เปิดใช้งานสำหรับรายการรับทุนใหม่</label></div>
         <div class="actions"><button id="cancel-edit" class="ghost" type="button" hidden>ยกเลิกการแก้</button><button id="save-source" class="primary" type="button">เพิ่มแหล่งทุน</button></div>
-      </section>
+      </details>
       <section class="card">
         <div class="section-head"><div><h2>แหล่งทุนทั้งหมด</h2><p>ปิดใช้งานแทนการลบเมื่อไม่ต้องการเลือกในรายการใหม่</p></div></div>
         <div id="source-list" class="source-list"><div class="empty">กำลังโหลด…</div></div>
@@ -111,7 +124,7 @@ function renderSources() {
   el("source-list").innerHTML = sources.map(source => `<div class="source-row${source.active ? "" : " inactive"}" data-source-id="${escapeHtml(source.id)}">
     <div><div class="source-name">${escapeHtml(source.name)}<span class="badge${source.active ? "" : " off"}">${source.active ? "เปิดใช้" : "ปิดใช้"}</span></div>
       <span class="meta">${escapeHtml(source.kind)}${source.note ? " · " + escapeHtml(source.note) : ""}</span></div>
-    <div class="actions"><button class="ghost edit-source" type="button">แก้ไข</button>${canAdmin ? '<button class="danger delete-source" type="button">ลบ</button>' : ""}</div>
+    <div class="actions"><button class="ghost icon-btn edit-source" type="button" aria-label="แก้แหล่งทุน">✎</button>${canAdmin ? '<button class="danger icon-btn delete-source" type="button" aria-label="ลบแหล่งทุน">🗑</button>' : ""}</div>
   </div>`).join("") || '<div class="empty">ยังไม่มีแหล่งทุน · เพิ่มรายการแรกจากฟอร์มด้านบน</div>';
 }
 async function loadSources() {
@@ -121,6 +134,7 @@ async function loadSources() {
   renderSources();
 }
 
+new MutationObserver(() => { if (el("form-title").textContent === "แก้แหล่งทุน") el("source-editor").open = true; }).observe(el("form-title"), {childList:true});
 el("cancel-edit").addEventListener("click", resetForm);
 el("save-source").addEventListener("click", async () => {
   const name = el("source-name").value.trim();
@@ -197,6 +211,24 @@ if (session) {
     el("access-card").innerHTML = `<div class="banner bad"><b>เปิดทะเบียนแหล่งทุนไม่สำเร็จ</b><br>${escapeHtml(friendlyError(error))}</div>`;
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>

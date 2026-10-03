@@ -83,6 +83,33 @@
     .save-bar { align-items:stretch; flex-direction:column; }
     .save-bar button { width:100%; }
   }
+  #entry-card { overflow:visible; }
+  #student-list { padding-bottom:140px; }
+  .student-row { grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; padding:9px 0; scroll-margin-block:160px; }
+  .student-name .meta { display:inline; font-size:12px; }
+  .student-name .meta.bad { display:block; }
+  .balance { font-size:13px; }
+  .amount-wrap { grid-column:1/-1; display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+  .amount-wrap label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .deposit-input { flex:1 1 72px; min-width:60px; width:72px; }
+  .amount-wrap > .meta { flex-basis:100%; }
+  .amount-shortcut { min-width:44px; min-height:44px; padding:4px; font-size:12px; white-space:nowrap; border:1px solid var(--line); background:var(--white); color:var(--ink); }
+  .amount-shortcut.previous { background:var(--teal-soft); color:var(--teal); }
+  .blocked .amount-wrap { display:none; }
+  .save-bar { z-index:10; bottom:calc(12px + env(safe-area-inset-bottom)); flex-wrap:wrap; }
+  #deposit-summary { flex-basis:100%; color:var(--teal); font-weight:600; }
+  button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  @media (max-width:680px) { .student-row { grid-template-columns:minmax(0,1fr) auto; } .save-bar { display:flex; } }
+
+  [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
+  [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
+  [data-kpi-tone="amber"] { --kpi-color:var(--amber,#8a5a00); --kpi-bg:var(--amber-soft,#fff4df); }
+  [data-kpi-tone="danger"] { --kpi-color:var(--danger); --kpi-bg:var(--danger-soft,#fceaea); }
+  .metric[data-kpi-tone],.stat[data-kpi-tone],.summary-grid > .summary[data-kpi-tone],.term-box[data-kpi-tone],.ledger-summary > div[data-kpi-tone],.balance[data-kpi-tone],.expected[data-kpi-tone],.system-debt[data-kpi-tone] { background:var(--kpi-bg)!important; }
+  [data-kpi-tone] > b,[data-kpi-tone] > strong,#fee-outstanding[data-kpi-tone],.revenue-value[data-kpi-tone] { color:var(--kpi-color)!important; }
+  input,button,select { scroll-margin-bottom:150px; }
+  .balance[data-kpi-tone] { color:var(--kpi-color)!important; background:transparent!important; }
+  #deposit-summary[data-kpi-tone] { color:var(--kpi-color)!important; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -95,7 +122,7 @@
     <script src="../app-shell.js?v=20261003-3"></script>
   </header>
 
-  <main class="academic-content">
+  <main class="academic-content" data-kpi-entry-balances="true">
     <section class="card">
       <div class="field">
         <label for="room-select">ห้องเรียน</label>
@@ -117,6 +144,7 @@
       </div>
       <div id="student-list" class="student-list"></div>
       <div class="save-bar">
+        <span id="deposit-summary" aria-live="polite">ฝาก 0 คน · รวม 0 บาท</span>
         <span id="save-note">กรอกเฉพาะคนที่นำเงินมาฝากวันนี้</span>
         <button id="save-button" class="primary" type="button">บันทึกการฝากทั้งห้อง</button>
       </div>
@@ -196,6 +224,28 @@ function latestDeposit(rows) {
   )[0] || null;
 }
 
+function depositShortcuts(studentId) {
+  const previous = [...txns].filter(row => row.student_id === studentId && row.kind === "ฝาก" && row.txn_date < today)
+    .sort((a,b) => String(b.txn_date).localeCompare(String(a.txn_date)) || String(b.updated_at || b.recorded_at || "").localeCompare(String(a.updated_at || a.recorded_at || "")))[0];
+  const amount = Number(previous?.amount);
+  return (amount > 0 ? [{amount, label:`เท่าครั้งก่อน ${amount}`, previous:true}] : [])
+    .concat([5,10,20].filter(value => value !== amount).map(value => ({amount:value, label:String(value)})))
+    .map(item => `<button type="button" class="amount-shortcut${item.previous ? " previous" : ""}" data-deposit-shortcut="${item.amount}" aria-label="ฝาก ${item.amount} บาท">${esc(item.label)}</button>`).join("");
+}
+function updateDepositSummary() {
+  const values = [...document.querySelectorAll(".deposit-input:not(:disabled)")].map(input => Number(input.value)).filter(value => Number.isFinite(value) && value > 0);
+  el("deposit-summary").textContent = `ฝาก ${values.length} คน · รวม ${formatMoney(values.reduce((sum,value) => sum + value, 0))}`;
+}
+el("student-list").addEventListener("click", event => {
+  const button = event.target.closest("[data-deposit-shortcut]");
+  if (!button) return;
+  const input = button.closest(".amount-wrap").querySelector(".deposit-input");
+  if (input.disabled) return;
+  input.value = button.dataset.depositShortcut;
+  input.dispatchEvent(new Event("input", {bubbles:true}));
+});
+el("student-list").addEventListener("input", updateDepositSummary);
+
 function renderRoster({ roomChecked, canWrite }) {
   el("student-list").innerHTML = roster.map(placement => {
     const student = placement.student || {};
@@ -219,17 +269,19 @@ function renderRoster({ roomChecked, canWrite }) {
         <span class="meta">รหัส ${esc(student.student_no || "—")}</span>
         <span class="meta${canReceive ? "" : " bad"}">${esc(statusText)}</span>
       </div>
-      <div class="balance${hasOpening ? "" : " pending"}">${balanceText}</div>
+      <div class="balance${hasOpening ? "" : " pending"}">สะสม ${balanceText}</div>
       <div class="amount-wrap">
         <label for="deposit-${esc(placement.student_id)}">ยอดฝากวันนี้ (บาท)</label>
         <input id="deposit-${esc(placement.student_id)}" class="deposit-input" type="number" min="0.01" step="0.01"
           inputmode="decimal" data-student-id="${esc(placement.student_id)}" data-existing-id="${esc(existing?.id || "")}" data-old-amount="${esc(existing?.amount || "")}" 
           value="${existing ? Number(existing.amount).toFixed(2) : ""}" placeholder="เว้นว่างถ้าไม่ฝาก"${blocked ? " disabled" : ""}>
+        ${blocked ? "" : depositShortcuts(placement.student_id)}
         ${existing ? `<span class="meta">บันทึกแล้ววันนี้ · แก้ยอดแล้วกดบันทึกทับได้</span>` : ""}
       </div>
     </div>`;
   }).join("");
   el("save-button").disabled = !roomChecked || !canWrite;
+  updateDepositSummary();
 }
 
 async function loadRoom(index) {
@@ -448,6 +500,24 @@ if (session) {
     el("access-warning").innerHTML = `<div class="banner bad"><b>เปิดหน้ารับฝากไม่สำเร็จ</b><br>${esc(friendlyError(error))}</div>`;
   }
 }
+</script>
+<script type="module">
+// Presentation only: semantic tones use the numbers already rendered by the finance logic.
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
+syncFinanceKpiTones();
 </script>
 </body>
 </html>
