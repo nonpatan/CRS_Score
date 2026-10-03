@@ -152,6 +152,67 @@
   }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261002-2">
+<style>
+  /* รอบ 3: mobile first; overrides stay local to this page. */
+  #content [hidden] { display:none !important; }
+  #my-work-main, #my-stats-card, #month-panel, #year-panel { min-width:0; }
+  #my-work-main > .card:first-child, #my-stats-card { margin-top:0; }
+  #today-box .big { font-size:21px; }
+  #today-box .today { background:var(--bg); color:var(--muted); }
+  #today-box .big { color:inherit; }
+  #today-box .today.present { background:var(--teal-soft); color:var(--teal); }
+  #today-box .today.late { background:var(--amber-soft); color:var(--amber); }
+  #today-box .today.absent { background:var(--danger-soft); color:var(--danger); }
+  .today-icon { width:28px; height:28px; flex:none; }
+  .permit-section { border-top:1px solid var(--line); padding-top:10px; }
+  .permit-section .banner { margin-bottom:8px; }
+  #my-todo-card { border-color:var(--amber); }
+  #my-todo-card h2 { display:flex; align-items:center; gap:8px; margin-top:0; }
+  .todo-count { display:inline-flex; justify-content:center; align-items:center; min-width:25px; height:25px;
+    border-radius:99px; background:var(--amber-soft); color:var(--amber); font-size:14px; }
+  .todo-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0;
+    border-bottom:1px solid var(--line); }
+  .todo-row:last-child { border-bottom:0; padding-bottom:0; }
+  .todo-row > div { min-width:0; overflow-wrap:anywhere; }
+  .todo-row b { font-size:15px; }
+  #content .btn.amb { width:auto; min-height:44px; flex:none; background:var(--amber-soft) !important; color:var(--amber) !important; box-shadow:none; }
+  #my-empty-strip { padding-top:12px; padding-bottom:12px; }
+  #my-empty-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .empty-chip { background:var(--bg); color:var(--muted); border:1px solid var(--line);
+    border-radius:99px; padding:2px 9px; font-size:13px; }
+  #my-teaching-gap-card .muted-empty { text-align:left; padding:2px 0; font-size:13px; }
+  .stats-switch { display:flex; gap:8px; margin-bottom:12px; }
+  .stats-switch button { min-height:44px; flex:1; padding:8px; }
+  #content .stats-switch button[aria-pressed="false"] { background:var(--bg) !important; color:var(--muted) !important; }
+  #content .stats-switch button[aria-pressed="true"] { background:var(--teal) !important; color:var(--white) !important; }
+  #my-stats-card .stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+  .stat-attendance { grid-column:1/-1; background:var(--teal-soft); }
+  .stat-attendance b { color:var(--teal); font-size:32px; }
+  .stat-attendance b small { font-size:17px; color:var(--muted); font-weight:500; }
+  .stat-attendance progress, .quota-row progress { display:block; width:100%; height:6px; margin-top:8px; accent-color:var(--teal); }
+  progress { border:0; border-radius:99px; background:var(--line); overflow:hidden; }
+  progress::-webkit-progress-bar { background:var(--line); }
+  progress::-webkit-progress-value { background:var(--teal); }
+  progress::-moz-progress-bar { background:var(--teal); }
+  .stats-zero { grid-column:1/-1; font-size:13px; color:var(--muted); }
+  #year-quota .quota-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:0 10px; }
+  .quota-row .used { grid-column:1/-1; font-size:13px; }
+  #year-quota .quota-row .left { grid-column:2; grid-row:1; }
+  .quota-row progress { grid-column:1/-1; grid-row:2; margin:5px 0; }
+  #month-daily summary { min-height:44px; padding:10px 0; cursor:pointer; font-weight:600; color:var(--teal); }
+  #month-days .day-row { flex-wrap:wrap; }
+  #month-days .day-row .d { width:82px; }
+  #month-days .day-row .s { min-width:80px; }
+  .list-expand { min-height:44px; margin-top:10px; }
+  .overview-target { scroll-margin-top:20px; }
+  .overview-highlight { outline:2px solid var(--amber); outline-offset:3px; border-radius:8px; }
+  #content button:focus-visible, #content summary:focus-visible { outline:2px solid var(--teal) !important; outline-offset:3px; }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  @media (min-width:1200px) {
+    #content { display:grid; grid-template-columns:minmax(0,1fr) minmax(310px,.8fr); align-items:start; gap:16px; }
+    #my-stats-card { position:sticky; top:16px; margin-bottom:0; }
+  }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -173,7 +234,27 @@
   <div id="gate" class="card" style="display:none"></div>
 
   <div id="content" style="display:none">
-    <div class="card">
+    <div id="my-work-main">
+    <div class="card" id="my-today-card">
+      <div class="section-title">วันนี้</div>
+      <div id="today-box"><div class="field-note">กำลังโหลด…</div></div>
+    <div class="permit-section" id="permit-card">
+      <div class="section-title">ขออนุญาตเข้าสายวันนี้</div>
+      <div id="permit-body"><div class="field-note">กำลังโหลด…</div></div>
+    </div>
+
+    </div>
+    <div class="card" id="my-todo-card" hidden>
+      <h2 class="section-title">สิ่งที่ต้องทำ <span id="my-todo-count" class="todo-count">0</span></h2>
+      <div id="my-todo-list"></div>
+      <div id="my-todo-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+    </div>
+    <div class="card" id="my-empty-strip" hidden>
+      <div class="section-title">ไม่มีรายการ</div>
+      <div id="my-empty-chips"></div>
+      <div id="my-empty-duty-note" class="field-note" hidden>ถ้าคิดว่าควรมี ให้สอบถามฝ่ายบุคคล — อาจยังไม่ได้สร้างตารางเวรของเดือนถัดไป</div>
+    </div>
+    <div class="card" id="my-coverage-card">
       <div class="section-title">งานที่ฉันต้องไปแทน</div>
       <div id="my-coverage-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
@@ -231,7 +312,7 @@
       <div style="margin-top:10px"><a class="report-link" href="../finance/transport-settings.html">ไปหน้าตั้งค่าค่ารถ</a></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="my-duty-card">
       <div class="section-title">เวรของฉัน</div>
       <div id="my-duty-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
@@ -244,7 +325,7 @@
 
     <div class="card" id="field-duty-card">
       <div class="section-title">ออกปฏิบัติหน้าที่ / อบรมของฉัน</div>
-      <div class="banner warn">
+      <div class="banner warn" id="field-duty-sharing-note" hidden>
         ก่อนส่งลิงก์ โปรดตั้งสิทธิ์แชร์ไฟล์ใน Google Drive ให้ฝ่ายบุคคลเปิดดูได้
       </div>
       <div id="my-field-duty-list"><div class="field-note">กำลังโหลด…</div></div>
@@ -255,34 +336,35 @@
       <div id="my-project-list"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
-    <div class="card">
-      <div id="today-box"></div>
+    </div>
+    <div class="card" id="my-stats-card">
+      <div class="section-title">สถิติการทำงาน</div>
+      <div class="stats-switch" role="group" aria-label="ช่วงสถิติการทำงาน">
+        <button type="button" class="ghost" id="stats-month-tab" aria-pressed="true" aria-controls="month-panel">เดือนนี้</button>
+        <button type="button" class="ghost" id="stats-year-tab" aria-pressed="false" aria-controls="year-panel">ทั้งรอบปี</button>
+      </div>
+      <div id="month-panel">
       <div class="field">
         <label for="month">ดูข้อมูลเดือน</label>
         <input id="month" type="month">
       </div>
-    </div>
-
-    <div class="card" id="permit-card">
-      <div class="section-title">ขออนุญาตเข้าสายวันนี้</div>
-      <div id="permit-body"><div class="field-note">กำลังโหลด…</div></div>
-    </div>
-
-    <div class="card">
+      <div class="section-title" id="month-title">รายเดือน</div>
+      <div class="stats" id="month-stats" style="margin-bottom:14px"></div>
+      <details id="month-daily"><summary>ดูรายวัน</summary>
+        <div id="month-days"></div>
+      </details>
+      </div>
+      <div id="year-panel" hidden>
       <div class="section-title" id="year-title">สะสมทั้งรอบปีทำงาน</div>
       <div class="stats" id="year-stats"></div>
-      <div class="field-note">ขาดเวร = มีเวรแต่ไม่มีเวลาเข้าเลย · ติดภารกิจ = วันเวรที่ลาหรือไปราชการ ไม่ถือเป็นความผิด — ยังขึ้นให้เห็นเพราะวันนั้นต้องมีคนไปแทน</div>
-      <div style="margin-top:14px">
+
+      <div id="year-quota" style="margin-top:14px">
         <div class="section-title">สิทธิ์วันลา</div>
         <div class="field-note">นับทั้งรอบปี รวมใบที่ลงล่วงหน้า</div>
         <div id="quota-list"></div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="section-title" id="month-title">รายเดือน</div>
-      <div class="stats" id="month-stats" style="margin-bottom:14px"></div>
-      <div id="month-days"></div>
+      </div>
+      <div class="field-note">ขาดเวร = มีเวรแต่ไม่มีเวลาเข้าเลย · ติดภารกิจ = วันเวรที่ลาหรือไปราชการ ไม่ถือเป็นความผิด — ยังขึ้นให้เห็นเพราะวันนั้นต้องมีคนไปแทน</div>
     </div>
   </div>
 </div>
@@ -373,6 +455,178 @@ if (session) {
       return nowSeconds > limitSeconds;
     }
 
+    // Presentation registry only: renderers report their existing results, never fetch here.
+    const overviewSections = [
+      { id:"my-coverage-list", card:"my-coverage-card", label:"งานที่ต้องไปแทน" },
+      { id:"my-teaching-gap-list", card:"my-teaching-gap-card", label:"สอนชด" },
+      { id:"my-makeup-requests", card:"my-teaching-gap-card", label:"คำขอสอนชด" },
+      { id:"homeroom-audit-body", card:"homeroom-audit-card", label:"เช็คชื่อประจำชั้น" },
+      { id:"my-duty-list", card:"my-duty-card", label:"เวรข้างหน้า" },
+      { id:"duty-swap-list", card:"duty-swap-card", label:"คำขอสลับเวร" },
+      { id:"my-field-duty-list", card:"field-duty-card", label:"ออกปฏิบัติหน้าที่ / อบรม" },
+      { id:"my-project-list", card:"my-project-card", label:"โครงการ/กิจกรรม" }
+    ];
+    const sectionRegistry = new Map();
+    function isEmptySection(box) {
+      const children = Array.from(box.children);
+      return children.length > 0 && children.every(child => child.matches(".muted-empty"));
+    }
+    function setSection(id, { todos = [], enabled = true } = {}) {
+      sectionRegistry.set(id, { empty:isEmptySection(el(id)), todos, enabled });
+      renderOverview();
+    }
+    function renderOverview() {
+      const empty = overviewSections.filter(section => {
+        const state = sectionRegistry.get(section.id);
+        return state?.enabled && state.empty;
+      });
+      // A two-part card stays visible until BOTH parts finish rendering and are empty.
+      for (const card of new Set(overviewSections.map(section => section.card))) {
+        const parts = overviewSections.filter(section => section.card === card);
+        const states = parts.map(section => sectionRegistry.get(section.id));
+        if (states.some(state => !state)) continue;
+        if (states.every(state => !state.enabled)) continue; // Keep the permission gate.
+        el(card).hidden = states.every(state => !state.enabled || state.empty);
+      }
+      el("my-empty-strip").hidden = !empty.length;
+      el("my-empty-chips").innerHTML = empty.map(section =>
+        `<span class="empty-chip">${escapeHtml(section.label)}</span>`).join("");
+      el("my-empty-duty-note").hidden = !empty.some(section => section.id === "my-duty-list");
+      const todos = overviewSections.flatMap(section => {
+        const state = sectionRegistry.get(section.id);
+        return state?.enabled ? state.todos : [];
+      });
+      el("my-todo-card").hidden = !todos.length;
+      const count = String(todos.length);
+      if (el("my-todo-count").textContent !== count) {
+        el("my-todo-count").textContent = count;
+        el("my-todo-status").textContent = `สิ่งที่ต้องทำ ${count} รายการ`;
+      }
+      el("my-todo-list").innerHTML = todos.map((todo, index) => `<div class="todo-row">
+        <div><b>${escapeHtml(todo.title)}</b><div class="field-note">${escapeHtml(todo.detail)}</div></div>
+        <button type="button" class="btn amb" data-overview-todo="${index}" aria-label="${escapeHtml(todo.title + " · " + todo.detail)}">${escapeHtml(todo.action)} ›</button>
+      </div>`).join("");
+      el("my-todo-list").onclick = event => {
+        const button = event.target.closest("[data-overview-todo]");
+        const todo = todos[Number(button?.dataset.overviewTodo)];
+        if (!button || !todo) return;
+        const card = el(todo.card);
+        card.hidden = false;
+        const box = el(todo.section);
+        const target = todo.selector ? box.querySelector(todo.selector) : box;
+        const row = target || box;
+        // A target can be beyond the folded list; expand locally without submitting its form.
+        if (row.hidden) box.parentElement.querySelector("[data-list-expand]")?.click();
+        row.classList.add("overview-target", "overview-highlight");
+        row.setAttribute("tabindex", "-1");
+        row.focus({ preventScroll:true });
+        row.scrollIntoView({ behavior:matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"center" });
+        setTimeout(() => row.classList.remove("overview-highlight"), 2500);
+      };
+    }
+    function coverageTodos(rows) {
+      return rows.flatMap((row, index) => row.cover_date >= today ? [{
+        title:`ไปแทน: ${row.kind === "วิชา" ? row.subject_label || "วิชา" : row.kind === "ครูประจำชั้น" ? row.room_label || "ครูประจำชั้น" : row.duty_type || "เวร"}`,
+        detail:fmt(row.cover_date), action:"ดูงาน", card:"my-coverage-card", section:"my-coverage-list",
+        selector:`[data-coverage-index="${index}"]`
+      }] : []);
+    }
+    function teachingGapTodos(rows, makeups) {
+      return rows.filter(row => row.remaining > 0 && !makeups.some(makeup =>
+        makeup.subject_id === row.subject.id)).map(row => ({
+        title:"ส่งคำขอสอนชด", detail:teachingSubjectName(row.subject), action:"ดูวิชา",
+        card:"my-teaching-gap-card", section:"my-teaching-gap-list",
+        selector:`[data-gap-subject="${CSS.escape(String(row.subject.id))}"]`
+      }));
+    }
+    function makeupTodos(makeups) {
+      return makeups.filter(makeup => makeup.approval_status === "ไม่อนุมัติ" && !makeup.teacher_seen_at).map(makeup => ({
+        title:"รับทราบคำขอที่ไม่อนุมัติ", detail:fmt(makeup.makeup_date), action:"ดูคำขอ",
+        card:"my-teaching-gap-card", section:"my-makeup-requests",
+        selector:`[data-makeup-id="${CSS.escape(String(makeup.id))}"]`
+      }));
+    }
+    function dutySwapTodos(waiting) {
+      return waiting.map(row => ({ title:"ตอบคำขอสลับเวร", detail:`${row.from_name || "ผู้ขอ"} · ${fmt(row.duty_date)} · ${row.duty_type}`,
+        action:"ดูคำขอ", card:"duty-swap-card", section:"duty-swap-list",
+        selector:`[data-duty-swap-id="${CSS.escape(String(row.id))}"]`
+      }));
+    }
+    function collapseLongList(id, rowSelector, prioritySelector = "") {
+      const box = el(id);
+      box.parentElement.querySelector("[data-list-expand]")?.remove();
+      const rows = Array.from(box.querySelectorAll(rowSelector));
+      const priority = prioritySelector ? rows.filter(row => row.matches(prioritySelector)) : [];
+      const ordered = [...priority, ...rows.filter(row => !priority.includes(row))];
+      for (const row of ordered) box.appendChild(row); // Move, do not clone form nodes.
+      // Never fold an actionable item, even if more than three need attention.
+      const shown = Math.max(3, priority.length);
+      const expanded = box.dataset.expanded === "true";
+      ordered.forEach((row, index) => { row.hidden = !expanded && index >= shown; });
+      if (ordered.length <= shown) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ghost list-expand";
+      button.dataset.listExpand = id;
+      button.setAttribute("aria-controls", id);
+      const update = () => {
+        button.setAttribute("aria-expanded", String(box.dataset.expanded === "true"));
+        button.textContent = box.dataset.expanded === "true" ? "ย่อรายการ" : `ดูทั้งหมด ${ordered.length} รายการ ›`;
+      };
+      button.onclick = () => {
+        const next = box.dataset.expanded !== "true";
+        box.dataset.expanded = String(next);
+        ordered.forEach((row, index) => { row.hidden = !next && index >= shown; });
+        update();
+      };
+      update();
+      box.after(button);
+    }
+    function reportFieldDutySection() {
+      const box = el("my-field-duty-list");
+      const pending = Array.from(box.querySelectorAll("[data-field-duty]")).filter(row =>
+        row.dataset.reportPending === "true");
+      const todos = pending.map(row => ({ title:`ส่งลิงก์รายงาน${row.querySelector("b").textContent.split(" · ").slice(1).join(" · ")}`,
+        detail:`${row.querySelector(".my-duty-meta").textContent} · ${row.querySelector("b").textContent.split(" · ")[0]}`,
+        action:"ส่งลิงก์", card:"field-duty-card", section:"my-field-duty-list",
+        selector:`[data-field-duty="${CSS.escape(row.dataset.fieldDuty)}"]`
+      }));
+      el("field-duty-sharing-note").hidden = !todos.length;
+      collapseLongList("my-field-duty-list", "[data-field-duty]", '[data-report-pending="true"]');
+      setSection("my-field-duty-list", { todos });
+    }
+    // Projects' renderer is also used in isolation by existing tests; an optional DOM
+    // event reports the rendered result without introducing a data dependency there.
+    el("my-project-list").addEventListener("my-section-rendered", () => {
+      collapseLongList("my-project-list", ".my-duty-row");
+      setSection("my-project-list");
+    });
+    function renderWorkStats(s, lateMarkup, leaveText) {
+      const optional = [
+        [s.offsiteDays, "ออกปฏิบัติหน้าที่ (วัน)", ""],
+        [s.leaveDays, `ลา: ${leaveText}`, ""],
+        [s.dutyDays, "วันเวร", ""], [s.dutyLate, "สายเวร", "warn"],
+        [s.dutyAbsent, "ขาดเวร", "bad"], [s.dutyExcused, "ติดภารกิจ (ลา/ไปราชการ)", ""]
+      ];
+      const zero = optional.filter(([value]) => value === 0).map(([, label]) => label.startsWith("ลา:") ? "ลา" : label);
+      return `<div class="stat stat-attendance"><b>${s.present} <small>/ ${s.workDays}</small></b><span>มา (วัน) / วันทำงาน</span>
+        <progress value="${s.present}" max="${s.workDays || 1}" aria-label="มา ${s.present} จาก ${s.workDays} วันทำงาน"></progress></div>
+        ${lateMarkup}<div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
+        ${optional.filter(([value]) => value !== 0).map(([value, label, tone]) =>
+          `<div class="stat ${tone}"><b>${value}</b><span>${escapeHtml(label)}</span></div>`).join("")}
+        ${zero.length ? `<div class="stats-zero">เป็น 0: ${escapeHtml(zero.join(" · "))}</div>` : ""}`;
+    }
+    function setStatsMode(mode) {
+      const yearMode = mode === "year";
+      el("month-panel").hidden = yearMode;
+      el("year-panel").hidden = !yearMode;
+      el("stats-month-tab").setAttribute("aria-pressed", String(!yearMode));
+      el("stats-year-tab").setAttribute("aria-pressed", String(yearMode));
+    }
+    el("stats-month-tab").addEventListener("click", () => setStatsMode("month"));
+    el("stats-year-tab").addEventListener("click", () => setStatsMode("year"));
+
+
     async function renderMyCoverage() {
       const fromDate = new Date(today + "T00:00:00Z");
       fromDate.setUTCDate(fromDate.getUTCDate() - 7);
@@ -382,6 +636,7 @@ if (session) {
       if (error) {
         el("my-coverage-list").innerHTML =
           '<div class="banner warn">โหลดงานที่ต้องไปแทนไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        setSection("my-coverage-list");
         return;
       }
       const rows = [...(data || [])].sort((a, b) => {
@@ -393,7 +648,7 @@ if (session) {
           : a.cover_date.localeCompare(b.cover_date);
         return dateDiff || String(a.kind).localeCompare(String(b.kind), "th");
       });
-      el("my-coverage-list").innerHTML = rows.length ? rows.map(row => {
+      el("my-coverage-list").innerHTML = rows.length ? rows.map((row, index) => {
         const date = new Date(row.cover_date + "T00:00:00Z")
           .toLocaleDateString("th-TH", {
             weekday:"short", day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
@@ -409,12 +664,13 @@ if (session) {
           : `<div class="field-note"><a class="report-link" href="${
               row.kind === "วิชา" ? "../academic/attendance.html" : "../general-affairs/daily-attendance.html"
             }">ไปหน้าเช็คชื่อ</a> · ต้องเลือกวันที่ให้ตรงกับวันที่ถูกจัดให้แทน ไม่เช่นนั้นจะกดไม่ได้</div>`;
-        return `<div class="my-duty-row">
+        return `<div class="my-duty-row" data-coverage-index="${index}">
           <b>${escapeHtml(date)} · ${escapeHtml(when)} · ${escapeHtml(row.kind)}</b>
           <div class="my-duty-meta">${escapeHtml(target || "ไม่ระบุงาน")} · แทน ${escapeHtml(row.absent_name || "ไม่ระบุชื่อ")}</div>
           ${worksheet}${action}
         </div>`;
       }).join("") : '<div class="muted-empty">ยังไม่มีงานที่ต้องไปแทน</div>';
+      setSection("my-coverage-list", { todos:coverageTodos(rows) });
     }
 
     const fmtPeriods = value => {
@@ -457,7 +713,7 @@ if (session) {
               `<li>${escapeHtml(fmt(detail.coverDate))} · ${escapeHtml(detail.leaveType)} · ${escapeHtml(fmtPeriods(detail.periods))} คาบ · คนแทน: ${escapeHtml(detail.substituteName)}</li>`
             ).join("")}</ul></details>`
           : "";
-        return `<div class="gap-subject">
+        return `<div class="gap-subject" data-gap-subject="${escapeHtml(row.subject.id)}">
           <div class="gap-title">${escapeHtml(teachingSubjectName(row.subject))}</div>
           ${parentNote(row.integratedParent)}
           <div class="gap-metrics">
@@ -470,6 +726,7 @@ if (session) {
           </div>${details}
         </div>`;
       }).join("") : '<div class="muted-empty">ยังไม่มีวิชาที่ต้องสอนชด</div>';
+      setSection("my-teaching-gap-list", { todos:teachingGapTodos(rows, teachingGapReport?.makeups || []) });
     }
 
     function renderMyMakeupRequests() {
@@ -494,6 +751,7 @@ if (session) {
           ${makeup.note ? `<div class="field-note">หมายเหตุ: ${escapeHtml(makeup.note)}</div>` : ""}${reason}${edit}
         </div>`;
       }).join("") : '<div class="muted-empty">ยังไม่มีคำขอสอนชด</div>';
+      setSection("my-makeup-requests", { todos:makeupTodos(makeups) });
     }
 
     function renderMakeupFormOptions(selectedId = "") {
@@ -553,6 +811,8 @@ if (session) {
         el("my-teaching-gap-list").innerHTML = '<div class="banner warn">โหลดข้อมูลการสอนชดไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
         el("my-makeup-requests").innerHTML = "";
         el("makeup-request-card").hidden = true;
+        setSection("my-teaching-gap-list");
+        setSection("my-makeup-requests");
         toast(error.message || "โหลดข้อมูลการสอนชดไม่สำเร็จ", true);
       }
     }
@@ -693,7 +953,10 @@ if (session) {
         // ทางเข้าหน้าค่ารถ — ครูไม่มีเมนูฝ่ายการเงิน ถ้าไม่ใส่ลิงก์ให้ก็เดินไปไม่ถึง
         // เฉพาะครูประจำชั้นจริงเท่านั้น ครูที่ไปเช็คชื่อแทนไม่มีสิทธิ์ผูกโซน (RLS ปฏิเสธ)
         if (hasHomeroom) el("homeroom-transport-card").hidden = false;
-        if (!hasHomeroom && !hasCoverage) return;
+        if (!hasHomeroom && !hasCoverage) {
+          setSection("homeroom-audit-body", { enabled:false });
+          return;
+        }
 
         card.hidden = false;
         const startDate = configuredStart || range.start;
@@ -705,11 +968,15 @@ if (session) {
         });
         if (!report.scheduleConfigured) {
           body.innerHTML = '<div class="banner warn"><b>ยังคำนวณไม่ได้</b><br>ระบบยังไม่มีตารางวันทำงาน จึงไม่เดาว่าวันใดต้องเช็คชื่อ กรุณาแจ้งฝ่ายบุคลากรให้ซิงก์ตารางงาน</div>';
+          setSection("homeroom-audit-body");
           return;
         }
         const row = report.staff.find(item => item.staff.id === me.id);
         const checked = (row?.self || 0) + (row?.byOther || 0);
         const missed = row?.missedDates || [];
+        const auditTodos = row?.missed > 0 ? [{ title:`เช็คชื่อประจำชั้นค้าง ${row.missed} วัน`,
+          detail:missed[0] ? `${fmt(missed[0].date)} · ${missed[0].room}` : "ดูวันที่ยังไม่ได้เช็คชื่อ", action:"ดูวันที่",
+          card:"homeroom-audit-card", section:"homeroom-audit-body" }] : [];
         const startNote = configuredStart
           ? ""
           : `<div class="banner warn"><b>ยังไม่ได้ตั้งวันเริ่มกำชับ</b><br>ขณะนี้ใช้วันเริ่มปีการศึกษา ${escapeHtml(fmt(range.start))} เป็นค่าตั้งต้น</div>`;
@@ -717,6 +984,7 @@ if (session) {
           body.innerHTML = `${startNote}<div class="muted-empty">${row?.away > 0
             ? `เดือนนี้คุณไม่อยู่ ${row.away} วัน (ลา/ออกปฏิบัติหน้าที่) จึงยังไม่มีวันที่ต้องเช็คชื่อ`
             : "เดือนนี้ยังไม่มีวันที่คุณต้องเช็คชื่อประจำชั้น"}</div>`;
+          setSection("homeroom-audit-body");
           return;
         }
         const missedHtml = missed.length ? `<div style="margin-top:12px"><b>วันที่ยังไม่มีการเช็คชื่อ</b>` +
@@ -731,9 +999,11 @@ if (session) {
           : "";
         body.innerHTML = `${startNote}<div class="today"><div><div class="big">เดือนนี้ เช็คแล้ว ${checked}/${row.due} วัน${timingText}</div>` +
           `<div class="sub">ไม่มีการเช็ค ${row.missed} วัน${row.away > 0 ? ` · ไม่อยู่ ${row.away} วัน (ไม่นับ)` : ""}</div></div></div>${roomTimingNote}${missedHtml}`;
+        setSection("homeroom-audit-body", { todos:auditTodos });
       } catch {
         card.hidden = false;
         body.innerHTML = '<div class="banner warn">โหลดข้อมูลการเช็คชื่อประจำชั้นของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        setSection("homeroom-audit-body");
       }
     }
 
@@ -832,6 +1102,7 @@ if (session) {
       }).join("") : `<div class="muted-empty">ยังไม่มีเวรของคุณตั้งแต่วันนี้เป็นต้นไป<br>
           <span class="field-note">ถ้าคิดว่าควรมี ให้สอบถามฝ่ายบุคคล — อาจยังไม่ได้สร้างตารางเวรของเดือนถัดไป</span>
         </div>`;
+      setSection("my-duty-list");
     }
 
     async function renderMyDuties() {
@@ -844,6 +1115,7 @@ if (session) {
       if (error) {
         el("my-duty-list").innerHTML =
           '<div class="banner warn">โหลดเวรของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+        setSection("my-duty-list");
         return;
       }
       myDutyRows = [...(data || [])].sort((a, b) =>
@@ -908,6 +1180,7 @@ if (session) {
       if (closed.length) groups.push(`<div class="swap-group"><div class="section-title">ที่ปิดไปแล้ว</div>${closed.map(row =>
         renderDutySwapItem(row)).join("")}</div>`);
       el("duty-swap-list").innerHTML = groups.join("") || '<div class="muted-empty">ยังไม่มีคำขอสลับเวร</div>';
+      setSection("duty-swap-list", { todos:dutySwapTodos(waiting) });
     }
 
     async function loadDutySwapRequests() {
@@ -917,6 +1190,7 @@ if (session) {
         if (myDutyRows.length) renderMyDutyRows();
       } catch (error) {
         el("duty-swap-list").innerHTML = `<div class="banner warn">${escapeHtml(error.message || "โหลดคำขอสลับเวรไม่สำเร็จ กรุณาลองเปิดหน้าใหม่")}</div>`;
+        setSection("duty-swap-list");
       }
     }
 
@@ -1222,7 +1496,7 @@ if (session) {
           });
           const range = row.start_date === row.end_date ? start : `${start} – ${end}`;
           const reportUrl = validHttpUrl(report?.report_url);
-          return `<div class="field-duty-row" data-field-duty="${row.id}" data-has-report="${report ? "1" : "0"}">
+          return `<div class="field-duty-row" data-field-duty="${row.id}" data-has-report="${report ? "1" : "0"}" data-report-pending="${report && reportUrl ? "false" : "true"}">
             <b>${escapeHtml(range)} · ${escapeHtml(row.kind)}</b>
             <div class="my-duty-meta">${escapeHtml(row.title)}</div>
             <div class="report-entry">
@@ -1239,6 +1513,8 @@ if (session) {
         }).join("") : '<div class="muted-empty">ยังไม่มีรายการออกปฏิบัติหน้าที่หรืออบรมของคุณ</div>';
       } catch {
         box.innerHTML = '<div class="banner warn">โหลดรายการออกปฏิบัติหน้าที่ไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
+      } finally {
+        reportFieldDutySection();
       }
     }
 
@@ -1291,6 +1567,8 @@ if (session) {
       } catch {
         // การ์ดนี้เป็นข้อมูลข้ามฝ่าย ต้องล้มเฉพาะตัวเอง ไม่ขวางข้อมูลเวลาทำงานที่ครูใช้ทุกวัน
         box.innerHTML = '<div class="banner warn">โหลดโครงการ/กิจกรรมของคุณไม่สำเร็จ กรุณาลองเปิดหน้าใหม่ หรือไปที่หน้าโครงการ/กิจกรรม</div>';
+      } finally {
+        box.dispatchEvent?.(new Event("my-section-rendered"));
       }
     }
 
@@ -1325,6 +1603,8 @@ if (session) {
         status.innerHTML = `บันทึกแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}"
           target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`;
         status.classList.add("ok");
+        row.dataset.reportPending = "false";
+        reportFieldDutySection();
       } catch {
         status.textContent = "บันทึกลิงก์ไม่สำเร็จ กรุณาตรวจลิงก์และลองใหม่";
         status.classList.add("err");
@@ -1505,17 +1785,10 @@ if (session) {
       const s = summarizeStaff(me, range.start, to, ctx);
       const usedByType = countLeaveDaysByType(me.id, range.start, range.end, leaveCtx);
 
+      el("stats-year-tab").textContent = `ทั้งรอบปี ${year}`;
       el("year-title").textContent = `สะสมรอบปีทำงาน ${year} (${fmt(range.start)} – ถึงวันนี้)`;
-      el("year-stats").innerHTML = `
-        <div class="stat"><b>${s.workDays}</b><span>วันทำงาน</span></div>
-        <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-        <div class="stat warn"><b>${s.late} ครั้ง</b><span>มาสาย · รวม ${s.lateMinutes} นาที</span></div>
-        <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
-        <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
-        <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
-        <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-        <div class="stat bad"><b>${s.dutyAbsent}</b><span>ขาดเวร</span></div>
-        <div class="stat"><b>${s.dutyExcused}</b><span>ติดภารกิจ (ลา/ไปราชการ)</span></div>`;
+      const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
+      el("year-stats").innerHTML = renderWorkStats(s, `<div class="stat warn"><b>${s.late} ครั้ง</b><span>มาสาย · รวม ${s.lateMinutes} นาที</span></div>`, leaveText);
 
       const codes = new Set([...Object.keys(quotas), ...Object.keys(usedByType)]);
       el("quota-list").innerHTML = codes.size
@@ -1523,13 +1796,14 @@ if (session) {
             const used = usedByType[code] || 0;
             const quota = quotas[code];
             if (quota === undefined) {
-              return `<div class="quota-row"><span class="name">${code}</span>
+              return `<div class="quota-row"><span class="name">${escapeHtml(code)}</span>
                 <span class="used">ใช้ไป ${used} วัน</span><span class="left">ไม่จำกัด</span></div>`;
             }
             const left = quota - used;
-            return `<div class="quota-row"><span class="name">${code}</span>
+            return `<div class="quota-row"><span class="name">${escapeHtml(code)}</span>
               <span class="used">ใช้ไป ${used} จาก ${quota} วัน</span>
-              <span class="left ${left <= 0 ? "none" : ""}">${left <= 0 ? "หมดสิทธิ์" : "เหลือ " + left + " วัน"}</span></div>`;
+              <span class="left ${left <= 0 ? "none" : ""}">${left <= 0 ? "หมดสิทธิ์" : "เหลือ " + left + " วัน"}</span>
+              <progress value="${Math.max(0, used)}" max="${quota > 0 ? quota : 1}" aria-label="${escapeHtml(code)} ใช้ไป ${used} จาก ${quota} วัน"></progress></div>`;
           }).join("")
         : '<div class="field-note">ยังไม่ได้กำหนดโควตาวันลาสำหรับปีนี้</div>';
     }
@@ -1549,16 +1823,7 @@ if (session) {
 
       el("month-title").textContent = label;
       const leaveText = Object.entries(s.leaveByType).map(([k, v]) => `${k} ${v}`).join(" · ") || "—";
-      el("month-stats").innerHTML = `
-        <div class="stat"><b>${s.present}</b><span>มา (วัน)</span></div>
-        <div class="stat warn"><b>${s.late} ครั้ง</b><span>มาสาย · รวม ${s.lateMinutes} นาที</span></div>
-        <div class="stat bad"><b>${s.absent}</b><span>ขาด (วัน)</span></div>
-        <div class="stat"><b>${s.leaveDays}</b><span>ลา: ${leaveText}</span></div>
-        <div class="stat"><b>${s.offsiteDays}</b><span>ออกปฏิบัติหน้าที่ (วัน)</span></div>
-        <div class="stat"><b>${s.dutyDays}</b><span>วันเวร</span></div>
-        <div class="stat warn"><b>${s.dutyLate}</b><span>สายเวร</span></div>
-        <div class="stat bad"><b>${s.dutyAbsent}</b><span>ขาดเวร</span></div>
-        <div class="stat"><b>${s.dutyExcused}</b><span>ติดภารกิจ (ลา/ไปราชการ)</span></div>`;
+      el("month-stats").innerHTML = renderWorkStats(s, `<div class="stat warn"><b>${s.late} ครั้ง</b><span>มาสาย · รวม ${s.lateMinutes} นาที</span></div>`, leaveText);
 
       el("month-days").innerHTML = s.rows.length ? s.rows.map(r => {
         const d = new Date(r.date + "T00:00:00Z");
@@ -1584,7 +1849,12 @@ if (session) {
       if (r.status === "present" && r.exempt) text = "มา (อนุโลม)";
       const dToday = new Date(today + "T00:00:00Z")
         .toLocaleDateString("th-TH", { day: "numeric", month: "long", timeZone: "UTC" });
-      el("today-box").innerHTML = `<div class="today">
+      const statusIcon = r.status === "present" ? '<path d="m5 12 4 4L19 6"/>'
+        : r.status === "late" ? '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+        : r.status === "absent" ? '<path d="m6 6 12 12M18 6 6 18"/>'
+        : '<circle cx="12" cy="12" r="9"/><path d="M7 12h10"/>';
+      el("today-box").innerHTML = `<div class="today ${escapeHtml(r.status)}">
+        <svg class="today-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">${statusIcon}</svg>
         <div><div class="big">${text}</div>
         <div class="sub">วันนี้ ${dToday}${r.firstIn ? " · ลงเวลา " + String(r.firstIn).slice(0,5) + " น." : ""}</div>
         ${r.onDuty
