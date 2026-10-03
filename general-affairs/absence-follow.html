@@ -69,11 +69,27 @@
   .issued-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
   .badge { display:inline-block; padding:3px 9px; border:1px solid var(--line); border-radius:99px; color:var(--muted); background:var(--bg); font-size:13px; }
   .letter-controls { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
-  .control-grid { display:grid; grid-template-columns:minmax(150px,.55fr) minmax(220px,1fr) auto; gap:10px; align-items:end; }
+  .control-grid { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:end; }
   .control-grid .field { margin:0; }
   .invite-toggle { display:flex; align-items:center; gap:8px; min-height:44px; margin:0; cursor:pointer; }
   .invite-toggle input { width:20px; height:20px; margin:0; }
-  .print-letter-btn { min-width:170px; border:1px solid var(--teal); color:var(--teal); background:var(--white); }
+  .print-letter-btn { min-width:80px; border:1px solid var(--teal); color:var(--teal); background:var(--white); }
+  .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:10px 0; }
+  .summary-item { padding:8px 12px; background:var(--teal-soft); border-radius:10px; }
+  .summary-item b { display:block; font-size:22px; color:var(--teal); }
+  .summary-item span { font-size:13px; color:var(--muted); }
+  #absence-kpis .tone-danger { background:var(--danger-soft); }
+  #absence-kpis .tone-danger b { color:var(--danger); }
+  #absence-kpis .tone-amber { background:var(--amber-soft); }
+  #absence-kpis .tone-amber b { color:var(--amber); }
+  #absence-kpis .tone-muted { background:var(--bg); }
+  #absence-kpis .tone-muted b { color:var(--muted); }
+  .issued-summary { margin-top:8px; font-size:13px; color:var(--muted); }
+  .issued-summary summary { min-height:44px; cursor:pointer; color:var(--teal); }
+  #meeting-fields { margin-top:8px; padding:12px; background:var(--teal-soft); border-radius:10px; }
+  #meeting-fields .row2 { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  #meeting-fields .hint { font-size:13px; }
+  .invite-toggle { margin-top:8px; }
   .empty { padding:24px 8px; color:var(--muted); text-align:center; }
   .toast {
     position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
@@ -85,12 +101,15 @@
   #print-area { position:fixed; left:-100000px; top:0; width:186mm; height:0; overflow:hidden; }
   [hidden] { display:none !important; }
   @media (max-width:760px) {
-    .filters, .row2, .control-grid { grid-template-columns:1fr; }
+    .filters { grid-template-columns:1fr; }
     .print-letter-btn { width:100%; }
   }
   @media (max-width:520px) {
     .audit-head { display:block; }
     .streak-count { display:block; margin-top:4px; white-space:normal; }
+  }
+  @media (max-width:479px) {
+    #meeting-fields .row2 { grid-template-columns:1fr; }
   }
   @media print {
     @page { size:A4 portrait; margin:12mm; }
@@ -125,7 +144,11 @@
           </div>
         </div>
         <div class="banner warn" id="threshold-note" style="margin:12px 0 0"></div>
-        <div class="row2" style="margin-top:14px">
+      </section>
+
+      <div id="meeting-parking" hidden>
+        <div id="meeting-fields">
+          <div class="row2">
           <div class="field">
             <label for="meet-date">วันนัดพบครูประจำชั้น</label>
             <input id="meet-date" type="date">
@@ -137,12 +160,13 @@
             <div class="hint" id="meet-time-hint"></div>
           </div>
         </div>
-        <div class="hint">ใช้วันและเวลานี้เฉพาะนักเรียนที่เลือก “เชิญพบครูประจำชั้น”</div>
-      </section>
-
+        <div class="hint">ใช้วันและเวลานี้กับทุกคนที่ติ๊กเชิญพบ</div>
+        </div>
+      </div>
       <section class="card" id="report-card">
         <div class="section">รายชื่อนักเรียนที่เข้าเกณฑ์</div>
         <div id="report-state" class="hint">กำลังโหลด…</div>
+        <div id="absence-kpis" class="summary-grid" aria-label="สรุปนักเรียนขาดเรียน"></div>
         <div id="absence-list" class="audit-list"></div>
       </section>
     </div>
@@ -229,10 +253,11 @@ function roundOptions(letters) {
 }
 
 function issuedBadges(letters) {
-  if (!letters.length) return "";
-  return `<div class="issued-list">${letters.map(letter =>
+  if (!letters.length) return '<div class="issued-summary">ยังไม่เคยออกหนังสือ</div>';
+  const latest = letters[letters.length - 1];
+  return `<div class="issued-summary">ออกแล้ว ${letters.length} ฉบับ · ล่าสุด บร.${Number(latest.doc_no)}/${esc(latest.year)}<details><summary>ดูทั้งหมด</summary><div class="issued-list">${letters.map(letter =>
     `<span class="badge">ออกหนังสือแล้ว ครั้งที่ ${Number(letter.letter_round)} (บร.${Number(letter.doc_no)}/${esc(letter.year)})</span>`
-  ).join("")}</div>`;
+  ).join("")}</div></details></div>`;
 }
 
 function absenceDateChips(row) {
@@ -246,6 +271,10 @@ function absenceDateChips(row) {
 
 function renderReport() {
   const list = el("absence-list");
+  el("meeting-parking").appendChild(el("meeting-fields"));
+  const neverIssued = reportRows.filter(row => !(issuedByStudent.get(String(row.studentId)) || []).length).length;
+  el("absence-kpis").innerHTML = [[reportRows.length, "เข้าเกณฑ์", "danger"], [neverIssued, "ยังไม่เคยออกหนังสือ", "amber"]]
+    .map(([value, label, tone]) => `<div class="summary-item tone-${value > 0 ? tone : "muted"}"><b>${value}</b><span>${label}</span></div>`).join("");
   if (!reportRows.length) {
     list.innerHTML = '<div class="empty">ไม่มีนักเรียนที่ขาดเรียนติดต่อกันถึงเกณฑ์</div>';
     return;
@@ -274,9 +303,10 @@ function renderReport() {
             <label for="round-${esc(row.studentId)}">หนังสือครั้งที่</label>
             <select id="round-${esc(row.studentId)}" data-letter-round="${esc(row.studentId)}">${roundOptions(letters)}</select>
           </div>
-          <label class="invite-toggle"><input type="checkbox" data-invite-student="${esc(row.studentId)}"> เชิญพบครูประจำชั้น</label>
-          <button type="button" class="print-letter-btn" data-print-student="${esc(row.studentId)}">พิมพ์หนังสือเตือน</button>
+          <button type="button" class="print-letter-btn" data-print-student="${esc(row.studentId)}" aria-label="พิมพ์หนังสือเตือนของ ${esc(row.name)}">พิมพ์</button>
         </div>
+        <label class="invite-toggle"><input type="checkbox" data-invite-student="${esc(row.studentId)}" aria-expanded="false"> เชิญพบครูประจำชั้น</label>
+        <div class="meeting-slot"></div>
       </div>
     </article>`;
   }).join("");
@@ -290,6 +320,8 @@ function showGate(message) {
 }
 
 async function loadReport() {
+  el("meeting-parking").appendChild(el("meeting-fields"));
+  el("absence-kpis").innerHTML = "";
   const requestSeq = ++loadRequestSeq;
   const yearSelect = el("year-select");
   const year = yearSelect.value;
@@ -396,6 +428,23 @@ el("absence-list").addEventListener("change", event => {
     .find(item => Number(item.letter_round) === Number(select.value));
   const checkbox = el("absence-list").querySelector(`[data-invite-student="${CSS.escape(studentId)}"]`);
   if (checkbox) checkbox.checked = letter?.invite_meeting === true;
+});
+
+// ย้ายชุดช่องเดิมเพียงชุดเดียว: วัน/เวลาใช้ร่วมกับทุกคนที่ติ๊กเชิญพบ
+function moveMeetingFields(preferred = null) {
+  const checked = [...el("absence-list").querySelectorAll("[data-invite-student]:checked")];
+  const target = preferred?.checked ? preferred : checked[checked.length - 1];
+  const fields = el("meeting-fields");
+  if (target) target.closest("[data-student-card]").querySelector(".meeting-slot").appendChild(fields);
+  else el("meeting-parking").appendChild(fields);
+  el("absence-list").querySelectorAll("[data-invite-student]").forEach(checkbox => {
+    checkbox.setAttribute("aria-expanded", String(checkbox === target));
+  });
+}
+el("absence-list").addEventListener("change", event => {
+  const checkbox = event.target.closest("[data-invite-student]");
+  const select = event.target.closest("[data-letter-round]");
+  if (checkbox || select) moveMeetingFields(checkbox || select.closest("[data-student-card]").querySelector("[data-invite-student]"));
 });
 
 el("absence-list").addEventListener("click", async event => {

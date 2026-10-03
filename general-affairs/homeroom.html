@@ -52,7 +52,7 @@
   .level-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
   .button-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   .hint { color:var(--muted); font-size:14px; }
-  .room-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .room-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr)); gap:10px; }
   .room-card {
     min-width:0; padding:14px; border:1px solid var(--line);
     border-radius:12px; background:#fff;
@@ -67,8 +67,8 @@
     padding:8px 9px; border-radius:9px; background:#f4f8f7;
   }
   .teacher-chip .who { min-width:0; flex:1; overflow-wrap:anywhere; }
-  .teacher-chip .who b { display:block; font-size:14px; }
-  .teacher-chip .who span { color:var(--muted); font-size:12px; }
+  .teacher-chip .who b { display:inline; font-size:14px; }
+  .teacher-chip .who span { display:inline; margin-left:6px; color:var(--muted); font-size:12px; }
   .teacher-chip.no-login { color:var(--amber); background:var(--amber-soft); }
   .teacher-chip button { min-height:32px; padding:5px 9px; font-size:12px; flex:0 0 auto; }
   .assign-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; }
@@ -84,11 +84,31 @@
   #toast.show { opacity:1; }
   #toast.err { background:var(--danger); }
   [hidden] { display:none !important; }
-  @media (max-width:700px) { .room-grid, .row2, .level-grid { grid-template-columns:1fr; } }
-  @media (max-width:420px) {
-    .assign-row { grid-template-columns:1fr; }
-    .assign-row button { width:100%; }
-  }
+  @media (max-width:700px) { .row2, .level-grid { grid-template-columns:1fr; } }
+  .settings { padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--white); }
+  .settings summary { cursor:pointer; font-weight:600; }
+  .settings .card { margin-top:12px; }
+  .settings-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .pill { display:inline-block; padding:3px 8px; border-radius:8px; background:var(--amber-soft); color:var(--amber); font-size:13px; font-weight:500; }
+  .settings-chips .pill { background:var(--teal-soft); color:var(--teal); }
+  .settings-chips .pill.warn { background:var(--amber-soft); color:var(--amber); }
+  .room-group-title { margin:12px 0 6px; font-size:16px; }
+  .room-group-title:first-child { margin-top:0; }
+  .room-hint { margin:0 0 10px; }
+  .teacher-list { margin:4px 0; gap:4px; }
+  .room-card { position:relative; padding:10px; }
+  .room-head h2 { font-size:16px; }
+  .room-head { align-items:center; min-height:44px; padding-right:85px; }
+  .teacher-chip { padding:4px 6px; }
+  .teacher-chip .who span:empty { display:none; }
+  .teacher-chip button { min-height:44px; }
+  .add-toggle, .assign-cancel { min-height:44px; padding:4px 8px; background:transparent; color:var(--teal); }
+  .room-card > .add-toggle { position:absolute; top:10px; right:10px; }
+  .assign-row { grid-template-columns:1fr; margin-top:8px; }
+  .assign-actions { display:flex; gap:8px; }
+  .select-warning:empty { display:none; }
+  button:focus-visible, summary:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -111,6 +131,12 @@
         </div>
         <div class="summary-line" id="scope-note">กำลังโหลดข้อมูลห้อง…</div>
       </div>
+      <section id="placement-warning" class="card" hidden></section>
+      <section class="card">
+        <div id="room-grid"><div class="empty">กำลังโหลด…</div></div>
+      </section>
+      <details class="settings" id="attendance-settings">
+        <summary>ตั้งค่าการเช็คชื่อ <span class="settings-chips" id="settings-chips"></span></summary>
       <!-- ค่าตั้งของฝ่าย: อยู่ในเมนู "กำหนดค่า" เพราะเป็นการตั้งกติกา ไม่ใช่การอ่านรายงาน
            (ผู้ใช้เคาะ 2026-08-20) · หน้ารายงานแสดงค่านี้อย่างเดียวแล้วลิงก์กลับมาที่นี่ -->
       <section class="card" id="audit-start-card">
@@ -163,14 +189,7 @@
         </div>
       </section>
 
-      <section id="placement-warning" class="card" hidden></section>
-      <section class="card">
-        <div class="banner info">
-          รายชื่อมาจากบุคลากรที่ปฏิบัติงานอยู่ ธง “ยังไม่ผูกบัญชี” หมายถึงคนนั้นยังเช็คชื่อไม่ได้
-          แม้จะถูกกำหนดเป็นครูประจำชั้นแล้ว
-        </div>
-        <div class="room-grid" id="room-grid"><div class="empty">กำลังโหลด…</div></div>
-      </section>
+      </details>
     </section>
   </main>
 </div>
@@ -222,7 +241,8 @@ function renderRooms() {
     el("room-grid").innerHTML = '<div class="empty">ปีนี้ยังไม่มีข้อมูลห้องเรียนจาก student_year_placements</div>';
     return;
   }
-  el("room-grid").innerHTML = rooms.map(room => {
+  const groups = { pending:[], ready:[] };
+  rooms.forEach(room => {
     const roomAssignments = assignments.filter(row => roomKey(row) === roomKey(room));
     const ready = roomAssignments.some(row => staffById(row.staff_id)?.has_login);
     const teachers = roomAssignments.length
@@ -231,28 +251,35 @@ function renderRooms() {
           const name = person?.full_name || "บุคลากรที่ไม่อยู่ในรายชื่อปัจจุบัน";
           const hasLogin = person?.has_login === true;
           return `<div class="teacher-chip${hasLogin ? "" : " no-login"}">
-            <div class="who"><b>${esc(name)}</b><span>${hasLogin ? esc(person?.staff_position || "ผูกบัญชีแล้ว") : "ยังไม่ผูกบัญชี — คนนี้เช็คชื่อไม่ได้"}</span></div>
+            <div class="who"><b>${esc(name)}</b><span>${hasLogin ? "" : "ยังไม่ผูกบัญชี — คนนี้เช็คชื่อไม่ได้"}</span></div>
             <button class="danger" data-remove="${esc(row.id)}" type="button">เอาออก</button>
           </div>`;
         }).join("")
       : '<div class="summary-line">ยังไม่ได้กำหนดครูประจำชั้น</div>';
-    return `<article class="room-card${ready ? "" : " not-ready"}" data-room="${esc(roomKey(room))}">
+    groups[ready ? "ready" : "pending"].push(`<article class="room-card${ready ? "" : " not-ready"}" data-room="${esc(roomKey(room))}">
       <div class="room-head">
         <h2>${esc(room.grade_level)} · ${esc(room.classroom)}</h2>
         <span>${room.studentCount} คน</span>
       </div>
       <div class="teacher-list">${teachers}</div>
-      <div class="assign-row">
+      <button type="button" class="add-toggle" data-open-assign aria-expanded="${!roomAssignments.length}"${!roomAssignments.length ? " hidden" : ""}>+ เพิ่มครู</button>
+      <div class="assign-row"${roomAssignments.length ? " hidden" : ""}>
         <div>
           <label for="staff-${esc(room.index)}">เพิ่มครูประจำชั้น</label>
           <select id="staff-${esc(room.index)}" data-staff-select="${esc(room.index)}">${staffOptions(room)}</select>
           <div class="select-warning" data-select-warning="${esc(room.index)}"></div>
         </div>
-        <button class="primary" data-add="${esc(room.index)}" type="button">เพิ่มครู</button>
+        <div class="assign-actions"><button class="ghost" data-add="${esc(room.index)}" type="button">เพิ่มครู</button><button type="button" class="assign-cancel" data-cancel-assign>ยกเลิก</button></div>
       </div>
-      ${ready ? "" : '<div class="room-warning">⚠ ห้องนี้ยังไม่มีครูที่ผูกบัญชี จึงยังเช็คชื่อไม่ได้</div>'}
-    </article>`;
-  }).join("");
+      ${ready ? "" : `<div class="room-warning"><span class="pill">${roomAssignments.length ? "ครูยังไม่ผูกบัญชี" : "ยังไม่มีครู"}</span></div>`}
+    </article>`);
+  });
+  const hint = '<p class="hint room-hint">รายชื่อจากบุคลากรที่ปฏิบัติงานอยู่ · ครูที่ยังไม่ผูกบัญชียังเช็คชื่อไม่ได้</p>';
+  el("room-grid").innerHTML = [
+    ["pending", "ต้องจัดการก่อน"], ["ready", "พร้อมแล้ว"]
+  ].filter(([key]) => groups[key].length).map(([key, title], index) =>
+    `<h2 class="room-group-title">${title} · ${groups[key].length} ห้อง</h2>${index === 0 ? hint : ""}<div class="room-grid" data-room-group="${key}">${groups[key].join("")}</div>`
+  ).join("");
 }
 
 async function loadYear() {
@@ -293,6 +320,27 @@ async function loadYear() {
   el("scope-note").textContent = `${rooms.length} ห้อง · พร้อมเช็คชื่อ ${readyCount} ห้อง · ยังไม่พร้อม ${rooms.length - readyCount} ห้อง`;
   renderRooms();
 }
+
+el("room-grid").addEventListener("click", event => {
+  const toggle = event.target.closest("[data-open-assign], [data-cancel-assign]");
+  if (!toggle) return;
+  const card = toggle.closest(".room-card");
+  const open = toggle.hasAttribute("data-open-assign");
+  card.querySelector(".assign-row").hidden = !open;
+  const opener = card.querySelector("[data-open-assign]");
+  opener.hidden = open;
+  opener.setAttribute("aria-expanded", String(open));
+  if (open) card.querySelector("[data-staff-select]").focus();
+  else opener.focus();
+});
+
+// อ่านข้อความที่ renderer เดิมเขียนแล้ว ไม่คำนวณค่าตั้งซ้ำ
+function syncSettingsSummary() {
+  const notes = [el("audit-start-note"), el("cutoff-note")];
+  el("settings-chips").innerHTML = notes.map(note => `<span class="pill${note.classList.contains("warn") ? " warn" : ""}">${esc(note.querySelector("b")?.textContent || note.textContent)}</span>`).join("");
+}
+const settingsObserver = new MutationObserver(syncSettingsSummary);
+["audit-start-note", "cutoff-note"].forEach(id => settingsObserver.observe(el(id), { childList:true, subtree:true }));
 
 el("room-grid").addEventListener("change", event => {
   const select = event.target.closest("[data-staff-select]");
@@ -525,6 +573,8 @@ if (session) {
     // เปิดให้ has_department('บริหารทั่วไป') เขียนเฉพาะ prefix นี้แล้ว (migration 2026-09-12)
     // · checkDepartment() คลุม admin อยู่แล้ว จึงไม่ต้องเช็ค role ซ้ำ
     await Promise.all([setupAuditStart(canManage), setupCutoff(canManage)]);
+    syncSettingsSummary();
+    el("attendance-settings").open = ["audit-start-note", "cutoff-note"].some(id => el(id).classList.contains("warn"));
     try {
       [years, staff] = await Promise.all([getAcademicYears(), listStaffPicker()]);
       const todayYear = academicYearOf(toDateStr(bangkokNow()), years);
