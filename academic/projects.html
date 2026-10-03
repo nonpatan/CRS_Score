@@ -115,9 +115,50 @@
   .toast.show { opacity: 1; }
   .toast.err { background: var(--danger); }
   [hidden] { display: none !important; }
-  @media (max-width: 900px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .project-scope { display: flex; gap: 8px; margin-bottom: 12px; }
+  .project-scope button[aria-pressed="true"] { color: var(--white) !important; background: var(--teal) !important; }
+  .filters .field { margin-bottom: 0; }
+  .filter-more, .filter-extra, .filter-more::details-content { display: contents; }
+  .filter-more > summary { display: none; }
+  .filters > .field:has(#filter-year) { order: 0; }
+  .filter-extra > .field:has(#filter-kind) { order: 1; }
+  .filters > .field:has(#filter-status) { order: 2; }
+  .filter-extra > .field:has(#filter-approval) { order: 3; }
+  .filter-extra > .field:has(#filter-month) { order: 4; }
+  .budget-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .project-meta { margin-top: 6px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .project-budget-bar { display: block; width: 100%; height: 5px; margin-top: 8px; accent-color: var(--teal); }
+  .project-more { margin-top: 8px; }
+  .project-more > summary, .project-kids > summary, .filter-more > summary { min-height: 44px; padding: 10px 0; cursor: pointer; color: var(--teal); font-size: 14px; font-weight: 600; list-style: none; }
+  .project-more > summary::-webkit-details-marker, .project-kids > summary::-webkit-details-marker, .filter-more > summary::-webkit-details-marker { display: none; }
+  .project-more > summary::marker, .project-kids > summary::marker, .filter-more > summary::marker { content: ""; }
+  .project-more > summary::after, .project-kids > summary::after, .filter-more > summary::after { content: " ▸"; }
+  .project-more[open] > summary::after, .project-kids[open] > summary::after, .filter-more[open] > summary::after { content: " ▾"; }
+  .project-more { grid-column: 1 / -1; }
+  .project-kids { margin: 10px 0 0 14px; padding-left: 14px; border-left: 3px solid var(--line); }
+  .project-kids .project-child { margin-left: 0; border-left: 0; }
+  .project-todo { padding: 12px; margin-top: 12px; border-radius: 12px; background: var(--amber-soft); }
+  .project-todo h3 { margin: 0; font-size: 17px; }
+  .project-todo article { background: var(--amber-soft); }
+  .item-grid > div { min-width: 0; }
+  .actions { max-width: 290px; gap: 8px; }
+  .action-reason { flex-basis: 100%; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+  @media (max-width: 899px) { .item-grid { grid-template-columns: 1fr; } .actions { max-width: none; justify-content: flex-start; } .action-reason { max-width: none; text-align: left; } }
+  @media (max-width: 639px) {
+    .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .filters > .field:has(#filter-status) { order: 0; }
+    .filter-more { display: block; grid-column: 1 / -1; }
+    .filter-more > summary { display: list-item; }
+    .filter-more::details-content { display: block; }
+    .filter-more:not([open]) > .filter-extra { display: none; }
+    .filter-extra { display: grid; gap: 10px; }
+    .metric { padding: 8px; }
+    .metric .value { font-size: 17px; }
+  }
+  @media (max-width: 899px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 620px) {
-    .filters, .row2, .form-grid, .budget-grid, .link-row, .link-row.project-link-row { grid-template-columns: 1fr; }
+    .row2, .form-grid, .link-row, .link-row.project-link-row { grid-template-columns: 1fr; }
     .wide { grid-column: auto; }
     .item-grid { grid-template-columns: 1fr; }
     .actions { justify-content: flex-start; }
@@ -143,19 +184,28 @@
 
   <main class="academic-content">
     <section class="card">
+      <div class="project-scope" id="project-scope" role="group" aria-label="ขอบเขตรายการ" hidden>
+        <button type="button" class="ghost" id="scope-mine" aria-pressed="false">ของฉัน</button>
+        <button type="button" class="ghost" id="scope-all" aria-pressed="true">ทั้งหมด</button>
+      </div>
       <div class="filters">
         <div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"><option value="">กำลังโหลด…</option></select></div>
-        <div class="field"><label for="filter-kind">ประเภท</label><select id="filter-kind"><option value="">ทั้งหมด</option><option>โครงการ</option><option>กิจกรรม</option></select></div>
         <div class="field"><label for="filter-status">สถานะ</label><select id="filter-status"><option value="">ทั้งหมด</option><option>วางแผน</option><option>กำลังดำเนินการ</option><option>เสร็จสิ้น</option><option>ยกเลิก</option></select></div>
+        <details class="filter-more" id="filter-more">
+          <summary>ตัวกรองเพิ่มเติม <span id="filter-more-count"></span></summary>
+          <div class="filter-extra">
+        <div class="field"><label for="filter-kind">ประเภท</label><select id="filter-kind"><option value="">ทั้งหมด</option><option>โครงการ</option><option>กิจกรรม</option></select></div>
         <div class="field"><label for="filter-approval">สถานะอนุมัติ</label><select id="filter-approval"><option value="">ทั้งหมด</option><option>ร่าง</option><option>รออนุมัติ</option><option>อนุมัติ</option><option>ส่งกลับให้แก้</option><option>ไม่อนุมัติ</option></select></div>
         <div class="field"><label for="filter-month">เดือน</label><input id="filter-month" type="month"></div>
+          </div>
+        </details>
       </div>
       <div class="budget-grid">
         <div class="metric"><div class="label">งบตั้งไว้</div><div class="value" id="budget-planned">—</div></div>
         <div class="metric"><div class="label">ใช้จริง</div><div class="value" id="budget-actual">—</div></div>
         <div class="metric"><div class="label">คงเหลือ</div><div class="value" id="budget-left">—</div></div>
       </div>
-      <div class="hint" id="scope-note">ยอดรวมเปลี่ยนตามตัวกรอง และไม่นับงบแม่ซ้ำกับกิจกรรมลูก</div>
+      <div class="hint" id="scope-note">ยอดรวมเปลี่ยนตามตัวกรองและขอบเขต และไม่นับงบแม่ซ้ำกับกิจกรรมลูก</div>
     </section>
 
     <section class="card" id="access-note" hidden></section>
@@ -361,12 +411,29 @@ if (!session) {
     return project.start_date <= end && (project.end_date || project.start_date) >= start;
   }
 
-  function matchedProjects() {
+  // ขอบเขตจำเฉพาะปีที่กำลังดู ไม่เก็บในฐานข้อมูล
+  let projectScope = "all";
+  let projectScopeYear = null;
+  const mobileFilters = window.matchMedia("(max-width: 639px)");
+  function syncProjectFilters() {
+    const count = ["filter-kind", "filter-approval", "filter-month"].filter(id => el(id).value).length;
+    el("filter-more-count").textContent = count ? `(${count})` : "";
+    if (!mobileFilters.matches || count) el("filter-more").open = true;
+    else el("filter-more").open = false;
+  }
+  mobileFilters.addEventListener("change", syncProjectFilters);
+  ["mine", "all"].forEach(scope => el(`scope-${scope}`).addEventListener("click", () => {
+    projectScope = scope;
+    renderProjects();
+  }));
+
+  function matchedProjects(scope = projectScope) {
     const kind = el("filter-kind").value;
     const status = el("filter-status").value;
     const approval = el("filter-approval").value;
     const month = el("filter-month").value;
     return projects.filter(project =>
+      (scope !== "mine" || project.responsible_staff_id === myStaffId) &&
       (!kind || project.kind === kind) &&
       (!status || project.status === status) &&
       (!approval || project.approval_status === approval) &&
@@ -604,19 +671,28 @@ if (!session) {
     const resultLinks = resultBox
       ? `<div class="chips"><span class="chip">สรุปโครงการ ${resultLinkCount} ไฟล์</span></div>`
       : "";
+    const compactBudget = budgetLine.replace(/ · จัดสรรให้กิจกรรมแล้ว .*? · เหลือ .*? · ใช้จริง/, " · ใช้จริง").replace("งบตั้งไว้", "งบ");
+    const planned = budget ? budget.planned : project.budget_planned;
+    const actual = budget ? budget.actual : project.budget_actual;
+    const budgetBar = planned > 0
+      ? `<progress class="project-budget-bar" max="${planned}" value="${Math.min(Number(actual || 0), planned)}" aria-label="${hasActual ? `ใช้จริง ${esc(fmtMoney(actual || 0))}` : "ใช้จริงยังไม่ได้กรอก"} จากงบ ${esc(fmtMoney(planned))}"></progress>` : "";
     return `<article class="${context ? "project-root context" : child ? "project-child" : "project-root"}">
       <div class="item-grid"><div><div class="item-title">${context ? "โครงการแม่: " : ""}${esc(project.name)}</div>
         <div class="chips"><span class="chip">${esc(project.kind)}</span><span class="${statusClass}">${esc(project.status)}</span><span class="${approvalClass}">${esc(approvalBadge.label)}</span>${projectChips(project)}${budgetWarnings}${krOutside}</div>
+        <div class="project-meta">${esc(responsible)} · ${esc(range)} · ${esc(compactBudget)}</div>
+        ${budgetBar}
         ${approvalBanner}
+      </div><div class="actions">
+        ${projectWorkflowActions(project, context)}
+        ${!context && isAdmin ? `<button class="danger" data-delete-project="${project.id}">ลบ</button>` : ""}
+      </div>
+      <details class="project-more"><summary>ดูรายละเอียด</summary>
         ${factList}
         ${detailBox}
         ${resultBox}
         ${resultLinks}
         ${approvalMeta}
-      </div><div class="actions">
-        ${projectWorkflowActions(project, context)}
-        ${!context && isAdmin ? `<button class="danger" data-delete-project="${project.id}">ลบ</button>` : ""}
-      </div></div></article>`;
+      </details></div></article>`;
   }
 
   function renderOkrCoverageSummary() {
@@ -625,11 +701,21 @@ if (!session) {
     const summary = el("okr-coverage-summary");
     summary.hidden = uncovered.length === 0;
     summary.textContent = uncovered.length
-      ? `⚠ KR ที่ยังไม่มีโครงการรองรับ ${uncovered.length} ตัว · ${uncovered.map(kr => kr.code || "KR").join(" · ")}`
+      ? `KR ที่ยังไม่มีโครงการรองรับ ${uncovered.length} ตัว · ${uncovered.map(kr => kr.code || "KR").join(" · ")}`
       : "";
   }
 
   function renderProjects() {
+    const year = el("filter-year").value;
+    if (projectScopeYear !== year) {
+      projectScopeYear = year;
+      projectScope = !canEditAll && myStaffId && projects.some(project => project.responsible_staff_id === myStaffId) ? "mine" : "all";
+    }
+    el("project-scope").hidden = !myStaffId;
+    el("scope-mine").textContent = `ของฉัน ${matchedProjects("mine").length}`;
+    el("scope-all").textContent = `ทั้งหมด ${matchedProjects("all").length}`;
+    ["mine", "all"].forEach(scope => el(`scope-${scope}`).setAttribute("aria-pressed", String(projectScope === scope)));
+    syncProjectFilters();
     const matched = matchedProjects();
     const tree = buildProjectTree(matched);
     const budget = summarizeProjectBudget(tree);
@@ -643,12 +729,17 @@ if (!session) {
       return;
     }
     const allById = new Map(projects.map(row => [row.id, row]));
-    el("project-list").innerHTML = tree.map(root => {
+    const todo = matched.filter(project => project.approval_status === "ส่งกลับให้แก้" && canEditProject(project));
+    const todoHtml = todo.length ? `<section class="project-todo"><h3>ต้องทำ ${todo.length}</h3>${todo.map(project => projectArticle(project, project.kind === "กิจกรรม")).join("")}</section>` : "";
+    const expanded = projectScope === "mine" || ["filter-kind", "filter-status", "filter-approval", "filter-month"].some(id => el(id).value);
+    el("project-list").innerHTML = todoHtml + tree.map(root => {
       if (root.isOrphan && root.parent_id) {
         const parent = allById.get(root.parent_id);
         return `${parent ? projectArticle(parent, false, true) : '<div class="meta">โครงการแม่ไม่อยู่ในชุดข้อมูลที่อ่านได้</div>'}${projectArticle(root, true)}`;
       }
-      return projectArticle(root) + (root.children || []).map(child => projectArticle(child, true)).join("");
+      const children = root.children || [];
+      const open = expanded || children.some(child => child.approval_status === "ส่งกลับให้แก้");
+      return projectArticle(root) + (children.length ? `<details class="project-kids"${open ? " open" : ""}><summary>กิจกรรม ${children.length} รายการ</summary>${children.map(child => projectArticle(child, true)).join("")}</details>` : "");
     }).join("");
   }
 
