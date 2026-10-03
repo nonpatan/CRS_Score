@@ -157,11 +157,6 @@
     });
   };
 
-  const nav = document.querySelector("header .nav");
-  if (!nav) return;
-  const header = nav.closest("header");
-  if (header) header.classList.add("academic-header");
-
   // ไฟล์ shell อยู่รากเว็บเสมอ จึงใช้สร้าง URL ที่ถูกต้องจากทุกโฟลเดอร์ฝ่าย
   const appRootUrl = new URL("./", document.currentScript.src);
   const shellVersion = new URL(document.currentScript.src).searchParams.get("v");
@@ -174,11 +169,11 @@
       label: "ระบบ",
       groups: [
         { label: "ฝ่ายงาน", items: [
-          ["academic/index.html", "ฝ่ายวิชาการ"], ["finance/index.html", "ฝ่ายการเงิน"],
-          ["personnel/index.html", "ฝ่ายบุคคล"], ["general-affairs/index.html", "บริหารทั่วไป"]
+          ["academic/index.html", "ฝ่ายวิชาการ", { short: "วิชาการ" }], ["finance/index.html", "ฝ่ายการเงิน", { short: "การเงิน" }],
+          ["personnel/index.html", "ฝ่ายบุคคล", { short: "บุคคล" }], ["general-affairs/index.html", "บริหารทั่วไป", { short: "ทั่วไป" }]
         ] },
         { label: "ผู้ดูแลระบบ", items: [
-          ["permissions.html", "จัดการสิทธิ์ผู้ใช้"], ["handover.html", "ส่งมอบงานครูที่ออก"]
+          ["permissions.html", "จัดการสิทธิ์ผู้ใช้", { id: "link-permissions" }], ["handover.html", "ส่งมอบงานครูที่ออก", { id: "link-handover" }]
         ] },
         { label: "บัญชีของฉัน", items: [["profile.html", "ข้อมูลส่วนตัว"]] }
       ],
@@ -634,6 +629,45 @@
   };
 
   // ---------- หาว่าหน้านี้อยู่ฝ่ายไหน จากโฟลเดอร์ใน URL ----------
+  // ไอคอนภาพรวมใช้ชุดเดียวกับ dashboard — ลิงก์งานอื่นคงข้อความเดิม
+  const icon = paths => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  const dashboardIcon = icon('<rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/>');
+  const moduleIcons = {
+    academic: icon('<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M7 9v5c0 1.7 2.2 3 5 3s5-1.3 5-3V9"/>'),
+    finance: icon('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/>'),
+    personnel: icon('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3 3-5 6-5s5.4 2 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.5c1.6.7 2.6 2.3 3 4.5"/>'),
+    "general-affairs": icon('<path d="M4 21V10l8-6 8 6v11"/><path d="M9 21v-6h6v6"/>')
+  };
+  const signoutIcon = icon('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/>');
+  const signoutLabel = "ออกจากระบบ";
+  const adminIcons = {
+    "link-permissions": icon('<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/>'),
+    "link-handover": icon('<path d="M7 7h13l-3-3M17 17H4l3 3"/>')
+  };
+  const menuUrl = href => {
+    const target = new URL(href, appRootUrl);
+    if (shellVersion) target.searchParams.set("v", shellVersion);
+    return target.href;
+  };
+  const [departmentGroup, adminGroup] = MODULES.system.groups;
+  // เปิดข้อมูลก่อน guard: dashboard ใช้หน้าตาเดิม แต่เมนูมาจาก MODULES ที่เดียว
+  Object.defineProperty(window, "crsShellMenu", { value: Object.freeze({
+    dashboard: Object.freeze({ href: menuUrl("dashboard.html"), label: "ภาพรวม", icon: dashboardIcon }),
+    signout: Object.freeze({ label: signoutLabel, icon: signoutIcon }),
+    departmentsLabel: departmentGroup.label,
+    departments: Object.freeze(departmentGroup.items.map(([href, label, metadata]) => Object.freeze({
+      href: menuUrl(href), label, short: metadata.short, icon: moduleIcons[href.split("/")[0]]
+    }))),
+    admin: Object.freeze({ label: adminGroup.label, items: Object.freeze(adminGroup.items.map(([href, label, metadata]) => Object.freeze({
+      id: metadata.id, href: menuUrl(href), label, icon: adminIcons[metadata.id]
+    }))) })
+  }) });
+
+  const nav = document.querySelector("header .nav");
+  if (!nav) return;
+  const header = nav.closest("header");
+  if (header) header.classList.add("academic-header");
+
   const path = window.location.pathname;
   const segments = path.split("/").filter(Boolean);
   // URL ที่ลงท้ายด้วย / ไม่มีชื่อไฟล์ → ตัวสุดท้ายคือชื่อโฟลเดอร์
@@ -665,16 +699,6 @@
     return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}>${label}</a>`;
   };
 
-  // ไอคอนภาพรวมใช้ชุดเดียวกับ dashboard — ลิงก์งานอื่นคงข้อความเดิม
-  const icon = paths => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
-  const dashboardIcon = icon('<rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/>');
-  const moduleIcons = {
-    academic: icon('<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M7 9v5c0 1.7 2.2 3 5 3s5-1.3 5-3V9"/>'),
-    finance: icon('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M16 15h2"/>'),
-    personnel: icon('<circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3 3-5 6-5s5.4 2 6 5"/><path d="M16 5.5a3 3 0 0 1 0 5.6M18 14.5c1.6.7 2.6 2.3 3 4.5"/>'),
-    "general-affairs": icon('<path d="M4 21V10l8-6 8 6v11"/><path d="M9 21v-6h6v6"/>')
-  };
-  const signoutIcon = icon('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/>');
   const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link">${dashboardIcon}ภาพรวม</a>`;
   const moduleHomeLink = mod.moduleHome
     ? buildLink(mod.moduleHome[0], moduleIcons[moduleKey] + mod.moduleHome[1], "dashboard-link")
@@ -684,7 +708,7 @@
     const isCurrent = group.items.some(([href]) => href === current);
     const links = group.items.map(([href, label]) => buildLink(href, label)).join("");
     return `<span class="shell-nav-sep" aria-hidden="true"></span><div class="nav-group${isCurrent ? " current" : ""}"><span class="nav-group-label">${group.label}</span><div class="nav-group-links">${links}</div></div>`;
-  }).join("") + `<div class="shell-side-foot"><a href="#" id="btn-signout">${signoutIcon}ออกจากระบบ</a></div>`;
+  }).join("") + `<div class="shell-side-foot"><a href="#" id="btn-signout">${signoutIcon}${signoutLabel}</a></div>`;
 
   // แบรนด์ไม่ใช้ heading และ crumb ไม่ใช้ p เพื่อคง selector ของหน้าเดิม
   const brandMarkup = `<a class="shell-brand" href="${dashboardUrl}"><span class="shell-badge"><img src="${new URL("logo.png", appRootUrl).href}" alt=""></span><span><b>โรงเรียนเจริญศึกษา</b><span class="shell-brand-module">${mod.label}</span></span></a>`;
