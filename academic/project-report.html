@@ -54,7 +54,7 @@
   .metric .label { color: var(--muted); font-size: 13px; }
   .metric .value { font-size: 21px; font-weight: 700; overflow-wrap: anywhere; }
   .follow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
-  .follow-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+  .follow-card { align-self: start; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
   .follow-card h3 { margin: 0; font-size: 17px; }
   .follow-count { color: var(--amber); font-size: 14px; font-weight: 700; }
   .follow-card details > summary { display: flex; align-items: center; min-height: 44px; color: var(--teal); font-weight: 700; cursor: pointer; list-style: none; }
@@ -95,6 +95,38 @@
   .toast { position: sticky; z-index: 80; bottom: 14px; margin: 12px auto 0; max-width: 680px; padding: 11px 16px; border-radius: 10px; color: var(--white); background: var(--ink); font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .18s; }
   .toast.show { opacity: 1; }
   .toast.err { background: var(--danger); }
+  button:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .print-menu-wrap { position: relative; flex-shrink: 0; }
+  .print-menu { position: absolute; z-index: 90; right: 0; top: calc(100% + 4px); width: min(280px, calc(100vw - 48px)); padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 16%, transparent); }
+  .print-menu button { display: block; width: 100%; color: var(--ink); background: transparent; text-align: left; font-size: 14px; }
+  .print-menu button:hover, .print-menu button:focus-visible { background: var(--teal-soft); }
+  #year-card, #follow-section { overflow: visible !important; }
+  #year-card > .section-head { display: flex; align-items: center; }
+  #year-card > .field { max-width: 280px; }
+  .metric-pending { border-color: var(--amber); }
+  .metric-pending .value { color: var(--amber); }
+  .status-summary { margin: 16px 0; }
+  .status-summary p { margin: 0 0 6px; }
+  .status-bar { display: flex; width: 100%; height: 10px; overflow: hidden; border-radius: 999px; background: var(--line); }
+  .status-planned { background: var(--amber); }
+  .status-active { background: var(--teal); }
+  .status-finished { background: var(--ink); }
+  .status-cancelled { background: var(--danger); }
+  .status-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; font-size: 13px; }
+  .status-dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; }
+  .follow-heading { display: flex; align-items: flex-start; gap: 8px; }
+  .follow-heading h3 { flex: 1; min-width: 0; }
+  .follow-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; color: var(--ink); background: transparent; text-align: left; font-size: 16px; }
+  .follow-toggle .follow-count { display: grid; place-items: center; min-width: 32px; height: 32px; border-radius: 50%; background: var(--amber-soft); }
+  .determined .follow-count { color: var(--danger); background: var(--danger-soft); }
+  .follow-chevron { margin-left: auto; flex-shrink: 0; }
+  [data-follow-toggle][aria-expanded="true"] .follow-chevron { transform: rotate(180deg); }
+  .follow-more { width: 44px; padding: 0; color: var(--muted); background: transparent; font-size: 22px; }
+  .follow-body { margin-top: 12px; }
+  .is-empty .follow-toggle { color: var(--muted); cursor: default; }
+  .is-empty .follow-count { color: var(--muted); background: var(--bg); }
+  .is-empty .follow-chevron { visibility: hidden; }
   [hidden] { display: none !important; }
   @media (max-width: 900px) {
     .metrics, .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -116,6 +148,11 @@
     .wrap { display: block !important; width: 100%; max-width: none !important; }
     header, header .nav, #year-card, #filter-card, button, #toast, #detail-overlay, .workspace-card-heading { display: none !important; }
     details > summary { display: none !important; }
+    .follow-body[hidden] { display: block !important; }
+    .follow-toggle { display: flex !important; min-height: 0; }
+    .follow-chevron, .follow-more, .print-menu-wrap { display: none !important; }
+    .follow-toggle .follow-count { color: #000; background: transparent; border: 1px solid #999; }
+    .is-empty { display: none !important; }
     body.print-single .print-hide { display: none !important; }
     body.print-single .print-target { break-before: auto !important; }
     .academic-content { display: block !important; width: 100%; }
@@ -194,28 +231,42 @@
       <section class="card" id="year-card">
         <div class="section-head">
           <div><h2>เลือกปีการศึกษา</h2><p>ตัวเลขและรายการทั้งหมดแสดงปีเดียวกัน</p></div>
-          <button class="primary" id="print-report" type="button">พิมพ์รายงาน</button>
+          <div class="print-menu-wrap no-print">
+            <button class="primary" id="print-report" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="report-print-menu">พิมพ์ ▾</button>
+            <div class="print-menu" id="report-print-menu" role="menu" aria-label="เลือกขอบเขตการพิมพ์" hidden>
+              <button type="button" role="menuitem" data-print-all>พิมพ์ทั้งรายงาน</button>
+              <button type="button" role="menuitem" data-print-section data-print-target="summary-card" data-print-label="ภาพรวมทั้งปี">พิมพ์เฉพาะภาพรวม</button>
+              <button type="button" role="menuitem" data-print-section data-print-target="follow-section" data-print-label="ต้องตามงาน">พิมพ์เฉพาะต้องตามงาน</button>
+              <button type="button" role="menuitem" data-print-section data-print-target="all-projects-card" data-print-label="รายการทั้งหมด">พิมพ์รายการตามตัวกรอง</button>
+            </div>
+          </div>
         </div>
         <div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"><option value="">กำลังโหลด…</option></select></div>
       </section>
 
       <section class="card" id="summary-card">
-        <div class="section-head"><div><h2>ภาพรวมทั้งปี</h2><p id="project-count">—</p></div><button class="ghost no-print" type="button" data-print-section data-print-label="ภาพรวมทั้งปี">🖨️ พิมพ์เฉพาะส่วนนี้</button></div>
+        <div class="section-head"><div><h2>ภาพรวมทั้งปี</h2><p id="project-count">—</p></div></div>
         <div class="metrics">
+          <div class="metric"><div class="label">รายการตามแผน</div><div class="value" id="count-plan">—</div></div>
           <div class="metric"><div class="label">สร้างแล้วในระบบ</div><div class="value" id="count-all">—</div></div>
-          <div class="metric"><div class="label">วางแผน</div><div class="value" id="count-planned">—</div></div>
-          <div class="metric"><div class="label">กำลังดำเนินการ</div><div class="value" id="count-active">—</div></div>
-          <div class="metric"><div class="label">เสร็จสิ้น</div><div class="value" id="count-finished">—</div></div>
-          <div class="metric"><div class="label">ยกเลิก</div><div class="value" id="count-cancelled">—</div></div>
-          <div class="metric"><div class="label">งบตั้งไว้</div><div class="value" id="budget-planned">—</div></div>
-          <div class="metric"><div class="label">ใช้จริง</div><div class="value" id="budget-actual">—</div></div>
-          <div class="metric"><div class="label">คงเหลือ</div><div class="value" id="budget-left">—</div></div>
+          <div class="metric metric-pending"><div class="label">ตามแผนแต่ยังไม่มีใครสร้าง</div><div class="value" id="count-missing">—</div></div>
+          <div class="metric"><div class="label">งบตั้งไว้</div><div class="value" id="budget-planned">—</div><div class="meta">ใช้จริง <span id="budget-actual">—</span></div><div class="meta">คงเหลือ <span id="budget-left">—</span></div></div>
+        </div>
+        <div class="status-summary">
+          <p class="meta">สถานะรายการในระบบ</p>
+          <div class="status-bar" id="status-bar" aria-hidden="true"></div>
+          <div class="status-legend">
+            <span><i class="status-dot status-planned" aria-hidden="true"></i>วางแผน <b id="count-planned">—</b></span>
+            <span><i class="status-dot status-active" aria-hidden="true"></i>กำลังดำเนินการ <b id="count-active">—</b></span>
+            <span><i class="status-dot status-finished" aria-hidden="true"></i>เสร็จสิ้น <b id="count-finished">—</b></span>
+            <span><i class="status-dot status-cancelled" aria-hidden="true"></i>ยกเลิก <b id="count-cancelled">—</b></span>
+          </div>
         </div>
         <div class="meta">ยอดงบรวมทุกใบในระบบ รวมใบที่ยกเลิกและใบที่ยังเป็นร่าง</div>
       </section>
 
       <section class="card" id="follow-section">
-        <div class="section-head"><div><h2>ต้องตามงาน</h2><p>แสดงเฉพาะเรื่องที่ยังต้องดำเนินการต่อ</p></div><button class="ghost no-print" type="button" data-print-section data-print-label="ต้องตามงาน">🖨️ พิมพ์เฉพาะส่วนนี้</button></div>
+        <div class="section-head"><div><h2>ต้องตามงาน</h2><p>แสดงเฉพาะเรื่องที่ยังต้องดำเนินการต่อ · กดหัวข้อเพื่อกาง</p></div></div>
         <div class="follow-grid" id="follow-grid"></div>
         <div class="empty" id="follow-empty" hidden>ไม่มีรายการที่ต้องตามในขณะนี้</div>
       </section>
@@ -232,7 +283,7 @@
       </section>
 
       <section class="card" id="all-projects-card">
-        <div class="section-head"><div><h2>รายการทั้งหมด</h2><p>กิจกรรมแสดงเยื้องใต้โครงการแม่</p></div><button class="ghost no-print" type="button" data-print-section data-print-label="รายการทั้งหมด">🖨️ พิมพ์เฉพาะส่วนนี้</button></div>
+        <div class="section-head"><div><h2>รายการทั้งหมด</h2><p>กิจกรรมแสดงเยื้องใต้โครงการแม่</p></div></div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>ชื่อ</th><th>ประเภท</th><th>ผู้รับผิดชอบ</th><th>KR ที่สนับสนุน</th><th>สถานะ</th><th>สถานะอนุมัติ</th><th>งบตั้งไว้</th><th>งบใช้จริง</th><th>เอกสาร</th></tr></thead>
@@ -267,11 +318,11 @@ import {
   bangkokNow, toDateStr
 } from "../supabase-client.js?v=20261002-3";
 
-// 🔵 “ร่าง — ยังไม่ได้ส่ง” คือก้อนที่ใหญ่ที่สุดและเดิมไม่มีใครเห็น
+// “ร่าง — ยังไม่ได้ส่ง” คือก้อนที่ใหญ่ที่สุดและเดิมไม่มีใครเห็น
 //    การ์ดอีก 5 ใบนับเฉพาะของที่ "ส่งมาแล้ว" หรือ "เสร็จแล้ว" ⟹ ครูที่ยังไม่กดส่งเลยหลุดหมด
-// 🪤 รวมแถวที่ถูก「ขอแก้ไขแผน」ด้วย เพราะ request_project_revision() ตั้ง approval_status
+// รวมแถวที่ถูก「ขอแก้ไขแผน」ด้วย เพราะ request_project_revision() ตั้ง approval_status
 //    กลับเป็น 'ร่าง' และล้าง submitted_at ⟹ มันค้างรอครูกดส่งใหม่เหมือนกัน
-// ⚠️ ตัวช่วยของอีก 5 การ์ดอยู่ใน supabase-client.js — ตั้งใจเขียนไว้ในหน้านี้แทน
+// ตัวช่วยของอีก 5 การ์ดอยู่ใน supabase-client.js — ตั้งใจเขียนไว้ในหน้านี้แทน
 //    เพื่อไม่ต้องบัมพ์ cache-buster (ครูจะได้ไม่ต้อง hard refresh ก่อนวันหมดเขต)
 //    รอบหน้าที่มีการบัมพ์อยู่แล้ว ให้ย้าย projectsNeverSubmitted กับ projectsReturned
 //    ไปรวมกับ projectsPendingTooLong และเพื่อน ๆ
@@ -281,7 +332,7 @@ function projectsNeverSubmitted(projects) {
   );
 }
 
-// 🔵 ไม่มีเกณฑ์วัน — ตีกลับเมื่อไหร่ขึ้นเมื่อนั้น (ผู้ใช้เคาะ 2026-09-20)
+// ไม่มีเกณฑ์วัน — ตีกลับเมื่อไหร่ขึ้นเมื่อนั้น (ผู้ใช้เคาะ 2026-09-20)
 //    เดิมใช้ projectsReturnedTooLong() ที่กรองเฉพาะเกิน 14 วัน ⟹ ของที่ค้าง 4 วันหายทั้งใบ
 //    เกณฑ์ 14 วันไม่ได้ทิ้ง — ย้ายไปเป็น “ชิปเน้น” รายใบแทน (ข้อ 2)
 function projectsReturned(projects) {
@@ -453,21 +504,24 @@ if (!session) {
     }).join("")}</ul>`;
   }
 
-  // 🪤 `note` ต้องอยู่นอก <details> เสมอ — หลักของรอบ 57: ซ่อนรายชื่อ ไม่ซ่อนคำตอบ
-  //    ถ้าส่งไปรวมกับ content มันจะถูกพับหายไปพร้อมรายชื่อเมื่อเกิน 3 แถว
+  // รอบ 4: พับทั้งหัวข้อด้วยปุ่มเดียว · เปิดเนื้อหาและ note ครบเมื่อพิมพ์
   function followCard(id, title, rows, content, note = "") {
-    if (!rows.length) return "";
-    const body = rows.length > 3
-      ? `<details><summary>▸ ดูรายชื่อ (${rows.length})</summary>${content}</details>`
-      : content;
-    return `<article class="follow-card" id="${id}"><div class="section-head"><div><h3>${title}</h3><div class="follow-count">${rows.length} รายการ</div>${note}</div><button class="ghost no-print" type="button" data-print-section data-print-label="${title}">🖨️ พิมพ์ใบนี้</button></div>${body}</article>`;
+    const body = content;
+    const tone = ["follow-overdue", "follow-summary", "follow-budget"].includes(id) ? "determined" : "pending";
+    return `<article class="follow-card ${rows.length ? tone : "is-empty"}" id="${id}">
+      <div class="follow-heading">
+        <h3><button class="follow-toggle" type="button" data-follow-toggle aria-expanded="false" aria-controls="${id}-body" ${rows.length ? "" : "disabled"}><span class="follow-count">${rows.length}<span class="sr-only"> รายการ</span></span><span>${title}</span><span class="follow-chevron" aria-hidden="true">▾</span></button></h3>
+        ${rows.length ? `<div class="print-menu-wrap no-print"><button class="follow-more" type="button" data-menu-toggle aria-label="เมนู ${title}" aria-haspopup="menu" aria-expanded="false" aria-controls="${id}-menu">⋯</button><div class="print-menu" id="${id}-menu" role="menu" aria-label="${title}" hidden><button type="button" role="menuitem" data-print-section data-print-label="${title}">พิมพ์ใบนี้</button></div></div>` : ""}
+      </div>
+      <div class="follow-body" id="${id}-body" hidden>${note}${body}</div>
+    </article>`;
   }
 
   function planGapListHtml(groups) {
     return `<ul class="follow-list">${groups.map(group => {
       const person = group.staffId ? staff.find(row => row.id === group.staffId) : null;
       const loginWarning = person?.has_login === false
-        ? '<div class="meta">⚠️ ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</div>'
+        ? '<div class="meta"><span class="chip warn">ยังไม่มีบัญชีล็อกอิน จึงกรอกเองไม่ได้</span></div>'
         : "";
       return `<li><b>${esc(group.name)}</b><div class="meta">สร้างแล้ว ${group.created}/${group.total}</div>${loginWarning}<ul>${group.missing.map(row => {
         const parent = row.kind === "กิจกรรม"
@@ -525,14 +579,14 @@ if (!session) {
       .filter(kr => coverageByKr.get(kr.id)?.isUncovered);
     const unapprovedKrs = krWithoutApprovedProject(okrTree, coverageByKr);
     const cards = [
-      followCard("follow-plan-uncreated", "📋 รายการตามแผนที่ยังไม่มีใครสร้าง", uncreatedPlans,
+      followCard("follow-plan-uncreated", "รายการตามแผนที่ยังไม่มีใครสร้าง", uncreatedPlans,
         planGapListHtml(planGaps)),
-      followCard("follow-plan-blocked", "🧱 โครงการแม่ค้าง ทำให้กิจกรรมลูกสร้างไม่ได้", blockedPlans,
+      followCard("follow-plan-blocked", "โครงการแม่ค้าง ทำให้กิจกรรมลูกสร้างไม่ได้", blockedPlans,
         blockedPlanListHtml(blockedPlans)),
-      followCard("follow-draft", "✏️ ร่าง — ครูยังไม่ได้กดส่งขออนุมัติ", neverSent,
+      followCard("follow-draft", "ร่าง — ครูยังไม่ได้กดส่งขออนุมัติ", neverSent,
         followProjectList(neverSent, todayIso, project => project.created_at)),
-      followCard("follow-pending", "⏳ รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
-      followCard("follow-returned", "🔁 ส่งกลับให้แก้ — รอครูแก้", returned,
+      followCard("follow-pending", "รออนุมัติเกิน 7 วัน", pending, followProjectList(pending, todayIso, project => project.submitted_at)),
+      followCard("follow-returned", "ส่งกลับให้แก้ — รอครูแก้", returned,
         followProjectList(returned, todayIso, project => projectLatestReturnedAt(project),
           project => returnedOverdue.has(project.id)
             ? ' <span class="chip warn">เกิน 14 วัน</span>'
@@ -540,19 +594,20 @@ if (!session) {
         returnedOverdue.size
           ? `<div class="meta">ในนี้ค้างเกิน ${PROJECT_RETURNED_DAYS} วัน ${returnedOverdue.size} รายการ</div>`
           : ""),
-      followCard("follow-overdue", "📌 เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
-      followCard("follow-summary", "📝 เสร็จแล้วแต่ไม่มีผลสรุป", noSummary, followProjectList(noSummary, todayIso, project => project.end_date ?? project.start_date)),
-      followCard("follow-budget", "💸 เสร็จแล้วแต่ไม่กรอกงบใช้จริง", noBudget, followProjectList(noBudget, todayIso, project => project.end_date ?? project.start_date)),
-      followCard("follow-okr", "⚠️ KR ที่ไม่มีโครงการรองรับ", uncovered,
+      followCard("follow-overdue", "เลยกำหนดแต่ยังไม่ปิด", overdue, followProjectList(overdue, todayIso, project => project.end_date ?? project.start_date)),
+      followCard("follow-summary", "เสร็จแล้วแต่ไม่มีผลสรุป", noSummary, followProjectList(noSummary, todayIso, project => project.end_date ?? project.start_date)),
+      followCard("follow-budget", "เสร็จแล้วแต่ไม่กรอกงบใช้จริง", noBudget, followProjectList(noBudget, todayIso, project => project.end_date ?? project.start_date)),
+      followCard("follow-okr", "KR ที่ไม่มีโครงการรองรับ", uncovered,
         `<ul class="follow-list">${uncovered.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}${planFollowupForKr(kr)}</li>`).join("")}</ul>`),
-      followCard("follow-okr-unapproved", "⚠️ KR ที่มีรายการแล้ว แต่ยังไม่มีใบไหนอนุมัติ", unapprovedKrs,
+      followCard("follow-okr-unapproved", "KR ที่มีรายการแล้ว แต่ยังไม่มีใบไหนอนุมัติ", unapprovedKrs,
         `<ul class="follow-list">${unapprovedKrs.map(kr => `<li><b>${esc(okrChipLabel(kr, okrById) || "KR")}</b> · ${esc(kr.key_result || "")}<div class="meta">มี ${(coverageByKr.get(kr.id)?.projects || []).length} รายการ แต่ยังไม่มีใบอนุมัติ</div></li>`).join("")}</ul>`),
-      planRows.length ? followCard("follow-unassigned", "🙋 บุคลากรที่แผนปีนี้ยังไม่ได้มอบหมายงานให้", unassignedStaff,
+      planRows.length ? followCard("follow-unassigned", "บุคลากรที่แผนปีนี้ยังไม่ได้มอบหมายงานให้", unassignedStaff,
         `<ul class="follow-list">${unassignedStaff.map(person => `<li><b>${esc(person.full_name)}</b><div class="meta">${esc(person.staff_position || "ยังไม่ระบุตำแหน่ง")}</div></li>`).join("")}</ul>`,
         '<div class="meta">ไม่ใช่รายการค้างส่ง — ใช้ตรวจว่าแผนปีนี้ครอบคนครบไหม</div>') : ""
     ].filter(Boolean);
     el("follow-grid").innerHTML = cards.join("");
-    el("follow-empty").hidden = cards.length > 0;
+    el("follow-empty").hidden = cards.some(card => !card.includes('class="follow-card is-empty"'));
+
   }
 
   function renderSummary(todayIso) {
@@ -566,8 +621,14 @@ if (!session) {
     el("budget-planned").textContent = fmtMoney(budget.planned);
     el("budget-actual").textContent = fmtMoney(budget.actual);
     el("budget-left").textContent = fmtMoney(budget.planned - budget.actual);
+    const planSummary = projectPlanCreationSummary(planRows, projects);
+    el("count-plan").textContent = planSummary.total.toLocaleString("th-TH");
+    el("count-missing").textContent = planSummary.missing.toLocaleString("th-TH");
+    const statusClasses = ["status-planned", "status-active", "status-finished", "status-cancelled"];
+    const statusTotal = Object.values(counts).reduce((total, count) => total + count, 0);
+    el("status-bar").innerHTML = Object.values(counts).map((count, index) =>
+      `<span class="${statusClasses[index]}" style="width:${statusTotal ? count / statusTotal * 100 : 0}%"></span>`).join("");
     if (planRows.length) {
-      const planSummary = projectPlanCreationSummary(planRows, projects);
       el("project-count").textContent = `ตามแผน ${planSummary.total.toLocaleString("th-TH")} รายการ · สร้างแล้ว ${planSummary.created.toLocaleString("th-TH")} · ยังไม่มีใครสร้าง ${planSummary.missing.toLocaleString("th-TH")}`;
     } else {
       el("project-count").textContent = `${projects.length.toLocaleString("th-TH")} รายการ`;
@@ -650,7 +711,7 @@ if (!session) {
     const matches = plannedIds.length === actualIds.length && plannedIds.every((id, index) => id === actualIds[index]);
     const plannedLabels = plannedIds.map(krLabelById);
     const actualLabels = actualIds.map(krLabelById);
-    const mismatch = matches ? "" : `<div class="banner warn">⚠ KR ไม่ตรงกับแผน · ตามแผน: ${esc(plannedLabels.join(" · ") || "ไม่มี")} · ที่ผูกไว้จริง: ${esc(actualLabels.join(" · ") || "ไม่มี")}</div>`;
+    const mismatch = matches ? "" : `<div class="banner warn">KR ไม่ตรงกับแผน · ตามแผน: ${esc(plannedLabels.join(" · ") || "ไม่มี")} · ที่ผูกไว้จริง: ${esc(actualLabels.join(" · ") || "ไม่มี")}</div>`;
     return `<div class="long-box"><span class="long-label">ตามทะเบียนแผนปฏิบัติการ</span><dl class="fact-list"><dt>หัวหน้าตามแผน</dt><dd>${esc(String(plan.responsible_name || "").trim() || "ยังไม่ระบุ")}</dd><dt>คณะทำงาน</dt><dd>${esc(memberNames.join(" · ") || "ไม่มี")}</dd><dt>KR ตามแผน</dt><dd>${esc(plannedLabels.join(" · ") || "ไม่มี")}</dd></dl>${mismatch}</div>`;
   }
 
@@ -795,7 +856,10 @@ if (!session) {
       coverageByKr = okrCoverage(okrTree, projects);
       const todayIso = toDateStr(bangkokNow());
       ownerOptions(); objectiveOptions();
-      renderSummary(todayIso); renderFollowUps(todayIso); renderTable(); syncPrintHeader();
+      renderSummary(todayIso); renderFollowUps(todayIso);
+      const firstFollow = el("follow-grid").querySelector("[data-follow-toggle]:not(:disabled)");
+      if (firstFollow) setFollowExpanded(firstFollow, true);
+      renderTable(); syncPrintHeader();
     } catch (error) {
       el("project-rows").innerHTML = `<tr><td colspan="9" class="empty">${esc(error.message)}</td></tr>`;
       toast(error.message, true);
@@ -849,22 +913,83 @@ if (!session) {
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && !el("detail-overlay").hidden) closeDetail();
   });
-  el("print-report")?.addEventListener("click", () => {
-    clearPrintScope();
-    syncPrintHeader();
-    window.print();
-  });
+  function setFollowExpanded(button, expanded) {
+    button.setAttribute("aria-expanded", String(expanded));
+    el(button.getAttribute("aria-controls")).hidden = !expanded;
+  }
+  function closePrintMenu(trigger, returnFocus = false) {
+    el(trigger.getAttribute("aria-controls")).hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    if (returnFocus) trigger.focus();
+  }
+  function closePrintMenus(returnFocus = false) {
+    document.querySelectorAll('[data-menu-toggle][aria-expanded="true"]')
+      .forEach(trigger => closePrintMenu(trigger, returnFocus));
+  }
   document.querySelector(".academic-content")?.addEventListener("click", event => {
+    const toggle = event.target.closest("[data-menu-toggle]");
+    if (toggle) {
+      const expanded = toggle.getAttribute("aria-expanded") !== "true";
+      closePrintMenus();
+      toggle.setAttribute("aria-expanded", String(expanded));
+      const menu = el(toggle.getAttribute("aria-controls"));
+      menu.hidden = !expanded;
+      if (expanded) menu.querySelector("[role=menuitem]").focus();
+      return;
+    }
+    const followToggle = event.target.closest("[data-follow-toggle]");
+    if (followToggle) {
+      if (!followToggle.disabled) setFollowExpanded(followToggle, followToggle.getAttribute("aria-expanded") !== "true");
+      return;
+    }
+    if (event.target.closest("[data-print-all]")) {
+      closePrintMenus(true);
+      clearPrintScope();
+      syncPrintHeader();
+      window.print();
+      return;
+    }
     const button = event.target.closest("[data-print-section]");
     if (!button) return;
-    const target = button.closest("section.card, article.follow-card");
+    const target = button.dataset.printTarget ? el(button.dataset.printTarget) : button.closest("section.card, article.follow-card");
     if (!target) return;
+    closePrintMenus(true);
     clearPrintScope();
     markPrintScope(target);
     el("print-scope").textContent = `เฉพาะส่วน: ${button.dataset.printLabel}`;
     el("print-scope").hidden = false;
     syncPrintHeader();
     window.print();
+  });
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".print-menu-wrap")) closePrintMenus();
+  });
+  document.addEventListener("keydown", event => {
+    const wrap = event.target.closest(".print-menu-wrap");
+    if (!wrap) return;
+    const trigger = wrap.querySelector("[data-menu-toggle]");
+    const menu = el(trigger.getAttribute("aria-controls"));
+    if (event.key === "Escape") {
+      if (!menu.hidden) { event.preventDefault(); closePrintMenu(trigger, true); }
+      return;
+    }
+    if (event.key === "Tab") { closePrintMenu(trigger); return; }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    closePrintMenus();
+    trigger.setAttribute("aria-expanded", "true");
+    menu.hidden = false;
+    const items = [...menu.querySelectorAll("[role=menuitem]")];
+    const current = items.indexOf(document.activeElement);
+    const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+      : event.key === "ArrowDown" ? (current + 1) % items.length
+      : (current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length);
+    items[index].focus();
+  });
+  document.addEventListener("focusin", event => {
+    document.querySelectorAll('[data-menu-toggle][aria-expanded="true"]').forEach(trigger => {
+      if (!trigger.closest(".print-menu-wrap").contains(event.target)) closePrintMenu(trigger);
+    });
   });
   window.addEventListener("beforeprint", openDetailsForPrint);
   window.addEventListener("afterprint", restoreDetailsAfterPrint);
