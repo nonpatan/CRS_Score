@@ -10,7 +10,7 @@
 <style>
   :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
           --bg:#f7f8f7; --white:#fff; --danger:#a32d2d; --danger-soft:#fceaea;
-          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; --blue-soft:#e8f0fb; }
+          --amber:#8a5a00; --amber-soft:#fff4df; --blue:#1f5aa8; --blue-soft:#e8f0fb; --violet:#6d5aa6; }
   * { box-sizing:border-box; }
   body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
          margin:0; padding:16px; font-size:16px; line-height:1.6; }
@@ -41,7 +41,7 @@
   button.ghost { background:var(--teal-soft); color:var(--teal); }
   button.small { font-size:13px; padding:6px 10px; }
   button:disabled { opacity:.5; cursor:default; }
-  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+  .section { font-size:12px; font-weight:600; color:var(--muted);
                    text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
   .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
   .banner.warn { background:var(--amber-soft); color:var(--amber); }
@@ -95,6 +95,22 @@
   .swap-meta { color:var(--muted); font-size:13px; }
   .swap-badge { display:inline-flex; margin-top:5px; padding:2px 8px; border-radius:99px;
                 background:var(--teal-soft); color:var(--teal); font-size:12px; font-weight:600; }
+  .mobile-cell { display:none; }
+  @media (max-width:639px) {
+    .table-scroll { overflow:visible; } table { min-width:0; width:100%; } thead { display:none; }
+    #tbody { display:block; } #tbody tr[data-staff] { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:4px; padding:6px; margin-bottom:10px; border:1px solid var(--line); border-radius:10px; cursor:pointer; }
+    #tbody tr[data-staff] td { border:0; padding:0; display:flex; flex-direction:column; white-space:normal; min-width:0; font-weight:600; font-size:14px; line-height:1.1; color:var(--muted); }
+    #tbody tr[data-staff] td::before { content:attr(data-label); color:var(--muted); font-weight:400; font-size:12px; }
+    #tbody tr[data-staff] td:first-child { grid-column:1 / -1; color:var(--ink); font-size:16px; }
+    #tbody tr[data-staff] td:first-child::before { display:none; }
+    #tbody tr[data-staff] td.good { color:var(--teal); } #tbody tr[data-staff] td.warn { color:var(--amber); }
+    #tbody tr[data-staff] td.bad { color:var(--danger); } #tbody tr[data-staff] td.leave-tone { color:var(--blue); }
+    #tbody tr[data-staff] td.offsite-tone { color:var(--violet); }
+    #tbody tr[data-staff] .cell-main, #tbody tr[data-staff] .cell-sub { white-space:normal; overflow-wrap:anywhere; }
+    #tbody tr[data-staff] .cell-sub { font-size:12px; font-weight:400; line-height:1.1; overflow-wrap:anywhere; }
+    #tbody tr[data-staff] .wide-cell { display:none; }
+    #tbody tr[data-staff] .mobile-cell { display:block; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -114,9 +130,10 @@
     </div>
     <script src="../app-shell.js?v=20261003-3"></script>
   </header>
+  <main class="academic-content">
 
   <div class="card">
-    <div class="section-title">เลือกรอบรายงาน</div>
+    <div class="section">เลือกรอบรายงาน</div>
     <div class="row2">
       <div class="field">
         <label for="mode">รอบ</label>
@@ -156,7 +173,7 @@
 
   <div id="report" style="display:none">
     <div class="card">
-      <div class="section-title" id="overview-title">ภาพรวม</div>
+      <div class="section" id="overview-title">ภาพรวม</div>
       <div id="alerts"></div>
       <div class="stats">
         <div class="stat"><b id="s-staff">—</b><span>บุคลากร</span></div>
@@ -172,12 +189,12 @@
     </div>
 
     <div class="card">
-      <div class="section-title">การสลับเวรในช่วงที่เลือก</div>
+      <div class="section">การสลับเวรในช่วงที่เลือก</div>
       <div id="duty-swaps"><div class="field-note">กำลังโหลด…</div></div>
     </div>
 
     <div class="card">
-      <div class="section-title">รายคน</div>
+      <div class="section">รายคน</div>
       <div class="field">
         <input id="q" type="search" placeholder="ค้นหาชื่อ" autocomplete="off">
       </div>
@@ -192,17 +209,17 @@
     </div>
 
     <div id="detail-card" class="card" style="display:none">
-      <div class="section-title" id="detail-title">รายละเอียดรายคน</div>
+      <div class="section" id="detail-title">รายละเอียดรายคน</div>
       <div id="detail-permit"></div>
       <div id="detail-stats" class="stats" style="margin-bottom:14px"></div>
-      <div class="section-title" id="detail-quota-title" style="margin-top:16px">สิทธิ์วันลา</div>
+      <div class="section" id="detail-quota-title" style="margin-top:16px">สิทธิ์วันลา</div>
       <div id="detail-quota"></div>
       <div id="detail-days"></div>
     </div>
   </div>
+    <div id="toast"></div>
+  </main>
 </div>
-
-<div id="toast"></div>
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble,
@@ -237,7 +254,7 @@ if (session) {
     const box = document.createElement("div");
     box.className = "card";
     box.innerHTML = personnelAccessDeniedHtml();
-    document.querySelector(".wrap").appendChild(box);
+    document.querySelector("main").appendChild(box);
   } else {
   let years = [], summaries = [], ctx = null, coverageStats = new Map(), loadedRange = null;
   let dutySwaps = [];
@@ -507,26 +524,29 @@ if (session) {
         { "วิชา": 0, "ครูประจำชั้น": 0, "เวร": 0, total: 0 };
       return `
       <tr data-staff="${s.staff.id}">
-        <td>${s.staff.full_name}${s.staff.exempt ? ' <span class="field-note">(อนุโลม)</span>' : ""}</td>
-        <td>${s.workDays}</td><td>${s.present}</td>
-        <td class="${s.late ? "warn" : ""}">
+        <td data-label="ชื่อ">${s.staff.full_name}${s.staff.exempt ? ' <span class="field-note">(อนุโลม)</span>' : ""}</td>
+        <td data-label="วันทำงาน">${s.workDays}</td><td data-label="มา" class="${s.present ? "good" : "zero"}">${s.present}</td>
+        <td data-label="สาย" class="${s.late ? "warn" : ""}">
           <span class="cell-main">${s.late} ครั้ง</span>
           <span class="cell-sub">${s.lateMinutes} นาที</span>
         </td>
-        <td class="${s.absent ? "bad" : ""}">${s.absent}</td>
-        <td>${s.leaveDays}</td>
-        <td>${s.offsiteDays}</td>
-        <td>
-          <span class="cell-main">${s.dutyDays - s.dutySubstituteDays} วัน${s.dutySubstituteDays > 0 ? ` (+${s.dutySubstituteDays} แทน)` : ""}</span>
-          <span class="cell-sub">สาย ${s.dutyLate} · ขาด ${s.dutyAbsent} · ติดภารกิจ ${s.dutyExcused}</span>
+        <td data-label="ขาด" class="${s.absent ? "bad" : ""}">${s.absent}</td>
+        <td data-label="ลา" class="${s.leaveDays ? "leave-tone" : "zero"}">${s.leaveDays}</td>
+        <td data-label="นอกสถานที่" class="${s.offsiteDays ? "offsite-tone" : "zero"}">${s.offsiteDays}</td>
+        <td data-label="เวร" class="${s.dutyDays ? "good" : "zero"}">
+          <span class="cell-main wide-cell">${s.dutyDays - s.dutySubstituteDays} วัน${s.dutySubstituteDays > 0 ? ` (+${s.dutySubstituteDays} แทน)` : ""}</span>
+          <span class="cell-main mobile-cell" aria-label="${s.dutyDays - s.dutySubstituteDays} วัน เวรแทน ${s.dutySubstituteDays} วัน">${s.dutyDays - s.dutySubstituteDays}${s.dutySubstituteDays > 0 ? ` (+${s.dutySubstituteDays})` : ""}</span>
+          <span class="cell-sub wide-cell">สาย ${s.dutyLate} · ขาด ${s.dutyAbsent} · ติดภารกิจ ${s.dutyExcused}</span>
+          <span class="cell-sub mobile-cell" aria-label="สาย ${s.dutyLate} ขาด ${s.dutyAbsent} ติดภารกิจ ${s.dutyExcused}">สาย ${s.dutyLate}<br>ขาด ${s.dutyAbsent}<br>ภารกิจ ${s.dutyExcused}</span>
         </td>
-        <td>
+        <td data-label="ไปแทน">
           <span class="cell-main">${coverage.total} งาน</span>
-          ${coverage.total > 0 ? `<span class="cell-sub">วิชา ${coverage["วิชา"]} · ประจำชั้น ${coverage["ครูประจำชั้น"]} · เวร ${coverage["เวร"]}</span>` : ""}
+          ${coverage.total > 0 ? `<span class="cell-sub wide-cell">วิชา ${coverage["วิชา"]} · ประจำชั้น ${coverage["ครูประจำชั้น"]} · เวร ${coverage["เวร"]}</span><span class="cell-sub mobile-cell" aria-label="วิชา ${coverage["วิชา"]} ประจำชั้น ${coverage["ครูประจำชั้น"]} เวร ${coverage["เวร"]}">วิชา ${coverage["วิชา"]}<br>ชั้น ${coverage["ครูประจำชั้น"]}<br>เวร ${coverage["เวร"]}</span>` : ""}
         </td>
-        <td>
+        <td data-label="ขอสาย">
           <span class="cell-main">ขอ ${s.permitRequested}</span>
-          <span class="cell-sub">มาทันเวลาที่อนุญาต ${s.permitUsed}</span>
+          <span class="cell-sub wide-cell">มาทันเวลาที่อนุญาต ${s.permitUsed}</span>
+          <span class="cell-sub mobile-cell" aria-label="มาทันเวลาที่อนุญาต ${s.permitUsed}">ทัน ${s.permitUsed}</span>
         </td>
       </tr>`;
     }).join("")

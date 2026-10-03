@@ -60,6 +60,8 @@
     body { padding:10px; }
     .task-head { display:block; }
   }
+  .empty-days { padding:8px 12px; color:var(--muted); font-size:14px; border-bottom:1px solid var(--line); }
+  .past-days { margin-bottom:12px; } .past-days > summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--teal); font-weight:600; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -91,6 +93,7 @@
       <div class="section">ตารางเวรรายวัน</div>
       <div id="days"><div class="empty">กำลังโหลด…</div></div>
     </div>
+    <div id="toast"></div>
   </main>
 </div>
 
@@ -125,6 +128,67 @@ if (session) {
     return end ? `${start}–${end} น.` : `${start} น. เป็นต้นไป`;
   };
 
+  function renderBoardDays(range, rosterByDate, dutyTypes, typeByCode, staffById, schedule, holidays) {
+    const dates = eachDate(range.from, range.to);
+    const hasToday = range.from <= today && today <= range.to;
+    const working = date => schedule.get(isoWeekday(date)) === true && !holidays.has(date);
+    const openDate = hasToday ? dates.find(date => date >= today && working(date) && (rosterByDate.get(date) || []).length) : null;
+    const renderDay = date => {
+        const d = new Date(date + "T00:00:00Z");
+        const label = d.toLocaleDateString("th-TH", {
+          weekday:"long", day:"numeric", month:"long", year:"numeric", timeZone:"UTC"
+        });
+        const rows = rosterByDate.get(date) || [];
+        const holidayName = holidays.get(date);
+        const isWorkingDay = schedule.get(isoWeekday(date)) === true;
+        const dim = !!holidayName || !isWorkingDay;
+        const dayNote = holidayName ? `วันหยุด — ${holidayName}` : !isWorkingDay ? "วันไม่ทำงาน" : "";
+        const groups = dutyTypes.map(type => ({
+          type,
+          rows:rows.filter(row => row.duty_type === type.code)
+        })).filter(group => group.rows.length);
+        const unknownCodes = [...new Set(rows.map(row => row.duty_type)
+          .filter(code => !typeByCode.has(code)))];
+        unknownCodes.forEach(code => groups.push({ type:{ code }, rows:rows.filter(row => row.duty_type === code) }));
+        const body = groups.length ? groups.map(group => `<section class="task-group">
+          <div class="task-head"><div><div class="task-name">${esc(group.type.code)}</div>
+            <div class="hint">${esc(timeLabel(group.type))}</div></div>
+            <span class="hint">${group.rows.length} คน</span></div>
+          <div class="roster">${group.rows.map(row => {
+            const person = staffById.get(row.staff_id);
+            const isMine = row.staff_id === me?.id;
+            return `<div class="roster-row${isMine ? " mine" : ""}"><span class="name">${esc(person?.full_name || "ไม่พบชื่อในทะเบียนปัจจุบัน")}
+              ${row.note ? `<span class="note">${esc(row.note)}</span>` : ""}</span>
+              ${isMine ? '<span class="badge">เวรของคุณ</span>' : ""}</div>`;
+          }).join("")}</div></section>`).join("")
+          : '<div class="empty">ยังไม่มีเวร</div>';
+        return `<details class="day${date === today ? " today" : ""}${dim ? " dim" : ""}"
+          ${date === openDate ? "open" : ""}>
+          <summary>${esc(label)} · ${rows.length} รายการ${date === today ? " · วันนี้" : date === openDate ? " · วันทำงานถัดไป" : ""}
+            ${dayNote ? `<span class="day-note"> · ${esc(dayNote)}</span>` : ""}</summary>${body}</details>`;
+
+    };
+    const short = date => new Date(date + "T00:00:00Z").toLocaleDateString("th-TH", {weekday:"short",day:"numeric",month:"short",timeZone:"UTC"});
+    const renderDates = values => {
+      let output = "";
+      for (let index=0; index<values.length; index++) {
+        const from = values[index];
+        if ((rosterByDate.get(from) || []).length) { output += renderDay(from); continue; }
+        let end = index;
+        while (end+1<values.length && !(rosterByDate.get(values[end+1]) || []).length) end++;
+        const emptyDates = values.slice(index,end+1);
+        const workCount = emptyDates.filter(working).length;
+        const notes = emptyDates.filter(date => holidays.has(date)).map(date => `${short(date)} · วันหยุด — ${holidays.get(date)}`);
+        output += `<div class="empty-days">${esc(short(from))}${end>index ? " – " + esc(short(values[end])) : ""} · ไม่มีเวร${workCount ? ` (วันทำงาน ${workCount} วัน)` : ""}${notes.length ? `<div class="day-note">${esc(notes.join(" · "))}</div>` : !workCount ? '<span class="day-note"> · วันไม่ทำงาน</span>' : ""}</div>`;
+        index = end;
+      }
+      return output;
+    };
+    const past = hasToday ? dates.filter(date => date < today) : [];
+    const future = hasToday ? dates.filter(date => date >= today) : dates;
+    return (past.length ? `<details class="past-days"><summary>ดูวันที่ผ่านมา (${past.length} วัน)</summary>${renderDates(past)}</details>` : "") + renderDates(future);
+  }
+
   async function loadBoard() {
     const range = monthRange(el("month").value);
     if (!range) return;
@@ -155,40 +219,7 @@ if (session) {
         rosterByDate.get(row.duty_date).push(row);
       }
 
-      el("days").innerHTML = eachDate(range.from, range.to).map(date => {
-        const d = new Date(date + "T00:00:00Z");
-        const label = d.toLocaleDateString("th-TH", {
-          weekday:"long", day:"numeric", month:"long", year:"numeric", timeZone:"UTC"
-        });
-        const rows = rosterByDate.get(date) || [];
-        const holidayName = holidays.get(date);
-        const isWorkingDay = schedule.get(isoWeekday(date)) === true;
-        const dim = !!holidayName || !isWorkingDay;
-        const dayNote = holidayName ? `วันหยุด — ${holidayName}` : !isWorkingDay ? "วันไม่ทำงาน" : "";
-        const groups = dutyTypes.map(type => ({
-          type,
-          rows:rows.filter(row => row.duty_type === type.code)
-        })).filter(group => group.rows.length);
-        const unknownCodes = [...new Set(rows.map(row => row.duty_type)
-          .filter(code => !typeByCode.has(code)))];
-        unknownCodes.forEach(code => groups.push({ type:{ code }, rows:rows.filter(row => row.duty_type === code) }));
-        const body = groups.length ? groups.map(group => `<section class="task-group">
-          <div class="task-head"><div><div class="task-name">${esc(group.type.code)}</div>
-            <div class="hint">${esc(timeLabel(group.type))}</div></div>
-            <span class="hint">${group.rows.length} คน</span></div>
-          <div class="roster">${group.rows.map(row => {
-            const person = staffById.get(row.staff_id);
-            const isMine = row.staff_id === me?.id;
-            return `<div class="roster-row${isMine ? " mine" : ""}"><span class="name">${esc(person?.full_name || "ไม่พบชื่อในทะเบียนปัจจุบัน")}
-              ${row.note ? `<span class="note">${esc(row.note)}</span>` : ""}</span>
-              ${isMine ? '<span class="badge">เวรของคุณ</span>' : ""}</div>`;
-          }).join("")}</div></section>`).join("")
-          : '<div class="empty">ยังไม่มีเวร</div>';
-        return `<details class="day${date === today ? " today" : ""}${dim ? " dim" : ""}"
-          ${date === today ? "open" : ""}>
-          <summary>${esc(label)} · ${rows.length} รายการ${date === today ? " · วันนี้" : ""}
-            ${dayNote ? `<span class="day-note"> · ${esc(dayNote)}</span>` : ""}</summary>${body}</details>`;
-      }).join("");
+      el("days").innerHTML = renderBoardDays(range, rosterByDate, dutyTypes, typeByCode, staffById, schedule, holidays);
     } catch (error) {
       el("days").innerHTML = `<div class="banner warn">${esc(error.message || "โหลดตารางเวรไม่สำเร็จ กรุณาลองเปิดหน้าใหม่")}</div>`;
     }

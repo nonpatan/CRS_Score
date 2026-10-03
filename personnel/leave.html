@@ -43,7 +43,7 @@
   button.small { font-size:13px; padding:6px 10px; }
   button.danger { background:var(--danger-soft); color:var(--danger); }
   button:disabled { opacity:.5; cursor:default; }
-  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+  .section { font-size:12px; font-weight:600; color:var(--muted);
                    text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
   .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
   .banner.warn { background:var(--amber-soft); color:var(--amber); }
@@ -66,6 +66,31 @@
            pointer-events:none; transition:opacity .18s; z-index:60; }
   #toast.show { opacity:1; } #toast.err { background:var(--danger); }
   .muted-empty { color:var(--muted); text-align:center; padding:18px 0; }
+  /* ปุ่มประเภทและวันที่ใช้ช่องเดิมเป็นแหล่งความจริง */
+  [hidden] { display:none !important; }
+  .choice-group, .date-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+  .choice-group button, .date-chips button, #multi-days { min-height:44px; background:var(--white); border:1px solid var(--line); color:var(--ink); }
+  .choice-group button[aria-checked="true"], .date-chips button[aria-pressed="true"] { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); }
+  button:focus-visible, a:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #quota-hint { margin:0 0 14px; }
+  #date-fields { padding:12px; border:1px solid var(--line); border-radius:10px; margin-bottom:14px; }
+  #date-fields.is-empty { background:var(--amber-soft); border-color:var(--amber); }
+  #date-fields input { min-width:0; }
+  #multi-days { margin-top:8px; width:100%; color:var(--teal); }
+  #end-field { margin:12px 0 0; }
+  .month-nav { display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; gap:8px; margin-bottom:12px; }
+  .month-nav button { min-height:44px; padding:6px; background:var(--teal-soft); color:var(--teal); }
+  #month-title { text-align:center; font-weight:600; font-size:15px; }
+  .coverage-link { display:inline-flex; min-height:44px; align-items:center; padding:6px 10px; border-radius:8px; color:var(--teal); background:var(--teal-soft); text-decoration:none; font-size:14px; font-weight:600; }
+  .leave-row .info { overflow-wrap:anywhere; }
+  .leave-row .row-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .leave-row button.small, .duty-row button.small { min-height:44px; }
+  #leave-success { background:var(--teal-soft); color:var(--teal); padding:16px; border:1px solid var(--teal); border-radius:12px; margin-bottom:16px; }
+  #leave-success .success-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  #leave-success a { min-height:44px; background:var(--teal); color:var(--white); padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600; }
+  #leave-success button { min-height:44px; background:var(--white); color:var(--teal); }
+  @media (max-width:520px) { .leave-row { display:block; } .leave-row .row-actions { margin-top:8px; } }
+  @media (prefers-reduced-motion:reduce) { .leave-row.just-saved { animation:none; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -85,35 +110,42 @@
     </div>
     <script src="../app-shell.js?v=20261003-3"></script>
   </header>
+  <main class="academic-content">
 
   <div id="gate" class="card" style="display:none"></div>
 
+  <div id="leave-success" hidden role="status"></div>
+
   <div id="form-card" class="card" style="display:none">
-    <div class="section-title">บันทึกใบลาใหม่</div>
+    <div class="section">บันทึกใบลาใหม่</div>
     <div class="field">
       <label for="f-staff">บุคลากร</label>
       <select id="f-staff"></select>
     </div>
-    <div class="row2">
-      <div class="field">
-        <label for="f-type">ประเภทการลา</label>
-        <select id="f-type"></select>
-      </div>
-      <div class="field">
-        <label for="f-portion">ช่วงเวลา</label>
-        <select id="f-portion">
-          <option value="full">เต็มวัน</option>
-          <option value="morning">ครึ่งวันเช้า</option>
-          <option value="afternoon">ครึ่งวันบ่าย</option>
-        </select>
-      </div>
+    <div id="quota-hint" class="field-note"></div>
+    <div class="field">
+      <label id="type-label">ประเภทการลา</label>
+      <select id="f-type" hidden aria-hidden="true"></select>
+      <div id="type-buttons" class="choice-group" role="radiogroup" aria-labelledby="type-label"></div>
     </div>
-    <div class="row2">
-      <div class="field">
-        <label for="f-start">ตั้งแต่วันที่</label>
-        <input id="f-start" type="date">
+    <div class="field">
+      <label id="portion-label">ช่วงเวลา</label>
+      <select id="f-portion" hidden aria-hidden="true">
+        <option value="full">เต็มวัน</option>
+        <option value="morning">ครึ่งวันเช้า</option>
+        <option value="afternoon">ครึ่งวันบ่าย</option>
+      </select>
+      <div id="portion-buttons" class="choice-group" role="radiogroup" aria-labelledby="portion-label"></div>
+    </div>
+    <div id="date-fields">
+      <label for="f-start">วันที่ · เลือกวัน</label>
+      <div class="date-chips" role="group" aria-label="เลือกวันที่เร็ว">
+        <button type="button" id="date-today" aria-pressed="false">วันนี้</button>
+        <button type="button" id="date-tomorrow" aria-pressed="false">พรุ่งนี้</button>
       </div>
-      <div class="field">
+      <input id="f-start" type="date">
+      <button type="button" id="multi-days" aria-expanded="false" aria-controls="end-field">+ ลาหลายวัน (ใส่วันสุดท้าย)</button>
+      <div class="field" id="end-field" hidden>
         <label for="f-end">ถึงวันที่</label>
         <input id="f-end" type="date">
         <div class="field-note" id="end-note">ลาวันเดียวใส่วันเดียวกันได้</div>
@@ -123,21 +155,25 @@
       <label for="f-reason">เหตุผล</label>
       <textarea id="f-reason" placeholder="เช่น ป่วยเป็นไข้ / ไปติดต่อราชการ"></textarea>
     </div>
-    <div id="quota-hint" class="field-note"></div>
     <button id="btn-save" class="primary">บันทึกใบลา</button>
   </div>
 
   <div class="card">
-    <div class="section-title">ใบลาที่บันทึกไว้</div>
+    <div class="section">ใบลาที่บันทึกไว้</div>
+    <div class="month-nav" aria-label="เดือนของรายการ">
+      <button type="button" id="month-prev" aria-label="เดือนก่อน">‹</button>
+      <div id="month-title" aria-live="polite"></div>
+      <button type="button" id="month-next" aria-label="เดือนถัดไป">›</button>
+    </div>
     <div class="field">
       <input id="q" type="search" placeholder="ค้นหาชื่อบุคลากร" autocomplete="off">
     </div>
     <div id="count" class="field-note">—</div>
     <div id="list"></div>
   </div>
+    <div id="toast"></div>
+  </main>
 </div>
-
-<div id="toast"></div>
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getLeaveTypes,
@@ -167,7 +203,7 @@ if (session) {
     const box = document.createElement("div");
     box.className = "card";
     box.innerHTML = personnelAccessDeniedHtml();
-    document.querySelector(".wrap").appendChild(box);
+    document.querySelector("main").appendChild(box);
   } else {
   let staffList = [], leaves = [], years = [];
   let leaveCtxCache = null;   // { year, from, to, ctx }
@@ -182,7 +218,116 @@ if (session) {
     el("form-card").style.display = "";
   }
 
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[ch]);
   const PORTION_LABEL = { full: "เต็มวัน", morning: "ครึ่งวันเช้า", afternoon: "ครึ่งวันบ่าย" };
+
+    // ปุ่มแตะสั่งช่องเดิมและยิง change ให้ตรรกะเดิมทำงาน
+    function syncChoiceUi(selectId, groupId) {
+      const select = el(selectId);
+      const group = el(groupId);
+      group.innerHTML = [...select.options].filter(option => option.value).map(option =>
+        `<button type="button" role="radio" data-choice="${esc(option.value)}" aria-checked="${option.value === select.value}" tabindex="${option.value === select.value ? 0 : -1}">${esc(option.textContent)}</button>`
+      ).join("");
+    }
+    function bindChoiceUi(selectId, groupId) {
+      const group = el(groupId);
+      const choose = button => {
+        el(selectId).value = button.dataset.choice;
+        el(selectId).dispatchEvent(new Event("change", { bubbles:true }));
+        syncChoiceUi(selectId, groupId);
+        group.querySelector('[aria-checked="true"]')?.focus();
+      };
+      group.addEventListener("click", event => {
+        const button = event.target.closest("[data-choice]");
+        if (button) choose(button);
+      });
+      group.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+        const buttons = [...group.querySelectorAll("[data-choice]")];
+        const at = buttons.indexOf(event.target.closest("[data-choice]"));
+        if (at < 0 || !buttons.length) return;
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 :
+          (at + (["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 1) + buttons.length) % buttons.length;
+        choose(buttons[next]);
+      });
+      el(selectId).addEventListener("change", () => syncChoiceUi(selectId, groupId));
+    }
+
+    let multipleDays = false;
+    const thaiDateShort = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+      weekday:"short", day:"numeric", month:"short", timeZone:"UTC"
+    });
+    const dateChoices = () => {
+      const now = bangkokNow();
+      const today = toDateStr(now);
+      now.setUTCDate(now.getUTCDate() + 1);
+      return [today, toDateStr(now)];
+    };
+    function syncDateUi(fromValues = false) {
+      const start = el("f-start").value;
+      const end = el("f-end").value;
+      const half = el("f-portion") && el("f-portion").value !== "full";
+      if (fromValues) multipleDays = !!start && !!end && start !== end;
+      if (!start || half) multipleDays = false;
+      el("end-field").hidden = !multipleDays;
+      el("multi-days").disabled = !!half;
+      el("multi-days").setAttribute("aria-expanded", String(multipleDays));
+      el("multi-days").textContent = multipleDays ? "− ใช้วันเดียว" : "+ ลาหลายวัน (ใส่วันสุดท้าย)";
+      el("date-fields").classList.toggle("is-empty", !start);
+      if (!multipleDays) el("f-end").value = start;
+      const dates = dateChoices();
+      ["date-today", "date-tomorrow"].forEach((id, index) => {
+        el(id).dataset.date = dates[index];
+        el(id).setAttribute("aria-pressed", String(start === dates[index]));
+      });
+      el("date-today").textContent = "วันนี้ " + thaiDateShort(dates[0]);
+    }
+    function bindDateUi() {
+      ["date-today", "date-tomorrow"].forEach(id => el(id).addEventListener("click", () => {
+        el("f-start").value = el(id).dataset.date;
+        el("f-start").dispatchEvent(new Event("change", { bubbles:true }));
+      }));
+      el("multi-days").addEventListener("click", () => {
+        multipleDays = !multipleDays;
+        syncDateUi();
+        if (multipleDays) el("f-end").focus();
+      });
+      // ต้องติดตั้งหลัง listener เดิม เพื่อไม่ให้วันสุดท้ายค้างเมื่อเลือกวันเดียว
+      el("f-start").addEventListener("change", () => {
+        syncDateUi();
+        updateQuotaHint();
+      });
+      el("f-end").addEventListener("change", () => syncDateUi());
+      el("f-portion")?.addEventListener("change", () => syncDateUi());
+    }
+
+    let listMonth = toDateStr(bangkokNow()).slice(0, 7);
+    const shiftMonth = (month, offset) => {
+      const date = new Date(month + "-01T00:00:00Z");
+      date.setUTCMonth(date.getUTCMonth() + offset);
+      return date.toISOString().slice(0, 7);
+    };
+    const inListMonth = row => row.start_date.slice(0, 7) <= listMonth &&
+      (row.end_date || row.start_date).slice(0, 7) >= listMonth;
+    function syncMonthUi(allRows, count, searching, unit) {
+      const months = [toDateStr(bangkokNow()).slice(0, 7), ...allRows.flatMap(row =>
+        [row.start_date.slice(0, 7), (row.end_date || row.start_date).slice(0, 7)])].sort();
+      el("month-prev").disabled = !!searching || listMonth <= months[0];
+      el("month-next").disabled = !!searching || listMonth >= months[months.length - 1];
+      el("month-title").textContent = searching ? "ค้นหาทุกเดือน" :
+        new Date(listMonth + "-01T00:00:00Z").toLocaleDateString("th-TH", {
+          month:"long", year:"numeric", timeZone:"UTC"
+        }) + ` · ${count} ${unit}`;
+      el("count").hidden = !searching;
+      el("count").textContent = searching ? `พบ ${count} ${unit} (ทุกเดือน)` : "";
+    }
+    function bindMonthUi() {
+      el("month-prev").addEventListener("click", () => { listMonth = shiftMonth(listMonth, -1); render(); });
+      el("month-next").addEventListener("click", () => { listMonth = shiftMonth(listMonth, 1); render(); });
+    }
 
   async function loadAll() {
     // จำค่าที่ผู้ใช้เลือกไว้ก่อนสร้าง option ใหม่ เพื่อให้ลงใบลารายการถัดไปได้ต่อเนื่อง
@@ -295,33 +440,42 @@ if (session) {
     el(id)?.addEventListener("change", updateQuotaHint));
 
   function render() {
-    const q = el("q").value.trim().toLowerCase();
-    const nameOf = id => (staffList.find(s => s.id === id) || {}).full_name || "(ไม่พบชื่อ)";
-    const rows = leaves.filter(l => !q || nameOf(l.staff_id).toLowerCase().includes(q));
-    el("count").textContent = `${rows.length} รายการ`;
-
-    if (rows.length === 0) {
-      el("list").innerHTML = '<div class="muted-empty">ยังไม่มีใบลาที่บันทึกไว้</div>';
-      justSavedId = null;
-      return;
-    }
-    const fmt = d => new Date(d + "T00:00:00Z")
-      .toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
-
+    syncChoiceUi("f-type", "type-buttons");
+    syncChoiceUi("f-portion", "portion-buttons");
+    syncDateUi();
     const savedId = justSavedId;
-    el("list").innerHTML = rows.map(l => {
-      const range = l.start_date === l.end_date ? fmt(l.start_date) : `${fmt(l.start_date)} – ${fmt(l.end_date)}`;
+    const saved = savedId ? leaves.find(row => row.id === savedId) : null;
+    const nameOf = id => (staffList.find(row => row.id === id) || {}).full_name || "(ไม่พบชื่อ)";
+    if (saved) {
+      listMonth = saved.start_date.slice(0, 7);
+      el("leave-success").hidden = false;
+      const savedDate = saved.start_date === saved.end_date ? thaiDateShort(saved.start_date)
+        : `${thaiDateShort(saved.start_date)} – ${thaiDateShort(saved.end_date)}`;
+      el("leave-success").innerHTML = `<b>✓ บันทึกแล้ว — ${esc(nameOf(saved.staff_id))}</b>
+        <div>${esc(saved.leave_type)} · ${esc(PORTION_LABEL[saved.day_portion] || "")} · ${esc(savedDate)}</div>
+        <div class="success-actions"><a href="coverage.html?date=${encodeURIComponent(saved.start_date)}">จัดคนแทนวันที่ ${esc(thaiDateShort(saved.start_date))} →</a>
+        <button type="button" id="next-leave">บันทึกใบลาคนถัดไป</button></div>`;
+      el("next-leave").addEventListener("click", () => {
+        el("leave-success").hidden = true;
+        el("f-staff").focus();
+      });
+    }
+    const q = el("q").value.trim().toLowerCase();
+    const rows = leaves.filter(row => q ? nameOf(row.staff_id).toLowerCase().includes(q) : inListMonth(row));
+    syncMonthUi(leaves, rows.length, q, "ใบ");
+    const today = toDateStr(bangkokNow());
+    el("list").innerHTML = rows.length ? rows.map(l => {
+      const range = l.start_date === l.end_date ? thaiDateShort(l.start_date) : `${thaiDateShort(l.start_date)} – ${thaiDateShort(l.end_date)}`;
       const chip = l.day_portion === "full"
-        ? `<span class="chip">${l.leave_type}</span>`
-        : `<span class="chip half">${l.leave_type} · ${PORTION_LABEL[l.day_portion]}</span>`;
-      return `<div class="leave-row${l.id === savedId ? " just-saved" : ""}" data-leave-id="${l.id}">
-        <div class="info">
-          <div class="who">${nameOf(l.staff_id)} ${chip}</div>
-          <div class="meta">${range}${l.reason ? " · " + l.reason : ""}</div>
-        </div>
-        ${canEdit ? `<button class="danger small" data-del="${l.id}">ลบ</button>` : ""}
+        ? `<span class="chip">${esc(l.leave_type)}</span>`
+        : `<span class="chip half">${esc(l.leave_type)} · ${esc(PORTION_LABEL[l.day_portion])}</span>`;
+      return `<div class="leave-row${l.id === savedId ? " just-saved" : ""}" data-leave-id="${esc(l.id)}">
+        <div class="info"><div class="who">${esc(nameOf(l.staff_id))} ${chip}</div>
+          <div class="meta">${esc(range)}</div>${l.reason ? `<div class="meta">${esc(l.reason)}</div>` : ""}</div>
+        <div class="row-actions">${l.start_date >= today ? `<a class="coverage-link" href="coverage.html?date=${encodeURIComponent(l.start_date)}">จัดคนแทน →</a>` : ""}
+          ${canEdit ? `<button class="danger small" data-del="${esc(l.id)}">ลบ</button>` : ""}</div>
       </div>`;
-    }).join("");
+    }).join("") : `<div class="muted-empty">${q ? "ไม่พบใบลาที่ตรงกับคำค้น" : "ยังไม่มีใบลาในเดือนนี้"}</div>`;
     justSavedId = null;
     if (savedId) {
       el("list").querySelector(`[data-leave-id="${savedId}"]`)
@@ -388,6 +542,14 @@ if (session) {
     await loadAll();
     await updateQuotaHint();
   });
+
+  bindChoiceUi("f-type", "type-buttons");
+  bindChoiceUi("f-portion", "portion-buttons");
+  bindDateUi();
+  bindMonthUi();
+  ["input", "change"].forEach(type => el("form-card").addEventListener(type, () => {
+    el("leave-success").hidden = true;
+  }));
 
   // ตั้งค่าเริ่มต้นเป็นวันนี้ตามเวลาไทย
   const today = toDateStr(bangkokNow());

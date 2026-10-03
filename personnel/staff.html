@@ -47,7 +47,7 @@
   button.small { font-size: 13px; padding: 6px 10px; }
   button:disabled { opacity: .5; cursor: default; }
 
-  .section-title { font-size: 12px; font-weight: 600; color: var(--muted);
+  .section { font-size: 12px; font-weight: 600; color: var(--muted);
                    text-transform: uppercase; letter-spacing: .03em; margin: 4px 0 10px; }
   .banner { padding: 11px 13px; border-radius: 10px; font-size: 14px; margin-bottom: 14px; }
   .banner.warn { background: var(--amber-soft); color: var(--amber); }
@@ -88,6 +88,16 @@
   #toast.show { opacity: 1; }
   #toast.err { background: var(--danger); }
   .muted-empty { color: var(--muted); text-align: center; padding: 18px 0; }
+  .sync-line { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; }
+  .sync-line #sync-status { flex:1; min-width:140px; margin:0; }
+  .sync-line #btn-sync { width:auto; flex-shrink:0; margin:0; }
+  .sync-info summary { min-height:44px; display:flex; align-items:center; cursor:pointer; color:var(--teal); }
+  .staff-row { padding:12px 0; } .staff-head { align-items:center; }
+  .staff-toggle { margin-left:auto; min-height:44px; }
+  .staff-meta { overflow-wrap:anywhere; }
+  .chip.linked { color:var(--teal); background:var(--teal-soft); }
+  .chip.unlinked { color:var(--amber); background:var(--amber-soft); }
+  .staff-edit[hidden], #add-card[hidden] { display:none !important; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -107,34 +117,25 @@
     </div>
     <script src="../app-shell.js?v=20261003-3"></script>
   </header>
+  <main class="academic-content">
 
   <div id="main">
     <div id="gate" class="card" style="display:none"></div>
 
     <div id="sync-card" class="card" style="display:none">
-      <div class="section-title">ซิงก์จาก Jibble</div>
-      <div class="banner info">
+      <div class="section">ซิงก์จาก Jibble</div>
+      <details class="sync-info"><summary>ⓘ ข้อมูลการซิงก์</summary><div class="banner info">
         รายชื่อ ตารางงาน และวันหยุด ดึงมาจาก Jibble โดยตรง — แก้ที่ Jibble แล้วกดปุ่มนี้เพื่ออัปเดต
       </div>
+      </details>
+      <div class="sync-line"><div class="field-note" id="sync-status">—</div>
       <button id="btn-sync" class="primary">ดึงรายชื่อจาก Jibble</button>
-      <div class="field-note" id="sync-status">—</div>
+      </div>
+      <button type="button" class="ghost" id="toggle-add" aria-expanded="false" aria-controls="add-card">+ เพิ่มบุคลากร (ไม่มีใน Jibble)</button>
     </div>
 
-    <div class="card">
-      <div class="section-title">รายชื่อบุคลากร</div>
-      <div class="field">
-        <input id="q" type="search" placeholder="ค้นหาชื่อ อีเมล หรือรหัส" autocomplete="off">
-      </div>
-      <div class="inline" style="margin-bottom:10px">
-        <input type="checkbox" id="show-inactive">
-        <label for="show-inactive">แสดงคนที่ออกแล้วด้วย</label>
-      </div>
-      <div id="count" class="field-note">—</div>
-      <div id="list"></div>
-    </div>
-
-    <div id="add-card" class="card" style="display:none">
-      <div class="section-title">เพิ่มบุคลากรที่ไม่มีใน Jibble</div>
+    <div id="add-card" class="card" style="display:none" hidden>
+      <div class="section">เพิ่มบุคลากรที่ไม่มีใน Jibble</div>
       <div class="banner warn">
         ใช้กับคนที่ไม่ได้ลงเวลาใน Jibble (เช่น คนที่ได้รับการอนุโลม) — คนที่ลงเวลาอยู่แล้ว
         ให้กดปุ่มดึงจาก Jibble ด้านบนแทน จะได้ไม่มีชื่อซ้ำกัน
@@ -159,10 +160,25 @@
       </div>
       <button id="btn-add" class="primary">เพิ่มบุคลากร</button>
     </div>
-  </div>
-</div>
 
-<div id="toast"></div>
+    <div class="card">
+      <div class="section">รายชื่อบุคลากร</div>
+      <div class="field">
+        <input id="q" type="search" placeholder="ค้นหาชื่อ อีเมล หรือรหัส" autocomplete="off">
+      </div>
+      <div class="inline" style="margin-bottom:10px">
+        <input type="checkbox" id="show-inactive">
+        <label for="show-inactive">แสดงคนที่ออกแล้วด้วย</label>
+      </div>
+      <div id="count" class="field-note">—</div>
+      <div id="list"></div>
+    </div>
+
+
+  </div>
+    <div id="toast"></div>
+  </main>
+</div>
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, syncJibble, getLastSyncLog,
@@ -201,7 +217,7 @@ if (session) {
     const box = document.createElement("div");
     box.className = "card";
     box.innerHTML = personnelAccessDeniedHtml();
-    document.querySelector(".wrap").appendChild(box);
+    document.querySelector("main").appendChild(box);
   } else {
   let staffList = [];
   let profiles = [];
@@ -291,6 +307,7 @@ if (session) {
       .map(input => input.dataset.positionCode);
   }
 
+  const expandedStaff = new Set();
   function render() {
     const q = el("q").value.trim().toLowerCase();
     const showInactive = el("show-inactive").checked;
@@ -322,6 +339,7 @@ if (session) {
       if (s.allowed_late_time) chips.push(`<span class="chip late">อนุโลมถาวร ${String(s.allowed_late_time).slice(0,5)}</span>`);
       if (!s.jibble_person_id) chips.push('<span class="chip nojibble">ไม่มีใน Jibble</span>');
 
+      chips.push(`<span class="chip ${s.user_id ? "linked" : "unlinked"}">${s.user_id ? "มีบัญชี" : "ยังไม่ผูกบัญชี"}</span>`);
       const metaParts = [
         s.jibble_code ? esc(s.jibble_code) : "",
         positionText
@@ -330,7 +348,7 @@ if (session) {
         s.email ? esc(s.email) : ""
       ].filter(Boolean);
       const editor = canEdit ? `
-        <div class="staff-edit" data-editor="${s.id}">
+        <div class="staff-edit" data-editor="${s.id}" id="staff-editor-${esc(s.id)}"${expandedStaff.has(s.id) ? "" : " hidden"}>
           <div class="field">
             <label>ตำแหน่ง (เลือกได้หลายตำแหน่ง)</label>
             <div class="position-options">${positionOptionsHtml(selectedCodes)}</div>
@@ -373,12 +391,28 @@ if (session) {
       return `<div class="staff-row">
         <div class="staff-head">
           <span class="staff-name">${esc(s.full_name)}</span>${chips.join(" ")}
+          ${canEdit ? `<button type="button" class="ghost staff-toggle" data-toggle-staff="${esc(s.id)}" aria-controls="staff-editor-${esc(s.id)}" aria-expanded="${expandedStaff.has(s.id)}">${expandedStaff.has(s.id) ? "ปิด ▴" : "แก้ไข"}</button>` : ""}
         </div>
         <div class="staff-meta">${metaParts.join(" · ")}</div>
         ${editor}
       </div>`;
     }).join("");
   }
+
+  el("list").addEventListener("click", event => {
+    const button = event.target.closest("[data-toggle-staff]");
+    if (!button) return;
+    const id = button.dataset.toggleStaff;
+    if (expandedStaff.has(id)) expandedStaff.delete(id); else expandedStaff.add(id);
+    // พับ/กาง DOM เดิม จึงไม่ล้างค่าที่กำลังแก้
+    document.getElementById("staff-editor-" + id).hidden = !expandedStaff.has(id);
+    button.setAttribute("aria-expanded", String(expandedStaff.has(id)));
+    button.textContent = expandedStaff.has(id) ? "ปิด ▴" : "แก้ไข";
+  });
+  el("toggle-add").addEventListener("click", () => {
+    el("add-card").hidden = !el("add-card").hidden;
+    el("toggle-add").setAttribute("aria-expanded", String(!el("add-card").hidden));
+  });
 
   // ---------- บันทึกรายคน ----------
   async function syncPositionMap(staffId, desiredCodes) {

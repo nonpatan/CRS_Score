@@ -25,7 +25,7 @@
   header .nav #btn-signout { margin-left:auto; color:var(--danger); background:#fff0f0; }
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px;
           padding:16px; margin-bottom:16px; }
-  .section-title { font-size:12px; font-weight:600; color:var(--muted);
+  .section { font-size:12px; font-weight:600; color:var(--muted);
                    text-transform:uppercase; letter-spacing:.03em; margin:4px 0 10px; }
   .banner { padding:11px 13px; border-radius:10px; font-size:14px; margin-bottom:14px; }
   .banner.info { background:var(--teal-soft); color:var(--teal); }
@@ -99,6 +99,20 @@
     .add-row { align-items:stretch; flex-direction:column; }
     .add-row button { width:100%; }
   }
+  .pattern-mobile { display:none; }
+  @media (max-width:767px) {
+    #pattern-grid { overflow:visible; } .pattern-matrix { display:none; }
+    .pattern-mobile { display:block; }
+    .weekday-tabs { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; padding-bottom:8px; }
+    .weekday-tabs button { min-width:0; min-height:44px; padding:10px 0; color:var(--muted); border:1px solid var(--line); background:var(--white); }
+    .weekday-tabs button[aria-selected="true"] { color:var(--teal); border-color:var(--teal); background:var(--teal-soft); }
+    .pattern-task { padding:12px 0; border-bottom:1px solid var(--line); }
+    .pattern-task-head { display:flex; justify-content:space-between; gap:8px; margin-bottom:8px; }
+    .pattern-task .chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .pattern-task .chip { white-space:normal; } .pattern-task .chip button { min-width:32px; min-height:32px; margin-left:4px; }
+    .pattern-task select { width:100%; min-width:0; }
+    .pattern-task .copy-btn { width:100%; min-height:44px; margin-top:8px; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -121,9 +135,9 @@
   </header>
 
   <div id="gate" class="card" style="display:none"></div>
-  <main id="content" style="display:none">
+  <main class="academic-content" id="content" style="display:none">
     <div class="card">
-      <div class="section-title">เวรของเดือน</div>
+      <div class="section">เวรของเดือน</div>
       <div id="attendance-rule" class="banner info">กำลังโหลดเกณฑ์เข้างาน…</div>
       <div class="toolbar">
         <div>
@@ -136,7 +150,7 @@
     </div>
 
     <div class="card">
-      <div class="section-title">รูปแบบประจำสัปดาห์ — 5 วัน × งาน</div>
+      <div class="section">รูปแบบประจำสัปดาห์ — 5 วัน × งาน</div>
       <div class="banner warn">
         รูปแบบเป็นแม่แบบ การแก้ตรงนี้ไม่เปลี่ยนเดือนที่สร้างแล้ว ปุ่มคัดลอกจะคัดรายชื่อจากงานด้านซ้ายในวันเดียวกัน
       </div>
@@ -144,12 +158,12 @@
     </div>
 
     <div class="card">
-      <div class="section-title">ตารางจริงรายวัน — จัดกลุ่มตามงาน</div>
+      <div class="section">ตารางจริงรายวัน — จัดกลุ่มตามงาน</div>
       <div id="days"></div>
     </div>
+    <div id="toast"></div>
   </main>
 </div>
-<div id="toast"></div>
 
 <script type="module">
 import {
@@ -261,6 +275,8 @@ if (session) {
       });
     }
 
+    let patternWeekday = isoWeekday(today);
+    if (patternWeekday > 5) patternWeekday = 1;
     function renderPattern() {
       const weekdays = [1,2,3,4,5];
       el("pattern-grid").innerHTML = dutyTypes.length
@@ -286,7 +302,39 @@ if (session) {
                   <option value="">+ เพิ่มคน</option>${staffOptions(excluded)}</select></td>`;
             }).join("")}</tr>`).join("")}</tbody></table>`
         : '<div class="banner warn">ยังไม่มีงานเวรที่เปิดใช้งาน กรุณาเพิ่มที่หน้าตั้งค่างานบุคคล</div>';
+      if (!dutyTypes.length) return;
+      el("pattern-grid").insertAdjacentHTML("beforeend", `<div class="pattern-mobile">
+        <div class="weekday-tabs" role="tablist" aria-label="วันในรูปแบบเวร">${weekdays.map(weekday =>
+          `<button type="button" role="tab" aria-label="${THAI_DAY[weekday]}" data-pattern-day="${weekday}" aria-selected="${weekday === patternWeekday}" aria-controls="pattern-day-panel" id="pattern-tab-${weekday}" tabindex="${weekday === patternWeekday ? 0 : -1}">${["", "จ", "อ", "พ", "พฤ", "ศ"][weekday]}</button>`).join("")}</div>
+        <div id="pattern-day-panel" role="tabpanel" aria-labelledby="pattern-tab-${patternWeekday}">${dutyTypes.map((type,index) => {
+          const rows = rowsFor(patternWeekday, type.code);
+          const excluded = new Set(rows.map(row => row.staff_id));
+          return `<section class="pattern-task"><div class="pattern-task-head"><div><div class="task-time">${esc(timeLabel(type))}</div><b>${esc(type.code)}${type.active ? "" : " (ปิดใช้)"}</b></div><span class="field-note">${rows.length} คน</span></div>
+            <div class="chips">${rows.map(row => {
+              const staff = staffById.get(row.staff_id);
+              return staff ? `<span class="chip${staff.exempt || staff.allowed_late_time ? " warn" : ""}">${esc(staff.full_name)}<button type="button" data-remove-pattern="${row.staff_id}" data-weekday="${patternWeekday}" data-duty-type="${esc(type.code)}" aria-label="ถอด ${esc(staff.full_name)}">×</button></span>` : "";
+            }).join("") || '<span class="empty">ยังไม่มีคน</span>'}</div>
+            <select aria-label="เพิ่มคน ${esc(type.code)} ${THAI_DAY[patternWeekday]}" data-add-pattern data-weekday="${patternWeekday}" data-duty-type="${esc(type.code)}" ${type.active && staffOptions(excluded) ? "" : "disabled"}><option value="">+ เพิ่มคน</option>${staffOptions(excluded)}</select>
+            ${index && type.active ? `<button type="button" class="ghost copy-btn" data-copy-pattern data-weekday="${patternWeekday}" data-from-type="${esc(dutyTypes[index-1].code)}" data-to-type="${esc(type.code)}">คัดลอกจาก ${esc(dutyTypes[index-1].code)}</button>` : ""}</section>`;
+        }).join("")}</div></div>`);
     }
+    function selectPatternDay(weekday) {
+      patternWeekday = weekday;
+      renderPattern();
+      el("pattern-grid").querySelector(`[data-pattern-day="${weekday}"]`)?.focus();
+    }
+    el("pattern-grid").addEventListener("click", event => {
+      const button = event.target.closest("[data-pattern-day]");
+      if (button) selectPatternDay(Number(button.dataset.patternDay));
+    });
+    el("pattern-grid").addEventListener("keydown", event => {
+      const button = event.target.closest("[data-pattern-day]");
+      if (!button || !["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const weekday = event.key === "Home" ? 1 : event.key === "End" ? 5 :
+        ((patternWeekday - 1 + (event.key === "ArrowRight" ? 1 : 4)) % 5) + 1;
+      selectPatternDay(weekday);
+    });
 
     function dutyStatus(staff, date, type) {
       if (!type.affects_attendance) return null;
