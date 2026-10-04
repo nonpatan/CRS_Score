@@ -70,8 +70,16 @@
     body { padding: 12px; }
     .card { padding: 14px; }
     .section-head { display: block; }
-    .decision-actions { grid-template-columns: 1fr; }
+
   }
+
+  /* วันที่เป็นจุดนำสายตา และปุ่มตัดสินคู่กันทั้งมือถือ/คอม */
+  .request-summary { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; align-items: start; }
+  .makeup-date { display: grid; justify-items: center; padding: 8px 4px; border-radius: 10px; color: var(--teal); background: var(--teal-soft); line-height: 1.4; }
+  .makeup-date span { font-size: 13px; }
+  .makeup-date strong { font-size: 30px; line-height: 1.2; }
+  .request-info { min-width: 0; }
+  .request-info .queue-title { font-size: 18px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -90,7 +98,7 @@
     <div id="content" hidden>
       <section class="card">
         <div class="section-head">
-          <div><h2>รออนุมัติ</h2><p id="pending-count">กำลังโหลด…</p></div>
+          <div><h2 id="pending-count">รออนุมัติ — คำขอ</h2></div>
         </div>
         <div class="banner info">อนุมัติแล้วระบบจะนับเป็น “สอนชดแล้ว” ทันที · ไม่อนุมัติต้องบอกเหตุผลให้ครูแก้ได้</div>
         <div id="pending-list"><div class="empty">กำลังโหลด…</div></div>
@@ -149,16 +157,23 @@ if (session) {
   let busy = false;
 
   function render() {
-    el("pending-count").textContent = pending.length
-      ? `${pending.length} รายการ`
-      : "ไม่มีคำขอรออนุมัติ";
+    el("pending-count").textContent = `รออนุมัติ ${pending.length} คำขอ`;
     el("pending-list").innerHTML = pending.length ? pending.map(row => {
       const rejecting = rejectingId === row.id;
+      const date = new Date(String(row.makeup_date) + "T00:00:00Z");
+      const weekday = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."][date.getUTCDay()] || "—";
+      const datePart = options => Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("th-TH", { ...options, timeZone:"UTC" });
       return `<div class="queue-card" data-request="${esc(row.id)}">
-        <div class="queue-title">${esc(row.staff_name || "(ไม่พบชื่อครู)")}</div>
-        <div class="meta">${esc(subjectLabel(row) || "ไม่ระบุวิชา")}</div>
-        <div class="meta">สอนชด ${esc(fmtDate(row.makeup_date))} · ${esc(timeLabel(row))} · ${esc(fmtPeriods(row.periods))} คาบ</div>
-        <div class="meta">ครูส่งคำขอเมื่อ ${esc(fmtDateTime(row.created_at))}</div>
+        <div class="request-summary">
+          <time class="makeup-date" datetime="${esc(row.makeup_date)}" aria-label="สอนชด ${esc(fmtDate(row.makeup_date))}">
+            <span>${esc(weekday)}</span><strong>${esc(datePart({ day:"numeric" }))}</strong><span>${esc(datePart({ month:"short" }))}</span>
+          </time>
+          <div class="request-info">
+            <div class="queue-title">${esc(row.staff_name || "(ไม่พบชื่อครู)")}</div>
+            <div class="meta">${esc(subjectLabel(row) || "ไม่ระบุวิชา")}</div>
+            <div class="meta">${esc(timeLabel(row))} · ${esc(fmtPeriods(row.periods))} คาบ · ส่ง ${esc(fmtDateTime(row.created_at))}</div>
+          </div>
+        </div>
         ${row.note ? `<div class="note">หมายเหตุจากครู: ${esc(row.note)}</div>` : ""}
         <div class="decision-actions">
           <button class="primary" type="button" data-approve>อนุมัติ</button>
@@ -169,7 +184,7 @@ if (session) {
           <textarea id="reason-${esc(row.id)}" data-reason maxlength="500" placeholder="บอกครูว่าต้องแก้อะไร"></textarea>
         </div>` : ""}
       </div>`;
-    }).join("") : '<div class="empty">ไม่มีคำขอรออนุมัติ</div>';
+    }).join("") : '<div class="empty">ไม่มีคำขอรออนุมัติ · คำขอใหม่จะขึ้นที่นี่ทันที</div>';
   }
 
   async function loadQueue() {
