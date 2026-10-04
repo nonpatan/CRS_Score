@@ -18,6 +18,7 @@
     --white: #ffffff;
     --danger: #a32d2d;
     --danger-soft: #fceaea;
+    --amber: #8a5a00; --amber-soft: #fff4df;
   }
   * { box-sizing: border-box; }
   body {
@@ -170,10 +171,37 @@
   .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
   .modal-actions button { flex: 1; margin-top: 0; }
   .status-modal textarea { min-height: 88px; font-family: inherit; font-size: 16px; }
-  @media (max-width: 420px) {
-    .student-row { align-items: flex-start; flex-wrap: wrap; }
-    .student-actions { width: 100%; justify-content: flex-end; }
-  }
+  #student-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  .student-group { margin:0; min-width:0; }
+  .student-group.is-open { grid-column:1/-1; }
+  .student-group-toggle { min-height:68px; padding:8px; border:1px solid var(--line); border-radius:10px; text-align:center; justify-content:center; background:var(--bg); }
+  .student-group.is-open .student-group-toggle { min-height:44px; text-align:left; background:var(--teal-soft); }
+  .student-group-summary { font-size:14px; }
+  .student-group-summary b { display:block; font-size:17px; color:var(--ink); }
+  .student-group-summary small { font-size:12px; font-weight:400; }
+  .student-group.is-open .student-group-summary { display:flex; gap:8px; align-items:center; }
+  .student-group-toggle:focus-visible, button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #student-list .student-row { flex-wrap:nowrap; align-items:center; padding:4px 0; gap:6px; }
+  #student-list .student-actions { width:auto; gap:6px; }
+  #student-list .name { font-size:14px; line-height:1.35; overflow-wrap:anywhere; }
+  #student-list .meta { font-size:12px; line-height:1.4; }
+  #student-list .status-btn { min-height:44px; padding:6px; font-size:12px; }
+  #student-list .icon-btn { min-height:44px; min-width:44px; }
+  .student-status-chip { color:var(--amber); background:var(--amber-soft); font-size:12px; border-radius:6px; padding:1px 5px; }
+  input[type="search"] { width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); font:inherit; font-size:16px; }
+  textarea { font-size:16px; }
+  .list-head, .add-panel-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .list-head .section-title { margin:0; }
+  #open-add-panel { width:auto; margin:0; min-height:44px; font-size:14px; padding:8px 10px; }
+  .add-panel-head h2 { margin:0; font-size:18px; }
+  .add-tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .add-tabs button { flex:1; min-height:44px; }
+  .add-tabs button[aria-selected="true"] { background:var(--teal); color:#fff; }
+  #add-panel .panel-inactive { display:none !important; }
+  #add-panel { margin-top:16px; scroll-margin-top:16px; }
+  #preview-area { overflow-x:auto; }
+  [hidden] { display:none !important; }
+  @media (min-width:1000px) { #student-list { grid-template-columns:repeat(6,minmax(0,1fr)); } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -216,6 +244,32 @@
     คุณไม่ใช่ admin — ดูรายชื่อนักเรียนได้อย่างเดียว เพิ่ม/แก้/ลบไม่ได้
   </div>
 
+  <!-- filter + list -->
+  <div class="card" id="student-filter-card">
+    <div class="row2">
+      <div class="field">
+        <label for="filter-grade">กรองตามชั้น</label>
+        <select id="filter-grade"><option value="">— ทุกชั้น —</option></select>
+      </div>
+      <div class="field">
+        <label for="filter-classroom">กรองตามห้อง</label>
+        <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
+      </div>
+    </div>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin:0">
+      <input type="checkbox" id="filter-show-graduated" style="width:18px; height:18px">
+      <span>แสดงนักเรียนที่ไม่ได้กำลังศึกษาด้วย</span>
+    </label>
+  </div>
+
+  <div class="card" id="list-card">
+    <div class="list-head"><div class="section-title" id="list-title">รายชื่อนักเรียน</div><button type="button" class="primary" id="open-add-panel" hidden aria-expanded="false" aria-controls="add-panel">+ เพิ่มนักเรียน</button></div>
+    <div class="field"><label for="student-search">ค้นชื่อหรือรหัสประจำตัว</label><input type="search" id="student-search" placeholder="ค้นชื่อหรือรหัสประจำตัว" autocomplete="off"></div>
+    <div id="student-list"></div>
+  </div>
+
+  <section id="add-panel" hidden aria-labelledby="add-panel-title">
+    <div class="add-panel-head"><h2 id="add-panel-title">เพิ่มนักเรียน</h2><button type="button" class="ghost" id="close-add-panel">ปิด</button></div>
   <div class="card" id="placement-year-card" style="display:none">
     <div class="section-title">ปีการศึกษาของชั้นและห้อง</div>
     <div class="field">
@@ -225,6 +279,10 @@
     <div class="field-note">ใช้ปีนี้กับนักเรียนที่เพิ่มทั้งแบบทีละคนและจาก Excel เพื่อเก็บประวัติชั้น/ห้องสำหรับรายงานย้อนหลัง</div>
   </div>
 
+    <div class="add-tabs" role="tablist" aria-label="วิธีเพิ่มนักเรียน">
+      <button type="button" id="add-single-tab" role="tab" aria-selected="true" aria-controls="add-card">ทีละคน</button>
+      <button type="button" id="add-excel-tab" role="tab" aria-selected="false" aria-controls="import-card" tabindex="-1">วางจาก Excel</button>
+    </div>
   <!-- วางจาก Excel -->
   <div class="card" id="import-card" style="display:none">
     <div class="section-title">วางจาก Excel (เพิ่มทีละหลายคน)</div>
@@ -272,28 +330,7 @@
     <button class="primary" id="btn-add-one">เพิ่มนักเรียน</button>
   </div>
 
-  <!-- filter + list -->
-  <div class="card">
-    <div class="row2">
-      <div class="field">
-        <label for="filter-grade">กรองตามชั้น</label>
-        <select id="filter-grade"><option value="">— ทุกชั้น —</option></select>
-      </div>
-      <div class="field">
-        <label for="filter-classroom">กรองตามห้อง</label>
-        <select id="filter-classroom"><option value="">— ทุกห้อง —</option></select>
-      </div>
-    </div>
-    <label style="display:flex; align-items:center; gap:8px; font-weight:400; margin:0">
-      <input type="checkbox" id="filter-show-graduated" style="width:18px; height:18px">
-      <span>แสดงนักเรียนที่ไม่ได้กำลังศึกษาด้วย</span>
-    </label>
-  </div>
-
-  <div class="card" id="list-card">
-    <div class="section-title" id="list-title">รายชื่อนักเรียน</div>
-    <div id="student-list"></div>
-  </div>
+  </section>
 
   <div class="toast" id="toast"></div>
   </main>
@@ -376,6 +413,44 @@ if (!isAdminUser) {
   document.getElementById("add-card").style.display = "block";
 }
 
+// แผงเพิ่มอ่านสิทธิ์หลังโค้ดเดิมตั้ง display แล้ว สลับแท็บด้วยคลาสเท่านั้น
+function syncStudentAddAccess() {
+  const allowed = document.getElementById("add-card").style.display !== "none";
+  document.getElementById("open-add-panel").hidden = !allowed;
+  if (!allowed) document.getElementById("add-panel").hidden = true;
+}
+function setStudentAddPanel(open) {
+  syncStudentAddAccess();
+  if (open && document.getElementById("open-add-panel").hidden) return;
+  document.getElementById("add-panel").hidden = !open;
+  document.getElementById("open-add-panel").setAttribute("aria-expanded", String(open));
+  if (open) document.getElementById("add-panel").scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",block:"start"});
+  else document.getElementById("open-add-panel").focus();
+}
+function selectStudentAddTab(excel, focus = false) {
+  document.getElementById("add-card").classList.toggle("panel-inactive", excel);
+  document.getElementById("import-card").classList.toggle("panel-inactive", !excel);
+  for (const [id,selected] of [["add-single-tab",!excel],["add-excel-tab",excel]]) {
+    const tab = document.getElementById(id);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && focus) tab.focus();
+  }
+}
+syncStudentAddAccess();
+selectStudentAddTab(false);
+document.getElementById("open-add-panel").addEventListener("click", () => setStudentAddPanel(true));
+document.getElementById("close-add-panel").addEventListener("click", () => setStudentAddPanel(false));
+for (const [id,excel] of [["add-single-tab",false],["add-excel-tab",true]]) {
+  document.getElementById(id).addEventListener("click", () => selectStudentAddTab(excel));
+  document.getElementById(id).addEventListener("keydown", event => {
+    if (["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) {
+      event.preventDefault();
+      selectStudentAddTab(event.key === "Home" ? false : event.key === "End" ? true : !excel, true);
+    }
+  });
+}
+
 const elPlacementYear = document.getElementById("placement-year");
 elPlacementYear.value = getActiveYear();
 elPlacementYear.addEventListener("change", () => setActiveYear(elPlacementYear.value.trim()));
@@ -409,15 +484,20 @@ document.getElementById("filter-grade").addEventListener("change", renderList);
 document.getElementById("filter-classroom").addEventListener("change", renderList);
 document.getElementById("filter-show-graduated").addEventListener("change", renderList);
 
+const expandedStudentRooms = new Set();
+document.getElementById("student-search").addEventListener("input", renderList);
+
 function renderList() {
   const gradeFilter = document.getElementById("filter-grade").value;
   const roomFilter = document.getElementById("filter-classroom").value;
   const showInactive = document.getElementById("filter-show-graduated").checked;
+  const search = document.getElementById("student-search").value.trim().toLocaleLowerCase();
   const filtered = allStudents.filter(s => {
     // ปกติแสดงเฉพาะนักเรียนที่ยัง active — ติ๊กช่องถึงจะเห็นคนที่จบ/ย้ายออก
     if (!showInactive && (s.graduated || s.left_school)) return false;
     if (gradeFilter && s.grade_level !== gradeFilter) return false;
     if (roomFilter && s.classroom !== roomFilter) return false;
+    if (search && !String(s.name || "").toLocaleLowerCase().includes(search) && !String(s.student_no || "").toLocaleLowerCase().includes(search)) return false;
     return true;
   });
   document.getElementById("list-title").textContent = "รายชื่อนักเรียน (" + filtered.length + " คน)";
@@ -435,12 +515,17 @@ function renderList() {
     if (!groups.has(key)) {
       const fullRoom = stu.grade_level && stu.classroom && String(stu.classroom).indexOf(stu.grade_level) === 0;
       const label = fullRoom ? String(stu.classroom) : grade + "/" + classroom;
-      groups.set(key, { label, students: [] });
+      groups.set(key, { label, grade, classroom, students: [] });
     }
     groups.get(key).students.push(stu);
   }
 
-  for (const group of groups.values()) {
+  const orderedGroups = [...groups.values()].sort((a,b) => {
+    const ai = GRADE_ORDER.indexOf(a.grade), bi = GRADE_ORDER.indexOf(b.grade);
+    return (ai < 0 ? GRADE_ORDER.length : ai) - (bi < 0 ? GRADE_ORDER.length : bi)
+      || a.grade.localeCompare(b.grade,"th") || a.classroom.localeCompare(b.classroom,"th",{numeric:true});
+  });
+  for (const group of orderedGroups) {
     const wrap = document.createElement("div");
     wrap.className = "student-group";
 
@@ -452,7 +537,7 @@ function renderList() {
 
     const summary = document.createElement("span");
     summary.className = "student-group-summary";
-    summary.textContent = group.label + " (" + group.students.length + " คน)";
+    summary.innerHTML = "<b>" + escapeHtml(group.label) + "</b><small>" + group.students.length + " คน</small>";
     const caret = document.createElement("span");
     caret.className = "student-group-caret";
     caret.setAttribute("aria-hidden", "true");
@@ -462,8 +547,16 @@ function renderList() {
 
     const body = document.createElement("div");
     body.className = "student-group-body";
+    const initiallyOpen = !!search || expandedStudentRooms.has(group.label);
+    body.classList.toggle("is-open", initiallyOpen);
+    wrap.classList.toggle("is-open", initiallyOpen);
+    caret.textContent = initiallyOpen ? "▾" : "▸";
+    toggle.setAttribute("aria-expanded", String(initiallyOpen));
+    toggle.setAttribute("aria-label", (initiallyOpen ? "พับ" : "กาง") + "รายชื่อนักเรียนห้อง " + group.label);
     toggle.addEventListener("click", () => {
       const isOpen = body.classList.toggle("is-open");
+      wrap.classList.toggle("is-open", isOpen);
+      if (isOpen) expandedStudentRooms.add(group.label); else expandedStudentRooms.delete(group.label);
       caret.textContent = isOpen ? "▾" : "▸";
       toggle.setAttribute("aria-expanded", String(isOpen));
       toggle.setAttribute("aria-label", (isOpen ? "พับ" : "กาง") + "รายชื่อนักเรียนห้อง " + group.label);
@@ -476,10 +569,8 @@ function renderList() {
       info.className = "info";
       const studentStatus = stu.status || "กำลังศึกษา";
       info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) +
-        (studentStatus !== "กำลังศึกษา" ? " <span class='hint'>(" + escapeHtml(studentStatus) + ")</span>" : "") + "</div>" +
-        "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
-        (stu.grade_level ? " · " + escapeHtml(stu.grade_level) : "") +
-        (stu.classroom ? "/" + escapeHtml(stu.classroom) : "") + "</div>";
+        (studentStatus !== "กำลังศึกษา" ? " <span class='student-status-chip'>" + escapeHtml(studentStatus) + "</span>" : "") + "</div>" +
+        "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) + "</div>";
       row.appendChild(info);
       const actions = document.createElement("div");
       actions.className = "student-actions";

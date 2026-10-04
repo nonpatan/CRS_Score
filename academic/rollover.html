@@ -149,6 +149,38 @@
     .year-control { align-items:stretch; flex-direction:column; }
     .year-control button { width:100%; }
   }
+  #main { padding-bottom:210px; }
+  .readiness-list { list-style:none; margin:0; padding:0; }
+  .readiness-list li { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .readiness-list li:last-child { border-bottom:0; }
+  .readiness-list b { display:block; font-size:14px; }
+  .readiness-list span { font-size:13px; color:var(--muted); overflow-wrap:anywhere; }
+  .readiness-list .readiness-warn { color:var(--amber); }
+  .readiness-list button { min-height:44px; font:inherit; font-size:13px; border-radius:8px; padding:6px 10px; cursor:pointer; }
+  #readiness-card > p { margin:8px 0 0; font-size:12px; }
+  #promote-list .group-head, #subject-list .group-head { margin:0; padding:0; border-bottom:1px solid var(--line); }
+  #main .grade-toggle { min-height:52px; padding:6px 4px; }
+  .group-head .group-actions { display:none; margin:0; }
+  .group-head:has(+ .grade-body.is-open) .group-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  #main .link-toggle { display:inline-flex; align-items:center; min-height:44px; padding:4px; }
+  #main button:focus-visible, #main .link-toggle:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #promote-list .group-summary { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .group-chips { display:flex; flex:1; min-width:0; flex-wrap:wrap; gap:4px 6px; align-items:center; font-size:13px; }
+  .group-chips b { font-size:15px; min-width:32px; }
+  .rollover-chip { display:inline-flex; align-items:center; padding:1px 6px; border-radius:6px; background:var(--bg); color:var(--muted); font-size:12px; }
+  .rollover-chip.promote { background:var(--teal-soft); color:var(--teal); }
+  .rollover-chip.attention { background:var(--amber-soft); color:var(--amber); }
+  .group-total { margin-left:auto; white-space:nowrap; font-size:12px; }
+  #main .promote-action { min-height:44px; font-size:16px !important; max-width:50%; }
+  #main .row .info { overflow-wrap:anywhere; }
+  .rollover-run-bar { position:fixed; bottom:12px; left:12px; right:12px; z-index:8; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--white); box-shadow:0 4px 20px rgba(31,42,46,.14); }
+  #run-summary { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:13px; margin-bottom:6px; }
+  #run-summary .attention { color:var(--amber); }
+  #readiness-warning { color:var(--amber); font-size:12px; line-height:1.4; margin-top:6px; }
+  #rollover-run-bar #btn-run { min-height:44px; margin:0; }
+  [hidden] { display:none !important; }
+  @media (min-width:700px) and (max-width:1199px) { .rollover-run-bar { left:max(26px,calc((100vw - 720px)/2)); right:max(26px,calc((100vw - 720px)/2)); } }
+  @media (min-width:1200px) { .rollover-run-bar { left:296px; right:32px; max-width:1056px; margin:auto; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -190,8 +222,13 @@
   </div>
 
   <div id="main" style="display:none">
+    <section class="card" id="readiness-card" aria-labelledby="readiness-title">
+      <div class="step-title" id="readiness-title">ตรวจความพร้อมก่อนขึ้นปีใหม่</div>
+      <ol id="readiness-list" class="readiness-list"></ol>
+      <p class="hint">รายการนี้ช่วยทบทวนข้อมูล · เมื่อกดเริ่ม ระบบจะตรวจสอบอีกครั้งตามขั้นตอนเดิม</p>
+    </section>
     <!-- ตั้งค่าชั้นสูงสุดที่เปิดสอน -->
-    <div class="card">
+    <div class="card" id="highest-card">
       <div class="step-title"><span class="num">0</span>ชั้นสูงสุดที่โรงเรียนเปิดสอน</div>
       <div class="hint" style="margin-bottom:8px">ใช้ตัดสินว่าใครจบการศึกษา — นักเรียนชั้นนี้จะถูกทำเครื่องหมาย "จบแล้ว" ตอนเลื่อนชั้น</div>
       <div class="field" style="display:flex; gap:10px; align-items:flex-end">
@@ -246,8 +283,12 @@
     <div class="card">
       <div class="step-title"><span class="num">5</span>เริ่มขึ้นปีใหม่</div>
       <div id="run-warn"></div>
-      <button class="primary danger" id="btn-run">ตรวจสอบและเริ่มขึ้นปีใหม่</button>
       <div id="run-log"></div>
+    </div>
+    <div class="rollover-run-bar" id="rollover-run-bar">
+      <div id="run-summary" aria-live="polite"></div>
+      <button class="primary danger" id="btn-run">ตรวจสอบและเริ่มขึ้นปีใหม่</button>
+      <div id="readiness-warning" hidden></div>
     </div>
   </div>
 
@@ -1142,6 +1183,88 @@ btnRun.addEventListener("click", async () => {
     btnRun.disabled = false;
   }
 });
+
+// ความพร้อมและแถบสรุปอ่านผลของตัวนับเดิม ไม่ตั้งกติกาปิดปุ่มรันเพิ่ม
+function rolloverDisplayState() {
+  const counts = [...elPromoteSummary.querySelectorAll(".summary-box b")].map(node => node.textContent);
+  const pending = !elSourceYear.value;
+  const note = elTargetYearNote.textContent.trim();
+  const warning = note || (!elNewYear.value ? "เลือกปีใหม่ หรือกดเพิ่มปีการศึกษาก่อน" : "");
+  return {
+    pending, warning, counts,
+    graduates:[...elPromoteList.querySelectorAll(".promote-action")].filter(select => select.value === "graduate").length,
+    subjects:checkedIds("subject-cb").length, subjectTotal:sourceSubjects.length,
+    activities:checkedIds("activity-cb").length, activityTotal:sourceActivities.length
+  };
+}
+function renderRolloverReadiness() {
+  const state = rolloverDisplayState();
+  const countText = state.counts.length === 4
+    ? `เลื่อน ${state.counts[0]} · จบ ${state.counts[1]} · ซ้ำ ${state.counts[2]} · ย้ายออก ${state.counts[3]}`
+    : elPromoteSummary.textContent;
+  const waiting = "เลือกปีต้นทางก่อน";
+  const highestText = `${elHighest.value || "ยังไม่ได้ตั้ง"} จะจบการศึกษา ${state.graduates} คน`;
+  const yearText = `${elSourceYear.value || "ยังไม่ได้เลือก"} → ${elNewYear.value || "ยังไม่ได้เลือกปีใหม่"}`;
+  document.getElementById("readiness-list").innerHTML =
+    `<li><div><b>1 · ชั้นสูงสุด ${escapeHtml(elHighest.value || "ยังไม่ได้ตั้ง")}</b><span>${escapeHtml(highestText)}</span></div><button type="button" class="ghost" data-readiness-highest>แก้</button></li>` +
+    `<li><div><b>2 · ปีการศึกษา ${escapeHtml(yearText)}</b><span class="${state.warning ? "readiness-warn" : ""}">${state.warning ? "⚠ " + escapeHtml(state.warning) : "ปีใหม่เลือกแล้ว"}</span></div>${state.warning ? '<button type="button" class="ghost" data-readiness-year>+ เพิ่มปี</button>' : ""}</li>` +
+    `<li><div><b>3 · เลื่อนชั้นนักเรียน</b><span>${escapeHtml(state.pending ? waiting : countText)}</span></div></li>` +
+    `<li><div><b>4 · วิชา</b><span>${state.pending ? waiting : `เลือก ${state.subjects} / ทั้งหมด ${state.subjectTotal}`}</span></div></li>` +
+    `<li><div><b>5 · กิจกรรม</b><span>${state.pending ? waiting : `เลือก ${state.activities} / ทั้งหมด ${state.activityTotal}`}</span></div></li>`;
+  document.getElementById("run-summary").innerHTML = state.pending ? waiting :
+    (state.counts.length === 4 ? ["เลื่อน","จบ","ซ้ำ","ย้ายออก"].map((label,index) => `<span class="${index >= 2 && Number(state.counts[index]) > 0 ? "attention" : ""}">${label} ${escapeHtml(state.counts[index])}</span>`).join("") : `<span>${escapeHtml(countText)}</span>`) +
+    `<span>วิชา ${state.subjects}</span><span>กิจกรรม ${state.activities}</span>`;
+  const warn = document.getElementById("readiness-warning");
+  warn.textContent = state.warning ? "⚠ " + state.warning : "";
+  warn.hidden = !state.warning;
+  decorateRolloverGroups();
+}
+function decorateRolloverGroups() {
+  elPromoteList.querySelectorAll(".grade-toggle").forEach(button => {
+    const original = button.querySelector(".group-summary");
+    const match = original?.textContent.match(/\((\d+) คน\) — (เลื่อน|จบ) (\d+) · ซ้ำชั้น (\d+) · ย้ายออก (\d+)/);
+    if (!match) return;
+    let chips = button.querySelector(".group-chips");
+    if (!chips) {
+      chips = document.createElement("span");
+      chips.className = "group-chips";
+      chips.setAttribute("aria-hidden", "true");
+      button.insertBefore(chips, button.querySelector(".grade-caret"));
+    }
+    chips.innerHTML = `<b>${escapeHtml(button.dataset.grade)}</b><span class="rollover-chip ${match[2] === "เลื่อน" ? "promote" : ""}">${match[2]} ${match[3]}</span>` +
+      (Number(match[4]) ? `<span class="rollover-chip attention">ซ้ำ ${match[4]}</span>` : "") +
+      (Number(match[5]) ? `<span class="rollover-chip attention">ย้ายออก ${match[5]}</span>` : "") + `<span class="group-total">${match[1]} คน</span>`;
+  });
+  document.querySelectorAll("#main .link-toggle").forEach(link => {
+    if (link.dataset.keyboardReady) return;
+    link.dataset.keyboardReady = "true";
+    link.setAttribute("role", "button");
+    link.tabIndex = 0;
+    link.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); link.click(); }
+    });
+  });
+}
+document.getElementById("readiness-list").addEventListener("click", event => {
+  if (event.target.closest("[data-readiness-highest]")) {
+    document.getElementById("highest-card").scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",block:"center"});
+    elHighest.focus({preventScroll:true});
+  }
+  if (event.target.closest("[data-readiness-year]")) document.getElementById("btn-add-academic-year").click();
+});
+const rolloverReadinessObserver = new MutationObserver(renderRolloverReadiness);
+for (const node of [elPromoteSummary, elSubjectSummary, elActivitySummary, elTargetYearNote]) {
+  rolloverReadinessObserver.observe(node, {childList:true,subtree:true,characterData:true});
+}
+for (const node of [elHighest,elSourceYear,elNewYear]) node.addEventListener("change", renderRolloverReadiness);
+let followRolloverLog = false;
+btnRun.addEventListener("click", () => { followRolloverLog = true; });
+new MutationObserver(() => {
+  if (!followRolloverLog || !elRunLog.textContent.trim()) return;
+  followRolloverLog = false;
+  elRunLog.scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",block:"center"});
+}).observe(elRunLog, {childList:true,subtree:true,characterData:true});
+renderRolloverReadiness();
 
 init();
 }
