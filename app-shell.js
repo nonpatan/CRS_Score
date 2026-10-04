@@ -2,6 +2,33 @@
    รองรับหลายฝ่าย: ดูว่าหน้าปัจจุบันอยู่ในโฟลเดอร์ไหน แล้วเลือกชุดเมนูของฝ่ายนั้น
    (โฟลเดอร์ที่ไม่รู้จักจะถือเป็นฝ่ายวิชาการ เพื่อคงพฤติกรรมเดิมของหน้าเก่าทุกหน้า) */
 (function () {
+  // ลงสี KPI เฉพาะหน้าที่เปิดใช้ โดยรอ main พร้อมก่อนเริ่ม observer
+function syncFinanceKpiTones() {
+  const options = document.querySelector("main").dataset;
+  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
+    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
+    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
+  for (const box of document.querySelectorAll(selectors)) {
+    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
+    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
+    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
+    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
+    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
+  }
+}
+  window.crsSyncFinanceKpiTones = syncFinanceKpiTones;
+  function initializeFinanceKpiTones() {
+    const main = document.querySelector("main[data-kpi-tones]");
+    if (!main) return;
+    new MutationObserver(syncFinanceKpiTones).observe(main, {childList:true,subtree:true,characterData:true});
+    syncFinanceKpiTones();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeFinanceKpiTones, { once: true });
+  } else {
+    initializeFinanceKpiTones();
+  }
+
   // กราฟโดนัทกลาง — legend ใส่ตัวเลขและสัดส่วนเสมอ สีจึงไม่ใช่ช่องทางเดียวที่สื่อความหมาย
   window.renderDonut = function ({
     svgId, legendId, heroId, titleId, title, hero, unit, segments, empty

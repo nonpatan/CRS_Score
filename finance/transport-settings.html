@@ -118,10 +118,10 @@
     <h1>ตั้งค่าค่ารถ</h1>
     <p>ตั้งโซน ผูกนักเรียน และประกาศยอดที่จะเก็บรายเดือน</p>
     <div class="nav"></div>
-    <script src="../app-shell.js?v=20261003-3"></script>
+    <script src="../app-shell.js?v=20261004-1"></script>
   </header>
 
-  <main class="academic-content">
+  <main data-kpi-tones class="academic-content">
     <section id="access-card" class="card" hidden></section>
     <div id="settings-app" hidden>
       <section class="card">
@@ -221,7 +221,7 @@ import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, HOMEROOM_FINANCE_LINKS,
   getAcademicYears, academicYearOf, academicYearRange, getStudentPlacements,
   roomsFromPlacements, activePlacements, bangkokNow, toDateStr, fetchAllRows, formatMoney
-} from "../supabase-client.js?v=20261003-1";
+} from "../supabase-client.js?v=20261004-1";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -785,22 +785,6 @@ if (session) {
 }
 </script>
 <script type="module">
-// Presentation only: semantic tones use the numbers already rendered by the finance logic.
-function syncFinanceKpiTones() {
-  const options = document.querySelector("main").dataset;
-  const selectors = ".metric,.stat,.summary-grid > .summary,.term-box,.ledger-summary > div,.balance:has(> b),.money-cell,.expected,.system-debt,#fee-outstanding,.revenue-value"
-    + (options.kpiEntryBalances === "true" ? ",.balance,#deposit-summary" : "")
-    + (options.kpiRemitRooms === "true" ? ",.room-card" : "");
-  for (const box of document.querySelectorAll(selectors)) {
-    const value = (box.matches(".room-card") ? box.querySelector("strong") : box.querySelector("b,strong")) || box;
-    const number = Number((value.textContent.match(/[-−]?[\d,]+(?:\.\d+)?/)?.[0] || "0").replaceAll(",","").replace("−","-"));
-    const label = (box.matches(".room-card") ? "ค้างส่ง " : box.matches(".term-box") ? "ค้างชำระ " : "") + (box.querySelector("span")?.textContent || (box.id === "fee-outstanding" ? "ค้างชำระ" : box.closest(".revenue-row")?.querySelector("b")?.textContent || ""));
-    const tone = number === 0 ? "muted" : number < 0 ? "danger" : box.matches(".balance.pending") ? "amber" : /ค้างส่ง|ยังไม่ส่ง|รอจ่าย|รอเบิก|ต้องเตรียม/.test(label) ? "amber" : /ค้าง|หนี้/.test(label) ? "danger" : /ถอน|เบิก|หัก/.test(label) ? "amber" : /^(ทุน|เรียกเก็บ|ยอดสุทธิ|ลด\/อุดหนุน)$/.test(label) || /คน|รายการ|จำนวน/.test(label) || /คน|รายการ/.test(value.textContent) && !/บาท/.test(value.textContent) ? "muted" : "teal";
-    if (box.dataset.kpiTone !== tone) box.dataset.kpiTone = tone;
-  }
-}
-new MutationObserver(syncFinanceKpiTones).observe(document.querySelector("main"), {childList:true,subtree:true,characterData:true});
-syncFinanceKpiTones();
 </script>
 </body>
 </html>

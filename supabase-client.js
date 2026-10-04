@@ -4664,7 +4664,7 @@ export async function loadAcademicProjects(year) {
 
   const projectIds = projects.map(p => p.id);
   const staffIds = [...new Set(projects.map(p => p.responsible_staff_id).filter(Boolean))];
-  const [linksRes, okrLinksRes, okrsRes, staffRes] = await Promise.all([
+  const [linksRes, okrLinksRes, okrsRes, staffRes, historyRes] = await Promise.all([
     sb.from("academic_project_links")
       .select("*")
       .in("project_id", projectIds)
@@ -4678,13 +4678,22 @@ export async function loadAcademicProjects(year) {
       .order("sort_order"),
     staffIds.length
       ? sb.from("staff").select("id,full_name").in("id", staffIds)
-      : Promise.resolve({ data: [], error: null })
+      : Promise.resolve({ data: [], error: null }),
+    sb.from("academic_project_approvals")
+      .select("project_id,action,note,acted_by_name,created_at")
+      .in("project_id", projectIds)
+      .order("created_at", { ascending: false })
   ]);
 
-  for (const res of [linksRes, okrLinksRes, okrsRes, staffRes]) {
+  for (const res of [linksRes, okrLinksRes, okrsRes, staffRes, historyRes]) {
     if (res.error) throw new Error("โหลดรายละเอียดโครงการไม่สำเร็จ: " + res.error.message);
   }
 
+  const historyByProject = new Map();
+  for (const item of (historyRes.data || [])) {
+    if (!historyByProject.has(item.project_id)) historyByProject.set(item.project_id, []);
+    historyByProject.get(item.project_id).push(item);
+  }
   const linksByProject = new Map();
   for (const link of (linksRes.data || [])) {
     if (!linksByProject.has(link.project_id)) linksByProject.set(link.project_id, []);
@@ -4710,7 +4719,8 @@ export async function loadAcademicProjects(year) {
         responsible_staff: liveStaff
       }),
       links: linksByProject.get(project.id) || [],
-      okrs: okrsByProject.get(project.id) || []
+      okrs: okrsByProject.get(project.id) || [],
+      approval_history: historyByProject.get(project.id) || []
     };
   });
 }
