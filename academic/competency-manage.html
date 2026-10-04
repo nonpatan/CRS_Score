@@ -92,6 +92,21 @@
   .toast { position:sticky; bottom:12px; display:none; padding:10px; border-radius:8px; text-align:center; margin-top:12px; font-size:14px; } .toast.ok { display:block; background:var(--teal-soft); color:var(--teal); } .toast.err { display:block; background:var(--danger-soft); color:var(--danger); }
   .overlay { position:fixed; inset:0; z-index:10; display:none; align-items:center; justify-content:center; padding:16px; background:rgba(20,45,44,.38); } .overlay.show { display:flex; } .modal { width:100%; max-width:400px; padding:20px; background:var(--white); } .modal h3 { margin:0 0 14px; font-size:18px; } .modal-note { color:var(--muted); font-size:13px; margin:-4px 0 12px; } .modal-warning { color:var(--danger); background:var(--danger-soft); border-radius:8px; padding:9px; font-size:13px; margin:0 0 12px; } .modal-actions { display:flex; gap:10px; margin-top:16px; } .modal-actions button { flex:1; width:auto; }
   @media (max-width:480px) { .member-tools,.teacher-add-row { grid-template-columns:1fr; } .target-row { align-items:flex-start; } .target-actions { flex-wrap:wrap; justify-content:flex-end; } }
+
+  [hidden],.manage-tab-hidden { display:none!important; }
+  button:focus-visible,summary:focus-visible { outline:2px solid var(--teal);outline-offset:3px; }
+  .fold-form>summary,.member-room>summary { min-height:44px;padding:10px 12px;cursor:pointer;color:var(--teal);font-weight:600;background:var(--teal-soft);border-radius:8px; }
+  .fold-form[open]>summary { margin-bottom:14px; }
+  .member-room { border:1px solid var(--line);border-radius:8px;margin:8px 0; }
+  .member-room>summary { background:var(--bg);color:var(--ink); }
+  .member-room-body { padding:8px; }
+  .manage-head { padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--white);margin-bottom:12px; }
+  .manage-head h2 { margin:12px 0 4px;font-size:20px;overflow-wrap:anywhere; }
+  .manage-head a { display:inline-block;min-height:44px;padding:10px;text-decoration:none; }
+  .manage-tabs { display:flex;gap:6px;margin-top:12px; }
+  .manage-tabs button { flex:1;min-width:0;min-height:44px;padding:8px 4px;background:var(--bg);color:var(--ink);font-size:14px;border:1px solid var(--line); }
+  .manage-tabs [aria-selected=true] { background:var(--teal-soft);color:var(--teal);border-color:var(--teal); }
+  @media(min-width:1100px) { .manage-tabs { display:none; } .manage-tab-hidden { display:block!important; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -128,7 +143,8 @@
   </header>
 
   <main class="academic-content">
-  <div class="card">
+  <div class="card" id="create-card">
+    <details class="fold-form" id="create-fold"><summary>+ สร้างรายการใหม่</summary>
     <div class="section">สร้างรายการใหม่</div>
     <div class="row2">
       <div class="field"><label for="f-year">ปีการศึกษา</label><select id="f-year"></select></div>
@@ -153,15 +169,17 @@
       </div>
     </div>
     <button class="primary" id="btn-create">สร้างรายการ</button>
+    </details>
   </div>
 
   <div class="card">
-    <div class="section">รายการที่กำหนดไว้</div>
+    <div class="section">รายการที่กำหนดไว้</div><button type="button" class="ghost" id="show-create">+ สร้างรายการใหม่</button>
     <div class="field"><label for="filter-assessment-year">กรองปีการศึกษา</label><select id="filter-assessment-year"></select></div>
     <div id="assessment-list" class="empty">กำลังโหลด...</div>
   </div>
 
   <div id="detail" style="display:none">
+    <div class="manage-head"><button type="button" class="ghost" id="back-assessments">‹ กลับรายการ</button><h2 id="detail-name"></h2><div id="detail-category" class="meta"></div><div id="detail-meta" class="meta"></div><a id="entry-link" class="ghost">ไปกรอกคะแนน →</a><div class="manage-tabs" role="tablist" aria-label="รายละเอียดรายการ"><button role="tab" data-panel="0" aria-selected="true"></button><button role="tab" data-panel="1" aria-selected="false"></button><button role="tab" data-panel="2" aria-selected="false"></button></div></div>
     <div class="card">
       <div class="section">องค์ประกอบที่ใช้</div>
       <div id="readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว</div>
@@ -176,14 +194,14 @@
     <div class="card">
       <div class="section">ผู้เข้าร่วม</div>
       <div id="member-list"></div>
-      <div id="member-form">
+      <div id="member-form"><details class="fold-form" id="member-add-fold"><summary>+ เพิ่มผู้เข้าร่วม</summary>
         <div class="member-tools">
           <div class="field"><label for="filter-grade">กรองชั้น</label><select id="filter-grade"><option value="">— ทุกชั้น —</option></select></div>
           <div class="field"><label for="filter-room">กรองห้อง</label><select id="filter-room"><option value="">— ทุกห้อง —</option></select></div>
         </div>
         <button class="ghost" id="btn-add-room" style="width:100%;margin-bottom:8px">+ เพิ่มทั้งห้องตามตัวกรอง</button>
         <div id="student-picker" class="student-picker"></div>
-        <button class="ghost" id="btn-add-selected" style="width:100%;margin-top:9px">+ เพิ่มรายชื่อที่ติ๊ก</button>
+        <button class="ghost" id="btn-add-selected" style="width:100%;margin-top:9px">+ เพิ่มรายชื่อที่ติ๊ก</button></details>
       </div>
     </div>
 
@@ -410,7 +428,11 @@ function renderAssessments() {
       const row=document.createElement("div");
       row.className="assessment-row"+(current&&current.id===a.id?" selected":"");
       row.innerHTML="<div class='grow'><div class='title'>"+esc(a.name)+(a.activity_category?"<span class='transcript-tag'>ปพ.</span>":"")+"</div><div class='meta'>"+esc(a.source_type)+(a.activity_category?" · "+esc(a.activity_category):"")+" · ปี "+esc(a.year)+(a.term?" · ภาคเรียน "+esc(a.term):" · ทั้งปี")+" · "+esc(ownerLabel(a))+"</div></div>";
-      row.addEventListener("click",()=>selectAssessment(a.id));
+      row.querySelector(".grow").tabIndex=0;
+      row.querySelector(".grow").setAttribute("role","button");
+      row.querySelector(".grow").setAttribute("aria-label","เลือกรายการ "+a.name);
+      row.querySelector(".grow").addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();row.click();}});
+      row.addEventListener("click",async()=>{await selectAssessment(a.id);syncManageDetail();$("detail").scrollIntoView({block:"start"});});
       if(canManageAssessment(a)){
         const actions=document.createElement("div"); actions.className="target-actions";
         const edit=document.createElement("button"); edit.className="icon-btn edit"; edit.textContent="✎"; edit.title="แก้ไขรายการ"; edit.setAttribute("aria-label","แก้ไขรายการ "+a.name);
@@ -481,10 +503,21 @@ function renderTargets() {
     el.appendChild(container);
   }
 }
+const memberRoomsOpen = new Set();
 function renderMembers() {
   const el=$("member-list");el.innerHTML="";if(!members.length)el.innerHTML="<div class='empty-note'>ยังไม่มีผู้เข้าร่วม</div>";
-  for(const m of [...members].sort((a,b)=>((a.student&&a.student.grade_level)||"").localeCompare((b.student&&b.student.grade_level)||"")||((a.student&&a.student.classroom)||"").localeCompare((b.student&&b.student.classroom)||"")||((a.student&&a.student.student_no)||"").localeCompare((b.student&&b.student.student_no)||""))){const student=m.student||{};const gradeRoom=m.placementMissing?"ไม่พบชั้น/ห้อง ปี "+current.year:(student.grade_level||"")+"/"+(student.classroom||"");const row=document.createElement("div");row.className="member-row";row.innerHTML="<div class='grow'><div class='title'>"+esc(student.name||"ไม่พบข้อมูลนักเรียน")+"</div><div class='meta'>"+esc(gradeRoom)+" · "+esc(student.student_no)+"</div></div>";if(canEdit()){const b=document.createElement("button");b.className="icon-btn del";b.textContent="🗑";b.title="เอานักเรียนออก";b.setAttribute("aria-label","เอานักเรียนออก");b.onclick=()=>removeMember(m);row.appendChild(b);}el.appendChild(row);}
+  const grouped=new Map(), roomBodies=new Map();
+  for(const member of members){const student=member.student||{};const room=member.placementMissing?"ไม่พบชั้น/ห้อง ปี "+current.year:(student.grade_level||"")+"/"+(student.classroom||"");if(!grouped.has(room))grouped.set(room,[]);grouped.get(room).push(member);}
+  for(const [room,rows] of [...grouped].sort(([a],[b])=>a.localeCompare(b,"th",{numeric:true}))){
+    const key=current.id+":"+room,detail=document.createElement("details");detail.className="member-room";detail.open=memberRoomsOpen.has(key);
+    const summary=document.createElement("summary");summary.textContent=room+" · "+rows.length+" คน";
+    const body=document.createElement("div");body.className="member-room-body";roomBodies.set(room,body);
+    detail.addEventListener("toggle",()=>{if(detail.isConnected){if(detail.open)memberRoomsOpen.add(key);else memberRoomsOpen.delete(key);}});
+    detail.append(summary,body);el.appendChild(detail);
+  }
+  for(const m of [...members].sort((a,b)=>((a.student&&a.student.grade_level)||"").localeCompare((b.student&&b.student.grade_level)||"")||((a.student&&a.student.classroom)||"").localeCompare((b.student&&b.student.classroom)||"")||((a.student&&a.student.student_no)||"").localeCompare((b.student&&b.student.student_no)||""))){const student=m.student||{};const gradeRoom=m.placementMissing?"ไม่พบชั้น/ห้อง ปี "+current.year:(student.grade_level||"")+"/"+(student.classroom||"");const row=document.createElement("div");row.className="member-row";row.innerHTML="<div class='grow'><div class='title'>"+esc(student.name||"ไม่พบข้อมูลนักเรียน")+"</div><div class='meta'>"+esc(gradeRoom)+" · "+esc(student.student_no)+"</div></div>";if(canEdit()){const b=document.createElement("button");b.className="icon-btn del";b.textContent="🗑";b.title="เอานักเรียนออก";b.setAttribute("aria-label","เอานักเรียนออก");b.onclick=()=>removeMember(m);row.appendChild(b);}roomBodies.get(gradeRoom).appendChild(row);}
 }
+
 function profileLabel(userId) {
   const person=profilesById.get(userId);
   return person&&(person.name||person.email)||"ไม่พบข้อมูลบัญชี";
@@ -680,6 +713,32 @@ async function removeAssessmentTeacher(teacher){
   await selectAssessment(current.id);
   toast("ถอนครูผู้ดูแลแล้ว");
 }
+let managePanel=0, manageAssessmentId="", creationIds=new Set(), creationObserved=false;
+function syncManageDetail() {
+  if(!current)return;
+  if(manageAssessmentId!==current.id){managePanel=0;manageAssessmentId=current.id;}
+  $("detail-name").textContent=current.name;
+  $("detail-category").textContent=current.activity_category?"ปพ. · "+current.activity_category:"ไม่ออก ปพ.";
+  $("detail-meta").textContent=current.source_type+" · ปี "+current.year+(current.term?" · ภาคเรียน "+current.term:" · ทั้งปี")+" · เจ้าของ "+profileLabel(current.owner_id);
+  $("entry-link").href="competency-entry.html?assessment="+encodeURIComponent(current.id);
+  const cards=[...$("detail").children].filter(el=>el.classList.contains("card"));
+  const counts=[targets.length,members.length,new Set([current.owner_id,...assessmentTeachers.map(t=>t.user_id)]).size];
+  const labels=["องค์ประกอบ","ผู้เข้าร่วม","ครูผู้ดูแล"];
+  $("detail").querySelectorAll(".manage-tabs button").forEach((button,index)=>{button.textContent=labels[index]+" "+counts[index];button.setAttribute("aria-selected",String(managePanel===index));button.tabIndex=managePanel===index?0:-1;});
+  cards.forEach((card,index)=>card.classList.toggle("manage-tab-hidden",index!==managePanel));
+}
+$("detail").querySelectorAll(".manage-tabs button").forEach((button,index)=>{
+  button.addEventListener("click",()=>{managePanel=index;syncManageDetail();});
+  button.addEventListener("keydown",event=>{if(!["ArrowLeft","ArrowRight"].includes(event.key))return;event.preventDefault();managePanel=(index+(event.key==="ArrowLeft"?2:1))%3;syncManageDetail();$("detail").querySelectorAll(".manage-tabs button")[managePanel].focus();});
+});
+$("back-assessments").onclick=()=>$("assessment-list").closest(".card").scrollIntoView({block:"start"});
+$("show-create").onclick=()=>{$("create-fold").open=!$("create-fold").open;if($("create-fold").open)$("create-card").scrollIntoView({block:"start"});};
+$("btn-create").addEventListener("click",()=>{creationIds=new Set(assessments.map(a=>a.id));creationObserved=true;});
+new MutationObserver(()=>{
+  if(creationObserved && assessments.some(a=>!creationIds.has(a.id)))$("create-fold").open=false;
+  creationIds=new Set(assessments.map(a=>a.id));creationObserved=true;syncManageDetail();
+}).observe($("assessment-list"),{childList:true});
+["target-list","member-list","assessment-teacher-list"].forEach(id=>new MutationObserver(syncManageDetail).observe($(id),{childList:true}));
 init();
 }
 </script>
