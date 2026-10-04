@@ -120,6 +120,30 @@
     .actions { justify-content: flex-start; }
     .okr-kr { margin-left: 4px; padding-left: 10px; }
   }
+
+  .fold-tools { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+  .fold-details { margin:12px 0; }
+  .fold-details > summary { min-height:44px; display:flex; align-items:center; cursor:pointer; font-weight:600; gap:8px; }
+  .fold-details > summary::before { content:"▸"; }
+  .fold-details[open] > summary::before { content:"▾"; }
+  .objective-toggle { width:100%; text-align:left; background:transparent; border:0; padding:0; min-height:44px; color:var(--ink); }
+  .objective-title { display:flex; align-items:baseline; gap:8px; overflow-wrap:anywhere; }
+  .objective-title .okr-code { flex-shrink:0; white-space:nowrap; }
+  .objective-toggle[aria-expanded="false"] .fold-arrow::before { content:"▸"; }
+  .objective-toggle[aria-expanded="true"] .fold-arrow::before { content:"▾"; }
+  .objective-toggle .okr-objective-score { display:block; }
+  .objective-body > .actions { margin-top:8px; }
+  .kr-title { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+  .okr-kr { margin:10px 0 0; padding:10px 0 0; border-left:0; }
+  .okr-kr .actions { justify-content:flex-start; margin:8px 0; gap:6px; }
+  .checkin-action { border-color:var(--teal); color:var(--teal); font-weight:600; }
+  .okr-warnings { gap:5px; margin:6px 0; }
+  .okr-warnings > span { border-radius:999px; background:var(--amber-soft); padding:3px 8px; font-size:12px; }
+  .plan-chips .chip { font-size:12px; }
+  .plan-okr-group { display:inline-flex; width:auto; }
+  .plan-okr-label { font-size:12px; }
+  .plan-row .actions { justify-content:flex-end; }
+  @media(max-width:620px) { .okr-objective { padding:12px; } .plan-child { margin-left:10px; padding-left:8px; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -142,10 +166,11 @@
 
     <section class="card">
       <div class="section-head"><div><h2>OKR ของโรงเรียน</h2><p>Objective → Key Results → ผลวัดและกิจกรรมสนับสนุน</p></div><button class="primary" id="add-objective" hidden>เพิ่ม Objective</button></div>
-      <div id="okr-admin-tools" hidden>
+      <div class="fold-tools"><button class="ghost" id="expand-objectives" type="button">กางทั้งหมด</button><button class="ghost" id="collapse-objectives" type="button">พับทั้งหมด</button></div>
+      <details class="fold-details" id="okr-admin-tools" hidden><summary>ตั้งค่า OKR</summary>
         <div class="copy-row"><div class="field"><label for="copy-source-year">ก๊อป OKR จากปี</label><select id="copy-source-year"><option value="">— เลือกปีต้นทาง —</option></select></div><button class="ghost" id="copy-okrs" type="button">ก๊อปมาเป็นร่าง</button></div>
         <div class="threshold-row"><div class="field"><label for="kr-pass">เกณฑ์ผ่าน KR (0–1)</label><input id="kr-pass" type="number" min="0" max="1" step="0.01"></div><div class="field"><label for="o-pass">เกณฑ์ผ่าน O (0–1)</label><input id="o-pass" type="number" min="0" max="1" step="0.01"></div><button class="ghost" id="save-thresholds" type="button">บันทึกเกณฑ์</button></div>
-      </div>
+      </details>
       <div id="okr-list"><div class="empty">กำลังโหลด…</div></div>
 
       <div class="subform" id="okr-form-box" hidden>
@@ -194,11 +219,11 @@
     </section>
     <section class="card" id="plan-card">
       <div class="section-head"><div><h2>ทะเบียนโครงการ/กิจกรรมตามแผนปฏิบัติการ</h2><p>รายชื่อกลางของปีนี้ · ฝ่ายวิชาการเป็นผู้กรอก · รอบหน้าครูจะเลือกจากรายการนี้แทนการพิมพ์เอง</p></div><button class="ghost" id="add-plan" type="button" disabled hidden>เพิ่มรายการ</button></div>
-      <div id="plan-admin-tools" hidden>
+      <details class="fold-details" id="plan-admin-tools" hidden><summary>ก๊อปทะเบียนจากปี</summary>
         <div class="copy-row"><div class="field"><label for="plan-source-year">ก๊อปทะเบียนจากปี</label><select id="plan-source-year"><option value="">— เลือกปีต้นทาง —</option></select></div><button class="ghost" id="carry-plan" type="button" disabled>ก๊อปมาเป็นร่าง</button></div>
-      </div>
+      </details>
       <div id="plan-coverage" class="banner info plan-coverage"><div>กำลังตรวจช่องโหว่ของแผน…</div></div>
-      <div id="plan-list"><div class="empty">กำลังโหลด…</div></div>
+      <details class="fold-details" id="plan-registry"><summary id="plan-registry-summary">ดูทะเบียนทั้งหมด (กำลังโหลด…)</summary><div id="plan-list"><div class="empty">กำลังโหลด…</div></div></details>
       <div class="subform" id="plan-form-box" hidden>
         <h3 id="plan-form-title">เพิ่มรายการในทะเบียน</h3>
         <form id="plan-form">
@@ -269,6 +294,7 @@ if (!session) {
   let editingPlanId = null;
   let planLoadVersion = 0;
   let planBusy = false;
+  const expandedObjectives = new Set();
   let okrs = [];
   let okrTree = { objectives:[], orphans:[] };
   let staff = [];
@@ -457,6 +483,8 @@ if (!session) {
   }
 
   function renderPlanCoverage() {
+    const registrySummary = el("plan-registry-summary");
+    if (registrySummary) registrySummary.textContent = `ดูทะเบียนทั้งหมด (${planRows.length} รายการ)`;
     const tree = planYearOkrTree();
     const summary = projectPlanKrCoverage(tree, planRows);
     const leadGap = projectPlanLeadGap(planRows);
@@ -775,10 +803,10 @@ if (!session) {
     }
     const warnings = `${!checkin ? '<span>⚠ ยังไม่ได้วัดผลปีนี้</span>' : ""}${coverage.isUncovered ? '<span>⚠ ยังไม่มีโครงการรองรับ</span>' : ""}`;
     const coverageList = coverageProjectsHtml(coverage.projects, projects);
-    return `<div class="okr-kr"><div class="okr-heading"><div><span class="okr-code">${esc(kr.code || "KR")}</span> ${esc(kr.key_result)}${kr.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</div><div class="actions">
-      ${canEditAll ? `<button class="ghost" data-edit-okr="${kr.id}">แก้ไข</button><button class="ghost" data-checkin="${kr.id}">บันทึกผลวัด</button>` : ""}
+    return `<div class="okr-kr"><div class="kr-title" title="${esc(kr.key_result)}"><span class="okr-code">${esc(kr.code || "KR")}</span> ${esc(kr.key_result)}${kr.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</div>${result}<div class="meta">รองรับด้วย ${coverage.projects.length} รายการ · งบ ${fmtMoney(coverage.plannedBudget)}</div>${warnings ? `<div class="okr-warnings">${warnings}</div>` : ""}<div class="actions">
+      ${canEditAll ? `<button class="ghost checkin-action" data-checkin="${kr.id}">บันทึกผลวัด</button><button class="ghost" data-edit-okr="${kr.id}">แก้ไข</button>` : ""}
       ${isAdmin ? `<button class="danger" data-delete-okr="${kr.id}">ลบ</button>` : ""}
-    </div></div>${result}<div class="meta">รองรับด้วย ${coverage.projects.length} รายการ · งบ ${fmtMoney(coverage.plannedBudget)}</div>${coverageList}${trendHtml(kr)}${warnings ? `<div class="okr-warnings">${warnings}</div>` : ""}</div>`;
+    </div>${coverageList}${trendHtml(kr)}</div>`;
   }
 
   function renderOkrs() {
@@ -789,14 +817,32 @@ if (!session) {
     const objectives = okrTree.objectives.map(objective => {
       const summary = okrObjectiveScore(objective, checkinsByOkr, thresholds);
       const score = summary.score == null ? "ยังไม่มี KR" : summary.score.toFixed(2);
-      return `<article class="okr-objective"><div class="okr-heading"><div><span class="okr-code">${esc(objective.code || "O")}</span> <b>${esc(objective.objective)}</b>${objective.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</div><div class="actions">
-        ${canEditAll ? `<button class="ghost" data-add-kr="${objective.id}">+ เพิ่ม KR</button><button class="ghost" data-edit-okr="${objective.id}">แก้ไข</button>` : ""}
+      const missing = summary.total - summary.measured;
+      const uncovered = objective.keyResults.filter(kr => coverageByKr.get(kr.id)?.isUncovered).length;
+      const expanded = expandedObjectives.has(objective.id);
+      return `<article class="okr-objective"><button type="button" class="objective-toggle" data-toggle-objective="${objective.id}" aria-expanded="${expanded}" aria-controls="objective-body-${objective.id}"><span class="objective-title"><span class="fold-arrow" aria-hidden="true"></span><span class="okr-code">${esc(objective.code || "O")}</span> <b>${esc(objective.objective)}</b>${objective.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</span><span class="okr-objective-score">คะแนน ${esc(objective.code || "O")} = ${score} · วัดแล้ว ${summary.measured} จาก ${summary.total} KR · ${objectiveStatus(summary)}</span><span class="okr-warnings">${missing > 0 ? `<span>ยังไม่วัด ${missing} KR</span>` : ""}${uncovered > 0 ? `<span>ไม่มีโครงการรองรับ ${uncovered} KR</span>` : ""}</span></button><div class="objective-body" id="objective-body-${objective.id}" ${expanded ? "" : "hidden"}><div class="actions">
+        ${canEditAll ? `<button class="ghost" data-add-kr="${objective.id}">+ เพิ่ม KR</button>` : ""}${canEditAll ? `<button class="ghost" data-edit-okr="${objective.id}">แก้ไข</button>` : ""}
         ${isAdmin ? `<button class="danger" data-delete-okr="${objective.id}">ลบ</button>` : ""}
-      </div></div><div class="okr-objective-score">คะแนน ${esc(objective.code || "O")} = ${score} · วัดแล้ว ${summary.measured} จาก ${summary.total} KR · ${objectiveStatus(summary)}</div>${objective.keyResults.map(renderKr).join("")}</article>`;
+      </div>${objective.keyResults.map(renderKr).join("")}</div></article>`;
     }).join("");
-    const orphans = okrTree.orphans.length ? `<section class="okr-objective"><div class="section">ยังไม่ได้จัดกลุ่ม</div>${okrTree.orphans.map(renderKr).join("")}</section>` : "";
+    const orphans = okrTree.orphans.length ? `<section class="okr-objective"><button type="button" class="objective-toggle" data-toggle-objective="__orphans__" aria-expanded="${expandedObjectives.has("__orphans__")}" aria-controls="objective-orphans"><span class="objective-title"><span class="fold-arrow" aria-hidden="true"></span>ยังไม่ได้จัดกลุ่ม · ${okrTree.orphans.length} KR</span></button><div class="objective-body" id="objective-orphans" ${expandedObjectives.has("__orphans__") ? "" : "hidden"}>${okrTree.orphans.map(renderKr).join("")}</div></section>` : "";
     el("okr-list").innerHTML = objectives + orphans;
   }
+
+  el("okr-list").addEventListener("click", event => {
+    const toggle = event.target.closest("[data-toggle-objective]");
+    if (!toggle) return;
+    const id = toggle.dataset.toggleObjective;
+    expandedObjectives.has(id) ? expandedObjectives.delete(id) : expandedObjectives.add(id);
+    renderOkrs();
+    [...el("okr-list").querySelectorAll("[data-toggle-objective]")].find(button => button.dataset.toggleObjective === id)?.focus();
+  });
+  el("expand-objectives").addEventListener("click", () => {
+    okrTree.objectives.forEach(objective => expandedObjectives.add(objective.id));
+    expandedObjectives.add("__orphans__");
+    renderOkrs();
+  });
+  el("collapse-objectives").addEventListener("click", () => { expandedObjectives.clear(); renderOkrs(); });
 
   function staffOptions() {
     el("o-owner").innerHTML = '<option value="">— ยังไม่ระบุ —</option>' + staff.map(person => `<option value="${person.id}">${esc(person.full_name)}${person.staff_position ? ` · ${esc(person.staff_position)}` : ""}${person.has_login === false ? " · ยังไม่ผูกบัญชี" : ""}</option>`).join("");

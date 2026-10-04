@@ -199,6 +199,36 @@
   }
   .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
   .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
+
+  [hidden] { display:none !important; }
+  .structure-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .structure-heading .section-title { margin:0; }
+  .fold-tools { display:flex; gap:6px; flex-wrap:wrap; }
+  .unit-head { gap:6px; padding:8px 10px; }
+  .unit-toggle { flex:1 1 100%; min-width:0; min-height:44px; text-align:left; background:none; padding:0; color:var(--teal); }
+  .unit-toggle .title { display:block; overflow-wrap:anywhere; }
+  .unit-toggle .hint { display:block; font-size:12px; font-weight:400; }
+  .unit-toggle[aria-expanded="false"] .title::before { content:"▸ "; }
+  .unit-toggle[aria-expanded="true"] .title::before { content:"▾ "; }
+  .node-row.indicator { gap:2px; padding:2px 10px 0; }
+  .node-row.indicator > .title { flex:1 1 100%; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:20px; }
+  .score-toggle { padding:0 4px; margin:0; }
+  .icon-btn { min-height:36px; min-width:36px; padding:4px; }
+  .collection-chips { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:0 10px 4px; }
+  .node-row.collection { display:inline-flex; gap:3px; padding:0 5px; border:0; box-shadow:inset 0 0 0 1px var(--line); border-radius:8px; font-size:12px; min-height:36px; }
+  .node-row.collection .title { font-size:12px; white-space:nowrap; }
+  .node-row.collection .cap { font-size:12px; margin:0; white-space:nowrap; }
+  .node-row.collection .cap::before { content:"· "; }
+  .add-row.collection { padding:0; border:0; }
+  .collection-chips .small { min-height:36px; padding:4px 6px; font-size:12px; }
+  .subject-toggle { display:block; width:100%; min-height:44px; text-align:left; background:none; color:var(--teal); padding:0; }
+  .subject-toggle[aria-expanded="false"]::before { content:"▸ "; }
+  .subject-toggle[aria-expanded="true"]::before { content:"▾ "; }
+  .subject-summary { margin:6px 0; font-size:14px; color:var(--muted); overflow-wrap:anywhere; }
+  .enrollment-room { border:1px solid var(--line); border-radius:8px; margin:8px 0; padding:0 10px; }
+  .enrollment-room > summary { min-height:44px; cursor:pointer; display:flex; align-items:center; gap:6px; font-weight:600; color:var(--teal); }
+  .enrollment-room > summary::before { content:"▸"; }
+  .enrollment-room[open] > summary::before { content:"▾"; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -298,6 +328,9 @@
     <div id="readonly-banner" style="display:none; background:var(--danger-soft); color:var(--danger); padding:8px 12px; border-radius:8px; margin-bottom:14px; font-size:13px;">
       คุณไม่ใช่เจ้าของวิชานี้ — ดูได้อย่างเดียว แก้ไข/ลบไม่ได้ (ให้ admin ตั้งเป็นเจ้าของก่อน)
     </div>
+    <button type="button" class="subject-toggle" id="subject-form-toggle" aria-expanded="true" aria-controls="subject-form-body">แก้ไขข้อมูลวิชา</button>
+    <div class="subject-summary" id="subject-form-summary"></div>
+    <div id="subject-form-body">
     <div class="section-title" id="subject-form-title">ข้อมูลวิชา</div>
     <div class="field">
       <label for="f-type">ประเภทวิชา</label>
@@ -364,6 +397,7 @@
     </div>
     <button class="primary" id="btn-save-subject">บันทึกข้อมูลวิชา</button>
     <button class="danger" id="btn-del-subject" style="width:100%; margin-top:8px; display:none">ลบวิชานี้</button>
+    </div>
   </div>
 
   <!-- ปิด/เปิดคะแนนสอบ (เฉพาะวิชาพื้นฐานที่เลือกอยู่) -->
@@ -413,7 +447,7 @@
 
   <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
   <div class="card" id="structure-card" style="display:none">
-    <div class="section-title">คะแนนวิชา</div>
+    <div class="structure-heading"><div class="section-title">คะแนนวิชา</div><div class="fold-tools"><button type="button" class="ghost small" id="expand-units">กางทั้งหมด</button><button type="button" class="ghost small" id="collapse-units">พับทั้งหมด</button></div></div>
     <div id="units-vicha"></div>
     <button class="ghost small" id="btn-add-unit-vicha">+ เพิ่มหน่วยใหญ่ (คะแนนวิชา)</button>
 
@@ -974,6 +1008,11 @@ mMax.addEventListener("input", clearCollectionMaxError);
 
 // state
 let currentSubject = null;    // object วิชาที่เลือกอยู่ (null = โหมดสร้างใหม่)
+const collapsedUnits = new Set();
+const expandedEnrollmentRooms = new Set();
+let structureSubjectId = null;
+let enrollmentSubjectId = null;
+let subjectFormSubjectId = null;
 let units = [];               // ต้นไม้โครงสร้างของวิชานี้ (units > indicators > collections > scores)
 let modalContext = null;      // เก็บว่ากำลังเพิ่ม/แก้ node ประเภทอะไร ของใคร
 let allSubjects = [];         // วิชาทั้งหมด (ใช้เลือกวิชาพื้นฐานมาเป็นสมาชิกวิชาบูรณาการ)
@@ -1783,7 +1822,34 @@ function fillSubjectForm(subj) {
   if (canEditAcademicSettings) fOwner.value = subj && subj.owner_id ? subj.owner_id : "";
   const isIntegratedSubj = subj && subj.subject_type === "บูรณาการ";
   document.getElementById("field-periods").style.display = isIntegratedSubj ? "none" : "block";
+  syncSubjectFold(subj);
 }
+
+// พับเฉพาะการแสดงผล โดยฟอร์มวิชาเดิมยังอยู่ใน DOM ทั้งสองโหมด
+function syncSubjectFold(subj) {
+  const toggle = document.getElementById("subject-form-toggle");
+  const body = document.getElementById("subject-form-body");
+  const summary = document.getElementById("subject-form-summary");
+  const id = subj?.id || null;
+  if (id !== subjectFormSubjectId) { structureSubjectId = null; enrollmentSubjectId = null; }
+  if (id !== subjectFormSubjectId || !subj) body.hidden = !!subj;
+  subjectFormSubjectId = id;
+  toggle.hidden = !subj;
+  toggle.setAttribute("aria-expanded", String(!body.hidden));
+  summary.hidden = !subj;
+  const ownerId = canEditAcademicSettings ? fOwner.value : subj?.owner_id;
+  const ownerName = allProfiles.find(profile => profile.id === ownerId)?.email || (ownerId === myUserId ? myProfile?.email || session.user.email : "ครูเจ้าของวิชา");
+  summary.textContent = subj ? [fCode.value + " " + fName.value, fGrade.value, fPeriods.value ? fPeriods.value + " คาบ" : "ยังไม่ระบุคาบ", ownerName].join(" · ") : "";
+}
+for (const event of ["input", "change"]) document.getElementById("subject-form-body").addEventListener(event, () => syncSubjectFold(currentSubject));
+document.getElementById("subject-form-toggle").addEventListener("click", () => {
+  if (!currentSubject) return;
+  const body = document.getElementById("subject-form-body");
+  body.hidden = !body.hidden;
+  document.getElementById("subject-form-toggle").setAttribute("aria-expanded", String(!body.hidden));
+});
+document.getElementById("expand-units").addEventListener("click", () => { collapsedUnits.clear(); renderStructure(); });
+document.getElementById("collapse-units").addEventListener("click", () => { units.forEach(unit => collapsedUnits.add(unit.id)); renderStructure(); });
 
 // ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
 document.getElementById("btn-save-subject").addEventListener("click", async () => {
@@ -1972,6 +2038,11 @@ function countScoresInUnits(unitList) {
 
 // ---------- วาดต้นไม้โครงสร้าง ----------
 function renderStructure() {
+  if (structureSubjectId !== currentSubject.id) {
+    collapsedUnits.clear();
+    if (units.length >= 2) units.forEach(unit => collapsedUnits.add(unit.id));
+    structureSubjectId = currentSubject.id;
+  }
   elUnitsVicha.innerHTML = "";
   elUnitsComp.innerHTML = "";
   const vicha = units.filter(u => u.kind === "วิชา");
@@ -1993,9 +2064,27 @@ function renderUnit(unit) {
 
   const head = document.createElement("div");
   head.className = "unit-head";
-  head.innerHTML =
-    "<span class='title'>" + escapeHtml(unit.name) + "</span>" +
-    "<span class='cap'>เต็ม " + unit.max_score + "</span>";
+  const body = document.createElement("div");
+  body.id = "unit-body-" + unit.id;
+  body.hidden = collapsedUnits.has(unit.id);
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "unit-toggle";
+  fold.setAttribute("aria-expanded", String(!body.hidden));
+  fold.setAttribute("aria-controls", body.id);
+  const indicators = unit.indicators || [];
+  const collections = indicators.reduce((total, ind) => total + (ind.collections || []).length, 0);
+  fold.innerHTML = "<span class='title'>" + escapeHtml(unit.name) + "</span><span class='hint'>" + indicators.length + " หน่วยย่อย · " + collections + " ครั้ง</span>";
+  fold.addEventListener("click", () => {
+    body.hidden = !body.hidden;
+    body.hidden ? collapsedUnits.add(unit.id) : collapsedUnits.delete(unit.id);
+    fold.setAttribute("aria-expanded", String(!body.hidden));
+  });
+  head.appendChild(fold);
+  const cap = document.createElement("span");
+  cap.className = "cap";
+  cap.textContent = "เต็ม " + unit.max_score;
+  head.appendChild(cap);
   if (isUnitNotScored) {
     const badge = document.createElement("span");
     badge.className = "not-scored-badge";
@@ -2019,6 +2108,7 @@ function renderUnit(unit) {
     head.appendChild(makeIconBtn("🗑", "del", () => deleteUnit(unit)));
   }
   block.appendChild(head);
+  block.appendChild(body);
 
   for (const ind of (unit.indicators || [])) {
     const isNotScored = ind.counts_score === false;
@@ -2049,7 +2139,11 @@ function renderUnit(unit) {
     if (canDelete) {
       row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
     }
-    block.appendChild(row);
+    row.querySelector(".title").title = ind.name;
+    body.appendChild(row);
+    const chips = document.createElement("div");
+    chips.className = "collection-chips";
+    body.appendChild(chips);
 
     for (const coll of (ind.collections || [])) {
       const crow = document.createElement("div");
@@ -2063,14 +2157,14 @@ function renderUnit(unit) {
       if (canDelete) {
         crow.appendChild(makeIconBtn("🗑", "del", () => deleteCollection(coll)));
       }
-      block.appendChild(crow);
+      chips.appendChild(crow);
     }
 
     if (canEdit) {
       const addColl = document.createElement("div");
       addColl.className = "add-row collection";
       addColl.appendChild(makeAddBtn("+ เพิ่มครั้งที่", () => openNodeModal("collection", "add", ind)));
-      block.appendChild(addColl);
+      chips.appendChild(addColl);
     }
   }
 
@@ -2078,7 +2172,7 @@ function renderUnit(unit) {
     const addInd = document.createElement("div");
     addInd.className = "add-row indicator";
     addInd.appendChild(makeAddBtn("+ เพิ่มหน่วยย่อย", () => openNodeModal("indicator", "add", unit)));
-    block.appendChild(addInd);
+    body.appendChild(addInd);
   }
 
   return block;
@@ -2427,6 +2521,10 @@ async function loadEnrollments() {
 }
 
 function renderEnrollments() {
+  if (enrollmentSubjectId !== currentSubject.id) {
+    expandedEnrollmentRooms.clear();
+    enrollmentSubjectId = currentSubject.id;
+  }
   const canEdit = canEditCurrentSubject();
 
   // dropdown "เพิ่มทั้งห้อง" — เฉพาะห้องที่ชั้นปีตรงกับวิชานี้
@@ -2454,15 +2552,34 @@ function renderEnrollments() {
     elEnrollList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีนักเรียนลงทะเบียน</div>";
   }
   const enrolledIds = new Set(currentEnrollments.map(e => e.student.id));
+  const rooms = new Map();
   for (const e of currentEnrollments) {
-    const row = document.createElement("div");
-    row.className = "member-row";
-    row.innerHTML = "<span class='title'>" + escapeHtml(e.student.name) +
-      " <span class='hint'>(รหัสประจำตัว " + escapeHtml(e.student.student_no) +
-      (e.student.classroom ? " · " + escapeHtml(e.student.grade_level || "") + "/" + escapeHtml(e.student.classroom) : "") +
-      ")</span></span>";
-    if (canEdit) row.appendChild(makeIconBtn("🗑", "del", () => removeEnrollment(e)));
-    elEnrollList.appendChild(row);
+    const room = e.student.classroom ? (e.student.grade_level || "") + "/" + e.student.classroom : "ไม่ระบุห้อง";
+    if (!rooms.has(room)) rooms.set(room, []);
+    rooms.get(room).push(e);
+  }
+  for (const [room, enrollments] of [...rooms].sort(([a], [b]) => a.localeCompare(b, "th", { numeric:true }))) {
+    const group = document.createElement("details");
+    group.className = "enrollment-room";
+    group.open = expandedEnrollmentRooms.has(room);
+    const heading = document.createElement("summary");
+    heading.textContent = room + " · " + enrollments.length + " คน";
+    group.appendChild(heading);
+    group.addEventListener("toggle", () => {
+      if (!group.isConnected) return;
+      group.open ? expandedEnrollmentRooms.add(room) : expandedEnrollmentRooms.delete(room);
+    });
+    elEnrollList.appendChild(group);
+    for (const e of enrollments) {
+      const row = document.createElement("div");
+      row.className = "member-row";
+      row.innerHTML = "<span class='title'>" + escapeHtml(e.student.name) +
+        " <span class='hint'>(รหัสประจำตัว " + escapeHtml(e.student.student_no) +
+        (e.student.classroom ? " · " + escapeHtml(e.student.grade_level || "") + "/" + escapeHtml(e.student.classroom) : "") +
+        ")</span></span>";
+      if (canEdit) row.appendChild(makeIconBtn("🗑", "del", () => removeEnrollment(e)));
+      group.appendChild(row);
+    }
   }
 
   // dropdown เพิ่มทีละคน — ตั้งต้นแสดงเฉพาะช่วงชั้นเดียวกับวิชานี้ แล้วแยกกลุ่มตามห้อง
