@@ -253,6 +253,25 @@
   .risk-marker span { position: absolute; top: 13px; left: 0; transform: translateX(-50%); font-size: 11px; color: var(--muted); }
   .risk-marker.at-20 { left: 20%; }
   .risk-marker.at-40 { left: 40%; }
+  .ms-list-actions { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .ms-list-actions h2 { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+  .ms-list-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ms-list-buttons .ghost { min-height: 44px; max-width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--teal-soft); color: var(--teal); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+  .ms-list-buttons .ghost:disabled { opacity: .55; cursor: wait; }
+  .ms-list-message { margin: 8px 0 0; color: var(--danger); font-size: 14px; }
+  .ms-list-sheet { color: black; background: white; font: 14px/1.55 "Sarabun", sans-serif; }
+  .ms-list-heading { text-align: center; margin-bottom: 6mm; }
+  .ms-list-logo { width: 18mm; height: 18mm; object-fit: contain; }
+  .ms-list-school { font-size: 18px; font-weight: 600; }
+  .ms-list-title { font-size: 16px; margin: 2mm 0; }
+  .ms-list-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .ms-list-table th, .ms-list-table td { border: 1px solid black; padding: 1.5mm; vertical-align: top; overflow-wrap: anywhere; }
+  .ms-list-table th { font-weight: 600; }
+  .ms-list-table thead { display: table-header-group; }
+  .ms-list-table tr, .ms-list-student, .ms-list-summary, .ms-list-signatures { break-inside: avoid; }
+  .ms-list-number { text-align: center; }
+  .ms-list-summary { margin-top: 4mm; }
+  .ms-list-signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6mm; margin-top: 12mm; text-align: center; }
   @media (min-width: 900px) {
     .student-head { display: grid; grid-template-columns: minmax(100px, 1.2fr) minmax(85px, 1fr) minmax(70px, .8fr) auto minmax(0, auto) auto 48px; padding: 12px 14px; }
     .student-identity { grid-column: 1; }
@@ -400,6 +419,7 @@
   let reportYear = "";
   let reportTerm = "";
   let reportWarnPercent = 0;
+  let reportTargetStudents = [];
   let printing = false;
   let schoolName = "";
   let schoolAddress = "";
@@ -783,6 +803,107 @@ function decorateWarningReport(total, grade, warnPercent) {
   }));
 }
 
+  // คัดจากผลรอบตรวจเดิมเท่านั้น ไม่คำนวณเกณฑ์หรือแยกวิชาย่อยใหม่
+  function roomMsListStudents(students, classroom) {
+    return students
+      .filter(item => String(item.stu.classroom || "") === classroom)
+      .map(item => ({ ...item, riskySubjects: item.riskySubjects.filter(subject => subject.critical || subject.retake) }))
+      .filter(item => item.riskySubjects.length > 0)
+      .sort((a, b) => String(a.stu.student_no || "").localeCompare(String(b.stu.student_no || ""), "th", { numeric: true }));
+  }
+
+  function roomMsListBarHtml(students, grade) {
+    if (!String(grade || "").startsWith("ม.")) return "";
+    const rooms = [...new Set(students
+      .filter(item => item.riskySubjects.some(subject => subject.critical || subject.retake))
+      .map(item => String(item.stu.classroom || "")))]
+      .sort((a, b) => a.localeCompare(b, "th", { numeric: true }));
+    if (!rooms.length) return "";
+    return `<div class="ms-list-actions no-print"><h2>พิมพ์รายชื่อติด มส. รายห้อง</h2>
+      <div class="ms-list-buttons">${rooms.map(classroom => {
+        const label = homeroomAuditRoomLabel({ grade_level: grade, classroom });
+        return `<button type="button" class="ghost no-print" data-print-ms-room="${escapeHtml(classroom)}">พิมพ์ ${escapeHtml(label)} · ${escapeHtml(roomMsListStudents(students, classroom).length)} คน</button>`;
+      }).join("")}</div><p class="ms-list-message" id="ms-list-message" role="alert" hidden></p></div>`;
+  }
+
+  function renderRoomMsList(students, { grade, year, term, classroom, total, dateText }, signers = {}) {
+    const room = homeroomAuditRoomLabel({ grade_level: grade, classroom });
+    const retakeCount = students.filter(item => item.riskySubjects.some(subject => subject.retake)).length;
+    const bodies = students.map((item, index) => {
+      const rows = item.riskySubjects.map((subject, subjectIndex) => {
+        const identity = subjectIndex === 0
+          ? `<td class="ms-list-number" rowspan="${item.riskySubjects.length}">${escapeHtml(index + 1)}</td><td rowspan="${item.riskySubjects.length}">${escapeHtml(item.stu.student_no)}</td><td rowspan="${item.riskySubjects.length}">${escapeHtml(item.stu.name)}</td>`
+          : "";
+        const missed = subject.retake ? subject.rawMissed : subject.netMissed;
+        const percent = subject.retake ? subject.rawPct : subject.pct;
+        const status = subject.retake ? "เรียนซ้ำรายวิชา" : "มส. (ต้องชดเชยเวลา)";
+        return `<tr>${identity}<td>${escapeHtml(subject.name)}</td><td class="ms-list-number">${escapeHtml(String(missed))} / ${escapeHtml(String(subject.total))}</td><td class="ms-list-number">${escapeHtml(percent.toFixed(1))}</td><td>${escapeHtml(status)}</td></tr>`;
+      }).join("");
+      return `<tbody class="ms-list-student">${rows}</tbody>`;
+    }).join("");
+    return `<article class="ms-list-sheet"><div class="ms-list-heading">
+      <img class="ms-list-logo" src="../logo.png" alt="ตราโรงเรียน">
+      <div class="ms-list-school">${escapeHtml(schoolName)}</div>
+      <h1 class="ms-list-title">รายชื่อนักเรียนที่ไม่มีสิทธิ์สอบ (มส.) และต้องเรียนซ้ำรายวิชา</h1>
+      <div>ชั้น ${escapeHtml(room)} · ภาคเรียนที่ ${escapeHtml(term)} ปีการศึกษา ${escapeHtml(year)} · ข้อมูล ณ วันที่ ${escapeHtml(dateText)}</div></div>
+      <table class="ms-list-table"><colgroup><col style="width:5%"><col style="width:10%"><col style="width:19%"><col style="width:27%"><col style="width:12%"><col style="width:8%"><col style="width:19%"></colgroup>
+      <thead><tr><th>ที่</th><th>เลขประจำตัว</th><th>ชื่อ–สกุล</th><th>รายวิชา</th><th>ขาด/ทั้งหมด</th><th>ร้อยละ</th><th>สถานะ</th></tr></thead>${bodies}</table>
+      <div class="ms-list-summary">สรุป: มส. (ชดเชยได้) ${escapeHtml(String(students.length - retakeCount))} คน · ต้องเรียนซ้ำรายวิชา ${escapeHtml(String(retakeCount))} คน · รวม ${escapeHtml(String(students.length))} คน จากนักเรียนทั้งห้อง ${escapeHtml(String(total))} คน</div>
+      <div class="ms-list-signatures"><div>ลงชื่อ ....................... ครูประจำชั้น<br>(${escapeHtml(signers.homeroomName)})</div><div>ลงชื่อ ....................... หัวหน้าฝ่ายวิชาการ<br>(${escapeHtml(signers.academicHeadName)})</div></div></article>`;
+  }
+
+  async function printRoomMsList(classroom, button) {
+    if (printing || !String(reportGrade || "").startsWith("ม.")) return;
+    const students = roomMsListStudents(flaggedStudents, classroom);
+    if (!students.length) return;
+    const message = elResults.querySelector("#ms-list-message");
+    if (!reportTerm || !elTerm.value) {
+      message.textContent = "เลือกภาคเรียนก่อน — ใบรายชื่อต้องระบุภาคเรียน";
+      message.hidden = false;
+      elTerm.focus();
+      return;
+    }
+    message.hidden = true;
+    const context = {
+      grade: reportGrade, year: reportYear, term: reportTerm, classroom,
+      total: reportTargetStudents.filter(student => String(student.classroom || "") === classroom).length,
+      dateText: thaiLetterDateText(toDateStr(bangkokNow()))
+    };
+    const staffId = signerByRoom.get(classroom) || null;
+    const pickedName = (teachersByRoom.get(classroom) || []).find(teacher => String(teacher.staffId) === String(staffId))?.fullName;
+    printing = true;
+    const buttons = [...elResults.querySelectorAll("[data-print-student], [data-print-ms-room]")];
+    buttons.forEach(item => { item.disabled = true; });
+    const checkDisabled = btnCheck.disabled;
+    btnCheck.disabled = true;
+    const label = button.textContent;
+    button.textContent = "กำลังเตรียมใบรายชื่อ...";
+    try {
+      const signers = await loadLetterSigners(context.year, context.grade, classroom);
+      elPrintArea.innerHTML = renderRoomMsList(students, context, {
+        ...signers, homeroomName: pickedName || signers.homeroomName
+      });
+      await document.fonts.ready;
+      try {
+        await Promise.all([...elPrintArea.querySelectorAll("img")].map(img => img.decode()));
+      } catch (error) {
+        // รูปเสียยังพิมพ์ข้อความต่อได้ เช่นเดียวกับเส้นทางหนังสือเดิม
+      }
+      window.print();
+    } catch (error) {
+      if (message.isConnected) {
+        message.textContent = error.message || "เตรียมใบรายชื่อไม่สำเร็จ — ลองพิมพ์อีกครั้ง";
+        message.hidden = false;
+      }
+    } finally {
+      elPrintArea.innerHTML = "";
+      printing = false;
+      button.textContent = label;
+      buttons.forEach(item => { if (item.isConnected) item.disabled = false; });
+      btnCheck.disabled = checkDisabled;
+    }
+  }
+
   async function runCheck() {
     const year = elYear.value;
     const term = elTerm.value;
@@ -1038,6 +1159,8 @@ function decorateWarningReport(total, grade, warnPercent) {
       reportYear = year;
       reportTerm = term;
       reportWarnPercent = warnPercent;
+      reportTargetStudents = targetStudents;
+      elResults.firstElementChild.insertAdjacentHTML("beforeend", roomMsListBarHtml(flaggedStudents, reportGrade));
 
     } catch (err) {
       elResults.innerHTML = "<div class='card hint' style='color:var(--danger)'>เกิดข้อผิดพลาด: " + err.message + "</div>";
@@ -1128,6 +1251,11 @@ function decorateWarningReport(total, grade, warnPercent) {
       printing = false;
       buttons.forEach(item => { if (item.isConnected) item.disabled = false; });
     }
+  });
+
+  elResults.addEventListener("click", async event => {
+    const button = event.target.closest("[data-print-ms-room]");
+    if (button) await printRoomMsList(button.dataset.printMsRoom, button);
   });
 
   window.addEventListener("DOMContentLoaded", init);
