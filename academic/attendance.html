@@ -2915,12 +2915,17 @@ async function openLinkedLessonLog() {
     await selectSubject(false);
     elPeriods.value = target.periods_covered;
     if (subject.subject_type === "บูรณาการ") {
-      // เลือกเฉพาะวิชาย่อยของคาบเป้าหมาย คาบอื่นในบันทึกเดิมโหลดคืนโดย refreshLessonLogCard
+      // เลือกทุกวิชาย่อยที่อยู่ในบันทึกวันเป้าหมาย โดยไม่ดึงคาบวันอื่นหรือวิชาที่ไม่มีสิทธิ์เข้ามา
+      const sameDay = log.sessions.filter(row => row.session_date === target.session_date);
+      const sameDayIds = new Set(sameDay.map(row => row.subject_id));
       for (const cb of elMemberList.querySelectorAll(".member-cb")) {
-        cb.checked = !cb.disabled && cb.dataset.id === target.subject_id;
+        cb.checked = !cb.disabled && sameDayIds.has(cb.dataset.id);
       }
       for (const input of elMemberList.querySelectorAll(".member-periods")) {
-        if (input.dataset.id === target.subject_id) input.value = target.periods_covered;
+        // วิชาเป้าหมายใช้คาบจากลิงก์ตรง ๆ วิชาอื่นใช้คาบแรกของวันนั้นในบันทึก
+        const memberSession = sameDay.find(row => row.subject_id === input.dataset.id &&
+          (input.dataset.id !== target.subject_id || row.id === sessionId));
+        if (memberSession) input.value = memberSession.periods_covered;
       }
     }
     if ([...elClassroom.options].some(option => option.value === ALL_ROOMS_VALUE)) {
@@ -2928,9 +2933,15 @@ async function openLinkedLessonLog() {
       acceptedClassroomValue = ALL_ROOMS_VALUE;
     }
     await loadRosterFromSelection();
-    const existing = daySessions.find(row => row.id === sessionId);
-    if (!existing) throw new Error("เปิดคาบจากลิงก์ไม่ได้ กรุณาเลือกวิชา วันที่ และครั้งที่เช็คชื่ออีกครั้ง");
-    await selectDaySession(existing);
+    if (blockMode) {
+      const roundIndex = blockRounds.findIndex(round => round.bySubject.get(target.subject_id)?.id === sessionId);
+      if (roundIndex < 0) throw new Error("เปิดคาบจากลิงก์ไม่ได้ กรุณาเลือกวิชา วันที่ และครั้งที่เช็คชื่ออีกครั้ง");
+      await selectBlockRound(roundIndex);
+    } else {
+      const existing = daySessions.find(row => row.id === sessionId);
+      if (!existing) throw new Error("เปิดคาบจากลิงก์ไม่ได้ กรุณาเลือกวิชา วันที่ และครั้งที่เช็คชื่ออีกครั้ง");
+      await selectDaySession(existing);
+    }
     elLessonLogCard.scrollIntoView({ block:"start" });
   } catch (error) { showToast(error.message, false); }
 }
