@@ -561,11 +561,12 @@
               <div id="makeup-student-error" class="makeup-error" hidden></div>
             </div>
             <div id="makeup-status" class="makeup-status" role="status">เลือกนักเรียนเพื่อดูสถานะเวลาเรียน</div>
+            <div id="makeup-member-quota" class="hint field" role="status" hidden></div>
             <div class="field">
               <label for="inp-makeup-periods">จำนวนคาบที่ชดเชย</label>
               <div class="makeup-stepper">
                 <button type="button" class="ghost" id="makeup-minus" aria-label="ลดครึ่งคาบ">−</button>
-                <input type="number" id="inp-makeup-periods" min="0.5" step="0.5" aria-describedby="makeup-periods-error makeup-after">
+                <input type="number" id="inp-makeup-periods" min="0.5" step="0.5" aria-describedby="makeup-member-quota makeup-periods-error makeup-after">
                 <button type="button" class="ghost" id="makeup-plus" aria-label="เพิ่มครึ่งคาบ">+</button>
               </div>
               <div id="makeup-periods-error" class="makeup-error" hidden></div>
@@ -2690,6 +2691,7 @@ let makeupLoadSeq = 0;
 let makeupLoading = false;
 let makeupSaving = false;
 let makeupError = "";
+let makeupAutoPeriods = "";
 const elMakeupPeriods = document.getElementById("inp-makeup-periods");
 const elMakeupReason = document.getElementById("inp-makeup-reason");
 const elMakeupStatus = document.getElementById("makeup-status");
@@ -2730,7 +2732,11 @@ elMakeupMember.addEventListener("change", () => { if (elMakeupMember.value) load
 // คำตอบจากวิชาย่อย/ห้อง/วิชาที่เลือกก่อนหน้า ห้ามทับฐานปัจจุบัน
 async function loadMakeupFor(subjectId, seq = loadSeq) {
   const request = ++makeupLoadSeq;
-  const selected = makeupSubjectId === subjectId ? elMakeupStudent.value : "";
+  const switchingMember = makeupSubjectId !== subjectId && [...integrationMap.values()]
+    .some(ids => ids.includes(makeupSubjectId) && ids.includes(subjectId));
+  const selected = makeupSubjectId === subjectId || switchingMember ? elMakeupStudent.value : "";
+  const refill = switchingMember && (elMakeupPeriods.value === "" ||
+    (makeupAutoPeriods !== "" && Number(elMakeupPeriods.value) === Number(makeupAutoPeriods)));
   makeupSubjectId = subjectId;
   makeupBasis = null; makeupRecords = []; makeupRoster = [];
   makeupLoading = true; makeupError = "";
@@ -2742,7 +2748,10 @@ async function loadMakeupFor(subjectId, seq = loadSeq) {
     if (seq !== loadSeq || request !== makeupLoadSeq) return;
     makeupRoster = roster; makeupBasis = basis; makeupRecords = basis.records;
     fillSelect(elMakeupStudent, makeupRoster, student => student.name + "  (รหัสประจำตัว " + student.student_no + ")", "— เลือกนักเรียน —");
-    if (roster.some(student => student.id === selected)) elMakeupStudent.value = selected;
+    if (roster.some(student => student.id === selected)) {
+      elMakeupStudent.value = selected;
+      if (refill) fillMakeupDefault(basis.rows[selected]);
+    }
   } catch (error) {
     if (seq !== loadSeq || request !== makeupLoadSeq) return;
     makeupError = "โหลดข้อมูลเวลาเรียนไม่สำเร็จ: " + (error.message || String(error));
@@ -2787,7 +2796,7 @@ function renderMakeup() {
       hintEl.textContent = "คนที่ยังขาดไม่เกิน " + pass + " คาบไม่แสดงตรงนี้ — บันทึกล่วงหน้าได้จากช่อง “นักเรียน”";
     }
   }
-  renderMakeupCandidates(candidates); renderMakeupList(); updateMakeupForm();
+  renderMakeupCandidates(candidates); renderMakeupList(); updateMakeupForm(); renderMakeupMemberQuota();
 }
 
 function renderMakeupCandidates(candidates) {
@@ -2800,7 +2809,11 @@ function renderMakeupCandidates(candidates) {
     row.className = "makeup-who-row " + (risk.retake ? "retake" : "need");
     row.dataset.studentId = student.id;
     row.classList.toggle("selected", elMakeupStudent.value === student.id);
-    row.innerHTML = "<div><div class='name'>" + escapeHtml(student.name) + "</div><div class='meta'>ขาดรวม " + fmtPeriods(risk.rawMissed) + " / " + fmtPeriods(makeupBasis.base) + " คาบ · ชดเชยแล้ว " + fmtPeriods(risk.makeupTotal) + "</div></div>";
+    const memberQuotas = makeupBasis.parentName && !risk.retake ? makeupBasis.members
+      .filter(member => risk.members?.[member.id]?.quota > 0)
+      .map(member => escapeHtml(member.name) + " " + fmtPeriods(risk.members[member.id].quota)).join(" · ") : "";
+    row.innerHTML = "<div><div class='name'>" + escapeHtml(student.name) + "</div><div class='meta'>ขาดรวม " + fmtPeriods(risk.rawMissed) + " / " + fmtPeriods(makeupBasis.base) + " คาบ · ชดเชยแล้ว " + fmtPeriods(risk.makeupTotal) + "</div>" +
+      (memberQuotas ? "<div class='meta'>แยกตามวิชาย่อย: " + memberQuotas + " คาบ</div>" : "") + "</div>";
     if (risk.retake) row.innerHTML += "<span class='pill danger'>เรียนซ้ำ</span>";
     else {
       const button = document.createElement("button");
@@ -2823,8 +2836,33 @@ function renderMakeupCandidates(candidates) {
 function selectMakeupStudent(studentId) {
   if (makeupSaving || !makeupBasis || makeupBasis.rows[studentId]?.retake) return;
   elMakeupStudent.value = studentId;
-  elMakeupPeriods.value = fmtPeriods(makeupBasis.rows[studentId].need);
-  clearMakeupErrors(); updateMakeupForm(); elMakeupPeriods.focus();
+  fillMakeupDefault(makeupBasis.rows[studentId]);
+  clearMakeupErrors(); updateMakeupForm(); renderMakeupMemberQuota(); elMakeupPeriods.focus();
+}
+
+function fillMakeupDefault(risk) {
+  const integrated = !!makeupBasis.parentName;
+  const periods = integrated ? risk?.members?.[makeupSubjectId]?.quota : risk?.need;
+  makeupAutoPeriods = risk?.retake || !risk || (integrated && !(periods > 0)) ? "" : fmtPeriods(periods);
+  elMakeupPeriods.value = makeupAutoPeriods;
+}
+
+function renderMakeupMemberQuota() {
+  const node = document.getElementById("makeup-member-quota");
+  const risk = makeupBasis?.rows[elMakeupStudent.value];
+  const member = risk?.members?.[makeupSubjectId];
+  node.hidden = true; node.textContent = "";
+  if (!makeupBasis?.parentName || !member || risk.retake || !(risk.need > 0)) return;
+  const subject = makeupBasis.members.find(row => row.id === makeupSubjectId);
+  if (member.quota > 0) {
+    node.textContent = "ส่วนของ " + subject.name + ": ขาด " + fmtPeriods(member.missed) + " / " + fmtPeriods(member.base) +
+      " คาบ เกิน 20% ของวิชานี้ " + fmtPeriods(member.quota) + " คาบ";
+  } else {
+    const others = makeupBasis.members.filter(row => risk.members[row.id]?.quota > 0)
+      .map(row => row.name + " " + fmtPeriods(risk.members[row.id].quota) + " คาบ");
+    node.textContent = subject.name + " ขาดไม่เกิน 20% ของวิชานี้ — ส่วนที่ต้องชดเชยอยู่ที่ " + others.join(" · ");
+  }
+  node.hidden = false;
 }
 
 function updateMakeupForm() {
@@ -2903,7 +2941,7 @@ function renderMakeupList() {
   }
 }
 
-elMakeupStudent.addEventListener("change", () => { setMakeupFieldError("student", ""); updateMakeupForm(); });
+elMakeupStudent.addEventListener("change", () => { setMakeupFieldError("student", ""); updateMakeupForm(); renderMakeupMemberQuota(); });
 elMakeupPeriods.addEventListener("input", () => { setMakeupFieldError("periods", ""); updateMakeupForm(); });
 elMakeupReason.addEventListener("input", () => setMakeupFieldError("reason", ""));
 for (const [id, delta] of [["makeup-minus", -0.5], ["makeup-plus", 0.5]]) document.getElementById(id).addEventListener("click", () => {
@@ -2944,6 +2982,19 @@ async function loadMakeupBasis(subjectId, studentIds = []) {
     const risk = computeAttendanceRisk(studentId, dataList, { warnPercent: MS_WARN_PERCENT_SECONDARY });
     const missing = risk.netMissed - risk.totalBase * MS_MAKEUP_RATIO;
     rows[studentId] = { ...risk, need: risk.totalBase > 0 && missing > 0 ? Math.ceil(missing * 2) / 2 : 0 };
+    if (parentId) {
+      rows[studentId].members = {};
+      for (const item of dataList) {
+        const missed = computeMissedPeriods(studentId, item.sessions);
+        const makeup = item.makeupHours.filter(row => row.student_id === studentId)
+          .reduce((sum, row) => sum + Number(row.periods), 0);
+        const base = Number(item.subject.total_periods);
+        const over = missed - base * MS_MAKEUP_RATIO - makeup;
+        rows[studentId].members[item.subject.id] = {
+          missed, makeup, base, quota: over > 0 ? Math.min(Math.ceil(over * 2) / 2, rows[studentId].need) : 0
+        };
+      }
+    }
   }
   return {
     parentName: parentId ? (allSubjects.find(subject => subject.id === parentId)?.name || "วิชาบูรณาการ") : null,
