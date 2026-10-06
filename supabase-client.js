@@ -1628,7 +1628,7 @@ export async function loadLessonLogs({ createdBy, year, term, subjectId, from, t
     rows.push(...(data || []));
     if ((data || []).length < pageSize) break;
   }
-  return rows.map(row => {
+  const logs = rows.map(row => {
     const { lesson_log_sessions, ...log } = row;
     return {
       ...log,
@@ -1636,12 +1636,71 @@ export async function loadLessonLogs({ createdBy, year, term, subjectId, from, t
       sessions:(lesson_log_sessions || []).map(lessonSessionFromLink).filter(Boolean)
         .sort((a, b) => String(a.session_date).localeCompare(String(b.session_date)))
     };
-  }).filter(log => (!from && !to) || log.sessions.some(row =>
+  });
+  const matchingPlans = new Set(logs.filter(log => (!from && !to) || log.sessions.some(row =>
     (!from || row.session_date >= from) && (!to || row.session_date <= to)
-  )).sort((a, b) =>
+  )).map(log => log.continues_log_id || log.id));
+  return logs.filter(log => matchingPlans.has(log.continues_log_id || log.id)).sort((a, b) =>
     String(summarizeLessonLogSessions(b.sessions).lastDate || "")
       .localeCompare(String(summarizeLessonLogSessions(a.sessions).lastDate || ""))
   );
+}
+
+// โหลดคาบแยกจากใบ เพื่อแบ่งหน้าได้ครบ รวมแผนที่มีรอบ/คาบเกินเพดานคำขอ
+async function lessonLogPlansFromRoots(roots) {
+  if (!roots.length) return [];
+  const rounds = [...roots];
+  for (let offset = 0; offset < roots.length; offset += 100) {
+    const result = await fetchAllRows(() => sb.from("lesson_logs").select("*")
+      .in("continues_log_id", roots.slice(offset, offset + 100).map(row => row.id)));
+    if (result.error) throw new Error("โหลดรอบของแผนไม่สำเร็จ: " + result.error.message);
+    rounds.push(...(result.data || []));
+  }
+  const byId = new Map(rounds.map(row => [row.id, { ...row, sessions:[] }]));
+  const ids = [...byId.keys()];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const result = await fetchAllRows(() => sb.from("lesson_log_sessions")
+      .select("log_id,attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status))")
+      .in("log_id", ids.slice(offset, offset + 100)), ["log_id", "session_id"]);
+    if (result.error) throw new Error("โหลดคาบของแผนไม่สำเร็จ: " + result.error.message);
+    for (const link of result.data || []) {
+      const session = lessonSessionFromLink(link);
+      if (session && byId.has(link.log_id)) byId.get(link.log_id).sessions.push(session);
+    }
+  }
+  for (const round of byId.values()) round.sessions.sort((a, b) =>
+    String(a.session_date || "").localeCompare(String(b.session_date || "")) || String(a.id).localeCompare(String(b.id)));
+  return roots.map(root => ({ ...root, rounds:[...byId.values()]
+    .filter(row => (row.continues_log_id || row.id) === root.id)
+    .sort((a, b) => String(summarizeLessonLogSessions(a.sessions).firstDate || "")
+      .localeCompare(String(summarizeLessonLogSessions(b.sessions).firstDate || "")) ||
+      String(a.created_at || "").localeCompare(String(b.created_at || "")) || String(a.id).localeCompare(String(b.id))) }));
+}
+
+export async function loadLessonLogPlanOptions(subjectId, { excludeLogId } = {}) {
+  if (!subjectId) return [];
+  const { data:{ session }, error } = await sb.auth.getSession();
+  if (error) throw new Error("ตรวจบัญชีผู้บันทึกไม่สำเร็จ: " + error.message);
+  if (!session) throw new Error("กรุณาเข้าสู่ระบบใหม่ก่อนเลือกแผน");
+  const result = await fetchAllRows(() => {
+    let query = sb.from("lesson_logs").select("*").eq("subject_id", subjectId)
+      .eq("created_by", session.user.id).is("continues_log_id", null);
+    if (excludeLogId) query = query.neq("id", excludeLogId);
+    return query;
+  });
+  if (result.error) throw new Error("โหลดแผนเดิมไม่สำเร็จ: " + result.error.message);
+  const plans = await lessonLogPlansFromRoots(result.data || []);
+  return plans.sort((a, b) => String(summarizeLessonLogSessions(b.rounds.flatMap(row => row.sessions)).lastDate || "")
+    .localeCompare(String(summarizeLessonLogSessions(a.rounds.flatMap(row => row.sessions)).lastDate || "")) ||
+    String(b.created_at || "").localeCompare(String(a.created_at || "")) || String(b.id).localeCompare(String(a.id))).slice(0, 20);
+}
+
+export async function loadLessonLogPlan(rootId) {
+  if (!rootId) return null;
+  const result = await sb.from("lesson_logs").select("*").eq("id", rootId).is("continues_log_id", null).maybeSingle();
+  if (result.error) throw new Error("โหลดแผนเดิมไม่สำเร็จ: " + result.error.message);
+  if (!result.data) return null;
+  return (await lessonLogPlansFromRoots([result.data]))[0];
 }
 
 // นับคาบของเจ้าของวิชา ไม่ขึ้นกับว่าใครเป็นคนเช็คชื่อหรือเขียนบันทึก
@@ -1762,8 +1821,9 @@ export async function saveLessonLog({ logId = null, subjectId, sessionIds, field
   const plannedText = String(fields.planned_periods ?? "").trim();
   const payload = {
     subject_id: subjectId,
-    plan_name: textOrNull(fields.plan_name),
-    planned_periods: plannedText ? Number(plannedText) : null,
+    continues_log_id: fields.continues_log_id || null,
+    plan_name: fields.continues_log_id ? null : textOrNull(fields.plan_name),
+    planned_periods: fields.continues_log_id ? null : plannedText ? Number(plannedText) : null,
     learning_outcome: String(fields.learning_outcome ?? "").trim(),
     problem: String(fields.problem ?? "").trim(),
     improvement: textOrNull(fields.improvement),

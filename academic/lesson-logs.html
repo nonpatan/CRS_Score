@@ -72,6 +72,10 @@
   .split-text { color:var(--muted); }
   .ll-log-body { padding:0 14px 14px; }
   .ll-sessions > div { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px dashed var(--line); font-size:14px; }
+  .ll-round { padding:12px 0; border-bottom:1px dashed var(--line); overflow-wrap:anywhere; }
+  .ll-round h4 { margin:0 0 4px; }
+  .ll-round .ll-actions { margin-top:8px; }
+  .round-head { margin-top:4mm; padding:1mm 2mm; background:var(--bg); font-weight:600; break-after:avoid; }
   .ll-log-body h4 { margin:16px 0 4px; font-size:15px; }
   .ll-text { white-space:pre-wrap; overflow-wrap:anywhere; }
   .ll-actions { display:flex; gap:8px; margin-top:16px; }
@@ -205,7 +209,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, loadLessonLogCoverage, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?v=20261004-1";
+import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, loadLessonLogCoverage, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?v=20261006-1";
 document.getElementById("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 const session = await requireAuth();
 if (!session) {
@@ -313,6 +317,33 @@ function integratedParts(log) {
     periods:summarizeLessonLogForPrint({ sessions:log.sessions.filter(row => row.subject_id === id) }).totalPeriods
   })).sort((a, b) => a.name.localeCompare(b.name, "th") || a.id.localeCompare(b.id));
 }
+// คงใบเดิมทั้งใบสำหรับแผนรอบเดียว รวมด้วย id ของใบแรกเท่านั้น ไม่จับจากชื่อ
+function groupLessonPlans(rows) {
+  const groups = new Map();
+  for (const log of rows) {
+    const key = log.continues_log_id || log.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(log);
+  }
+  return [...groups].map(([key, rounds]) => {
+    if (rounds.length === 1 && !rounds[0].continues_log_id) return rounds[0];
+    const root = rounds.find(row => row.id === key);
+    if (!root) throw new Error("ไม่พบใบแรกของแผน กรุณาโหลดบันทึกใหม่");
+    const ordered = [...rounds].sort((a, b) => String(summarizeLessonLogForPrint(a).firstDate || "")
+      .localeCompare(String(summarizeLessonLogForPrint(b).firstDate || "")) ||
+      String(a.created_at || "").localeCompare(String(b.created_at || "")) || String(a.id).localeCompare(String(b.id)));
+    const sessions = ordered.flatMap(row => row.sessions).sort((a, b) =>
+      String(a.session_date || "").localeCompare(String(b.session_date || "")) || String(a.id).localeCompare(String(b.id)));
+    return { ...root, id:key, rounds:ordered, sessions };
+  }).sort((a, b) => String(summarizeLessonLogForPrint(b).lastDate || "")
+    .localeCompare(String(summarizeLessonLogForPrint(a).lastDate || "")));
+}
+function renderPlanRounds(log) {
+  return log.rounds.map((round, index) => {
+    const summary = summarizeLessonLogForPrint(round);
+    return `<section class="ll-round"><h4>รอบที่ ${index + 1}</h4><div class="meta">${escapeHtml(dateRange(summary))} · ${summary.totalPeriods} คาบ</div><div class="ll-text">ผล: ${escapeHtml(String(round.learning_outcome || "—").slice(0, 120))}\nปัญหา: ${escapeHtml(String(round.problem || "—").slice(0, 120))}</div><div class="ll-actions"><a class="ghost no-print" href="${escapeHtml(editLessonUrl(round))}">แก้ไข</a></div></section>`;
+  }).join("");
+}
 function renderDocument(log) {
   const summary = summarizeLessonLogForPrint(log), subject = log.subject || {};
   const evidence = log.sessions.map(row => `${dateText(row.session_date)} (${Number(row.periods_covered) || 0} คาบ)`).join(" · ");
@@ -328,8 +359,12 @@ function renderDocument(log) {
     <h2 class="document-title">บันทึกหลังการจัดการเรียนรู้</h2>
     <div class="document-meta"><div>กลุ่มสาระ/รายวิชา: ${escapeHtml(subject.name)} (${escapeHtml(subject.code || "—")})</div><div>ชั้น: ${escapeHtml(subject.grade_level || "—")}</div><div>ครูผู้สอน: ${escapeHtml(log.created_by_name || "—")}</div><div>ภาคเรียนที่ ${escapeHtml(subject.term || "—")} ปีการศึกษา ${escapeHtml(subject.year || "—")}</div></div>${integrationLine}
     <div class="plan-name">ชื่อแผน/หน่วยการเรียนรู้: ${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}</div>
-    <div class="evidence">${evidenceHtml}<div>รวม: ${summary.totalPeriods} คาบ · ${summary.sessionCount} ครั้ง · ใช้เวลา ${summary.weeks} สัปดาห์ | ตามแผน: ${summary.plannedPeriods === null ? "ยังไม่ระบุ" : summary.plannedPeriods + " คาบ"}</div><div>นักเรียน: มา ${summary.present} · ลา ${summary.leave} · ขาด ${summary.absent} (รวมทุกคาบ)</div></div>
-    ${sections.map(([title, value]) => `<section class="lesson-section"><h3>${title}</h3><div class="lesson-text">${escapeHtml(value || "—")}</div></section>`).join("")}
+    <div class="evidence">${evidenceHtml}<div>รวม: ${summary.totalPeriods} คาบ · ${summary.sessionCount} ครั้ง · ใช้เวลา ${summary.weeks} สัปดาห์ | ตามแผน: ${summary.plannedPeriods === null ? "ยังไม่ระบุ" : summary.plannedPeriods + " คาบ"}${log.rounds?.length > 1 && summary.plannedPeriods !== null && !summary.matchesPlanned ? summary.difference > 0 ? " · เกินแผน " + summary.difference : " · ขาดจากแผน " + Math.abs(summary.difference) : ""}</div><div>นักเรียน: มา ${summary.present} · ลา ${summary.leave} · ขาด ${summary.absent} (รวมทุกคาบ)</div></div>
+    ${log.rounds?.length > 1 ? log.rounds.map((round, index) => {
+      const evidence = summarizeLessonLogForPrint(round);
+      const fields = [["1. ผลการจัดการเรียนรู้", round.learning_outcome], ["2. ปัญหา/อุปสรรค", round.problem], ["3. แนวทางปรับปรุง/ช่วยเหลือ", round.improvement], ["4. งานที่มอบหมาย/ชิ้นงาน", round.assigned_work]];
+      return `<div class="round-head">รอบที่ ${index + 1} · ${escapeHtml(dateRange(evidence))} · ${evidence.totalPeriods} คาบ</div>` + fields.map(([title, value]) => `<section class="lesson-section"><h3>${title}</h3><div class="lesson-text">${escapeHtml(value || "—")}</div></section>`).join("");
+    }).join("") : sections.map(([title, value]) => `<section class="lesson-section"><h3>${title}</h3><div class="lesson-text">${escapeHtml(value || "—")}</div></section>`).join("")}
     <div class="signatures"><div>ลงชื่อ …………………………………<br>(ครูผู้สอน)</div><div>ลงชื่อ …………………………………<br>(ผู้นิเทศ)</div></div>
   </div></article>`;
 }
@@ -358,7 +393,7 @@ function renderPaperPreview() {
     return;
   }
   const copy = renderDocument(log).replace(/class="print-doc" data-log-id="[^"]*"/, 'class="paper-preview-doc"').replace('alt="ตราโรงเรียน"', 'alt=""');
-  el("paper-preview").innerHTML = `<div class="ll-actions"><button type="button" class="primary no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button><a class="ghost no-print" href="${escapeHtml(editLessonUrl(log))}">แก้ไข</a></div><div class="ll-paper-frame">${copy}</div>`;
+  el("paper-preview").innerHTML = `<div class="ll-actions"><button type="button" class="primary no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button>${log.rounds?.length > 1 ? "" : `<a class="ghost no-print" href="${escapeHtml(editLessonUrl(log))}">แก้ไข</a>`}</div>${log.rounds?.length > 1 ? renderPlanRounds(log) : ""}<div class="ll-paper-frame">${copy}</div>`;
   scalePaperPreview();
 }
 function renderResults() {
@@ -385,7 +420,7 @@ function renderResults() {
       const date = summary.lastDate ? new Date(summary.lastDate + "T00:00:00") : null;
       const month = date ? date.toLocaleDateString("th-TH", { month:"short", year:"2-digit" }) : "—";
       const sections = [["1. ผลการจัดการเรียนรู้", log.learning_outcome], ["2. ปัญหา/อุปสรรค", log.problem], ["3. แนวทางปรับปรุง/ช่วยเหลือ", log.improvement], ["4. งานที่มอบหมาย/ชิ้นงาน", log.assigned_work]];
-      return `<article class="ll-log${log.id === selectedLogId ? " active" : ""}" data-log-id="${escapeHtml(log.id)}"><button type="button" class="ll-log-head" aria-expanded="false" aria-controls="ll-body-${escapeHtml(log.id)}"><span class="ll-date"><b>${date ? date.getDate() : "—"}</b><span>${escapeHtml(month)}</span></span><div><h3>${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}</h3><div class="meta">${escapeHtml(dateRange(summary))} · ${summary.sessionCount} ครั้ง</div>${canViewTeachers && selectedCreatedBy() !== session.user.id ? `<div class="meta">ครูผู้สอน: ${escapeHtml(log.created_by_name || "—")}</div>` : ""}${renderMeter(log, summary, colors)}<div class="chips">${summary.weeks > 1 ? `<span class="chip warn">ใช้เวลา ${summary.weeks} สัปดาห์</span>` : ""}${!log.plan_name?.trim() ? '<span class="chip warn">ยังไม่ระบุแผน</span>' : ""}</div></div></button><div class="ll-log-body" id="ll-body-${escapeHtml(log.id)}" hidden><div class="ll-sessions">${log.sessions.map(row => `<div><span>${escapeHtml(dateText(row.session_date))}${parts.length ? ` · ${escapeHtml(subjectInfo.get(row.subject_id).name)}` : ""}</span><span>${Number(row.periods_covered) || 0} คาบ</span></div>`).join("")}</div>${sections.map(([title, value]) => `<h4>${title}</h4><div class="ll-text">${escapeHtml(value || "—")}</div>`).join("")}<div class="ll-actions"><a class="ghost no-print" href="${escapeHtml(editLessonUrl(log))}">แก้ไข</a><button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button></div></div></article>`;
+      return `<article class="ll-log${log.id === selectedLogId ? " active" : ""}" data-log-id="${escapeHtml(log.id)}"><button type="button" class="ll-log-head" aria-expanded="false" aria-controls="ll-body-${escapeHtml(log.id)}"><span class="ll-date"><b>${date ? date.getDate() : "—"}</b><span>${escapeHtml(month)}</span></span><div><h3>${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}${log.rounds?.length > 1 ? ` <span class="ll-tag">${log.rounds.length} รอบ</span>` : ""}</h3><div class="meta">${escapeHtml(dateRange(summary))} · ${summary.sessionCount} ครั้ง</div>${canViewTeachers && selectedCreatedBy() !== session.user.id ? `<div class="meta">ครูผู้สอน: ${escapeHtml(log.created_by_name || "—")}</div>` : ""}${renderMeter(log, summary, colors)}${log.rounds?.length > 1 ? `<div class="meta">${log.rounds.map((round, index) => `รอบ ${index + 1}: ${summarizeLessonLogForPrint(round).totalPeriods}`).join(" · ")}</div>` : ""}<div class="chips">${summary.weeks > 1 ? `<span class="chip warn">ใช้เวลา ${summary.weeks} สัปดาห์</span>` : ""}${!log.plan_name?.trim() ? '<span class="chip warn">ยังไม่ระบุแผน</span>' : ""}</div></div></button><div class="ll-log-body" id="ll-body-${escapeHtml(log.id)}" hidden>${log.rounds?.length > 1 ? renderPlanRounds(log) : `<div class="ll-sessions">${log.sessions.map(row => `<div><span>${escapeHtml(dateText(row.session_date))}${parts.length ? ` · ${escapeHtml(subjectInfo.get(row.subject_id).name)}` : ""}</span><span>${Number(row.periods_covered) || 0} คาบ</span></div>`).join("")}</div>${sections.map(([title, value]) => `<h4>${title}</h4><div class="ll-text">${escapeHtml(value || "—")}</div>`).join("")}`}<div class="ll-actions">${log.rounds?.length > 1 ? "" : `<a class="ghost no-print" href="${escapeHtml(editLessonUrl(log))}">แก้ไข</a>`}<button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button></div></div></article>`;
     }).join("")}</section>`;
   }).join("") : '<div class="card empty">ไม่พบบันทึกในช่วงที่เลือก · ลองเปลี่ยนตัวกรอง หรือเขียนบันทึกจากหน้าเช็คชื่อ</div>';
   el("print-area").innerHTML = logs.map(renderDocument).join("");
@@ -477,7 +512,7 @@ async function search() {
     if (seq !== requestSeq) return;
     await loadSubjectInfo(logSubjectIds(result), seq);
     if (seq !== requestSeq) return;
-    logs = result;
+    logs = groupLessonPlans(result);
     rememberFilterOptions(result);
     renderResults();
   } catch (error) {
@@ -606,7 +641,7 @@ try {
   await loadSubjectInfo([...logSubjectIds(mine), ...subjects.map(subject => subject.id)]);
   rememberFilterOptions(mine, true);
   if (el("year").value) await refreshCoverage(selectedFilters(), requestSeq);
-  logs = mine.filter(log => !el("year").value || log.subject?.year === el("year").value);
+  logs = groupLessonPlans(mine.filter(log => !el("year").value || log.subject?.year === el("year").value));
   loading = false;
   el("filters").inert = false;
   renderResults();

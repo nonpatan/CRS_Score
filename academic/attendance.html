@@ -14,6 +14,7 @@
     --line: #dfe4e3;
     --teal: #0f6e56;
     --teal-soft: #e1f5ee;
+    --seg-prev: #9fcdbd;
     --bg: #f7f8f7;
     --white: #ffffff;
     --danger: #a32d2d;
@@ -191,6 +192,20 @@
   .lesson-log-bar { height:8px; margin-top:8px; border-radius:999px; background:var(--line); overflow:hidden; }
   .lesson-log-bar span { display:block; height:100%; border-radius:999px; background:var(--teal); }
   .lesson-log-summary .hint { margin-top:6px; }
+  .lesson-log-plan-kind { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+  .lesson-log-plan-kind button { min-height:44px; padding:8px 12px; border:1px solid var(--line); border-radius:10px; background:var(--white); color:var(--ink); font:inherit; cursor:pointer; }
+  .lesson-log-plan-kind [aria-pressed="true"] { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); font-weight:600; }
+  .lesson-log-plan-kind button:disabled { color:var(--muted); cursor:default; opacity:.6; }
+  .lesson-log-plan-kind button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #lesson-plan-kind-hint { margin-bottom:12px; }
+  #lesson-log-card input[readonly] { background:var(--bg); }
+  .lesson-log-prev { margin-top:12px; padding:12px; border-left:3px solid var(--seg-prev); background:var(--bg); border-radius:10px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }
+  .lesson-log-plan-bar { position:relative; display:flex; height:10px; margin-top:10px; background:var(--line); border-radius:5px; }
+  .lesson-log-plan-bar i { min-width:0; background:var(--teal); }
+  .lesson-log-plan-bar i.prev { background:var(--seg-prev); }
+  .lesson-log-plan-bar i:first-child { border-radius:5px 0 0 5px; }
+  .lesson-log-plan-bar i:last-of-type { border-radius:0 5px 5px 0; }
+  .lesson-log-plan-bar .plan-mark { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--ink); left:calc(var(--plan) * 100% - 1px); }
   .lesson-log-grid { display:grid; grid-template-columns:minmax(0,1fr) 140px; gap:12px; }
   #lesson-log-card .field { min-width:0; }
   #lesson-log-card input:not([type=checkbox]), #lesson-log-card select, #lesson-log-card textarea { min-height:44px; font-size:16px; border-radius:10px; }
@@ -468,6 +483,15 @@
       </div>
       <div class="lesson-log-step">
         <div class="lesson-log-step-head"><span class="lesson-log-number" aria-hidden="true">2</span><h3>แผนการสอน</h3></div>
+        <div class="lesson-log-plan-kind" role="group" aria-label="ชนิดแผน">
+          <button type="button" id="lesson-plan-new" aria-pressed="true">แผนใหม่</button>
+          <button type="button" id="lesson-plan-continue" aria-pressed="false" disabled>ต่อจากแผนเดิม</button>
+        </div>
+        <div class="hint" id="lesson-plan-kind-hint" hidden></div>
+        <div class="field" id="lesson-continue-field" hidden>
+          <label for="lesson-continue-plan">ต่อจากบันทึก</label><select id="lesson-continue-plan" aria-describedby="lesson-continue-plan-error"></select>
+          <div class="lesson-log-error" id="lesson-continue-plan-error" hidden></div>
+        </div>
         <div class="lesson-log-grid">
           <div class="field"><label for="lesson-plan-name">ชื่อแผน/หน่วยการเรียนรู้</label><input type="text" id="lesson-plan-name"></div>
           <div class="field">
@@ -477,9 +501,10 @@
           </div>
         </div>
         <div class="lesson-log-summary" id="lesson-log-summary"></div>
+        <div class="lesson-log-prev" id="lesson-log-prev" hidden></div>
       </div>
       <div class="lesson-log-step">
-        <div class="lesson-log-step-head"><span class="lesson-log-number" aria-hidden="true">3</span><h3>สะท้อนผลหลังสอน</h3></div>
+        <div class="lesson-log-step-head"><span class="lesson-log-number" aria-hidden="true">3</span><h3>สะท้อนผลหลังสอน <span class="hint" id="lesson-log-round-hint" hidden>(เฉพาะรอบนี้)</span></h3></div>
         <div class="field lesson-log-question">
           <div class="lesson-log-question-head"><label for="lesson-learning-outcome">1. ผลการจัดการเรียนรู้</label><span class="lesson-log-tag">ต้องกรอก</span></div>
           <div class="hint" id="lesson-learning-outcome-hint">เด็กทำได้ตามเป้าหรือไม่</div>
@@ -586,7 +611,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts } from "../supabase-client.js?v=20261004-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts } from "../supabase-client.js?v=20261006-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -697,6 +722,9 @@ const elLessonProblem = document.getElementById("lesson-problem");
 const elLessonImprovement = document.getElementById("lesson-improvement");
 const elLessonAssignedWork = document.getElementById("lesson-assigned-work");
 const btnSaveLessonLog = document.getElementById("btn-save-lesson-log");
+const elLessonContinuePlan = document.getElementById("lesson-continue-plan");
+const btnLessonPlanNew = document.getElementById("lesson-plan-new");
+const btnLessonPlanContinue = document.getElementById("lesson-plan-continue");
 
 // เก็บ state ที่กำลังทำงานอยู่
 // pickedSubject = วิชาที่เลือกใน dropdown หลัก (พื้นฐานหรือบูรณาการ)
@@ -740,6 +768,10 @@ let acceptedControls = {};
 let acceptedMemberIds = new Set();
 let discardPending = null;
 let lessonLog = null;
+let lessonLogPlanMode = "new";
+let lessonLogPlanOptions = [];
+let lessonLogOwnPlan = null;
+let lessonLogPlanDraft = { plan_name:"", planned_periods:"" };
 let lessonLogEditing = false;
 let lessonLogAvailableSessions = [];
 let lessonLogSelectedIds = new Set();
@@ -802,6 +834,9 @@ function hideLessonLogUI() {
   elLessonLogChoiceField.hidden = true;
   elLessonLogAuthor.hidden = true;
   lessonLog = null;
+  lessonLogPlanMode = "new";
+  lessonLogPlanOptions = [];
+  lessonLogOwnPlan = null;
   lessonLogAvailableSessions = [];
   lessonLogSelectedIds = new Set();
   lessonLogSaving = false;
@@ -817,8 +852,89 @@ function lessonAttendanceText(counts) {
   return parts.join(" ");
 }
 
+function selectedLessonPlan() {
+  return lessonLogPlanOptions.find(plan => plan.id === elLessonContinuePlan.value) || null;
+}
+
+function lessonPlanRoundOrder(a, b) {
+  return String(summarizeLessonLogSessions(a.sessions).firstDate || "")
+    .localeCompare(String(summarizeLessonLogSessions(b.sessions).firstDate || "")) ||
+    String(a.created_at || "").localeCompare(String(b.created_at || "")) || String(a.id).localeCompare(String(b.id));
+}
+
+function lessonPlanCurrentRound(plan, selected) {
+  const current = { id:lessonLog?.id || "new", created_at:lessonLog?.created_at || new Date().toISOString(), sessions:selected };
+  const rounds = [...plan.rounds.filter(row => row.id !== lessonLog?.id), current].sort(lessonPlanRoundOrder);
+  return { rounds, index:rounds.indexOf(current) };
+}
+
+function lessonPlanComparison(summary) {
+  return summary.plannedPeriods === null ? "ไม่ได้ระบุคาบตามแผน" : summary.matchesPlanned ? "ตามแผน" :
+    summary.difference > 0 ? "เกินแผน " + fmtPeriods(summary.difference) : "ขาดจากแผน " + fmtPeriods(Math.abs(summary.difference));
+}
+
+function renderContinuedLessonSummary(selected) {
+  const plan = selectedLessonPlan();
+  const previous = plan ? plan.rounds.filter(row => row.id !== lessonLog?.id).flatMap(row => row.sessions) : [];
+  const summary = summarizeLessonLogSessions([...previous, ...selected], plan?.planned_periods);
+  const before = summarizeLessonLogSessions(previous).totalPeriods;
+  const now = summarizeLessonLogSessions(selected).totalPeriods;
+  const position = plan ? lessonPlanCurrentRound(plan, selected) : null;
+  const scale = Math.max(summary.totalPeriods, summary.plannedPeriods || 0, 1);
+  const space = Math.max(0, scale - summary.totalPeriods);
+  const text = fmtPeriods(summary.totalPeriods) + (summary.plannedPeriods === null ? "" : " / " + fmtPeriods(summary.plannedPeriods)) +
+    " คาบทั้งแผน · " + lessonPlanComparison(summary) + (position ? " · รอบที่ " + (position.index + 1) : "");
+  const legend = "รอบก่อน " + fmtPeriods(before) + " คาบ · รอบนี้ " + fmtPeriods(now) + " คาบ";
+  elLessonLogSummary.innerHTML = `<div class="lesson-log-meter-top"><span>${escapeHtml(text)}</span></div><div class="lesson-log-plan-bar" role="img" aria-label="${escapeHtml(text + " · " + legend)}"><i class="prev" style="flex:${before}"></i><i style="flex:${now}"></i>${space ? `<i style="flex:${space};background:var(--line)"></i>` : ""}${summary.plannedPeriods === null ? "" : `<span class="plan-mark" style="--plan:${summary.plannedPeriods / scale}"></span>`}</div><div class="hint">${escapeHtml(legend)}</div><div class="hint">${escapeHtml(lessonLogDateRange(summary))}</div>`;
+  const prev = document.getElementById("lesson-log-prev");
+  const round = position?.rounds[position.index - 1];
+  prev.hidden = !round;
+  prev.textContent = round ? "รอบที่ " + position.index + " (" + lessonLogDateRange(summarizeLessonLogSessions(round.sessions)) +
+    ") เขียนไว้ว่า\nผล: " + String(round.learning_outcome || "—").slice(0, 120) + "\nปัญหา: " + String(round.problem || "—").slice(0, 120) : "";
+}
+
+function renderLessonPlanControls() {
+  const continuing = lessonLogPlanMode === "continue";
+  const hasChildren = !lessonLog?.continues_log_id && lessonLogOwnPlan?.rounds.length > 1;
+  btnLessonPlanNew.setAttribute?.("aria-pressed", String(!continuing));
+  btnLessonPlanContinue.setAttribute?.("aria-pressed", String(continuing));
+  btnLessonPlanNew.disabled = !lessonLogEditable;
+  btnLessonPlanContinue.disabled = !lessonLogEditable || hasChildren || !lessonLogPlanOptions.length;
+  elLessonContinuePlan.disabled = !lessonLogEditable;
+  const hint = document.getElementById("lesson-plan-kind-hint");
+  hint.textContent = hasChildren ? "ใบนี้มีรอบต่อแล้ว" : !lessonLogPlanOptions.length ? "ยังไม่มีบันทึกเดิมของวิชานี้" : "";
+  hint.hidden = !hint.textContent;
+  document.getElementById("lesson-continue-field").hidden = !continuing;
+  document.getElementById("lesson-log-round-hint").hidden = !continuing;
+  document.getElementById("lesson-log-prev").hidden = true;
+  elLessonPlanName.readOnly = continuing;
+  elLessonPlannedPeriods.readOnly = continuing;
+  const plan = continuing ? selectedLessonPlan() : lessonLogPlanDraft;
+  elLessonPlanName.value = plan?.plan_name || "";
+  elLessonPlannedPeriods.value = plan?.planned_periods == null ? "" : String(plan.planned_periods);
+  clearLessonLogErrors();
+  renderLessonLogSummary();
+}
+
+function fillLessonPlanOptions() {
+  elLessonContinuePlan.innerHTML = "";
+  lessonLogPlanOptions.forEach((plan, index) => {
+    const option = document.createElement("option");
+    option.value = plan.id;
+    const summary = summarizeLessonLogSessions(plan.rounds.flatMap(row => row.sessions));
+    option.textContent = (plan.plan_name || "ยังไม่ระบุแผน") + " · " + fmtLessonDate(summary.lastDate, true) +
+      " · " + plan.rounds.length + " รอบ" + (index === 0 ? " (ล่าสุด)" : "");
+    elLessonContinuePlan.appendChild(option);
+  });
+  elLessonContinuePlan.value = lessonLog?.continues_log_id || lessonLogPlanOptions[0]?.id || "";
+  renderLessonPlanControls();
+}
+
 function renderLessonLogSummary() {
   const selected = lessonLogAvailableSessions.filter(row => lessonLogSelectedIds.has(row.id));
+  if (typeof lessonLogPlanMode !== "undefined" && lessonLogPlanMode === "continue") {
+    renderContinuedLessonSummary(selected);
+  } else {
   const summary = summarizeLessonLogSessions(selected, elLessonPlannedPeriods.value);
   const planned = summary.plannedPeriods > 0 ? summary.plannedPeriods : null;
   let status = "";
@@ -830,6 +946,7 @@ function renderLessonLogSummary() {
   }
   const bar = planned === null ? "" : `<div class="lesson-log-bar" role="progressbar" aria-label="คาบที่แผนนี้ครอบคลุม" aria-valuemin="0" aria-valuenow="${Math.min(summary.totalPeriods, planned)}" aria-valuemax="${planned}"><span style="width:${Math.min(summary.totalPeriods / planned, 1) * 100}%"></span></div>`;
   elLessonLogSummary.innerHTML = `<div class="lesson-log-meter-top"><span><b>${fmtPeriods(summary.totalPeriods)}</b>${planned === null ? "" : " / " + fmtPeriods(planned)} คาบ · ${summary.sessionCount} ครั้ง</span>${status}</div>${bar}<div class="hint">${escapeHtml(lessonLogDateRange(summary))}</div>`;
+  }
   const hasSelection = lessonLogSelectedIds.size > 0;
   elLessonLogSelectionNote.style.display = hasSelection ? "none" : "block";
   btnSaveLessonLog.disabled = lessonLogSaving || !hasSelection || !lessonLogEditable;
@@ -919,6 +1036,17 @@ function renderLessonLogMode() {
   elLessonLogReadSummary.textContent = fmtPeriods(summary.totalPeriods) + " คาบ · " +
     summary.sessionCount + " ครั้ง · " + lessonLogDateRange(summary) +
     (lessonLog.planned_periods == null ? "" : " · ตามแผน " + fmtPeriods(lessonLog.planned_periods) + " คาบ");
+  if (typeof lessonLogOwnPlan !== "undefined" && lessonLogOwnPlan?.rounds.length > 1) {
+    const plan = lessonLogOwnPlan;
+    const index = [...plan.rounds].sort(lessonPlanRoundOrder).findIndex(row => row.id === lessonLog.id);
+    if (lessonLog.continues_log_id) elLessonLogReadPlan.innerHTML = escapeHtml(plan.plan_name || "บันทึกหลังสอน") +
+      ` <span class="lesson-log-tag">รอบที่ ${index + 1}</span>`;
+    const whole = summarizeLessonLogSessions(plan.rounds.flatMap(row => row.sessions), plan.planned_periods);
+    const line = document.createElement("div");
+    line.textContent = "ทั้งแผน: " + fmtPeriods(whole.totalPeriods) + (whole.plannedPeriods === null ? "" : " / " + fmtPeriods(whole.plannedPeriods)) +
+      " คาบ · " + lessonPlanComparison(whole);
+    elLessonLogReadSummary.appendChild(line);
+  }
   const sections = [
     ["1. ผลการจัดการเรียนรู้", lessonLog.learning_outcome],
     ["2. ปัญหา/อุปสรรค", lessonLog.problem],
@@ -961,6 +1089,16 @@ async function refreshLessonLogCard(preferredLogId) {
     const editable = permission.data === true;
     if (!existingLog && !editable) return;
 
+    const planSubjectId = existingLog?.subject_id || subjectId;
+    const [planOptions, ownPlan] = await Promise.all([
+      typeof loadLessonLogPlanOptions === "function" ? loadLessonLogPlanOptions(planSubjectId, { excludeLogId:existingLog?.id }) : [],
+      existingLog && typeof loadLessonLogPlan === "function" ? loadLessonLogPlan(existingLog.continues_log_id || existingLog.id) : null
+    ]);
+    if (requestSeq !== lessonLogRequestSeq) return;
+    // ใบที่กำลังแก้ต่อจากแผนเก่าอาจพ้น 20 ตัวเลือกล่าสุดแล้ว ต้องยังเลือกแผนเดิมได้
+    if (existingLog?.continues_log_id && ownPlan && !planOptions.some(plan => plan.id === ownPlan.id)) planOptions.push(ownPlan);
+    if (existingLog?.continues_log_id && !ownPlan) throw new Error("ไม่พบใบแรกของแผนเดิม กรุณาโหลดหน้าใหม่");
+
     // ใบเก่าที่เขียนแยกวิชาย่อยยังเปิดได้ ไม่ย้ายวิชา/รวมใบเดิมโดยอัตโนมัติ
     const acceptsSession = row => !existingLog || existingLog.subject_id === subjectId ||
       row.subject_id === existingLog.subject_id;
@@ -997,6 +1135,11 @@ async function refreshLessonLogCard(preferredLogId) {
     lessonLogSelectedIds = defaultLessonLogSelection(existingLog, freeCurrent);
     applyLessonLogAccess(editable, existingLog);
     fillLessonLogFields(existingLog);
+    lessonLogPlanOptions = planOptions;
+    lessonLogOwnPlan = ownPlan;
+    lessonLogPlanMode = existingLog?.continues_log_id ? "continue" : "new";
+    lessonLogPlanDraft = { plan_name:elLessonPlanName.value, planned_periods:elLessonPlannedPeriods.value };
+    fillLessonPlanOptions();
     renderLessonLogSessions();
     renderLessonLogMode();
     elLessonLogCard.style.display = "block";
@@ -1016,17 +1159,29 @@ btnEditLessonLog.addEventListener("click", () => {
 
 elLessonLogChoice.addEventListener("change", () => refreshLessonLogCard(elLessonLogChoice.value));
 elLessonPlannedPeriods.addEventListener("input", renderLessonLogSummary);
+btnLessonPlanNew.addEventListener("click", () => {
+  if (!lessonLogEditable || lessonLogPlanMode === "new") return;
+  lessonLogPlanMode = "new";
+  renderLessonPlanControls();
+});
+btnLessonPlanContinue.addEventListener("click", () => {
+  if (btnLessonPlanContinue.disabled) return;
+  if (lessonLogPlanMode === "new") lessonLogPlanDraft = { plan_name:elLessonPlanName.value, planned_periods:elLessonPlannedPeriods.value };
+  lessonLogPlanMode = "continue";
+  renderLessonPlanControls();
+});
+elLessonContinuePlan.addEventListener("change", renderLessonPlanControls);
 
 // aria ตั้งผ่าน JS เพื่อคง markup textarea ตามข้อตกลงเดิม
 function setLessonLogError(field, message = "") {
-  const error = document.getElementById(field === elLessonLearningOutcome ? "lesson-learning-outcome-error" : field === elLessonProblem ? "lesson-problem-error" : "lesson-planned-periods-error");
+  const error = document.getElementById(field === elLessonLearningOutcome ? "lesson-learning-outcome-error" : field === elLessonProblem ? "lesson-problem-error" : field === elLessonContinuePlan ? "lesson-continue-plan-error" : "lesson-planned-periods-error");
   error.hidden = !message;
   error.textContent = message;
   field.ariaInvalid = message ? "true" : "false";
 }
 
 function clearLessonLogErrors() {
-  for (const field of [elLessonLearningOutcome, elLessonProblem, elLessonPlannedPeriods]) setLessonLogError(field);
+  for (const field of [elLessonLearningOutcome, elLessonProblem, elLessonPlannedPeriods, elLessonContinuePlan]) setLessonLogError(field);
 }
 
 for (const [field, description] of [
@@ -1050,7 +1205,8 @@ btnSaveLessonLog.addEventListener("click", async () => {
   const errors = [];
   if (!learningOutcome) errors.push([elLessonLearningOutcome, "กรอกผลการจัดการเรียนรู้ก่อนบันทึก", "กรอกผลการจัดการเรียนรู้ก่อนบันทึก"]);
   if (!problem) errors.push([elLessonProblem, "กรอกปัญหา/อุปสรรค ถ้าไม่มีให้พิมพ์ “ไม่มี”", "กรอกปัญหา/อุปสรรคก่อนบันทึก ถ้าไม่มีให้ครูพิมพ์ “ไม่มี”"]);
-  if (plannedText && !isValidPeriods(Number(plannedText))) errors.push([elLessonPlannedPeriods, "แผนออกแบบไว้ต้องมากกว่า 0 และเพิ่มทีละ 0.5 คาบ", "แผนออกแบบไว้ต้องมากกว่า 0 และเพิ่มทีละ 0.5 คาบ"]);
+  if (lessonLogPlanMode === "continue" && !selectedLessonPlan()) errors.push([elLessonContinuePlan, "เลือกบันทึกของแผนเดิมก่อนบันทึก", "เลือกบันทึกของแผนเดิมก่อนบันทึก"]);
+  if (lessonLogPlanMode !== "continue" && plannedText && !isValidPeriods(Number(plannedText))) errors.push([elLessonPlannedPeriods, "แผนออกแบบไว้ต้องมากกว่า 0 และเพิ่มทีละ 0.5 คาบ", "แผนออกแบบไว้ต้องมากกว่า 0 และเพิ่มทีละ 0.5 คาบ"]);
   for (const [field, message] of errors) setLessonLogError(field, message);
   if (errors.length) {
     showToast(errors[0][2], false);
@@ -1067,6 +1223,7 @@ btnSaveLessonLog.addEventListener("click", async () => {
       subjectId: lessonLog?.subject_id || lessonLogSubjectId(),
       sessionIds: [...lessonLogSelectedIds],
       fields: {
+        continues_log_id: lessonLogPlanMode === "continue" ? elLessonContinuePlan.value : null,
         plan_name: elLessonPlanName.value,
         planned_periods: plannedText,
         learning_outcome: learningOutcome,
