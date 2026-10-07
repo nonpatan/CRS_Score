@@ -40,6 +40,10 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 .tabs button.active { color:var(--teal); border-color:var(--teal); font-weight:600; }
 .unit { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; } .unit-title { font-weight:600; margin-bottom:8px; }
 .indicator { border-top:1px solid var(--line); padding:10px 0; } .indicator:first-of-type { border-top:0; } .indicator-title { font-weight:600; }
+.unit-title,.indicator-title { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.tree-heading-text { flex:1 1 120px; min-width:0; overflow-wrap:anywhere; }
+.score-toggle { display:inline-flex; align-items:center; gap:8px; margin-left:auto; padding:4px; min-height:44px; min-width:44px; font-size:14px; font-weight:400; color:var(--muted); white-space:nowrap; cursor:pointer; }
+.score-toggle input[type="checkbox"] { width:20px; height:20px; min-height:20px; margin:0; padding:0; accent-color:var(--teal); }
 .collection-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; } .tree-button { text-align:left; background:var(--white); border:1px solid var(--line); padding:8px 10px; min-height:52px; min-width:0; max-width:100%; }
 .tree-button.done { border-color:var(--teal); background:var(--teal-soft); } .tree-button.part { border-color:var(--amber); background:var(--amber-soft); } .tree-button.empty { color:var(--muted); }
 .tree-button.selected { outline:2px solid var(--teal); } .tree-button small { display:block; font-size:12px; }
@@ -394,10 +398,72 @@ $("subject-view").querySelectorAll("[data-tab]").forEach(button => button.addEve
 function renderTree() {
   if (tab === "สอบ") { $("structure-tree").innerHTML = "<div class='hint'>คะแนนสอบและ ร. แสดงในรายการถัดไป</div>"; return; }
   const units = progress().kinds[tab] || [];
-  if (!units.length) { $("structure-tree").innerHTML = "<div class='empty'>ไม่มีหน่วยที่คิดคะแนน — ติ๊กเลือกได้ที่หน้าจัดการโครงสร้าง</div>"; return; }
-  $("structure-tree").innerHTML = units.map(unit => `<div class="unit"><div class="unit-title">${escapeHtml(unit.name)} · เต็ม ${escapeHtml(unit.max_score)}</div>${unit.indicators.map(indicator => `<div class="indicator ${selection?.indicatorId === indicator.id ? "open-indicator" : ""}"><div class="indicator-title">${escapeHtml(indicator.name)} · เต็ม ${escapeHtml(indicator.max_score)} <span class="badge">${indicator.doneCount}/${indicator.collectionCount}</span></div><div class="collection-list">${indicator.collections.map(collection => `<button class="tree-button ${collection.state} ${selection?.collectionId === collection.id ? "selected" : ""}" data-collection="${escapeHtml(collection.id)}">ครั้งที่ ${escapeHtml(collection.seq)}<small>${collection.state === "done" ? "✓ ครบ " + collection.total : collection.state === "part" ? collection.filled + "/" + collection.total : "ยังไม่กรอก"}</small>${collection.note ? `<small class="collection-note" title="${escapeHtml(collection.note)}">${escapeHtml(collection.note)}</small>` : ""}</button>`).join("")}<button class="ghost" data-add="${escapeHtml(indicator.id)}">+ เพิ่มครั้ง</button></div></div>`).join("")}</div>`).join("");
+  const emptyTree = "<div class='empty'>ไม่มีตัวชี้วัดที่คิดคะแนน · เปิดคืนได้ที่ <a href='manage.html'>หน้าจัดการโครงสร้าง</a></div>";
+  if (!units.length) { $("structure-tree").innerHTML = emptyTree; return; }
+  $("structure-tree").innerHTML = units.map(unit => `<div class="unit"><div class="unit-title"><span class="tree-heading-text">${escapeHtml(unit.name)} · เต็ม ${escapeHtml(unit.max_score)}</span>${entryCountsScoreToggle("unit", unit)}</div>${unit.indicators.length ? unit.indicators.map(indicator => `<div class="indicator ${selection?.indicatorId === indicator.id ? "open-indicator" : ""}"><div class="indicator-title"><span class="tree-heading-text">${escapeHtml(indicator.name)} · เต็ม ${escapeHtml(indicator.max_score)} <span class="badge">${indicator.doneCount}/${indicator.collectionCount}</span></span>${entryCountsScoreToggle("indicator", indicator)}</div><div class="collection-list">${indicator.collections.map(collection => `<button class="tree-button ${collection.state} ${selection?.collectionId === collection.id ? "selected" : ""}" data-collection="${escapeHtml(collection.id)}">ครั้งที่ ${escapeHtml(collection.seq)}<small>${collection.state === "done" ? "✓ ครบ " + collection.total : collection.state === "part" ? collection.filled + "/" + collection.total : "ยังไม่กรอก"}</small>${collection.note ? `<small class="collection-note" title="${escapeHtml(collection.note)}">${escapeHtml(collection.note)}</small>` : ""}</button>`).join("")}<button class="ghost" data-add="${escapeHtml(indicator.id)}">+ เพิ่มครั้ง</button></div></div>`).join("") : emptyTree}</div>`).join("");
   $("structure-tree").querySelectorAll("[data-collection]").forEach(button => button.addEventListener("click", async () => { if (!await allowLeave()) return; resetInputs(); selectCollection(button.dataset.collection); }));
   $("structure-tree").querySelectorAll("[data-add]").forEach(button => button.addEventListener("click", () => addCollection(button.dataset.add)));
+  $("structure-tree").querySelectorAll("[data-counts-unit]").forEach(checkbox => checkbox.addEventListener("change", () => updateEntryCountsScore("unit", checkbox.dataset.countsUnit, checkbox)));
+  $("structure-tree").querySelectorAll("[data-counts-indicator]").forEach(checkbox => checkbox.addEventListener("change", () => updateEntryCountsScore("indicator", checkbox.dataset.countsIndicator, checkbox)));
+}
+// หน้ากรอกให้ติ๊กออกอย่างเดียว และตรวจคะแนนทุกห้องจาก DB ก่อนเสมอ
+let entryCountsScoreBusy = false;
+function entryCountsScoreToggle(kind, item) {
+  if (!canEdit(currentSubject)) return "";
+  return `<label class="score-toggle"><input type="checkbox" checked data-counts-${kind}="${escapeHtml(item.id)}" aria-label="คิดคะแนน ${escapeHtml(item.name)}">คิดคะแนน</label>`;
+}
+async function updateEntryCountsScore(kind, id, checkbox) {
+  if (checkbox.checked || entryCountsScoreBusy || !canEdit(currentSubject) || tab === "สอบ") { checkbox.checked = true; return; }
+  const source = subjectData, subjectId = currentSubject.id;
+  const unit = (source?.units || []).find(u => kind === "unit" ? u.id === id : (u.indicators || []).some(i => i.id === id));
+  const target = kind === "unit" ? unit : unit?.indicators.find(i => i.id === id);
+  if (!target || target.counts_score === false || !["unit","indicator"].includes(kind)) { checkbox.checked = true; return; }
+  const includesSelection = !!selection && (kind === "unit" ? selection.unitId === id : selection.indicatorId === id);
+  const indicators = kind === "unit" ? (unit.indicators || []).filter(i => i.counts_score !== false) : [target];
+  const collectionIds = indicators.flatMap(i => (i.collections || []).map(c => c.id));
+  entryCountsScoreBusy = true; checkbox.disabled = true;
+  try {
+    if (includesSelection && !await allowLeave()) { checkbox.checked = true; return; }
+    let count = 0;
+    try {
+      if (collectionIds.length) {
+        const result = await sb.from("scores").select("student_id",{ count:"exact", head:true }).in("collection_id", collectionIds);
+        if (result.error || !Number.isInteger(result.count) || result.count < 0) throw new Error("count unavailable");
+        count = result.count;
+      }
+    } catch {
+      checkbox.checked = true; showToast("ตรวจคะแนนไม่สำเร็จ ลองใหม่อีกครั้ง", false); return;
+    }
+    if (count > 0) {
+      checkbox.checked = true;
+      const scoredCollections = indicators.map(i => ({ name:i.name, rounds:(i.collections || []).slice().sort((a,b) => Number(a.seq)-Number(b.seq))
+        .filter(c => c.scores?.length).map(c => c.seq) })).filter(i => i.rounds.length);
+      const scoredList = kind === "unit"
+        ? scoredCollections.map(i => "• " + i.name + " : ครั้งที่ " + i.rounds.join(", ")).join("\n")
+        : scoredCollections.length ? "ครั้งที่ " + scoredCollections[0].rounds.join(", ") : "";
+      await askConfirm({ title:"ยังติ๊กออกไม่ได้", message:(kind === "unit" ? "มาตรฐาน" : "ตัวชี้วัด") + " ‘" + target.name + "’ มีคะแนนที่บันทึกแล้ว " + count + " ช่อง" +
+        (scoredList ? "\n\n" + scoredList : "") + "\n\nกด 🗑 ลบครั้งที่มีคะแนนก่อน แล้วจึงติ๊กไม่คิดคะแนนได้", okLabel:"เข้าใจแล้ว", cancelLabel:"ปิด" });
+      return;
+    }
+    // ถ้าเปลี่ยนวิชาระหว่างรอตรวจคะแนน ให้หยุดก่อนเขียน
+    if (currentSubject?.id !== subjectId || subjectData !== source) { checkbox.checked = true; return; }
+    try {
+      const { data, error } = await sb.from(kind === "unit" ? "units" : "indicators").update({ counts_score:false }).eq("id", id).select("id,counts_score");
+      if (error || data?.length !== 1) throw new Error("update failed");
+    } catch {
+      checkbox.checked = true; showToast("เปลี่ยนสถานะคิดคะแนนไม่สำเร็จ — ตรวจสิทธิ์วิชา", false); return;
+    }
+    target.counts_score = false;
+    const overview = overviewUnits.get(subjectId) || [];
+    const overviewTarget = kind === "unit" ? overview.find(u => u.id === id) : overview.flatMap(u => u.indicators || []).find(i => i.id === id);
+    if (overviewTarget) overviewTarget.counts_score = false;
+    if (currentSubject?.id !== subjectId || subjectData !== source) return;
+    if (includesSelection) {
+      resetInputs(); selection = null;
+      setView("subject");
+    } else renderWorkspace();
+    showToast(kind === "unit" ? "ตั้งทั้งหน่วยเป็นไม่คิดคะแนนแล้ว" : "ตั้งเป็นไม่คิดคะแนนแล้ว", true);
+  } finally { entryCountsScoreBusy = false; checkbox.disabled = false; }
 }
 function selectCollection(id, push = true) {
   for (const unit of subjectData.units) for (const indicator of unit.indicators || []) if ((indicator.collections || []).some(c => c.id === id) && unit.counts_score !== false && indicator.counts_score !== false) {
