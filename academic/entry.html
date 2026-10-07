@@ -40,13 +40,17 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 .tabs button.active { color:var(--teal); border-color:var(--teal); font-weight:600; }
 .unit { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; } .unit-title { font-weight:600; margin-bottom:8px; }
 .indicator { border-top:1px solid var(--line); padding:10px 0; } .indicator:first-of-type { border-top:0; } .indicator-title { font-weight:600; }
-.collection-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; } .tree-button { text-align:left; background:var(--white); border:1px solid var(--line); padding:8px 10px; min-height:52px; }
+.collection-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; } .tree-button { text-align:left; background:var(--white); border:1px solid var(--line); padding:8px 10px; min-height:52px; min-width:0; max-width:100%; }
 .tree-button.done { border-color:var(--teal); background:var(--teal-soft); } .tree-button.part { border-color:var(--amber); background:var(--amber-soft); } .tree-button.empty { color:var(--muted); }
 .tree-button.selected { outline:2px solid var(--teal); } .tree-button small { display:block; font-size:12px; }
-.collection-note { display:block; max-width:160px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--muted); font-size:12px; font-weight:400; }
+.tree-button .collection-note { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; max-width:160px; overflow:hidden; white-space:normal; overflow-wrap:anywhere; color:var(--muted); font-size:12px; font-weight:400; }
+.tree-button.selected .collection-note { display:block; -webkit-line-clamp:unset; max-width:240px; }
 .entry-note-row { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; margin-top:6px; }
 .entry-note-text { flex:1 1 160px; min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); font-size:14px; }
-.score-table .collection-note { max-width:120px; }
+.collection-notes { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin:8px 0 12px; font-size:14px; color:var(--ink); }
+.collection-notes-row { display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 10px; }
+.collection-notes-row + .collection-notes-row { margin-top:6px; }
+.collection-notes-row span { min-width:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .score-table .note-edit { min-height:34px; padding:3px 7px; }
 .entry-head { position:sticky; top:0; z-index:3; background:var(--bg); padding:8px 0; } .entry-head .card { margin:0 0 10px; }
 .student-row { display:grid; grid-template-columns:minmax(0,1fr) 100px; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--line); }
@@ -95,9 +99,11 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
   #back-structure { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #delete-mobile { flex:none; }
   #entry-title { font-size:19px; line-height:1.4; margin:4px 0 2px; }
-  #entry-path,#entry-note { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #entry-path { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #entry-path { font-size:13px; }
-  #entry-note { margin-top:2px; font-size:13px; }
+  #entry-note { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; white-space:pre-wrap; overflow:hidden; overflow-wrap:anywhere; margin-top:2px; font-size:14px; min-height:44px; cursor:pointer; }
+  #entry-note.expanded { display:block; -webkit-line-clamp:unset; }
+  #entry-note:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
   .entry-progress-row { display:flex; align-items:center; gap:8px; margin-top:4px; }
   #edit-mobile-note { min-height:40px; padding:6px 8px; font-size:14px; flex:none; }
   .entry-progress-row .progress { flex:1; min-width:0; margin:0; }
@@ -417,6 +423,17 @@ function renderMobileEntry() {
   $("entry-note").hidden = !collection?.note;
   $("entry-note").innerHTML = escapeHtml(collection?.note || "");
   $("entry-note").title = collection?.note || "";
+  const note = $("entry-note");
+  note.classList.remove("expanded");
+  note.setAttribute("role", "button");
+  note.tabIndex = 0;
+  note.setAttribute("aria-expanded", "false");
+  note.onclick = () => note.setAttribute("aria-expanded", String(note.classList.toggle("expanded")));
+  note.onkeydown = event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    note.onclick();
+  };
   $("edit-mobile-note").textContent = collection?.note ? "✎ หมายเหตุ" : "+ เพิ่มหมายเหตุ";
   $("back-structure").textContent = "‹ " + currentSubject.name;
   $("delete-mobile").hidden = exam;
@@ -448,7 +465,9 @@ function renderRightPane() {
   const indicator = currentIndicator(), unit = subjectData.units.find(u => u.id === selection.unitId); if (!indicator || !unit) return;
   const collections = [...indicator.collections].sort((a,b) => Number(a.seq)-Number(b.seq)); fillInputs(collections.map(c => c.id));
   const totalMax = collections.reduce((sum,c) => sum+Number(c.max_score),0);
-  $("right-pane").innerHTML = `<div class="card"><div class="meta">${escapeHtml(unit.name)} (เต็ม ${escapeHtml(unit.max_score)}) ›</div><div class="toolbar"><h2>${escapeHtml(indicator.name)} (เต็ม ${escapeHtml(indicator.max_score)})</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div><div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span>${c.note ? `<span class="collection-note" title="${escapeHtml(c.note)}">${escapeHtml(c.note)}</span>` : ""}<button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้หมายเหตุครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวมคะแนนดิบ<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div><div class="score-legend"><span><i class="empty-example" aria-hidden="true"></i>ยังไม่กรอก</span><span><i aria-hidden="true"></i>กรอกแล้ว</span><span><i class="changed-example" aria-hidden="true"></i>แก้แล้วยังไม่บันทึก</span></div></div>`;
+  const notedCollections = collections.filter(c => c.note);
+  const collectionNotes = notedCollections.length ? `<div class="collection-notes" aria-label="หมายเหตุของแต่ละครั้ง">${notedCollections.map(c => `<div class="collection-notes-row"><b>ครั้งที่ ${escapeHtml(c.seq)}</b><span>${escapeHtml(c.note)}</span></div>`).join("")}</div>` : "";
+  $("right-pane").innerHTML = `<div class="card"><div class="meta">${escapeHtml(unit.name)} (เต็ม ${escapeHtml(unit.max_score)}) ›</div><div class="toolbar"><h2>${escapeHtml(indicator.name)} (เต็ม ${escapeHtml(indicator.max_score)})</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div>${collectionNotes}<div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span><button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้หมายเหตุครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวมคะแนนดิบ<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div><div class="score-legend"><span><i class="empty-example" aria-hidden="true"></i>ยังไม่กรอก</span><span><i aria-hidden="true"></i>กรอกแล้ว</span><span><i class="changed-example" aria-hidden="true"></i>แก้แล้วยังไม่บันทึก</span></div></div>`;
   $("add-desktop").addEventListener("click", () => addCollection(indicator.id));
   $("right-pane").querySelectorAll("[data-edit-note]").forEach(button => button.addEventListener("click", () => editCollectionNote(button.dataset.editNote)));
   $("right-pane").querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteCollection(button.dataset.delete)));
