@@ -55,11 +55,19 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 .entry-head { position:sticky; top:0; z-index:3; background:var(--bg); padding:8px 0; } .entry-head .card { margin:0 0 10px; }
 .student-row { display:grid; grid-template-columns:minmax(0,1fr) 100px; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--line); }
 .student-row .name { font-weight:600; } .student-row input { text-align:center; } .student-row.changed { background:var(--teal-soft); } .student-row.removing { background:var(--amber-soft); } .student-row.invalid,.student-row.exam-over-cap { background:var(--danger-soft); }
+.student-row:focus-within { box-shadow:inset 4px 0 0 var(--teal); padding-left:12px; }
+#mobile-score-list .student-row:focus-within { padding-left:12px; }
+.student-row:focus-within .name { color:var(--teal); }
+input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 .student-row.invalid input,.student-row.exam-over-cap input { border-color:var(--danger); } .row-message { grid-column:1/-1; font-size:13px; color:var(--amber); } .student-row.invalid .row-message,.exam-over-cap-note { color:var(--danger); font-weight:600; }
 .save-bar { position:sticky; bottom:0; z-index:4; background:var(--white); border:1px solid var(--line); border-radius:12px; padding:10px; display:flex; gap:10px; justify-content:space-between; align-items:center; box-shadow:0 -5px 20px rgba(31,42,46,.08); }
 .save-bar button { min-width:128px; } .save-bar .hint { flex:1; }
 .table-wrap { width:100%; max-width:100%; overflow-x:auto; } .score-table { border-collapse:collapse; min-width:100%; white-space:nowrap; } .score-table th,.score-table td { border-bottom:1px solid var(--line); padding:8px; text-align:left; } .score-table th { background:var(--bg); } .score-table input { width:86px; text-align:center; }
 .score-table td.empty-score { background:var(--amber-soft); } .score-table td.changed { background:var(--teal-soft); } .score-table td.removing { background:var(--amber-soft); } .score-table td.invalid { background:var(--danger-soft); }
+.score-table tbody tr:focus-within > td { box-shadow:inset 0 2px 0 var(--teal), inset 0 -2px 0 var(--teal); }
+.score-table tbody tr:focus-within > td:first-child { box-shadow:inset 4px 0 0 var(--teal), inset 0 2px 0 var(--teal), inset 0 -2px 0 var(--teal); }
+.score-table tbody tr:focus-within > td:nth-child(-n+2) { color:var(--teal); font-weight:600; }
+.score-table th.active-col { box-shadow:inset 0 -3px 0 var(--teal); color:var(--teal); }
 .score-table td.invalid input { border-color:var(--danger); } .score-table .meta { display:block; } .score-table .danger { min-height:34px; padding:3px 7px; }
 .exam-status { border:1px solid var(--line); background:var(--bg); border-radius:10px; padding:12px; margin-bottom:12px; } .exam-status.closed { background:var(--amber-soft); border-color:var(--amber); } .status-title { font-weight:600; } .exam-actions { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-top:10px; }
 .access-note { background:var(--amber-soft); color:var(--amber); padding:12px; border-radius:8px; }
@@ -93,6 +101,7 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 .save-main { display:flex; align-items:center; justify-content:space-between; flex:1; min-width:0; gap:10px; }
 @media(max-width:600px) { .row2 { grid-template-columns:1fr; } }
 @media(max-width:1199px) {
+  input[data-score-key] { scroll-margin-top:240px; }
   .entry-head { padding:0 0 8px; }
   .entry-head .card { padding:7px 12px!important; margin:0!important; }
   .entry-head .toolbar { flex-wrap:nowrap; }
@@ -459,6 +468,16 @@ $("prev-collection").addEventListener("click", async () => { if (!await allowLea
 $("next-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at+1].id); });
 $("delete-mobile").addEventListener("click", () => deleteCollection(selection?.collectionId));
 $("edit-mobile-note").addEventListener("click", () => editCollectionNote(selection?.collectionId));
+// ผูกที่ pane ครั้งเดียว เพื่อให้ใช้กับตารางที่วาดใหม่ทุกครั้งได้
+function updateActiveScoreColumn(target) {
+  $("right-pane").querySelectorAll(".active-col").forEach(header => header.classList.remove("active-col"));
+  const cell = target?.closest("input[data-score-key]")?.closest("td.score-cell");
+  const table = cell?.closest(".score-table");
+  if (!table || !$("right-pane").contains(table)) return;
+  table.tHead?.rows[0]?.cells[cell.cellIndex]?.classList.add("active-col");
+}
+$("right-pane").addEventListener("focusin", event => updateActiveScoreColumn(event.target));
+$("right-pane").addEventListener("focusout", event => updateActiveScoreColumn(event.relatedTarget));
 function renderRightPane() {
   if (tab === "สอบ") { renderExamPane(); return; }
   if (!selection) { $("right-pane").innerHTML = "<div class='card empty'>เลือกครั้งที่จากต้นไม้เพื่อกรอกคะแนน</div>"; return; }
