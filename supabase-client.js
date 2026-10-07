@@ -1488,8 +1488,8 @@ export function computeEntryProgress({ units = [], roster = [], examScores = [],
   let collectDone = 0, collectTotal = 0, partCount = 0;
   for (const unit of (units || []).filter(u => u.counts_score !== false)) {
     const indicators = [];
-    for (const indicator of (unit.indicators || []).filter(i => i.counts_score !== false)) {
-      const collections = (indicator.collections || []).map(collection => {
+    for (const indicator of (unit.indicators || []).slice().sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).filter(i => i.counts_score !== false)) {
+      const collections = (indicator.collections || []).slice().sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).map(collection => {
         const filled = new Set((collection.scores || []).filter(score => ids.has(score.student_id)).map(score => score.student_id)).size;
         const total = visible.length;
         const state = total > 0 && filled === total ? "done" : filled > 0 ? "part" : "empty";
@@ -2022,7 +2022,9 @@ export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
     sb.from("units")
       .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(student_id, raw_score)))")
       .eq("subject_id", subjectId)
-      .order("seq"),
+      .order("seq")
+      .order("seq", { referencedTable: "indicators" })
+      .order("seq", { referencedTable: "indicators.collections" }),
     sb.from("remarks").select("*").eq("subject_id", subjectId),
     sb.from("attendance_sessions")
       .select("*, attendance_records(*)")
