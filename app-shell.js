@@ -242,6 +242,7 @@ function syncFinanceKpiTones() {
           items: [
             ["summary.html", "สรุปผลการเรียน"],
             ["warning.html", "เฝ้าระวัง มส."],
+            ["remark-report.html", "นักเรียนติด ร."],
             ["retention.html", "เรียนซ้ำชั้น"],
             ["lesson-logs.html", "บันทึกหลังสอน"]
           ]
@@ -328,6 +329,11 @@ function syncFinanceKpiTones() {
           title: "กรองกลุ่มที่ต้องติดตาม",
           description: "เลือกปี ชั้น และห้อง เพื่อดูความเสี่ยงการขาดเรียน",
           steps: ["เลือกกลุ่ม", "ตรวจความเสี่ยง", "ติดตาม"]
+        },
+        "remark-report.html": {
+          title: "เลือกชั้นที่ต้องการรายงาน",
+          description: "ดูรายชื่อนักเรียนติด ร. แล้วพิมพ์แจกครูประจำชั้น",
+          steps: ["เลือกปี/ภาค", "เลือกชั้น", "พิมพ์รายห้อง"]
         },
         "retention.html": {
           title: "เลือกเกณฑ์รายงาน",

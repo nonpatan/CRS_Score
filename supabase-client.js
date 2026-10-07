@@ -2429,7 +2429,8 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
           subject: subj,
           result: ir.overall,
           scoring: ir.scoring,
-          noPeriodSubjects: ir.noPeriodSubjects
+          noPeriodSubjects: ir.noPeriodSubjects,
+          memberResults: ir.memberResults
         });
       }
     } else {

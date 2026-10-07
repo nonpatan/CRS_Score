@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>นักเรียนติด ร. — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f2a2e; --muted: #5f6b70; --line: #dfe4e3;
+    --teal: #0f6e56; --teal-soft: #e1f5ee; --bg: #f7f8f7;
+    --white: #ffffff; --danger: #a32d2d; --danger-soft: #fceaea;
+    --amber: #8a5a00; --amber-soft: #fff4df;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "Sarabun", sans-serif; color: var(--ink); background: var(--bg); margin: 0; padding: 16px; font-size: 16px; line-height: 1.6; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header h1 { font-size: 22px; margin: 4px 0; }
+  header p, .hint, .meta { color: var(--muted); }
+  header p { margin: 0 0 12px; }
+  .nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .nav a { color: var(--teal); padding: 8px 10px; }
+  .card { background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .field label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  select { width: 100%; min-height: 44px; font: inherit; font-size: 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); color: var(--ink); }
+  select:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .hint { font-size: 14px; margin: 12px 0 0; padding: 8px 12px; background: var(--bg); border-radius: 8px; }
+  .hint a { color: var(--teal); }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; }
+  .stat { background: var(--white); border: 1px solid var(--line); border-radius: 10px; min-width: 120px; padding: 8px 14px; }
+  .stat b { display: block; font-size: 20px; } .stat span { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .toolbar .meta { font-size: 14px; }
+  button { min-height: 44px; padding: 8px 14px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary { color: var(--white); background: var(--teal); }
+  button.ghost { color: var(--teal); background: var(--teal-soft); }
+  button:disabled { opacity: .55; cursor: wait; }
+  .room { padding: 0; overflow: hidden; }
+  .room-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 14px; background: var(--bg); box-shadow: inset 4px 0 0 var(--teal); }
+  .room-head .name { font-size: 17px; font-weight: 600; }
+  .room-head .meta { flex: 1 1 260px; font-size: 14px; }
+  .student { border-top: 1px solid var(--line); padding: 10px 14px; }
+  .student .who { font-weight: 600; }
+  .subject { margin-top: 6px; padding-left: 12px; border-left: 3px solid var(--danger); overflow-wrap: anywhere; }
+  .subject.auto { border-left-color: var(--amber); }
+  .subject-name { font-size: 15px; font-weight: 600; }
+  .subject .meta { font-size: 13px; }
+  .pill { display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.manual { background: var(--danger); color: var(--white); }
+  .pill.auto { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber); }
+  .subject ul { margin: 2px 0 0; padding-left: 18px; font-size: 14px; }
+  .empty { color: var(--muted); text-align: center; }
+  .error { color: var(--danger); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--white); border-radius: 8px; padding: 10px 16px; display: none; z-index: 1000; }
+  .toast.show { display: block; }
+  #print-area { position: fixed; left: -100000px; top: 0; width: 186mm; height: 0; overflow: hidden; }
+  .report-sheet { color: black; background: white; font: 13px/1.5 "Sarabun", sans-serif; }
+  .report-sheet + .report-sheet { break-before: page; }
+  .sheet-head { text-align: center; margin-bottom: 5mm; }
+  .sheet-logo { width: 18mm; height: 18mm; object-fit: contain; }
+  .sheet-school { font-size: 17px; font-weight: 600; }
+  .sheet-title { font-size: 15px; font-weight: 600; margin: 1mm 0; }
+  .sheet-table { width: calc(100% - 2px); margin: 0 auto; border-collapse: collapse; table-layout: fixed; }
+  .sheet-table th, .sheet-table td { border: 1px solid black; padding: 1.5mm; vertical-align: top; overflow-wrap: anywhere; }
+  .sheet-table thead { display: table-header-group; }
+  .sheet-table ul { margin: 0; padding-left: 4mm; }
+  .sheet-student, .sheet-student tr, .sheet-summary, .sheet-signatures { break-inside: avoid; }
+  .sheet-center { text-align: center; }
+  .sheet-summary { margin-top: 4mm; }
+  .sheet-signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6mm; margin-top: 12mm; text-align: center; }
+  .sheet-foot { margin-top: 6mm; font-size: 11px; }
+  @media (max-width: 640px) {
+    .filters { grid-template-columns: 1fr; }
+    .stat { flex: 1 1 28%; min-width: 0; }
+    .room-head .ghost, .toolbar .primary { width: 100%; }
+  }
+  @media print {
+    @page { size: A4 portrait; margin: 12mm; }
+    .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print { display: none !important; }
+    html body { display: block !important; padding: 0 !important; margin: 0; background: #fff !important; font-size: 14px; }
+    html body .wrap, .academic-content { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
+    header, #screen-report { display: none !important; }
+    #print-area { position: static; width: 100%; height: auto; overflow: visible; }
+    .card { box-shadow: none; border: 0; padding: 0; }
+    tr, .avoid-break { break-inside: avoid; }
+    a[href]::after { content: ""; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+  <header class="no-print">
+    <h1>นักเรียนติด ร.</h1>
+    <p>รายชื่อนักเรียนที่ต้องแก้ ร. แยกตามห้องสำหรับครูประจำชั้น</p>
+    <div class="nav"><a href="summary.html">สรุปผลการเรียน</a><a href="warning.html">เฝ้าระวัง มส.</a><a href="remark-report.html">นักเรียนติด ร.</a><a href="retention.html">เรียนซ้ำชั้น</a><a href="#" id="btn-signout">ออกจากระบบ</a></div>
+    <script src="../app-shell.js?v=20261007-1"></script>
+  </header>
+  <main class="academic-content">
+    <div id="screen-report" class="no-print">
+      <div class="card">
+        <div class="filters">
+          <div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"></select></div>
+          <div class="field"><label for="filter-term">ภาคเรียน</label><select id="filter-term"><option value="1">ภาคเรียนที่ 1</option><option value="2">ภาคเรียนที่ 2</option></select></div>
+          <div class="field"><label for="filter-grade">ชั้น</label><select id="filter-grade"></select></div>
+        </div>
+        <p class="hint">ประถมไม่มี ร. · วิชาที่ติด มส. ไม่อยู่ในรายงานนี้ (มส. ชนะ ร.) — ดูที่หน้า <a href="warning.html">เฝ้าระวัง มส.</a></p>
+      </div>
+      <div id="report-state" class="card empty" role="status">กำลังโหลดข้อมูล...</div>
+      <div id="report-content" hidden></div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+</div>
+<div id="print-area" aria-hidden="true"></div>
+<script type="module">
+import {
+  sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
+  computeStudentSubjectResults, getStudentPlacements, homeroomAuditRoomLabel,
+  loadLetterSigners, getSetting, bangkokNow, toDateStr, thaiLetterDateText
+} from "../supabase-client.js?v=20261007-2";
+
+const elYear = document.getElementById("filter-year");
+const elTerm = document.getElementById("filter-term");
+const elGrade = document.getElementById("filter-grade");
+const elState = document.getElementById("report-state");
+const elContent = document.getElementById("report-content");
+const elPrintArea = document.getElementById("print-area");
+let schoolName = "";
+let currentRooms = [];
+let loadedAt = null;
+let printing = false;
+let loadToken = 0;
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"})[ch]);
+}
+function subjectLabel(subject) {
+  return [subject?.code, subject?.name].filter(Boolean).join(" ") || "ไม่ระบุรายวิชา";
+}
+function reasonLines(reason) {
+  return String(reason || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+}
+function reasonList(reason) {
+  const lines = reasonLines(reason);
+  return `<ul>${(lines.length ? lines : ["ติดต่อครูผู้สอนเพื่อสอบถามงานที่ค้าง"]).map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`;
+}
+function buildRemarkRooms(studentResults, placements, remarks, profiles, signersByRoom) {
+  const placementByStudent = new Map(placements.map(p => [String(p.student_id), p]));
+  const remarkKeys = new Set(remarks.map(r => `${r.student_id}\u0000${r.subject_id}`));
+  const rooms = new Map();
+  for (const [studentId, entry] of studentResults) {
+    const placement = placementByStudent.get(String(studentId));
+    if (!placement || placement.grade_level !== elGrade.value) continue;
+    const subjects = [];
+    for (const item of entry.subjects) {
+      if (item.result?.type !== "ร.") continue;
+      const members = item.subject.subject_type === "บูรณาการ"
+        ? (item.memberResults || []).filter(member => member.result?.type === "ร.")
+        : [{ subject: item.subject, result: item.result }];
+      for (const member of members) {
+        const subject = member.subject;
+        const manual = remarkKeys.has(`${studentId}\u0000${subject.id}`);
+        subjects.push({
+          label: item.subject.subject_type === "บูรณาการ" ? `${subjectLabel(item.subject)} › ${subjectLabel(subject)}` : subjectLabel(subject),
+          teacher: profiles.get(String(subject.owner_id)) || "—",
+          manual, reason: member.result.reason || "", subjectId: subject.id
+        });
+      }
+    }
+    if (!subjects.length) continue;
+    const classroom = String(placement.classroom || "");
+    if (!rooms.has(classroom)) rooms.set(classroom, { classroom, students: [], total: placements.filter(p => p.grade_level === placement.grade_level && String(p.classroom || "") === classroom).length, signers: signersByRoom.get(classroom) || {} });
+    rooms.get(classroom).students.push({ student: entry.student, subjects });
+  }
+  return [...rooms.values()].sort((a, b) => a.classroom.localeCompare(b.classroom, "th", { numeric: true }))
+    .map(room => ({ ...room, students: room.students.sort((a, b) => String(a.student.student_no || "").localeCompare(String(b.student.student_no || ""), "th", { numeric: true })) }));
+}
+function roomCounts(room) {
+  const items = room.students.flatMap(item => item.subjects);
+  return { students: room.students.length, subjects: items.length, manual: items.filter(item => item.manual).length, auto: items.filter(item => !item.manual).length };
+}
+function screenRoomHtml(room, index) {
+  const counts = roomCounts(room);
+  const label = homeroomAuditRoomLabel({ grade_level: elGrade.value, classroom: room.classroom });
+  const rows = room.students.map((item, i) => `<div class="student"><div class="who">${i + 1}. เลขที่ ${escapeHtml(item.student.student_no)} · ${escapeHtml(item.student.name)}</div>${item.subjects.map(subject => `<div class="subject${subject.manual ? "" : " auto"}"><div class="subject-name">${escapeHtml(subject.label)}<span class="pill ${subject.manual ? "manual" : "auto"}">${subject.manual ? "ร." : "ร. ขาดสอบ"}</span></div><div class="meta">ครูผู้สอน: ${escapeHtml(subject.teacher)}</div>${subject.manual ? reasonList(subject.reason) : "<ul><li>ไม่มีคะแนนสอบปลายภาค/ปลายปี</li></ul>"}</div>`).join("")}</div>`).join("");
+  return `<section class="card room"><div class="room-head"><span class="name">${escapeHtml(label)}</span><span class="meta">${counts.students} คน · ${counts.subjects} วิชา · ครูประจำชั้น: ${escapeHtml(room.signers.homeroomName || "—")}</span><button type="button" class="ghost no-print" data-print-room="${index}">พิมพ์ห้องนี้</button></div>${rows}</section>`;
+}
+function renderRoomSheet(room, index) {
+  const counts = roomCounts(room);
+  const label = homeroomAuditRoomLabel({ grade_level: elGrade.value, classroom: room.classroom });
+  const dateText = thaiLetterDateText(toDateStr(loadedAt || bangkokNow()));
+  const bodies = room.students.map((item, i) => `<tbody class="sheet-student">${item.subjects.map((subject, j) => `<tr>${j === 0 ? `<td class="sheet-center" rowspan="${item.subjects.length}">${i + 1}</td><td rowspan="${item.subjects.length}">${escapeHtml(item.student.student_no)}</td><td rowspan="${item.subjects.length}">${escapeHtml(item.student.name)}</td>` : ""}<td>${escapeHtml(subject.label)}</td><td>${escapeHtml(subject.teacher)}</td><td>${subject.manual ? reasonList(subject.reason) : "ขาดสอบปลายภาค — ติดต่อครูผู้สอนเพื่อสอบ"}</td></tr>`).join("")}</tbody>`).join("");
+  return `<article class="report-sheet" data-sheet="${index}"><div class="sheet-head"><img class="sheet-logo" src="../logo.png" alt="ตราโรงเรียน"><div class="sheet-school">${escapeHtml(schoolName)}</div><h1 class="sheet-title">รายชื่อนักเรียนที่ได้ผลการเรียน “ร.” (รอการตัดสิน)</h1><div>ชั้น ${escapeHtml(label)} · ภาคเรียนที่ ${escapeHtml(elTerm.value)} ปีการศึกษา ${escapeHtml(elYear.value)} · ข้อมูล ณ วันที่ ${escapeHtml(dateText)}</div></div><table class="sheet-table"><colgroup><col style="width:6%"><col style="width:11%"><col style="width:20%"><col style="width:22%"><col style="width:13%"><col style="width:28%"></colgroup><thead><tr><th>ที่</th><th>เลขประจำตัว</th><th>ชื่อ–สกุล</th><th>รายวิชา</th><th>ครูผู้สอน</th><th>สิ่งที่ต้องทำ</th></tr></thead>${bodies}</table><div class="sheet-summary">สรุป: นักเรียนติด ร. ${counts.students} คน · รวม ${counts.subjects} รายวิชา (ร. งานค้าง ${counts.manual} · ร. ขาดสอบ ${counts.auto}) จากนักเรียนทั้งห้อง ${room.total} คน</div><div class="sheet-signatures"><div>ลงชื่อ ....................................... ครูประจำชั้น<br>(${escapeHtml(room.signers.homeroomName || "......................................")})</div><div>ลงชื่อ ....................................... หัวหน้าฝ่ายวิชาการ<br>(${escapeHtml(room.signers.academicHeadName || "......................................")})</div></div><div class="sheet-foot">หมายเหตุ: นักเรียนต้องแก้ ร. ตามระเบียบการวัดและประเมินผลของโรงเรียน · วิชาที่ติด มส. มีใบรายชื่อแยก</div></article>`;
+}
+function renderReport() {
+  if (!currentRooms.length) {
+    elContent.hidden = true;
+    elState.hidden = false;
+    elState.className = "card empty";
+    elState.textContent = "ไม่มีนักเรียนติด ร. ในชั้น/ภาคเรียนนี้";
+    return;
+  }
+  const total = currentRooms.reduce((sum, room) => sum + roomCounts(room).students, 0);
+  const subjects = currentRooms.reduce((sum, room) => sum + roomCounts(room).subjects, 0);
+  const timestamp = new Intl.DateTimeFormat("th-TH", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(loadedAt);
+  elState.hidden = true;
+  elContent.hidden = false;
+  elContent.innerHTML = `<div class="stats"><div class="stat"><b>${total}</b><span>นักเรียนติด ร.</span></div><div class="stat"><b>${subjects}</b><span>รายวิชา (คน×วิชา)</span></div><div class="stat"><b>${currentRooms.length}</b><span>ห้อง</span></div></div><div class="toolbar"><span class="meta">ข้อมูล ณ ${escapeHtml(timestamp)} น.</span><button type="button" class="primary no-print" id="print-all">พิมพ์ทุกห้อง (${currentRooms.length} ห้อง)</button></div>${currentRooms.map(screenRoomHtml).join("")}`;
+}
+async function loadReport() {
+  const token = ++loadToken;
+  currentRooms = [];
+  elContent.hidden = true;
+  elState.hidden = false;
+  elState.className = "card empty";
+  elState.textContent = "กำลังโหลดข้อมูล...";
+  const grade = elGrade.value, year = elYear.value, term = elTerm.value;
+  if (!grade || !year || !term) { elState.textContent = "เลือกปี ภาคเรียน และชั้นเพื่อดูรายงาน"; return; }
+  try {
+    const [studentResults, placementResponse] = await Promise.all([
+      computeStudentSubjectResults({ grade, year, term }), getStudentPlacements(year)
+    ]);
+    if (placementResponse.error) throw new Error("โหลดห้องของปีการศึกษาไม่สำเร็จ: " + placementResponse.error.message);
+    const placements = placementResponse.data.filter(p => p.grade_level === grade);
+    const relevant = [...studentResults].filter(([id, entry]) => placements.some(p => String(p.student_id) === String(id)) && entry.subjects.some(item => item.result?.type === "ร."));
+    const subjectIds = new Set();
+    const ownerIds = new Set();
+    for (const [, entry] of relevant) for (const item of entry.subjects) {
+      if (item.result?.type !== "ร.") continue;
+      const members = item.subject.subject_type === "บูรณาการ" ? (item.memberResults || []).filter(m => m.result?.type === "ร.") : [{ subject: item.subject }];
+      for (const member of members) { subjectIds.add(member.subject.id); if (member.subject.owner_id) ownerIds.add(member.subject.owner_id); }
+    }
+    const studentIds = relevant.map(([id]) => id);
+    const [remarkResponse, profileResponse] = await Promise.all([
+      subjectIds.size && studentIds.length ? sb.from("remarks").select("student_id,subject_id").in("subject_id", [...subjectIds]).in("student_id", studentIds) : Promise.resolve({ data: [], error: null }),
+      ownerIds.size ? sb.from("profiles").select("id,name,email").in("id", [...ownerIds]) : Promise.resolve({ data: [], error: null })
+    ]);
+    if (remarkResponse.error) throw new Error("โหลดรายการ ร. ไม่สำเร็จ: " + remarkResponse.error.message);
+    if (profileResponse.error) throw new Error("อ่านชื่อครูผู้สอนไม่สำเร็จ: " + profileResponse.error.message);
+    const profiles = new Map((profileResponse.data || []).map(p => [String(p.id), p.name || p.email || "—"]));
+    const candidateRooms = [...new Set(relevant.filter(([, entry]) => entry.subjects.some(item => item.result?.type === "ร.")).map(([id]) => placements.find(p => String(p.student_id) === String(id))?.classroom).filter(Boolean))];
+    const signerPairs = await Promise.all(candidateRooms.map(async classroom => [classroom, await loadLetterSigners(year, grade, classroom)]));
+    if (token !== loadToken) return;
+    currentRooms = buildRemarkRooms(studentResults, placements, remarkResponse.data || [], profiles, new Map(signerPairs));
+    loadedAt = bangkokNow();
+    renderReport();
+  } catch (error) {
+    if (token !== loadToken) return;
+    elContent.hidden = true;
+    elState.hidden = false;
+    elState.className = "card error";
+    elState.textContent = error.message || "โหลดรายงานไม่สำเร็จ — ลองใหม่อีกครั้ง";
+  }
+}
+async function printRooms(rooms, button) {
+  if (printing || !rooms.length) return;
+  printing = true;
+  const buttons = [...elContent.querySelectorAll("button")];
+  buttons.forEach(item => { item.disabled = true; });
+  const oldLabel = button.textContent;
+  button.textContent = "กำลังเตรียมใบรายชื่อ...";
+  try {
+    elPrintArea.innerHTML = rooms.map(renderRoomSheet).join("");
+    await document.fonts.ready;
+    try { await Promise.all([...elPrintArea.querySelectorAll("img")].map(img => img.decode())); } catch { /* โลโก้เสียยังพิมพ์ข้อความได้ */ }
+    window.print();
+  } catch (error) {
+    const toast = document.getElementById("toast");
+    toast.textContent = error.message || "เตรียมใบรายชื่อไม่สำเร็จ";
+    toast.classList.add("show");
+    setTimeout(() => toast.classList.remove("show"), 4000);
+  } finally {
+    elPrintArea.innerHTML = "";
+    printing = false;
+    button.textContent = oldLabel;
+    buttons.forEach(item => { if (item.isConnected) item.disabled = false; });
+  }
+}
+elContent.addEventListener("click", event => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (button.id === "print-all") printRooms(currentRooms, button);
+  else if (button.hasAttribute("data-print-room")) {
+    const room = currentRooms[Number(button.dataset.printRoom)];
+    if (room) printRooms([room], button);
+  }
+});
+
+async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    const [subjectsResponse, name, profileCheck] = await Promise.all([
+      sb.from("subjects").select("grade_level,year,term"),
+      getSetting("receipt_school_name").catch(() => ""),
+      sb.from("profiles").select("id,name,email").limit(1)
+    ]);
+    if (subjectsResponse.error) throw new Error("โหลดปีและชั้นไม่สำเร็จ: " + subjectsResponse.error.message);
+    if (profileCheck.error) throw new Error("อ่านชื่อครูผู้สอนไม่สำเร็จ: " + profileCheck.error.message);
+    schoolName = String(name || "").trim();
+    const subjects = subjectsResponse.data || [];
+    const years = distinctYears(subjects.filter(s => String(s.grade_level || "").startsWith("ม.")));
+    elYear.innerHTML = years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
+    const activeYear = getActiveYear();
+    if (years.includes(activeYear)) elYear.value = activeYear;
+    function updateGrades() {
+      const grades = [...new Set(subjects.filter(s => s.year === elYear.value && String(s.grade_level || "").startsWith("ม.")).map(s => s.grade_level))]
+        .sort((a, b) => GRADE_ORDER.indexOf(a) - GRADE_ORDER.indexOf(b));
+      const old = elGrade.value;
+      elGrade.innerHTML = grades.map(grade => `<option value="${escapeHtml(grade)}">${escapeHtml(grade)}</option>`).join("");
+      if (grades.includes(old)) elGrade.value = old;
+    }
+    updateGrades();
+    elYear.addEventListener("change", () => { setActiveYear(elYear.value); updateGrades(); loadReport(); });
+    elTerm.addEventListener("change", loadReport);
+    elGrade.addEventListener("change", loadReport);
+    await loadReport();
+  } catch (error) {
+    elState.className = "card error";
+    elState.textContent = error.message || "โหลดข้อมูลไม่สำเร็จ";
+  }
+}
+init();
+</script>
+</body>
+</html>
