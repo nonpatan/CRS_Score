@@ -2357,13 +2357,22 @@ function configureCorePicker(type, mode, ref, isCompUnit) {
     mCoreField.style.display = "block";
     mCoreLabel.textContent = "องค์ประกอบสมรรถนะหลัก";
     const stage = competencyStageForGrade(currentSubject && currentSubject.grade_level);
-    const elements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id &&
+    const used = new Set((coreUnit.indicators || [])
+      .filter(i => mode !== "edit" || i.id !== ref.id)
+      .map(i => i.core_competency_element_id).filter(Boolean));
+    const availableElements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id &&
       (((!stage || e.stage === stage) && e.active !== false) ||
         (mode === "edit" && e.id === ref.core_competency_element_id)));
-    if (!coreUnit.core_competency_id || elements.length === 0) {
+    const elements = availableElements.filter(e => !used.has(e.id) ||
+      (mode === "edit" && e.id === ref.core_competency_element_id));
+    if (!coreUnit.core_competency_id || availableElements.length === 0) {
       mCoreSelect.innerHTML = "<option value=''>— ยังไม่ได้ผูกด้านสมรรถนะหลักหรือไม่มีองค์ประกอบช่วงชั้นนี้ —</option>";
       mNote.style.display = "block";
       mNote.textContent = "กรุณาเลือกด้านสมรรถนะหลักก่อน แล้วจึงเพิ่มองค์ประกอบ";
+    } else if (elements.length === 0) {
+      mCoreSelect.innerHTML = "<option value=''>— เพิ่มครบทุกองค์ประกอบแล้ว —</option>";
+      mNote.style.display = "block";
+      mNote.textContent = "หน่วยนี้มีครบทุกองค์ประกอบของช่วงชั้นนี้แล้ว";
     } else {
       fillCorePicker(elements, mode === "edit" ? ref.core_competency_element_id : "", "— เลือกองค์ประกอบ —");
     }
@@ -2416,6 +2425,9 @@ async function saveNode() {
   } else if (type === "indicator" && unitForIndicator && unitForIndicator.kind === "สมรรถนะหลัก") {
     selectedElement = coreElements.find(e => e.id === mCoreSelect.value);
     if (!selectedElement) { showToast("เลือกองค์ประกอบก่อน", false); return; }
+    if (mode === "add" && (unitForIndicator.indicators || []).some(i => i.core_competency_element_id === selectedElement.id)) {
+      showToast("หน่วยนี้มีองค์ประกอบนี้แล้ว", false); return;
+    }
     name = selectedElement.name;
   }
   if (type !== "collection" && !name) { showToast("กรุณากรอกชื่อ", false); return; }
