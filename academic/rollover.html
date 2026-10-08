@@ -311,7 +311,7 @@ import {
   sb, requireAuth, signOut, getProfile,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20261007-2";
+} from "../supabase-client.js?v=20261008-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -832,13 +832,14 @@ async function cloneSubject(src, newYear) {
   // ก๊อปโครงสร้าง หน่วยใหญ่ > หน่วยย่อย > ครั้งที่ (ไม่ก๊อปคะแนน/เช็คชื่อ = เริ่มปีใหม่ว่างเปล่า)
   const { data: units } = await sb
     .from("units")
-    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*))")
+    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,core_competency_element_id,collections(*))")
     .eq("subject_id", src.id)
     .order("seq");
   for (const u of (units || [])) {
     const { data: newUnit, error: uErr } = await sb.from("units")
       .insert({ subject_id: newSub.id, kind: u.kind, name: u.name, max_score: u.max_score,
-        counts_score: u.counts_score === false ? false : true, seq: u.seq })
+        counts_score: u.counts_score === false ? false : true,
+        core_competency_id: u.core_competency_id ?? null, seq: u.seq })
       .select().single();
     if (uErr) throw new Error("ก๊อปหน่วยใหญ่ไม่สำเร็จ: " + uErr.message);
     for (const ind of (u.indicators || [])) {
@@ -848,7 +849,8 @@ async function cloneSubject(src, newYear) {
           name: ind.name,
           max_score: ind.max_score,
           seq: ind.seq,
-          counts_score: ind.counts_score === false ? false : true
+          counts_score: ind.counts_score === false ? false : true,
+          core_competency_element_id: ind.core_competency_element_id ?? null
         })
         .select().single();
       if (iErr) throw new Error("ก๊อปหน่วยย่อยไม่สำเร็จ: " + iErr.message);

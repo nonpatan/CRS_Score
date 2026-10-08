@@ -668,6 +668,7 @@ export function buildStructureCopyPlan(sourceUnits, options = {}) {
           max_score: indicator.max_score,
           seq: Number.isFinite(Number(indicator.seq)) ? Number(indicator.seq) : indicatorIndex + 1,
           counts_score: indicator.counts_score === false ? false : true,
+          core_competency_element_id: indicator.core_competency_element_id ?? null,
           collections: [{
             seq: 1,
             max_score: firstCollection ? firstCollection.max_score : indicator.max_score
@@ -679,6 +680,7 @@ export function buildStructureCopyPlan(sourceUnits, options = {}) {
         name: unit.name,
         max_score: unit.max_score,
         counts_score: unit.counts_score === false ? false : true,
+        core_competency_id: unit.core_competency_id ?? null,
         seq: startSeq + (Number.isFinite(sourceSeq) ? sourceSeq : unitIndex + 1),
         indicators
       };

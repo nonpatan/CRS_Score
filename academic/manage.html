@@ -579,7 +579,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20261007-2";
+import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20261008-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1559,7 +1559,7 @@ function syncStructureCopyCard(force = false) {
 
 async function readCopySourceUnits(subjectId) {
   const { data, error } = await sb.from("units")
-    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*))")
+    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,core_competency_element_id,collections(*))")
     .eq("subject_id", subjectId)
     .order("seq");
   if (error) throw new Error(error.message);
@@ -1659,6 +1659,7 @@ btnCopyStructure.addEventListener("click", async () => {
             name: unit.name,
             max_score: unit.max_score,
             counts_score: unit.counts_score,
+            core_competency_id: unit.core_competency_id,
             seq: unit.seq
           })
           .select("id").single();
@@ -1671,7 +1672,8 @@ btnCopyStructure.addEventListener("click", async () => {
               name: indicator.name,
               max_score: indicator.max_score,
               seq: indicator.seq,
-              counts_score: indicator.counts_score
+              counts_score: indicator.counts_score,
+              core_competency_element_id: indicator.core_competency_element_id
             })
             .select("id").single();
           if (indicatorError) throw new Error("สร้างตัวชี้วัดไม่สำเร็จ: " + indicatorError.message);
@@ -2003,7 +2005,7 @@ elDelSubject.addEventListener("click", async () => {
 async function loadStructure() {
   const { data, error } = await sb
     .from("units")
-    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(id)))")
+    .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,core_competency_element_id,collections(*, scores(id)))")
     .eq("subject_id", currentSubject.id)
     .order("seq");
   if (error) { showToast("โหลดโครงสร้างไม่สำเร็จ: " + error.message, false); return; }
@@ -2355,8 +2357,9 @@ function configureCorePicker(type, mode, ref, isCompUnit) {
     mCoreField.style.display = "block";
     mCoreLabel.textContent = "องค์ประกอบสมรรถนะหลัก";
     const stage = competencyStageForGrade(currentSubject && currentSubject.grade_level);
-    const elements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id && (!stage || e.stage === stage) &&
-      (e.active !== false || (mode === "edit" && e.id === ref.core_competency_element_id)));
+    const elements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id &&
+      (((!stage || e.stage === stage) && e.active !== false) ||
+        (mode === "edit" && e.id === ref.core_competency_element_id)));
     if (!coreUnit.core_competency_id || elements.length === 0) {
       mCoreSelect.innerHTML = "<option value=''>— ยังไม่ได้ผูกด้านสมรรถนะหลักหรือไม่มีองค์ประกอบช่วงชั้นนี้ —</option>";
       mNote.style.display = "block";
