@@ -187,7 +187,7 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
   <div class="entry-head"><div class="card">
     <div class="toolbar"><button id="back-structure" class="ghost">‹ ชื่อวิชา</button><button id="delete-mobile" class="danger mobile-only">ลบครั้งนี้</button></div>
     <h2 id="entry-title"></h2><div id="entry-path" class="meta"></div><div id="entry-note" class="entry-note-text" hidden></div>
-    <div class="entry-progress-row"><div id="entry-note-row"><button id="edit-mobile-note" class="ghost">+ เพิ่มหมายเหตุ</button></div><div class="progress"><span id="entry-progress-bar"></span></div><div id="entry-progress" class="hint" aria-label="ความคืบหน้าการกรอก"></div></div>
+    <div class="entry-progress-row"><div id="entry-note-row"><button id="edit-mobile-note" class="ghost">✎ แก้ครั้งนี้</button></div><div class="progress"><span id="entry-progress-bar"></span></div><div id="entry-progress" class="hint" aria-label="ความคืบหน้าการกรอก"></div></div>
     <div id="mobile-exam-head"></div>
   </div></div>
   <div id="mobile-score-list" class="card"></div><div id="mobile-exam-details"></div>
@@ -535,7 +535,8 @@ function renderMobileEntry() {
     event.preventDefault();
     note.onclick();
   };
-  $("edit-mobile-note").textContent = collection?.note ? "✎ หมายเหตุ" : "+ เพิ่มหมายเหตุ";
+  $("edit-mobile-note").textContent = "✎ แก้ครั้งนี้";
+  $("edit-mobile-note").setAttribute("aria-label", "แก้คะแนนเต็มหรือหมายเหตุครั้งที่ " + collection?.seq);
   $("back-structure").textContent = "‹ " + currentSubject.name;
   $("delete-mobile").hidden = exam;
   const p = exam ? progress().exam : progress().kinds[tab].flatMap(u => u.indicators).flatMap(i => i.collections).find(c => c.id === collection.id);
@@ -561,7 +562,7 @@ function renderMobileEntry() {
 $("prev-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at-1].id); });
 $("next-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at+1].id); });
 $("delete-mobile").addEventListener("click", () => deleteCollection(selection?.collectionId));
-$("edit-mobile-note").addEventListener("click", () => editCollectionNote(selection?.collectionId));
+$("edit-mobile-note").addEventListener("click", () => editCollection(selection?.collectionId));
 // ผูกที่ pane ครั้งเดียว เพื่อให้ใช้กับตารางที่วาดใหม่ทุกครั้งได้
 function updateActiveScoreColumn(target) {
   $("right-pane").querySelectorAll(".active-col").forEach(header => header.classList.remove("active-col"));
@@ -580,9 +581,9 @@ function renderRightPane() {
   const totalMax = collections.reduce((sum,c) => sum+Number(c.max_score),0);
   const notedCollections = collections.filter(c => c.note);
   const collectionNotes = notedCollections.length ? `<div class="collection-notes" aria-label="หมายเหตุของแต่ละครั้ง">${notedCollections.map(c => `<div class="collection-notes-row"><b>ครั้งที่ ${escapeHtml(c.seq)}</b><span>${escapeHtml(c.note)}</span></div>`).join("")}</div>` : "";
-  $("right-pane").innerHTML = `<div class="card"><div class="meta">${escapeHtml(unit.name)} (เต็ม ${escapeHtml(unit.max_score)}) ›</div><div class="toolbar"><h2>${escapeHtml(indicator.name)} (เต็ม ${escapeHtml(indicator.max_score)})</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div>${collectionNotes}<div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span><button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้หมายเหตุครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวมคะแนนดิบ<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div><div class="score-legend"><span><i class="empty-example" aria-hidden="true"></i>ยังไม่กรอก</span><span><i aria-hidden="true"></i>กรอกแล้ว</span><span><i class="changed-example" aria-hidden="true"></i>แก้แล้วยังไม่บันทึก</span></div></div>`;
+  $("right-pane").innerHTML = `<div class="card"><div class="meta">${escapeHtml(unit.name)} (เต็ม ${escapeHtml(unit.max_score)}) ›</div><div class="toolbar"><h2>${escapeHtml(indicator.name)} (เต็ม ${escapeHtml(indicator.max_score)})</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div>${collectionNotes}<div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span><button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้ครั้งที่ ${escapeHtml(c.seq)}" title="แก้ครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวมคะแนนดิบ<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div><div class="score-legend"><span><i class="empty-example" aria-hidden="true"></i>ยังไม่กรอก</span><span><i aria-hidden="true"></i>กรอกแล้ว</span><span><i class="changed-example" aria-hidden="true"></i>แก้แล้วยังไม่บันทึก</span></div></div>`;
   $("add-desktop").addEventListener("click", () => addCollection(indicator.id));
-  $("right-pane").querySelectorAll("[data-edit-note]").forEach(button => button.addEventListener("click", () => editCollectionNote(button.dataset.editNote)));
+  $("right-pane").querySelectorAll("[data-edit-note]").forEach(button => button.addEventListener("click", () => editCollection(button.dataset.editNote)));
   $("right-pane").querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteCollection(button.dataset.delete)));
   bindScoreInputs($("right-pane")); updateInputStyles();
 }
@@ -860,16 +861,34 @@ async function addCollection(indicatorId) {
   if (error || !data) { showToast("สร้างครั้งที่ไม่สำเร็จ: " + (error?.message || ""),false); return; }
   indicator.collections.push({ ...data, scores:[] }); resetInputs(); selectCollection(data.id); showToast("สร้างครั้งที่ " + seq + " แล้ว",true);
 }
-async function editCollectionNote(id) {
-  if (!id || !canEdit(currentSubject)) return;
+async function editCollection(id) {
+  if (!id || !canEdit(currentSubject) || !await allowLeave()) return;
   const collection = allCollections().find(row => row.id === id); if (!collection) return;
-  const value = await askConfirm({ title:"แก้หมายเหตุครั้งที่ " + collection.seq, message:"หมายเหตุนี้แสดงเฉพาะหน้ากรอกคะแนน", textInput:{ label:"หมายเหตุ (ไม่บังคับ)", value:collection.note || "" }, okLabel:"บันทึก" });
-  if (value === false) return;
-  const note = value.trim() || null;
-  const { data,error } = await sb.from("collections").update({ note }).eq("id",id).select("id");
-  if (error || data?.length !== 1) { showToast("บันทึกหมายเหตุไม่สำเร็จ — ตรวจสิทธิ์วิชา", false); return; }
-  collection.note = note;
-  renderWorkspace(); showToast("บันทึกหมายเหตุแล้ว", true);
+  const scored = (collection.scores || []).length;
+  const details = await askConfirm({ title:"แก้ครั้งที่ " + collection.seq,
+    message:scored ? "ครั้งนี้มีคะแนนแล้ว " + scored + " คน · เปลี่ยนคะแนนเต็มแล้ว คะแนนที่กรอกไว้จะถูกคิดสัดส่วนใหม่" : "แก้คะแนนเต็มหรือหมายเหตุของครั้งนี้",
+    numberInput:{ label:"คะแนนเต็ม (จำนวนเต็มมากกว่า 0)", value:collection.max_score },
+    textInput:{ label:"หมายเหตุ (ไม่บังคับ)", value:collection.note || "" }, okLabel:"บันทึก" });
+  if (details === false) return;
+  const note = details.note.trim() || null, maxScore = details.maxScore;
+  const payload = {};
+  if (maxScore !== Number(collection.max_score)) payload.max_score = maxScore;
+  if (note !== (collection.note || null)) payload.note = note;
+  if (!Object.keys(payload).length) return;
+  if (maxScore < Number(collection.max_score)) {
+    const { data:scores,error:scoreError } = await sb.from("scores").select("raw_score").eq("collection_id",id).gt("raw_score",maxScore);
+    if (scoreError) { showToast("ตรวจคะแนนที่กรอกไว้ไม่สำเร็จ: " + scoreError.message, false); return; }
+    if (scores?.length) {
+      const top = Math.max(...scores.map(score => Number(score.raw_score)));
+      showToast("บันทึกไม่ได้ — มีนักเรียน " + scores.length + " คนได้คะแนนเกิน " + maxScore + " (สูงสุด " + top + ") ให้แก้คะแนนก่อน", false);
+      return;
+    }
+  }
+  const { data,error } = await sb.from("collections").update(payload).eq("id",id).select("id");
+  if (error || data?.length !== 1) { showToast("บันทึกไม่สำเร็จ — ตรวจสิทธิ์วิชา", false); return; }
+  if ("max_score" in payload) collection.max_score = maxScore;
+  if ("note" in payload) collection.note = note;
+  resetInputs(); renderWorkspace(); showToast("บันทึกครั้งที่ " + collection.seq + " แล้ว", true);
 }
 async function deleteCollection(id) {
   if (!id || !canEdit(currentSubject) || !await allowLeave()) return;
