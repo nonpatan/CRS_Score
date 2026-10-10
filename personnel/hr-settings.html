@@ -125,7 +125,8 @@
   .period-actions button { min-height:44px; }
   .period-form { margin-top:12px; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
   .period-form-title { font-size:15px; font-weight:600; color:var(--ink); margin-bottom:12px; }
-  .period-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .period-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+  .period-form-grid .field { margin-bottom:0; }
   .period-form-actions { display:flex; gap:8px; }
   .period-form-actions .primary { width:auto; flex:1; }
   .period-form-actions .ghost { margin-top:8px; }
@@ -135,7 +136,10 @@
   .period-cutoff { font-weight:600; color:var(--ink); margin:2px 0 12px; }
   .readonly { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); margin:10px 0; }
   .field-error { color:var(--danger); font-size:13px; margin-top:4px; }
-  input[aria-invalid="true"] { border-color:var(--danger); }
+  .period-error-summary { margin:0 0 10px; font-weight:600; }
+  #period-form input[aria-invalid="true"] { border-color:var(--danger) !important; }
+  #period-form input[aria-invalid="true"]:focus { border-color:var(--danger) !important;
+    box-shadow:0 0 0 3px var(--danger-soft) !important; outline-color:var(--danger) !important; }
   @media (max-width:560px) { .period-form-grid { grid-template-columns:1fr; }
     .period-form-actions { flex-direction:column; gap:0; } .period-form-actions .primary { width:100%; } }
 </style>
@@ -219,6 +223,7 @@
           <div class="field-note" id="period-grace-hint"></div><div class="field-error" id="period-grace-error" hidden></div>
         </div>
         <div class="period-cutoff" id="period-cutoff" aria-live="polite">—</div>
+        <div class="field-error period-error-summary" id="period-error-summary" role="alert" hidden></div>
         <div class="period-form-actions"><button type="submit" class="primary" id="btn-save-period">บันทึกช่วงเวลา</button>
           <button type="button" class="ghost" id="btn-cancel-period">ยกเลิก</button></div>
       </form>
@@ -477,18 +482,44 @@ if (session) {
   let periodFormOpener = null;
   const periodFieldIds = ["period-name", "period-start-date", "period-end-date",
     "period-start-time", "period-end-time", "period-grace"];
+  function updatePeriodErrorSummary() {
+    const count = periodFieldIds.filter(id => el(id).getAttribute("aria-invalid") === "true").length;
+    el("period-error-summary").textContent = count >= 2 ? `มี ${count} ช่องที่ต้องแก้` : "";
+    el("period-error-summary").hidden = count < 2;
+  }
   function clearPeriodError(id) {
     el(id).removeAttribute("aria-invalid");
     el(id + "-error").textContent = "";
     el(id + "-error").hidden = true;
+    updatePeriodErrorSummary();
   }
   function showPeriodError(id, message) {
     el(id).setAttribute("aria-invalid", "true");
     el(id + "-error").textContent = message;
     el(id + "-error").hidden = false;
-    el(id).focus();
   }
   periodFieldIds.forEach(id => el(id).addEventListener("input", () => clearPeriodError(id)));
+  function validatePeriodForm(values, periods, editingId) {
+    const { name, start, end, startTime, endTime, graceRaw } = values;
+    const errors = [];
+    if (!name) errors.push({ id:"period-name", message:"กรุณากรอกชื่อช่วง" });
+    const overlap = start && end && end >= start
+      ? periods.find(row => row.id !== editingId && row.start_date <= end && row.end_date >= start)
+      : null;
+    if (!start) errors.push({ id:"period-start-date", message:"กรุณาเลือกวันเริ่ม" });
+    else if (overlap) errors.push({ id:"period-start-date",
+      message:`ซ้อนกับ “${overlap.name}” (${periodDate(overlap.start_date)} – ${periodDate(overlap.end_date)})` });
+    if (!end) errors.push({ id:"period-end-date", message:"กรุณาเลือกวันสิ้นสุด" });
+    else if (start && end < start) errors.push({ id:"period-end-date", message:"วันสิ้นสุดต้องไม่ก่อนวันเริ่ม" });
+    if (!startTime) errors.push({ id:"period-start-time", message:"กรุณาเลือกเวลาเข้า" });
+    if (!endTime) errors.push({ id:"period-end-time", message:"กรุณาเลือกเวลาเลิก" });
+    else if (startTime && endTime <= startTime) errors.push({ id:"period-end-time", message:"เวลาเลิกต้องหลังเวลาเข้า" });
+    const grace = Number(graceRaw);
+    if (graceRaw !== "" && (!/^\d+$/.test(graceRaw) || !Number.isInteger(grace) || grace < 0 || grace > 120)) {
+      errors.push({ id:"period-grace", message:"ผ่อนผันของช่วงต้องเว้นว่างหรือเป็นจำนวนเต็ม 0–120 นาที" });
+    }
+    return errors;
+  }
   function groupTimePeriods(periods, today) {
     return {
       active:periods.filter(row => row.start_date <= today && today <= row.end_date),
@@ -582,14 +613,13 @@ if (session) {
     const graceRaw = el("period-grace").value.trim();
     const grace = graceRaw === "" ? null : Number(graceRaw);
     periodFieldIds.forEach(clearPeriodError);
-    if (!name) return showPeriodError("period-name", "กรุณากรอกชื่อช่วง");
-    if (!start || !end || end < start) return showPeriodError(!start ? "period-start-date" : "period-end-date", "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม");
-    if (!startTime || !endTime || endTime <= startTime) return showPeriodError(!startTime ? "period-start-time" : "period-end-time", "เวลาเลิกต้องหลังเวลาเข้า");
-    if (graceRaw !== "" && (!/^\d+$/.test(graceRaw) || !Number.isInteger(grace) || grace < 0 || grace > 120)) {
-      return showPeriodError("period-grace", "ผ่อนผันของช่วงต้องเว้นว่างหรือเป็นจำนวนเต็ม 0–120 นาที");
+    const errors = validatePeriodForm({ name, start, end, startTime, endTime, graceRaw }, timePeriods, editingPeriodId);
+    if (errors.length) {
+      errors.forEach(({ id, message }) => showPeriodError(id, message));
+      updatePeriodErrorSummary();
+      el(errors[0].id).focus();
+      return;
     }
-    const overlap = timePeriods.find(row => row.id !== editingPeriodId && row.start_date <= end && row.end_date >= start);
-    if (overlap) return showPeriodError("period-start-date", `ซ้อนกับ “${overlap.name}” (${periodDate(overlap.start_date)} – ${periodDate(overlap.end_date)})`);
     const payload = { name, start_date:start, end_date:end, start_time:startTime,
       end_time:endTime, grace_minutes:grace };
     el("btn-save-period").disabled = true;
