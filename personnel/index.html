@@ -140,6 +140,8 @@
   .legend-line.zero { opacity:1; color:var(--muted); }
   .legend-line.zero b, .numeric-zero { color:var(--muted) !important; }
   #action-count.numeric-zero { background:var(--slate-soft); }
+  .period-today { padding:9px 12px; margin-bottom:12px; border-radius:8px;
+    background:var(--teal-soft); color:var(--teal); font-size:14px; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -162,6 +164,7 @@
   </header>
 
   <main class="academic-content" id="main">
+    <div id="period-today" class="period-today" hidden></div>
     <section class="holiday-banner" id="holiday-banner" hidden aria-label="สถานะวันหยุด">
       <strong>วันนี้วันหยุด</strong><span id="holiday-note">—</span>
     </section>
@@ -211,7 +214,7 @@ import { sb, requireAuth, signOut, getLastSyncLog, checkDepartment, syncJibble,
          loadWorkContext, computeDayStatus, staffArrivalCutoff, listDutySwaps,
          loadCoverageForDay, pickPersonnelAlerts, summarizeStaffWeek,
          pickSchoolDays, pickNextSchoolDay, getAcademicYears, academicYearOf,
-         bangkokNow, toDateStr, isoWeekday } from "../supabase-client.js?v=20261008-1";
+         bangkokNow, toDateStr, isoWeekday, timePeriodFor } from "../supabase-client.js?v=20261010-1";
 
 const session = await requireAuth();
 if (session) {
@@ -224,6 +227,13 @@ if (session) {
   const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[ch]);
+  function renderTodayPeriod(ctx, today) {
+    const period = timePeriodFor(today, ctx.timePeriods);
+    const isWorkday = !!ctx.schedule.get(isoWeekday(today))?.is_working_day && !ctx.holidays.has(today);
+    el("period-today").hidden = !period || !isWorkday;
+    if (period && isWorkday) el("period-today").textContent =
+      `วันนี้ใช้เวลา ${period.name}: เข้า ${String(period.start_time).slice(0,5)} · เลิก ${String(period.end_time).slice(0,5)} น.`;
+  }
   document.getElementById("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
   const STATUS_LABEL = { present:"มา", late:"มาสาย", leave:"ลา", offsite:"ออกปฏิบัติหน้าที่", absent:"ขาด", pending:"ยังไม่ลงเวลา" };
@@ -475,6 +485,7 @@ if (session) {
 
     const canSync = canManageHr;
     let ctx = await loadWorkContext(today, today);
+    renderTodayPeriod(ctx, today);
     const sched = ctx.schedule.get(isoWeekday(today));
     const isWorkday = !!sched?.is_working_day && !ctx.holidays.has(today);
     let syncWarning = "";
@@ -483,6 +494,7 @@ if (session) {
       try {
         await syncJibble("month", { yearMonth:today.slice(0, 7) });
         ctx = await loadWorkContext(today, today);
+        renderTodayPeriod(ctx, today);
       } catch (e) {
         syncWarning = "อัปเดต Jibble ไม่สำเร็จ: " + e.message;
       }
@@ -563,6 +575,7 @@ if (session) {
       try {
         if (pullJibble && isWorkday && canSync) await syncJibble("today");
         ctx = await loadWorkContext(today, today);
+        renderTodayPeriod(ctx, today);
         if (isWorkday) {
           let coverage = [], warning = "";
           try { coverage = await loadCoverageForDay(today); }

@@ -52,6 +52,8 @@
            background:var(--teal-soft); margin-bottom:14px; }
   .today .big { font-size:20px; font-weight:700; color:var(--teal); }
   .today .sub { color:var(--muted); font-size:14px; }
+  .period-today { padding:9px 12px; margin-bottom:12px; border-radius:8px;
+    background:var(--teal-soft); color:var(--teal); font-size:14px; }
   .duty-alert { margin-top:8px; padding:7px 10px; border-radius:8px;
                 background:var(--amber-soft); color:var(--amber); font-size:13px; font-weight:600; }
   .duty-tag { display:inline-block; margin-left:5px; padding:1px 7px; border-radius:99px;
@@ -238,6 +240,7 @@
     <div id="my-work-main">
     <div class="card" id="my-today-card">
       <div class="section">วันนี้</div>
+      <div id="period-today" class="period-today" hidden></div>
       <div id="today-box"><div class="field-note">กำลังโหลด…</div></div>
     <div class="permit-section" id="permit-card">
       <div class="section">ขออนุญาตเข้าสายวันนี้</div>
@@ -382,7 +385,7 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getSetting, getDailyAttendanceCutoff, loadMyHomeroomAuditData, buildHomeroomAudit, CHECK_TIMING_LABEL,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge, loadMyTeachingGap, ackMakeupRejection,
-         bangkokNow, toDateStr, computeDayStatus } from "../supabase-client.js?v=20261008-1";
+         bangkokNow, toDateStr, computeDayStatus, timePeriodFor } from "../supabase-client.js?v=20261010-1";
 
 const session = await requireAuth();
 if (session) {
@@ -1844,6 +1847,10 @@ if (session) {
       // สถานะของวันนี้ (แสดงเด่นด้านบน)
       const ctxToday = await loadWorkContext(today, today);
       const r = computeDayStatus(me, today, ctxToday);
+      const todayPeriod = timePeriodFor(today, ctxToday.timePeriods);
+      el("period-today").hidden = !todayPeriod || r.status === "holiday";
+      if (todayPeriod && r.status !== "holiday") el("period-today").textContent =
+        `วันนี้ใช้เวลา ${todayPeriod.name}: เข้า ${String(todayPeriod.start_time).slice(0,5)} · เลิก ${String(todayPeriod.end_time).slice(0,5)} น.`;
       let text = WORK_STATUS_LABEL[r.status];
       if (r.status === "late") text = `สาย ${r.lateMinutes} นาที`;
       if (r.status === "leave") text = `ลา (${r.leaveType})`;

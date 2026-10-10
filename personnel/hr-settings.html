@@ -115,6 +115,29 @@
   details[id^="settings-"][open] > summary::after { content:"▾"; }
   details[id^="settings-"][open] > summary { margin-bottom:16px; }
   .category-value { font-weight:400; font-size:13px; color:var(--muted); }
+  .period-row { padding:12px 0; border-bottom:1px solid var(--line); }
+  .period-row:last-child { border-bottom:0; }
+  .period-row.past { color:var(--muted); }
+  .period-row.active { border-left:3px solid var(--teal); padding-left:12px; }
+  .period-row b { display:block; overflow-wrap:anywhere; }
+  .period-meta { font-size:14px; }
+  .period-actions { display:flex; gap:8px; margin-top:8px; }
+  .period-actions button { min-height:44px; }
+  .period-form { margin-top:12px; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
+  .period-form-title { font-size:15px; font-weight:600; color:var(--ink); margin-bottom:12px; }
+  .period-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .period-form-actions { display:flex; gap:8px; }
+  .period-form-actions .primary { width:auto; flex:1; }
+  .period-form-actions .ghost { margin-top:8px; }
+  .period-badge { display:inline-block; margin-left:8px; padding:1px 8px; border-radius:99px;
+                  color:var(--teal); background:var(--teal-soft); font-size:12px; }
+  .period-past > summary { min-height:44px; cursor:pointer; font-weight:600; }
+  .period-cutoff { font-weight:600; color:var(--ink); margin:2px 0 12px; }
+  .readonly { padding:12px 14px; border-radius:10px; color:var(--danger); background:var(--danger-soft); margin:10px 0; }
+  .field-error { color:var(--danger); font-size:13px; margin-top:4px; }
+  input[aria-invalid="true"] { border-color:var(--danger); }
+  @media (max-width:560px) { .period-form-grid { grid-template-columns:1fr; }
+    .period-form-actions { flex-direction:column; gap:0; } .period-form-actions .primary { width:100%; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -136,7 +159,7 @@
   </header>
   <main class="academic-content">
 
-<nav class="settings-nav" aria-label="หมวดตั้งค่า"><button type="button" data-settings="work-time" aria-pressed="true">เวลาทำงาน</button><button type="button" data-settings="teach-gap" aria-pressed="false">สอนชด</button><button type="button" data-settings="work-year" aria-pressed="false">รอบปี</button><button type="button" data-settings="leave-types" aria-pressed="false">ประเภทลา</button><button type="button" data-settings="positions" aria-pressed="false">ตำแหน่ง</button><button type="button" data-settings="duty-types" aria-pressed="false">งานเวร</button><button type="button" data-settings="leave-quota" aria-pressed="false">โควตาลา</button></nav>
+<nav class="settings-nav" aria-label="หมวดตั้งค่า"><button type="button" data-settings="work-time" aria-pressed="true">เวลาทำงาน</button><button type="button" data-settings="work-periods" aria-pressed="false">ช่วงพิเศษ</button><button type="button" data-settings="teach-gap" aria-pressed="false">สอนชด</button><button type="button" data-settings="work-year" aria-pressed="false">รอบปี</button><button type="button" data-settings="leave-types" aria-pressed="false">ประเภทลา</button><button type="button" data-settings="positions" aria-pressed="false">ตำแหน่ง</button><button type="button" data-settings="duty-types" aria-pressed="false">งานเวร</button><button type="button" data-settings="leave-quota" aria-pressed="false">โควตาลา</button></nav>
 
   <div id="gate" class="card" style="display:none"></div>
 
@@ -144,7 +167,8 @@
     <details id="settings-work-time" open><summary><span>เวลาทำงาน</span><span class="category-value" id="value-work-time"></span></summary>
     <div class="banner info">
       เวลาเข้างานและวันทำงานมาจาก Jibble — ถ้าต้องการเปลี่ยน ให้แก้ที่ Jibble แล้วกด
-      “ดึงรายชื่อจาก Jibble” ที่หน้าทะเบียนบุคลากร ระบบจะอัปเดตตาม
+      “ดึงรายชื่อจาก Jibble” ที่หน้าทะเบียนบุคลากร ระบบจะอัปเดตตาม<br>
+      ถ้าบางช่วงของปีเข้า–เลิกต่างจากนี้ ตั้งที่หมวดช่วงพิเศษ
     </div>
     <div class="field">
       <div class="locked"><span>เวลาเข้างาน</span><b id="v-start">—</b></div>
@@ -173,6 +197,32 @@
     </div>
     <button id="btn-save-time-settings" class="primary">บันทึกการตั้งค่าเวลา</button>
   </details>
+  </div>
+
+  <div class="card single-card">
+    <details id="settings-work-periods"><summary><span>ช่วงเวลาทำงานพิเศษ</span><span class="category-value" id="value-work-periods"></span></summary>
+      <div class="banner info">ใช้แทนเวลาเข้างานจาก Jibble เฉพาะวันในช่วง · เวลาเลิกใช้แสดงเท่านั้น · ช่วงพิเศษไม่เปลี่ยนวันทำงาน/วันหยุด</div>
+      <button type="button" id="btn-add-period" class="ghost" hidden>+ เพิ่มช่วง</button>
+      <div id="period-list" aria-live="polite"><div class="field-note">กำลังโหลด…</div></div>
+      <div id="period-readonly" class="readonly" hidden>แก้ไขได้เฉพาะหัวหน้าฝ่ายบุคคลและผู้ดูแลระบบ</div>
+      <form id="period-form" class="period-form" novalidate hidden>
+        <div class="period-form-title" id="period-form-title">เพิ่มช่วงเวลาทำงานพิเศษ</div>
+        <div class="field"><label for="period-name">ชื่อช่วง</label><input id="period-name" type="text" required maxlength="120" aria-describedby="period-name-error"><div class="field-error" id="period-name-error" hidden></div></div>
+        <div class="period-form-grid">
+          <div class="field"><label for="period-start-date">วันเริ่ม</label><input id="period-start-date" type="date" required aria-describedby="period-start-date-error"><div class="field-error" id="period-start-date-error" hidden></div></div>
+          <div class="field"><label for="period-end-date">วันสิ้นสุด</label><input id="period-end-date" type="date" required aria-describedby="period-end-date-error"><div class="field-error" id="period-end-date-error" hidden></div></div>
+          <div class="field"><label for="period-start-time">เวลาเข้า</label><input id="period-start-time" type="time" step="60" required aria-describedby="period-start-time-error"><div class="field-error" id="period-start-time-error" hidden></div></div>
+          <div class="field"><label for="period-end-time">เวลาเลิก</label><input id="period-end-time" type="time" step="60" required aria-describedby="period-end-time-error"><div class="field-error" id="period-end-time-error" hidden></div></div>
+        </div>
+        <div class="field"><label for="period-grace">ผ่อนผันของช่วง (นาที)</label>
+          <input id="period-grace" type="number" min="0" max="120" step="1" aria-describedby="period-grace-hint period-grace-error">
+          <div class="field-note" id="period-grace-hint"></div><div class="field-error" id="period-grace-error" hidden></div>
+        </div>
+        <div class="period-cutoff" id="period-cutoff" aria-live="polite">—</div>
+        <div class="period-form-actions"><button type="submit" class="primary" id="btn-save-period">บันทึกช่วงเวลา</button>
+          <button type="button" class="ghost" id="btn-cancel-period">ยกเลิก</button></div>
+      </form>
+    </details>
   </div>
 
   <div class="card single-card">
@@ -297,10 +347,11 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, checkDepartment, getHrSettings, getProfile,
+         isPersonnelHead,
          applyPersonnelMenuAccess, personnelAccessDeniedHtml,
          getWorkYears, saveHrYearStart, clearHrYearStart, academicYearRange,
          getLeaveTypes, getLeaveQuotas,
-         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20261008-1";
+         getStaffPositions, getDutyTypes } from "../supabase-client.js?v=20261010-1";
 
 const session = await requireAuth();
 if (session) {
@@ -317,9 +368,10 @@ if (session) {
   })[ch]);
   el("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 
-  const [canEdit, profile] = await Promise.all([
+  const [canEdit, profile, canEditPeriods] = await Promise.all([
     checkDepartment("บุคลากร"),
-    getProfile(session.user.id)
+    getProfile(session.user.id),
+    isPersonnelHead()
   ]);
   const isAdmin = profile?.role === "admin";
   applyPersonnelMenuAccess(canEdit);
@@ -342,7 +394,8 @@ if (session) {
 
   const THAI_DAY = { 1:"จันทร์", 2:"อังคาร", 3:"พุธ", 4:"พฤหัสบดี", 5:"ศุกร์", 6:"เสาร์", 7:"อาทิตย์" };
   let years = [], types = [], leaveTypes = [], positions = [], positionUsage = {};
-  let dutyTypes = [], dutyUsage = {};
+  let dutyTypes = [], dutyUsage = {}, timePeriods = [], editingPeriodId = null;
+  let periodDefaultGrace = 0;
 
   // ---------- เวลาทำงาน ----------
   async function loadWorkTime() {
@@ -379,6 +432,9 @@ if (session) {
     }
     el("v-final").textContent = settings.dayFinalTime + " น.";
     el("grace").value = settings.lateGraceMinutes;
+    periodDefaultGrace = settings.lateGraceMinutes;
+    el("period-grace-hint").textContent = `เว้นว่าง = ตามค่ากลาง ${periodDefaultGrace} นาที`;
+    el("period-grace").placeholder = `ตามค่ากลาง ${periodDefaultGrace} นาที`;
     el("late-permission-until").value = permitSettingRes.data?.value
       ? String(permitSettingRes.data.value).slice(0, 5)
       : "";
@@ -395,6 +451,164 @@ if (session) {
     el("grace-note").textContent = `มาถึงหลัง ${hh}:${mm} น. จึงจะนับว่าสาย`;
   }
   el("grace").addEventListener("input", updateGraceNote);
+
+  // ช่วงพิเศษมีสิทธิ์แก้แยกจากการตั้งค่าอื่นในฝ่ายบุคคล
+  const shortTime = value => String(value || "").slice(0, 5);
+  const periodDate = value => new Date(value + "T00:00:00Z").toLocaleDateString("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"UTC"
+  });
+  const cutoffTime = (start, grace) => {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)) return null;
+    const [h, m] = start.split(":").map(Number);
+    const total = h * 60 + m + grace;
+    return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  };
+  function updatePeriodCutoff() {
+    const raw = el("period-grace").value.trim();
+    const grace = raw === "" ? periodDefaultGrace : Number(raw);
+    const cutoff = Number.isInteger(grace) && grace >= 0 && grace <= 120
+      ? cutoffTime(el("period-start-time").value, grace) : null;
+    el("period-cutoff").textContent = cutoff
+      ? `มาถึงหลัง ${cutoff} น. จึงนับว่าสาย` : "กรอกเวลาเข้าและค่าผ่อนผันที่ถูกต้องเพื่อดูเวลาเข้าสาย";
+  }
+  ["period-start-time", "period-grace"].forEach(id => el(id).addEventListener("input", updatePeriodCutoff));
+  el("btn-add-period").hidden = !canEditPeriods;
+  el("period-readonly").hidden = canEditPeriods;
+  let periodFormOpener = null;
+  const periodFieldIds = ["period-name", "period-start-date", "period-end-date",
+    "period-start-time", "period-end-time", "period-grace"];
+  function clearPeriodError(id) {
+    el(id).removeAttribute("aria-invalid");
+    el(id + "-error").textContent = "";
+    el(id + "-error").hidden = true;
+  }
+  function showPeriodError(id, message) {
+    el(id).setAttribute("aria-invalid", "true");
+    el(id + "-error").textContent = message;
+    el(id + "-error").hidden = false;
+    el(id).focus();
+  }
+  periodFieldIds.forEach(id => el(id).addEventListener("input", () => clearPeriodError(id)));
+  function groupTimePeriods(periods, today) {
+    return {
+      active:periods.filter(row => row.start_date <= today && today <= row.end_date),
+      upcoming:periods.filter(row => row.start_date > today).sort((a, b) => a.start_date.localeCompare(b.start_date)),
+      past:periods.filter(row => row.end_date < today).sort((a, b) => b.start_date.localeCompare(a.start_date))
+    };
+  }
+
+  async function loadTimePeriods() {
+    const { data, error } = await sb.from("work_time_periods").select("*")
+      .order("start_date", { ascending:false });
+    if (error) {
+      el("period-list").innerHTML = '<div class="banner warn">โหลดช่วงเวลาทำงานพิเศษไม่สำเร็จ กรุณาลองเปิดหน้านี้ใหม่</div>';
+      return;
+    }
+    timePeriods = data || [];
+    const today = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const groups = groupTimePeriods(timePeriods, today);
+    // ฟอร์มแก้ไขอาจอยู่ในรายการเดิม ต้องย้ายออกก่อน render รายการใหม่
+    el("btn-add-period").insertAdjacentElement("afterend", el("period-form"));
+    const periodRow = period => {
+      const grace = period.grace_minutes == null ? periodDefaultGrace : period.grace_minutes;
+      const cutoff = cutoffTime(shortTime(period.start_time), grace);
+      const active = period.start_date <= today && today <= period.end_date;
+      const past = period.end_date < today;
+      return `<div class="period-row${active ? " active" : ""}${past ? " past" : ""}" data-period-id="${esc(period.id)}">
+        <b>${esc(period.name)}${active ? '<span class="period-badge">กำลังใช้</span>' : ""}</b>
+        <div class="period-meta">${periodDate(period.start_date)} – ${periodDate(period.end_date)} · เข้า ${shortTime(period.start_time)} · เลิก ${shortTime(period.end_time)} น.</div>
+        <div class="field-note">ผ่อนผัน ${period.grace_minutes == null ? `ตามค่ากลาง ${periodDefaultGrace} นาที` : `${grace} นาที`} · สายเมื่อเกิน ${cutoff} น.${past ? " · ผ่านแล้ว" : ""}</div>
+        ${canEditPeriods ? '<div class="period-actions"><button type="button" class="ghost" data-edit-period>แก้ไข</button><button type="button" class="danger" data-delete-period>ลบ</button></div>' : ""}
+      </div>`;
+    };
+    el("period-list").innerHTML = timePeriods.length
+      ? [...groups.active.map(periodRow), ...groups.upcoming.map(periodRow),
+        ...(groups.past.length ? [`<details class="period-past"><summary>ผ่านแล้ว (${groups.past.length})</summary>${groups.past.map(periodRow).join("")}</details>`] : [])].join("")
+      : '<div class="field-note">ยังไม่มีช่วงเวลาทำงานพิเศษ</div>';
+  }
+
+  function openPeriodForm(period = null, opener = null) {
+    if (!canEditPeriods) return;
+    periodFormOpener = opener;
+    editingPeriodId = period?.id || null;
+    el("period-form").reset();
+    periodFieldIds.forEach(clearPeriodError);
+    el("period-form-title").textContent = period ? `แก้ไข: ${period.name}` : "เพิ่มช่วงเวลาทำงานพิเศษ";
+    el("period-name").value = period?.name || "";
+    el("period-start-date").value = period?.start_date || "";
+    el("period-end-date").value = period?.end_date || "";
+    el("period-start-time").value = shortTime(period?.start_time);
+    el("period-end-time").value = shortTime(period?.end_time);
+    el("period-grace").value = period?.grace_minutes ?? "";
+    updatePeriodCutoff();
+    if (period) opener.closest(".period-row").insertAdjacentElement("afterend", el("period-form"));
+    else el("btn-add-period").insertAdjacentElement("afterend", el("period-form"));
+    el("period-form").hidden = false;
+    el("period-form").scrollIntoView({block:"nearest"});
+    el("period-name").focus();
+  }
+  el("btn-add-period").addEventListener("click", event => openPeriodForm(null, event.currentTarget));
+  el("btn-cancel-period").addEventListener("click", () => {
+    el("period-form").hidden = true;
+    editingPeriodId = null;
+    if (periodFormOpener?.isConnected) periodFormOpener.focus();
+  });
+  el("period-list").addEventListener("click", async event => {
+    if (!canEditPeriods) return;
+    const id = event.target.closest("[data-period-id]")?.dataset.periodId;
+    const period = timePeriods.find(row => row.id === id);
+    if (!period) return;
+    const editButton = event.target.closest("[data-edit-period]");
+    if (editButton) return openPeriodForm(period, editButton);
+    if (!event.target.closest("[data-delete-period]")) return;
+    if (!await window.crsAskConfirm({
+      title:"ลบช่วงเวลาทำงานพิเศษ", message:`ช่วง “${period.name}” จะถูกลบถาวร และวันในช่วงนั้นจะกลับไปใช้เวลาเข้าปกติจาก Jibble`,
+      okLabel:"ลบช่วงเวลา"
+    })) return;
+    const { error } = await sb.from("work_time_periods").delete().eq("id", id);
+    if (error) return toast("ลบช่วงเวลาไม่สำเร็จ: " + error.message, true);
+    if (editingPeriodId === id) { el("period-form").hidden = true; editingPeriodId = null; }
+    toast("ลบช่วงเวลาแล้ว");
+    await loadTimePeriods();
+  });
+  el("period-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!canEditPeriods) return;
+    const name = el("period-name").value.trim();
+    const start = el("period-start-date").value;
+    const end = el("period-end-date").value;
+    const startTime = el("period-start-time").value;
+    const endTime = el("period-end-time").value;
+    const graceRaw = el("period-grace").value.trim();
+    const grace = graceRaw === "" ? null : Number(graceRaw);
+    periodFieldIds.forEach(clearPeriodError);
+    if (!name) return showPeriodError("period-name", "กรุณากรอกชื่อช่วง");
+    if (!start || !end || end < start) return showPeriodError(!start ? "period-start-date" : "period-end-date", "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม");
+    if (!startTime || !endTime || endTime <= startTime) return showPeriodError(!startTime ? "period-start-time" : "period-end-time", "เวลาเลิกต้องหลังเวลาเข้า");
+    if (graceRaw !== "" && (!/^\d+$/.test(graceRaw) || !Number.isInteger(grace) || grace < 0 || grace > 120)) {
+      return showPeriodError("period-grace", "ผ่อนผันของช่วงต้องเว้นว่างหรือเป็นจำนวนเต็ม 0–120 นาที");
+    }
+    const overlap = timePeriods.find(row => row.id !== editingPeriodId && row.start_date <= end && row.end_date >= start);
+    if (overlap) return showPeriodError("period-start-date", `ซ้อนกับ “${overlap.name}” (${periodDate(overlap.start_date)} – ${periodDate(overlap.end_date)})`);
+    const payload = { name, start_date:start, end_date:end, start_time:startTime,
+      end_time:endTime, grace_minutes:grace };
+    el("btn-save-period").disabled = true;
+    try {
+      const query = editingPeriodId
+        ? sb.from("work_time_periods").update({ ...payload, updated_at:new Date().toISOString() }).eq("id", editingPeriodId)
+        : sb.from("work_time_periods").insert(payload);
+      const { error } = await query;
+      if (error) throw error;
+      el("period-form").hidden = true;
+      editingPeriodId = null;
+      await loadTimePeriods();
+      toast("บันทึกช่วงเวลาทำงานพิเศษแล้ว");
+    } catch (error) {
+      toast("บันทึกช่วงเวลาไม่สำเร็จ: " + error.message, true);
+    } finally {
+      el("btn-save-period").disabled = false;
+    }
+  });
 
   el("btn-save-time-settings").addEventListener("click", async () => {
     // ตรวจทุกช่องให้ผ่านก่อนส่งคำสั่งเดียว เพื่อไม่ให้ฐานข้อมูลถูกเขียนไปครึ่งหนึ่ง
@@ -415,6 +629,7 @@ if (session) {
     if (error) return toast("บันทึกการตั้งค่าเวลาไม่สำเร็จ กรุณาลองใหม่", true);
     toast("บันทึกการตั้งค่าเวลาแล้ว");
     await loadWorkTime();
+    await loadTimePeriods();
   });
 
   // ---------- เกณฑ์การสอนชด ----------
@@ -958,6 +1173,7 @@ if (session) {
   });
 
   await loadWorkTime();
+  await loadTimePeriods();
   await loadTeachGapPercent();
   await loadYears();
   await loadLeaveTypes();
@@ -980,6 +1196,10 @@ if (session) {
   document.querySelectorAll("details[id^='settings-']").forEach(detail => categoryObserver.observe(detail));
   function updateCategoryValues() {
     el("value-work-time").textContent = `${el("v-start").textContent} · ${el("v-days").textContent}`;
+    const today = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const activePeriod = groupTimePeriods(timePeriods, today).active[0];
+    el("value-work-periods").textContent = activePeriod ? `กำลังใช้: ${activePeriod.name}`
+      : timePeriods.length ? `${timePeriods.length} ช่วง` : "ยังไม่มี";
     el("value-work-year").textContent = `${el("year-list").querySelectorAll("input").length} รอบปี`;
     el("value-leave-types").textContent = `${el("leave-type-list").querySelectorAll("[data-save-leave]").length} ประเภท`;
     el("value-positions").textContent = `${positions.length} ตำแหน่ง`;
@@ -997,7 +1217,7 @@ if (session) {
   updateCategoryValues();
   // ตรวจเฉพาะ DOM ที่โหลดใหม่หลังบันทึก ไม่อ่านค่าร่างของฟอร์มเป็นค่าปัจจุบัน
   const settingsObserver = new MutationObserver(updateCategoryValues);
-  ["year-list", "leave-type-list", "position-list", "duty-type-list", "quota-list"].forEach(id =>
+  ["period-list", "year-list", "leave-type-list", "position-list", "duty-type-list", "quota-list"].forEach(id =>
     settingsObserver.observe(el(id), {childList:true, subtree:true}));
   }
 }

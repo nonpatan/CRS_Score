@@ -4184,6 +4184,12 @@ export async function isAcademicHead() {
   return data === true;
 }
 
+export async function isPersonnelHead() {
+  const { data, error } = await sb.rpc("is_personnel_head");
+  if (error) return false;
+  return data === true;
+}
+
 // คิวคำขอสอนชดที่รออนุมัติ พร้อมชื่อครูและวิชา
 // 🔴 ต้องผ่าน RPC — staff_select เปิดให้เฉพาะฝ่ายบุคคลและเจ้าของแถว ถ้ายิง staff ตรงจะได้ 0 แถว
 //    เงียบ ๆ แล้วคิวจะขึ้นคำขอที่ไม่มีชื่อครู (บทเรียนเดียวกับ get_letter_signers)
@@ -5425,10 +5431,11 @@ export async function loadOkrThresholds() {
 // basic: server คืนเฉพาะ checkedIn/total เท่านั้น · full: นับด้วย computeDayStatus() ตัวเดิม
 export async function loadTodayStaffSummary() {
   const today = toDateStr(bangkokNow());
-  const [result, scheduleRes, holidayRes, settings, dutyTypes] = await Promise.all([
+  const [result, scheduleRes, holidayRes, periodRes, settings, dutyTypes] = await Promise.all([
     syncJibble("today"),
     sb.from("work_schedule").select("*"),
     sb.from("work_holidays").select("*").eq("holiday_date", today),
+    sb.from("work_time_periods").select("*").lte("start_date", today).gte("end_date", today),
     getHrSettings(),
     getDutyTypes(true)
   ]);
@@ -5450,6 +5457,7 @@ export async function loadTodayStaffSummary() {
   }
   if (scheduleRes.error) throw new Error("โหลดตารางงานไม่สำเร็จ: " + scheduleRes.error.message);
   if (holidayRes.error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + holidayRes.error.message);
+  if (periodRes.error) throw new Error("โหลดช่วงเวลาทำงานพิเศษไม่สำเร็จ: " + periodRes.error.message);
 
   const schedule = new Map((scheduleRes.data || []).map(row => [row.weekday, row]));
   const attendance = new Map();
@@ -5528,6 +5536,7 @@ export async function loadTodayStaffSummary() {
     dutyTypeByCode: new Map(dutyTypes.map(row => [row.code, row])),
     attendanceDutyByKey,
     dutyByKey: new Set(attendanceDutyByKey.keys()),
+    timePeriods: periodRes.data || [],
     settings
   };
   const counts = { present: 0, late: 0, leave: 0, offsite: 0, absent: 0, pending: 0 };
@@ -6010,7 +6019,7 @@ function timeToMinutes(t) {
 
 // ---------- โหลดข้อมูลที่ต้องใช้คำนวณทั้งช่วง ----------
 export async function loadWorkContext(from, to) {
-  const [staffRes, attRes, holRes, schedRes, leaveRes, fieldDutyRes, permitRes, dutyRes, dutyTypeRes, settings] = await Promise.all([
+  const [staffRes, attRes, holRes, schedRes, leaveRes, fieldDutyRes, permitRes, dutyRes, dutyTypeRes, periodRes, settings] = await Promise.all([
     sb.from("staff").select("*").order("full_name"),
     // 🪤 สองตารางนี้ทะลุ 1,000 แถวเมื่อดูสะสมทั้งรอบปี ห้ามกลับไปใช้ .select() ตรง ๆ
     fetchAllRows(() => sb.from("work_attendance").select("*")
@@ -6026,6 +6035,7 @@ export async function loadWorkContext(from, to) {
       .gte("duty_date", from).lte("duty_date", to),
       ["duty_date", "duty_type", "staff_id"]),
     sb.from("duty_types").select("*").order("sort_order").order("code"),
+    sb.from("work_time_periods").select("*").lte("start_date", to).gte("end_date", from),
     getHrSettings()
   ]);
 
@@ -6039,7 +6049,8 @@ export async function loadWorkContext(from, to) {
     [fieldDutyRes, "โหลดข้อมูลออกปฏิบัติหน้าที่"],
     [permitRes, "โหลดใบขอเข้าสาย"],
     [dutyRes, "โหลดตารางเวร"],
-    [dutyTypeRes, "โหลดรายการงานเวร"]
+    [dutyTypeRes, "โหลดรายการงานเวร"],
+    [periodRes, "โหลดช่วงเวลาทำงานพิเศษ"]
   ].find(([result]) => result.error);
   if (failed) throw new Error(`${failed[1]}ไม่สำเร็จ: ${failed[0].error.message}`);
 
@@ -6081,6 +6092,7 @@ export async function loadWorkContext(from, to) {
     attendanceDutyByKey,
     dutyByKey: new Set(attendanceDutyByKey.keys()),
     dutySubstituteOnlyKeys,
+    timePeriods: periodRes.data || [],
     settings
   };
 }
@@ -6143,7 +6155,7 @@ export function computeDayStatus(staff, dateStr, ctx) {
       lateMinutes: isLate ? arrived - cutoff : 0,
       latePermissionUsed: onDuty
         ? false
-        : !isLate && permitUntil !== null && arrived > normalArrivalCutoff(staff, sched, ctx),
+        : !isLate && permitUntil !== null && arrived > normalArrivalCutoff(staff, sched, ctx, dateStr),
       onDuty,
       dutyStartTime: onDuty ? dutyStartTime : null
     };
@@ -6161,10 +6173,21 @@ export function computeDayStatus(staff, dateStr, ctx) {
   return { status: "absent", weight: 1, onDuty };
 }
 
-function normalArrivalCutoff(staff, sched, ctx) {
-  return staff.allowed_late_time
-    ? timeToMinutes(staff.allowed_late_time)
-    : timeToMinutes(sched.start_time) + ctx.settings.lateGraceMinutes;
+export function timePeriodFor(dateStr, periods) {
+  return (periods || []).filter(row => row.start_date <= dateStr && dateStr <= row.end_date)
+    .sort((a, b) => b.start_date.localeCompare(a.start_date))[0] || null;
+}
+
+function normalArrivalCutoff(staff, sched, ctx, dateStr) {
+  const period = timePeriodFor(dateStr, ctx.timePeriods || []);
+  const grace = period && period.grace_minutes != null
+    ? period.grace_minutes : ctx.settings.lateGraceMinutes;
+  const normal = timeToMinutes(period ? period.start_time : sched.start_time) + grace;
+  if (staff.allowed_late_time) {
+    const allowed = timeToMinutes(staff.allowed_late_time);
+    return period ? Math.max(allowed, normal) : allowed;
+  }
+  return normal;
 }
 
 // ใช้เกณฑ์เดียวกับ computeDayStatus ทั้งตอนตัดสินสายและตอนแจ้งเตือนคนยังไม่ลงเวลา
@@ -6176,7 +6199,7 @@ export function staffArrivalCutoff(staff, dateStr, ctx) {
     : null;
   // วันเวรแทนที่ cutoff ทุกชนิด รวมใบขอเข้าสายและเวลาอนุโลมรายคน
   if (duty) return timeToMinutes(duty.start_time);
-  const normal = normalArrivalCutoff(staff, sched, ctx);
+  const normal = normalArrivalCutoff(staff, sched, ctx, dateStr);
   const permit = (ctx.latePermissions || []).find(p =>
     p.staff_id === staff.id && p.permit_date === dateStr);
   const permitUntil = permit ? timeToMinutes(permit.until_time) : null;
