@@ -13,8 +13,15 @@
     --amber:#8a5a00; --amber-soft:#fff4df; }
   * { box-sizing:border-box; }
   body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:16px; font-size:16px; line-height:1.6; }
-  .wrap { max-width:560px; margin:0 auto; }
-  main.academic-content { max-width:560px !important; margin-left:auto; margin-right:auto; }
+  /* ความกว้างระดับ "รายการ" (UI-STANDARD §6) · จอ ≥1200px ให้ app-shell จัด workspace เอง
+     ⛔ ห้ามใส่ max-width ให้ main.academic-content — เคยทับ workspace จนเนื้อหาลอยกลางจอ (ผู้ใช้ทักว่า "เล็ก แปลก") */
+  .wrap { max-width:760px; margin:0 auto; }
+  .eval-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:0; align-items:start; }
+  .eval-side .card { margin-bottom:16px; }
+  @media (min-width:1200px) {
+    .eval-layout { grid-template-columns:minmax(0,1fr) 300px; gap:20px; }
+    .eval-side { position:sticky; top:16px; }
+  }
   h1 { font-size:22px; margin:4px 0; } h2 { font-size:18px; margin:0 0 8px; } h3 { font-size:16px; margin:0; }
   header p, .hint { color:var(--muted); } header p { margin:0 0 8px; font-size:14px; }
   .nav { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:8px; background:var(--white);
@@ -36,7 +43,18 @@
     border-radius:8px; font-weight:600; color:var(--teal); background:var(--teal-soft); text-decoration:none; white-space:nowrap; }
   .action.primary { color:var(--white); background:var(--teal); }
   .round-meta { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:14px; }
-  .footer-link { display:inline-block; min-height:44px; padding:9px 0; }
+  .shortcut { display:flex; align-items:center; gap:10px; min-height:52px; padding:8px 4px; border-top:1px solid var(--line);
+    color:var(--ink); text-decoration:none; }
+  .shortcut:first-of-type { border-top:0; } .shortcut span { flex:1; min-width:0; }
+  .shortcut b { display:block; font-weight:600; } .shortcut small { display:block; color:var(--muted); font-size:13px; }
+  .shortcut::after { content:"›"; color:var(--muted); font-size:22px; line-height:1; }
+  .shortcut:hover b { color:var(--teal); }
+  .tasks-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:0 0 4px; }
+  .round-block { border-top:1px solid var(--line); padding-top:14px; margin-top:14px; }
+  .round-block:first-of-type { border-top:0; padding-top:0; margin-top:8px; }
+  .round-block h3 { font-size:16px; }
+  .tasks-head h2 { margin:0; } .tasks-head span { color:var(--muted); font-size:14px; }
+  .empty b { display:block; color:var(--ink); font-size:16px; margin-bottom:4px; }
   .result-hero { background:var(--teal-soft); border-radius:9px; padding:12px; margin:10px 0; }
   .result-hero b { font-size:20px; color:var(--teal); } .result-table { width:100%; border-collapse:collapse; font-size:14px; }
   .result-table th,.result-table td { border-bottom:1px solid var(--line); padding:7px; text-align:left; }
@@ -107,12 +125,13 @@ if (!session) {
         forms.set(formId, await loadEvalForm(formId));
       const targetById = new Map(data.targets.map(row => [row.id, row]));
       const today = toDateStr(bangkokNow());
-      let html = "";
-      if (head || visibleRounds.length) html += '<section class="card"><h2>สรุปผลประเมิน</h2>' +
-        '<p class="hint">ดูตาราง ก ข ค และยืนยันผลการพิจารณา</p><a class="action primary" href="eval-result.html">เปิดหน้าสรุปผลประเมิน</a></section>';
+      // 3 ส่วน: ผลของฉัน → งานที่ต้องประเมิน (งานหลักของหน้า) → ทางลัดผู้บริหาร (คอลัมน์ขวาบนจอคอม)
+      let html = "", tasksHtml = "", taskCount = 0, leftCount = 0;
+      const shortcuts = [];
+      if (head || visibleRounds.length) shortcuts.push(["eval-result.html", "สรุปผลประเมิน", "ตาราง ก ข ค และยืนยันผลการพิจารณา"]);
+      if (head) shortcuts.push(["eval-rounds.html", "รอบประเมิน", "เปิดรอบ จัดผู้ประเมิน และติดตามการส่ง"]);
       // Red Flag เห็นเฉพาะ admin (= ผอ.) — ไม่อยู่ในเมนูเพราะ hrOnly เปิดให้ทั้งฝ่ายบุคคล
-      if (profile?.role === "admin") html += '<section class="card"><h2>บันทึก Red Flag</h2>' +
-        '<p class="hint">บันทึกและติดตามเหตุการณ์ตามขั้นตอนในแบบประเมิน (เห็นเฉพาะผู้อำนวยการ)</p><a class="action" href="red-flags.html">เปิดหน้าบันทึก Red Flag</a></section>';
+      if (profile?.role === "admin") shortcuts.push(["red-flags.html", "บันทึก Red Flag", "เห็นเฉพาะผู้อำนวยการ"]);
       for (const item of myResults) {
         const decision = item.decision, computed = decision.computed;
         if (!computed) continue;
@@ -155,7 +174,9 @@ if (!session) {
         const sections = [...form.sections].filter(section => assignments.some(row => row.section_code === section.code))
           .sort((a,b) => Number(b.kind === "self") - Number(a.kind === "self") || a.sort - b.sort);
         const left = assignments.filter(row => row.status !== "submitted").length;
-        html += '<section class="card"><h2>' + esc(round.academic_year) + ' · ครั้งที่ ' + round.round_no + '</h2>' +
+        taskCount += assignments.length; if (round.status === "open") leftCount += left;
+        let html = "";
+        html += '<div class="round-block"><h3>' + esc(round.academic_year) + ' · ครั้งที่ ' + round.round_no + '</h3>' +
           '<div class="round-meta"><span>กำหนดส่ง ' + esc(round.due_date ? thaiShortDateText(round.due_date) : "ยังไม่กำหนด") +
           '</span><span>เหลือ ' + left + ' จาก ' + assignments.length + '</span></div>';
         for (const section of sections) {
@@ -185,10 +206,23 @@ if (!session) {
           if (section.kind === "peer") html += '<p class="hint">ครูผู้รับการประเมินจะไม่เห็นว่าคุณให้คะแนนเท่าไร — เห็นแค่ค่าเฉลี่ยของเพื่อนครูทุกคน</p>';
           html += '</div>';
         }
-        html += '</section>';
+        html += '</div>';
+        tasksHtml += html;
       }
-      app.className = "";
-      app.innerHTML = html || '<div class="card empty">ยังไม่มีแบบประเมินที่ต้องกรอก</div>';
+      // ข้อความสถานะงานต้องขึ้นเสมอ — เคยถูกซ่อนเมื่อมีการ์ดทางลัด ผู้บริหารเลยไม่รู้ว่าตัวเองมีงานไหม
+      const tasksHead = '<div class="tasks-head"><h2>งานที่ต้องประเมิน</h2>' +
+        (taskCount ? '<span>' + (leftCount ? 'ค้าง ' + leftCount + ' แบบ' : 'ส่งครบแล้ว') + '</span>' : '') + '</div>';
+      const tasksEmpty = '<div class="empty">' + (data.rounds.length
+        ? '<b>ไม่มีแบบประเมินที่ต้องกรอก</b>คุณไม่ได้เป็นผู้ประเมินในรอบที่เปิดอยู่'
+        : '<b>ยังไม่มีรอบประเมินที่เปิด</b>ฝ่ายบุคคลจะจัดผู้ประเมินและแจ้งเมื่อเริ่มรอบ') + '</div>';
+      const side = shortcuts.length ? '<section class="card"><div class="section">สำหรับผู้บริหาร</div>' +
+        shortcuts.map(([href, title, hint]) => '<a class="shortcut" href="' + href + '"><span><b>' + esc(title) +
+          '</b><small>' + esc(hint) + '</small></span></a>').join("") + '</section>' : "";
+      app.className = "eval-layout";
+      // งานทั้งหมดอยู่ในการ์ดเดียว — หัวข้อลอยนอกการ์ดจะไปทับแถบหัวสีเขียว (ส่วนที่การ์ดซ้อนขึ้นไป 54px) แล้วมองไม่เห็น
+      app.innerHTML = '<div class="eval-main">' + html + '<section class="card tasks-card">' + tasksHead +
+        (tasksHtml || tasksEmpty) + '</section></div>' +
+        (side ? '<aside class="eval-side" aria-label="ทางลัดสำหรับผู้บริหาร">' + side + '</aside>' : "");
       app.addEventListener("click", async event => {
         const button = event.target.closest("[data-ack]"); if (!button) return;
         const card = button.closest(".result-card"); button.disabled = true;
@@ -201,7 +235,6 @@ if (!session) {
           document.getElementById("toast").classList.add("show");
         } finally { button.disabled = false; }
       });
-      if (head) app.insertAdjacentHTML("beforeend", '<p><a class="footer-link" href="eval-rounds.html">ไปหน้ารอบประเมิน</a></p>');
     }
   } catch (error) {
     app.className = "card";
