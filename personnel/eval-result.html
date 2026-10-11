@@ -27,10 +27,32 @@
   .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; } .kpi { border:1px solid var(--line); border-radius:8px; padding:10px; } .kpi b { display:block; font-size:21px; } .kpi span { color:var(--muted); font-size:13px; }
   .kpi b.decision-summary { font-size:14px; line-height:1.5; }
   .table-scroll { overflow-x:auto; border:1px solid var(--line); border-radius:9px; } table { border-collapse:collapse; width:100%; font-size:14px; } th,td { padding:9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; } th { background:var(--bg); } tr:last-child td { border-bottom:0; }
-  .table-scroll table { min-width:700px; } .banner { padding:10px 12px; border-radius:8px; margin:10px 0; } .banner.warn { background:var(--amber-soft); color:var(--amber); } .banner.ok { background:var(--teal-soft); color:var(--teal); } .banner.err { background:var(--danger-soft); color:var(--danger); }
+  /* ตารางผล: ไม่บังคับกว้าง 700px (เดิมคอลัมน์คะแนน/ผลตกขอบขวาบนมือถือ) · ตัวเลขไม่ตัดบรรทัด ชื่อข้อตัดบรรทัดได้ */
+  .table-scroll table.wide { min-width:640px; } td.num, th.num { white-space:nowrap; text-align:right; } td.res { white-space:nowrap; }
+  .table-scroll table.wide td:first-child, .table-scroll table.wide th:first-child { position:sticky; left:0; background:var(--white); z-index:1; }
+  .table-scroll table.wide th:first-child { background:var(--bg); }
+  .banner { padding:10px 12px; border-radius:8px; margin:10px 0; } .banner.warn { background:var(--amber-soft); color:var(--amber); } .banner.ok { background:var(--teal-soft); color:var(--teal); } .banner.err { background:var(--danger-soft); color:var(--danger); }
   .pass { color:var(--teal); font-weight:600; } .fail { color:var(--danger); font-weight:600; } .muted { color:var(--muted); }
   .choice { display:flex; flex-wrap:wrap; gap:8px; } .choice label { flex:1 1 200px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:0; font-weight:400; cursor:pointer; } .choice input { margin-right:8px; }
   details { border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:14px; } summary { cursor:pointer; font-weight:600; min-height:36px; }
+  /* รายคน: ตัดสินผลอยู่บนสุดบนมือถือ · จอคอมเป็นคอลัมน์ขวาที่ค้างไว้ตอนเลื่อน (mockup แท็บ 4) */
+  .detail-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:0; align-items:start; }
+  .detail-grid .decide { order:-1; }
+  @media (min-width:1200px) {
+    .detail-grid { grid-template-columns:minmax(0,1fr) 360px; gap:16px; }
+    .detail-grid .decide { order:0; grid-column:2; grid-row:1 / span 3; position:sticky; top:16px; }
+  }
+  .person-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+  .person-head h2 { margin:0; flex:1 1 200px; } .person-nav { display:flex; gap:6px; flex-wrap:wrap; }
+  .person-nav .button { min-height:40px; font-size:14px; padding:6px 12px; }
+  .score-big { display:flex; align-items:baseline; gap:10px; margin:6px 0 10px; }
+  .score-big b { font-size:30px; line-height:1; } .score-big span { color:var(--muted); }
+  .suggest { display:inline-block; border-radius:99px; padding:3px 12px; font-weight:600; font-size:14px; }
+  .suggest.ok { background:var(--teal-soft); color:var(--teal); } .suggest.warn { background:var(--amber-soft); color:var(--amber); } .suggest.bad { background:var(--danger-soft); color:var(--danger); }
+  .deficits { margin:8px 0 12px; padding-left:20px; } .deficits li { margin:3px 0; color:var(--danger); }
+  .chip { display:inline-block; border-radius:99px; padding:2px 10px; font-size:13px; font-weight:600; white-space:nowrap; }
+  .chip.todo { background:var(--amber-soft); color:var(--amber); } .chip.done { background:var(--teal-soft); color:var(--teal); }
+  .round-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:60; background:var(--ink); color:var(--white); border-radius:8px; padding:10px 16px; opacity:0; pointer-events:none; } #toast.show { opacity:1; }
   @media (max-width:720px) { .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:420px) { body { padding:12px; } .toolbar select,.toolbar .button { width:100%; } }
 </style>
@@ -57,16 +79,33 @@ if (session) {
     assignments:data.assignments.filter(row => row.target_id === target.id),
     responses:data.responses, section4:data.section4.find(row => row.target_id === target.id),
     roundNo:Number(data.round.round_no), history:data.histories[target.id] || {} });
-  function table(headings, rows) { return '<div class="table-scroll" role="region" aria-label="ตารางผลประเมิน" tabindex="0"><table><thead><tr>' + headings.map(h => '<th>' + esc(h) + '</th>').join("") + '</tr></thead><tbody>' + rows.join("") + '</tbody></table></div>'; }
+  // headings: "ข้อ" ธรรมดา · "#เฉลี่ย" = คอลัมน์ตัวเลข (ชิดขวา ไม่ตัดบรรทัด) · wide = ตารางหลายคอลัมน์ที่ยอมให้เลื่อนข้าง (คอลัมน์แรกค้าง)
+  function table(headings, rows, wide = false) { return '<div class="table-scroll" role="region" aria-label="ตารางผลประเมิน" tabindex="0"><table' + (wide ? ' class="wide"' : '') + '><thead><tr>' + headings.map(h => h.startsWith("#") ? '<th class="num">' + esc(h.slice(1)) + '</th>' : '<th>' + esc(h) + '</th>').join("") + '</tr></thead><tbody>' + rows.join("") + '</tbody></table></div>'; }
+  const passCell = pass => '<td class="res">' + (pass == null ? "—" : pass ? '<span class="pass">ผ่าน</span>' : '<span class="fail">ไม่ผ่าน</span>') + '</td>';
+  // แปลรหัสข้อบกพร่อง (★1.3(1) · 1.3 · ส่วน4) เป็นภาษาคน — short สำหรับตารางรวม · long สำหรับกล่องตัดสินผล
+  function deficitText(code, form, result, long) {
+    if (code.startsWith("★")) {
+      const star = result.stars.find(row => "★" + row.code === code);
+      return long ? "★ " + code.slice(1) + " " + (star?.label || "") + " ได้ " + number(star?.value) : "★ " + code.slice(1);
+    }
+    if (code.startsWith("ส่วน")) {
+      const part = section(code.slice(4), form);
+      return long ? "ส่วนที่ " + code.slice(4) + " " + (part?.title || "") + " ต่ำกว่าเกณฑ์" : "ส่วนที่ " + code.slice(4);
+    }
+    const domain = form.sections.flatMap(row => row.domains || []).find(row => row.code === code);
+    // ชื่อด้านในฉบับขึ้นต้นด้วย "ด้าน" อยู่แล้ว — ตัดออกไม่ให้ซ้ำ "ด้าน 1.3 ด้าน Growth…"
+    return long ? "ด้าน " + code + " " + String(domain?.title || "").replace(/^ด้าน\s*/, "") + " ไม่ผ่าน" : "ด้าน " + code;
+  }
+  const suggestTone = value => ["pass","renew"].includes(value) ? "ok" : ["watch_strict","not_renew"].includes(value) ? "bad" : "warn";
   function resultTables(result) {
     const domainRows = (result.sections.find(row => row.kind === "committee")?.domains || []).map(row =>
-      '<tr><td>' + esc(row.code + " " + row.title) + '</td><td>' + number(row.avg) + '</td><td>' + number(row.minAvg) + '</td><td>' + (row.pass == null ? "—" : row.pass ? '<span class="pass">ผ่าน</span>' : '<span class="fail">ไม่ผ่าน</span>') + '</td></tr>');
-    const sectionRows = result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '</td><td>' + number(row.avg) + '</td><td>' + esc(row.weight) + '%</td><td>' + number(row.weighted) + '</td><td>' + number(row.minAvg) + '</td></tr>');
-    sectionRows.push('<tr><th>รวม · ' + esc(result.level || "—") + '</th><th colspan="2"></th><th>' + number(result.total) + '</th><th></th></tr>');
-    const starRows = result.stars.map(row => '<tr><td>' + esc(row.code) + '</td><td>' + esc(row.label) + '</td><td>' + number(row.value) + '</td><td><span class="' + (row.fail ? "fail" : "pass") + '">' + (row.fail ? "ไม่ผ่าน" : "ผ่าน") + '</span></td></tr>');
-    return '<section class="card"><h2>ตาราง ก · รายด้าน</h2>' + table(["ด้าน","เฉลี่ย","เกณฑ์ขั้นต่ำ","ผล"], domainRows) + '</section>' +
-      '<section class="card"><h2>ตาราง ข · ผลรวม</h2>' + table(["ส่วน","เฉลี่ย","น้ำหนัก","คะแนนถ่วงน้ำหนัก","เกณฑ์ขั้นต่ำ"], sectionRows) + '</section>' +
-      '<section class="card"><h2>ตาราง ค · ข้อ ★</h2>' + (starRows.length ? table(["ข้อ","รายการ","คะแนน","ผล"], starRows) : '<p class="hint">ไม่มีข้อ ★</p>') + '</section>';
+      '<tr><td>' + esc(row.code + " " + row.title) + '</td><td class="num">' + number(row.avg) + '</td><td class="num">' + number(row.minAvg) + '</td>' + passCell(row.pass) + '</tr>');
+    const sectionRows = result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '<br><span class="muted">น้ำหนัก ' + esc(row.weight) + '% · ขั้นต่ำ ' + number(row.minAvg) + '</span></td><td class="num">' + number(row.avg) + '</td><td class="num">' + number(row.weighted) + '</td>' + passCell(row.pass) + '</tr>');
+    sectionRows.push('<tr><th>รวม · ' + esc(result.level || "—") + '</th><th></th><th class="num">' + number(result.total) + '</th><th></th></tr>');
+    const starRows = result.stars.map(row => '<tr><td>' + esc(row.code + " " + row.label) + '</td><td class="num">' + number(row.value) + '</td>' + passCell(!row.fail) + '</tr>');
+    return '<section class="card"><h2>ตาราง ก · รายด้าน (ส่วนที่ 1)</h2>' + table(["ด้าน","#เฉลี่ย","#ขั้นต่ำ","ผล"], domainRows) + '</section>' +
+      '<section class="card"><h2>ตาราง ข · คะแนนรวม</h2>' + table(["ส่วน","#เฉลี่ย","#ถ่วงน้ำหนัก","ผล"], sectionRows) + '</section>' +
+      '<section class="card"><h2>ตาราง ค · ข้อสำคัญ ★</h2>' + (starRows.length ? table(["ข้อ","#คะแนน","ผล"], starRows) : '<p class="hint">ไม่มีข้อ ★</p>') + '</section>';
   }
   function privateDetails(data) {
     const responses = new Map(data.responses.map(row => [row.assignment_id + ":" + row.item_id, row]));
@@ -76,9 +115,9 @@ if (session) {
       html += '<h3>' + esc(part.title) + '</h3>';
       for (const row of rows) {
         html += '<p class="hint">ผู้ประเมิน: ' + esc(name(row.rater_staff_id)) + '</p>';
-        html += table(["ข้อ","คะแนน","หลักฐาน"], part.domains.flatMap(domain => domain.items.map(item => {
+        html += table(["ข้อ","#คะแนน"], part.domains.flatMap(domain => domain.items.map(item => {
           const answer = responses.get(row.id + ":" + item.id);
-          return '<tr><td>' + esc(domain.code + "(" + item.no + ") " + item.text) + '</td><td>' + esc(answer?.score ?? "—") + '</td><td>' + esc(answer?.evidence || "—") + '</td></tr>';
+          return '<tr><td>' + esc(domain.code + "(" + item.no + ") " + item.text) + (answer?.evidence ? '<br><span class="muted">หลักฐาน: ' + esc(answer.evidence) + '</span>' : '') + '</td><td class="num">' + esc(answer?.score ?? "—") + '</td></tr>';
         })));
       }
     }
@@ -86,54 +125,81 @@ if (session) {
   }
   function renderRound() {
     const data = state.roundData, round = data.round;
+    app.className = "";   // #app เริ่มเป็นการ์ด "กำลังโหลด" — เนื้อหามีการ์ดของตัวเอง ห้ามซ้อนการ์ดในการ์ด
     const rows = data.targets.map(target => {
       const result = compute(data, target), decision = data.decisions.find(row => row.target_id === target.id);
       const ack = data.acknowledgements.find(row => row.target_id === target.id);
-      const status = result.complete ? evalDecisionLabel(result.suggested) : '<span class="muted">ข้อมูลไม่ครบ · ' + esc(result.missing.join(" · ")) + '</span>';
-      return '<tr><td><a href="?target=' + encodeURIComponent(target.id) + '">' + esc(name(target.staff_id)) + '</a></td><td>' + number(result.total) + '</td><td>' + esc(result.level || "—") + '</td><td>' + status + '</td><td>' + esc(evalDecisionLabel(decision?.final)) + '</td><td>' + esc(result.deficiencies.join(", ") || "—") + '</td><td>' + (round.status === "published" ? (ack ? 'รับทราบแล้ว ' + esc(date(ack.acknowledged_at)) : "ยังไม่รับทราบ") : "—") + '</td></tr>';
+      const status = result.complete ? '<span class="suggest ' + suggestTone(result.suggested) + '">' + esc(evalDecisionLabel(result.suggested)) + '</span>' : '<span class="muted">ข้อมูลไม่ครบ · ' + esc(result.missing.join(" · ")) + '</span>';
+      const finalCell = decision ? '<span class="chip done">' + esc(evalDecisionLabel(decision.final)) + '</span>' : '<span class="chip todo">ยังไม่ยืนยัน</span>';
+      return '<tr><td><a href="?target=' + encodeURIComponent(target.id) + '" data-open-target="' + esc(target.id) + '">' + esc(name(target.staff_id)) + '</a></td><td class="num">' + number(result.total) + '</td><td>' + esc(result.level || "—") + '</td><td>' + status + '</td><td>' + finalCell + '</td><td>' + esc(result.deficiencies.map(code => deficitText(code, data.form, result, false)).join(" · ") || "—") + '</td>' + (round.status === "published" ? '<td>' + (ack ? 'รับทราบแล้ว ' + esc(date(ack.acknowledged_at)) : "ยังไม่รับทราบ") + '</td>' : "") + '</tr>';
     });
     const results = data.targets.map(target => compute(data, target));
     const confirmed = data.decisions.length, incomplete = results.filter(row => !row.complete).length;
     const decisionSummary = evalDecisionOptions(round.round_no).map(option =>
       option.label + " " + data.decisions.filter(row => row.final === option.value).length).join(" · ");
-    app.innerHTML = '<section class="card"><div class="toolbar"><label for="round-select">รอบประเมิน</label><select id="round-select">' + state.rounds.map(row => '<option value="' + esc(row.id) + '"' + (row.id === round.id ? " selected" : "") + '>' + esc(row.academic_year + " · ครั้งที่ " + row.round_no) + '</option>').join("") + '</select><a class="button" href="eval-rounds.html?round=' + encodeURIComponent(round.id) + '">หน้ารอบ</a></div></section>' +
+    app.innerHTML = '<section class="card"><div class="toolbar"><label for="round-select">รอบประเมิน</label><select id="round-select">' + state.rounds.map(row => '<option value="' + esc(row.id) + '"' + (row.id === round.id ? " selected" : "") + '>' + esc(row.academic_year + " · ครั้งที่ " + row.round_no) + '</option>').join("") + '</select></div>' +
+      '<div class="round-tools" style="margin-top:10px">' + (state.head ? '<a class="button" href="eval-rounds.html?round=' + encodeURIComponent(round.id) + '">ไปหน้ารอบประเมิน</a>' : '') +
+      (state.admin ? '<a class="button" href="red-flags.html">บันทึก Red Flag</a>' : '') + '</div></section>' +
       '<section class="card"><h2>' + esc(round.academic_year + " · ครั้งที่ " + round.round_no) + '</h2><div class="kpis">' +
       [[data.targets.length,"ครูในรอบ"],[confirmed,"ยืนยันผลแล้ว"],[incomplete,"ข้อมูลไม่ครบ"]].map(([n,label]) => '<div class="kpi"><b>' + n + '</b><span>' + esc(label) + '</span></div>').join("") +
       '<div class="kpi"><b class="decision-summary">' + esc(decisionSummary) + '</b><span>ผลที่ยืนยันแล้ว</span></div></div></section>' +
-      '<section class="card"><h2>ผลรายคน</h2>' + (rows.length ? table(["ครู","รวม","ระดับ","ระบบเสนอ","ผลที่ยืนยัน","ข้อบกพร่อง","รับทราบ"], rows) : '<div class="empty">ยังไม่มีครูในรอบนี้</div>') + '</section>';
+      '<section class="card"><h2>ผลรายคน</h2><p class="hint">กดชื่อครูเพื่อดูตาราง ก ข ค และยืนยันผล' + (confirmed < data.targets.length ? ' · ยังไม่ยืนยัน ' + (data.targets.length - confirmed) + ' คน' : ' · ยืนยันครบแล้ว') + '</p>' +
+      (rows.length ? table(["ครู","#รวม","ระดับ","ระบบเสนอ","ผลที่ยืนยัน","ข้อบกพร่อง"].concat(round.status === "published" ? ["รับทราบ"] : []), rows, true) : '<div class="empty">ยังไม่มีครูในรอบนี้</div>') + '</section>';
+  }
+  // ลำดับครูในรอบ (เรียงชื่อ) สำหรับปุ่มคนก่อน/คนถัดไป — ใช้ข้อมูลทั้งรอบที่โหลดไว้
+  function siblings() {
+    const data = state.roundData;
+    if (!data) return { prev:null, next:null, nextTodo:null };
+    const list = [...data.targets].sort((a, b) => name(a.staff_id).localeCompare(name(b.staff_id), "th"));
+    const at = list.findIndex(row => row.id === state.detail.target.id);
+    const decided = new Set(data.decisions.map(row => row.target_id));
+    const after = list.slice(at + 1).concat(list.slice(0, at));
+    return { prev:list[at - 1] || null, next:list[at + 1] || null, nextTodo:after.find(row => !decided.has(row.id)) || null };
   }
   function renderDetail() {
     const data = state.detail, target = data.target, result = state.result;
+    app.className = "";
     const decided = data.decision, final = decided?.final || result.suggested;
     const texts = data.form.sections.filter(row => ["committee","dept_head"].includes(row.kind)).flatMap(part =>
       data.assignments.filter(row => row.section_code === part.code).map(row => ({ part, row })));
     const textHtml = texts.flatMap(({part,row}) => (part.text_fields || []).map(field => '<p><b>' + esc(field.label) + ':</b> ' + esc(row.texts?.[field.key] || "—") + '</p>')).join("");
-    app.innerHTML = '<p><a class="button" href="?round=' + encodeURIComponent(data.round.id) + '">← กลับไปทั้งรอบ</a></p>' +
-      '<section class="card"><h2>' + esc(name(target.staff_id)) + '</h2><p class="hint">' + esc(target.workload || "ไม่ระบุภาระงาน") + ' · ' + esc(data.round.academic_year + " ครั้งที่ " + data.round.round_no) + ' · ฉบับ ' + esc(data.form.code) + '</p></section>' +
-      (result.complete ? resultTables(result) : '<section class="card banner warn">ข้อมูลไม่ครบ · ' + esc(result.missing.join(" · ")) + '</section>') +
-      '<section class="card"><h2>ผลการพิจารณา</h2>' +
-      (result.complete ? '<div class="banner ok">เข้าเงื่อนไข ' + esc(evalDecisionLabel(result.suggested)) + '</div>' : '<div class="banner warn">ข้อมูลไม่ครบ ยังยืนยันผลไม่ได้</div>') +
-      '<p>' + esc(result.reasons.join(" · ")) + '</p>' + (result.warnings.length ? '<div class="banner warn">' + esc(result.warnings.join(" · ")) + '</div>' : "") +
-      (data.round.status === "published" ? '<p><b>ผลที่ยืนยัน: ' + esc(evalDecisionLabel(decided?.final)) + '</b></p>' :
+    const nav = siblings();
+    const navLink = (row, label) => row ? '<a class="button" href="?target=' + encodeURIComponent(row.id) + '" data-open-target="' + esc(row.id) + '">' + label + '</a>' : '';
+    const deficits = result.deficiencies.map(code => '<li>' + esc(deficitText(code, data.form, result, true)) + '</li>').join("");
+    const decide = '<section class="card decide"><h2>ผลการพิจารณา</h2>' +
+      (result.complete ? '<span class="suggest ' + suggestTone(result.suggested) + '">ระบบเสนอ: ' + esc(evalDecisionLabel(result.suggested)) + '</span>' +
+        '<div class="score-big"><b>' + number(result.total) + '</b><span>คะแนนรวม · ' + esc(result.level || "—") + '</span></div>' +
+        (deficits ? '<p style="margin:0"><b>ข้อบกพร่อง</b></p><ul class="deficits">' + deficits + '</ul>' : '<p class="hint">ไม่มีข้อบกพร่อง</p>')
+        : '<div class="banner warn">ข้อมูลไม่ครบ ยังยืนยันผลไม่ได้ · ' + esc(result.missing.join(" · ")) + '</div>') +
+      (result.warnings.length ? '<div class="banner warn">' + esc(result.warnings.join(" · ")) + '</div>' : "") +
+      (data.round.status === "published" ? '<p><b>ผลที่ยืนยัน: ' + esc(evalDecisionLabel(decided?.final)) + '</b></p>' + (decided?.reason ? '<p>' + esc(decided.reason) + '</p>' : '') :
+        data.round.status !== "closed" ? '<div class="banner warn">ปิดรับคะแนนก่อนจึงยืนยันผลได้</div>' :
         '<fieldset' + (!result.complete ? ' disabled' : '') + '><legend>ยืนยันผลการพิจารณา</legend><div class="choice">' + evalDecisionOptions(data.round.round_no).map(option =>
           '<label><input type="radio" name="final" value="' + option.value + '"' + (option.value === final ? " checked" : "") + '>' + esc(option.label) + '</label>').join("") +
         '</div><label for="decision-reason">เหตุผล (บังคับเมื่อเลือกต่างจากระบบเสนอ)</label><textarea id="decision-reason">' + esc(decided?.reason || "") + '</textarea><p id="reason-error" class="fail" role="alert"></p><button class="primary" id="save-decision" type="button">ยืนยันผล</button></fieldset>' +
-        (decided ? '<p class="hint">ยืนยันเมื่อ ' + esc(date(decided.decided_at)) + ' · แก้ได้จนกว่าประกาศผล</p>' : "")) +
-      '<p><a class="button" href="eval-print.html?target=' + encodeURIComponent(target.id) + '">พิมพ์แบบลงนาม</a></p></section>' +
-      '<section class="card"><h2>ข้อความจากผู้ประเมิน</h2>' + (textHtml || '<p class="hint">ยังไม่มีข้อความ</p>') + privateDetails(data) + '</section>';
+        (decided ? '<p class="hint">ยืนยันแล้ว ' + esc(evalDecisionLabel(decided.final)) + ' เมื่อ ' + esc(date(decided.decided_at)) + ' · แก้ได้จนกว่าประกาศผล</p>' : "")) +
+      '<div class="round-tools" style="margin-top:12px">' + (nav.nextTodo && nav.nextTodo.id !== target.id ? navLink(nav.nextTodo, "คนถัดไปที่ยังไม่ยืนยัน →") : '') +
+      '<a class="button" href="eval-print.html?target=' + encodeURIComponent(target.id) + '">พิมพ์แบบลงนาม</a></div></section>';
+    app.innerHTML = '<section class="card"><div class="person-head"><h2>' + esc(name(target.staff_id)) + '</h2><div class="person-nav">' +
+      '<a class="button" href="?round=' + encodeURIComponent(data.round.id) + '" data-open-round="' + esc(data.round.id) + '">← ทั้งรอบ</a>' +
+      navLink(nav.prev, "‹ คนก่อน") + navLink(nav.next, "คนถัดไป ›") + '</div></div>' +
+      '<p class="hint" style="margin-bottom:0">' + esc(target.workload || "ไม่ระบุภาระงาน") + ' · ' + esc(data.round.academic_year + " ครั้งที่ " + data.round.round_no) + ' · ฉบับ ' + esc(data.form.code) + '</p></section>' +
+      '<div class="detail-grid">' + decide +
+      (result.complete ? resultTables(result) : '') +
+      '<section class="card"><h2>ข้อความจากผู้ประเมิน</h2>' + (textHtml || '<p class="hint">ยังไม่มีข้อความ</p>') + privateDetails(data) + '</section></div>';
   }
-  async function openRound(id) { state.roundData = await loadEvalRoundResults(id); state.detail = null; state.result = null; history.replaceState(null,"","?round=" + encodeURIComponent(id)); renderRound(); }
-  async function openTarget(id) { state.detail = await loadEvalTargetResult(id); state.result = computeEvalResult({ form:state.detail.form, target:state.detail.target, assignments:state.detail.assignments,
+  async function openRound(id) { state.roundData = await loadEvalRoundResults(id); state.detail = null; state.result = null; history.replaceState(null,"","?round=" + encodeURIComponent(id)); renderRound(); window.scrollTo({ top:0 }); }
+  async function openTarget(id, reloadRound = false) { state.detail = await loadEvalTargetResult(id); state.result = computeEvalResult({ form:state.detail.form, target:state.detail.target, assignments:state.detail.assignments,
     responses:state.detail.responses, section4:state.detail.section4, roundNo:Number(state.detail.round.round_no), history:state.detail.history });
-    history.replaceState(null,"","?target=" + encodeURIComponent(id)); renderDetail(); }
+    if (reloadRound || state.roundData?.round.id !== state.detail.round.id) state.roundData = await loadEvalRoundResults(state.detail.round.id);
+    history.replaceState(null,"","?target=" + encodeURIComponent(id)); renderDetail(); window.scrollTo({ top:0 }); }
   document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     const department = await checkDepartment("บุคลากร"); applyPersonnelMenuAccess(department);
     const [head, rounds, profile] = await Promise.all([isPersonnelHead(), listEvalRoundsICanSee(), getProfile(session.user.id)]);
-    state.rounds = rounds;
-    // ลิงก์ Red Flag เฉพาะ admin (= ผอ.) · วางนอก #app เพราะ #app ถูกวาดใหม่ทุกครั้ง
-    if (profile?.role === "admin") app.insertAdjacentHTML("beforebegin",
-      '<p class="hint" style="text-align:right;margin:0 0 8px"><a href="red-flags.html">บันทึก Red Flag →</a></p>');
+    state.rounds = rounds; state.head = head;
+    // ลิงก์ Red Flag เฉพาะ admin (= ผอ.) — อยู่ในการ์ดหน้ารวม (เดิมลอยบนแถบหัวเขียว สีลิงก์ดีฟอลต์อ่านไม่ออก)
+    state.admin = profile?.role === "admin";
     if (!head && !rounds.length) { app.innerHTML = '<div class="banner warn">หน้านี้สำหรับ ผอ. และหัวหน้าฝ่ายบุคคล</div>'; }
     else {
       state.staff = await listStaffPicker();
@@ -141,7 +207,8 @@ if (session) {
       const targetId = requested.get("target"), roundId = requested.get("round");
       if (targetId) await openTarget(targetId);
       else if (rounds.length) await openRound(rounds.find(row => row.id === roundId)?.id || rounds[0].id);
-      else app.innerHTML = '<div class="empty">ยังไม่มีรอบที่ปิดรับคะแนนหรือประกาศผล</div>';
+      else app.innerHTML = '<div class="empty"><b style="display:block;color:var(--ink)">ยังไม่มีรอบที่ปิดรับคะแนน</b>ผลประเมินจะขึ้นที่หน้านี้หลังหัวหน้าฝ่ายบุคคลกด “ปิดรับคะแนน” ในหน้ารอบประเมิน' +
+        (head ? '<p><a class="button" href="eval-rounds.html">ไปหน้ารอบประเมิน</a></p>' : '') + (state.admin ? '<p><a class="button" href="red-flags.html">บันทึก Red Flag</a></p>' : '') + '</div>';
       const clearReasonError = () => { const field = app.querySelector("#decision-reason"), error = app.querySelector("#reason-error");
         if (field && error) { error.textContent = ""; field.removeAttribute("aria-invalid"); field.removeAttribute("aria-describedby"); } };
       app.addEventListener("input", event => { if (event.target.id === "decision-reason") clearReasonError(); });
@@ -149,6 +216,13 @@ if (session) {
         if (event.target.id !== "round-select") return;
         try { await openRound(event.target.value); } catch (error) { notify(error.message); } });
       app.addEventListener("click", async event => {
+        const link = event.target.closest("[data-open-target], [data-open-round]");
+        if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+          event.preventDefault();
+          try { if (link.dataset.openTarget) await openTarget(link.dataset.openTarget); else await openRound(link.dataset.openRound); }
+          catch (error) { notify(error.message); }
+          return;
+        }
         if (event.target.id !== "save-decision") return;
         const selected = app.querySelector('input[name="final"]:checked')?.value;
         const reason = app.querySelector("#decision-reason").value.trim();
@@ -158,7 +232,7 @@ if (session) {
         event.target.disabled = true;
         try { await saveEvalDecision({ target_id:state.detail.target.id, computed:evalDecisionSnapshot(state.result),
           suggested:state.result.suggested, final:selected, reason:reason || null, deficiencies:state.result.deficiencies });
-          await openTarget(state.detail.target.id); notify("ยืนยันผลแล้ว");
+          await openTarget(state.detail.target.id, true); notify("ยืนยันผลแล้ว");
         } catch (error) { event.target.disabled = false; notify(error.message); }
       });
     }
