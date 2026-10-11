@@ -7932,6 +7932,27 @@ export function evalSelfDueDate(round, rules = {}) {
   date.setUTCDate(date.getUTCDate() - Number(rules.self_due_days_before));
   return date.toISOString().slice(0, 10);
 }
+
+// กำหนดตาม "ขั้นตอนเมื่อพบ Red Flag" ในแบบ v4.0 — ตัวเลขวันทำการอยู่ใน days (ไม่ hardcode ในหน้าเว็บ)
+// committee: ตั้งกรรมการภายใน 3 วันทำการนับจากวันรับแจ้ง · statement: ชี้แจงภายใน 3 วันทำการนับจากวันแจ้งข้อกล่าวหา
+// investigation: ตรวจสอบเสร็จภายใน 7 วันทำการนับจากวันตั้งกรรมการ ขยายได้อีกไม่เกิน 7 วันทำการ
+export const RED_FLAG_DAYS = { committee:3, statement:3, investigation:7, extension:7 };
+
+export function redFlagDeadlines(flag, holidays = new Set(), today = null, days = RED_FLAG_DAYS) {
+  const committeeDue = flag?.reported_date ? addWorkingDays(flag.reported_date, days.committee, holidays) : null;
+  const statementDue = flag?.accused_notified_date ? addWorkingDays(flag.accused_notified_date, days.statement, holidays) : null;
+  const investigationDue = flag?.committee_formed_date
+    ? addWorkingDays(flag.committee_formed_date, days.investigation + (flag.extended ? days.extension : 0), holidays) : null;
+  let next = null;
+  if (flag && !["confirmed", "dismissed"].includes(flag.status)) {
+    if (!flag.committee_formed_date) next = { label:"ตั้งคณะกรรมการตรวจสอบ", date:committeeDue };
+    else if (!flag.accused_notified_date) next = { label:"แจ้งข้อกล่าวหาเป็นลายลักษณ์อักษร", date:investigationDue };
+    else if (!flag.statement_received_date) next = { label:"รับคำชี้แจงจากผู้ถูกกล่าวหา", date:statementDue };
+    else next = { label:"สรุปผลการตรวจสอบ", date:investigationDue };
+    if (next) next.overdue = Boolean(today && next.date && today > next.date);
+  }
+  return { committeeDue, statementDue, investigationDue, next };
+}
 // ---------- /ประเมินครู 360° ----------
 
 // ---------- ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
@@ -8110,6 +8131,17 @@ async function evalHistories(round, targets) {
   const empty = () => ({ round1:null, prevYear:null, redFlagConfirmed:false });
   const output = Object.fromEntries(targets.map(target => [target.id, empty()]));
   if (Number(round.round_no) !== 2 || !targets.length) return output;
+  // Red Flag ที่ยืนยันแล้วในปีการศึกษาเดียวกัน = เงื่อนไขไม่ต่อสัญญา (5) · ปีที่ไม่ใช่ตัวเลข (รอบทดสอบ) ข้าม
+  const redFlags = {};
+  if (/^\d+$/.test(round.academic_year)) {
+    const yearRange = academicYearRange(round.academic_year, await getAcademicYears());
+    // ไม่พบปีในตาราง academic_years → ห้ามข้ามเงียบ ๆ (ผลจะกลายเป็น "ต่อสัญญา" ทั้งที่อาจมี Red Flag)
+    if (!yearRange) throw new Error("ไม่พบปีการศึกษา " + round.academic_year + " ในระบบ จึงตรวจ Red Flag ไม่ได้");
+    await Promise.all(targets.map(async target => {
+      redFlags[target.id] = await evalRedFlagConfirmed(target.staff_id, yearRange.start, yearRange.end);
+    }));
+  }
+  for (const target of targets) output[target.id].redFlagConfirmed = Boolean(redFlags[target.id]);
   const previousYear = /^\d+$/.test(round.academic_year) ? String(Number(round.academic_year) - 1) : null;
   const years = [round.academic_year, previousYear].filter(Boolean);
   const { data:rounds, error:roundError } = await sb.from("eval_rounds")
@@ -8135,7 +8167,7 @@ async function evalHistories(round, targets) {
   for (const target of targets) output[target.id] = {
     round1:pick(target.staff_id, round.academic_year, 1),
     prevYear:previousYear ? pick(target.staff_id, previousYear, 2) : null,
-    redFlagConfirmed:false
+    redFlagConfirmed:Boolean(redFlags[target.id])
   };
   return output;
 }
@@ -8236,6 +8268,45 @@ export async function loadEvalAppealHolidays(from, to) {
     .gte("holiday_date", from).lte("holiday_date", to);
   if (error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + error.message);
   return new Set((data || []).map(row => row.holiday_date));
+}
+
+// ---------- Red Flag (admin เท่านั้น — RLS is_admin) ----------
+export async function listRedFlagTypes() {
+  const { data, error } = await sb.from("eval_red_flag_types").select("*").order("sort");
+  if (error) throw new Error("โหลดประเภท Red Flag ไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function listRedFlags() {
+  const { data, error } = await sb.from("eval_red_flags").select("*")
+    .order("reported_date", { ascending:false }).order("created_at", { ascending:false });
+  if (error) throw new Error("โหลดรายการ Red Flag ไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function saveRedFlag(row) {
+  const { id, ...fields } = row;
+  const query = id ? sb.from("eval_red_flags").update(fields).eq("id", id) : sb.from("eval_red_flags").insert(fields);
+  const { data, error } = await query.select().single();
+  if (error) {
+    if (/eval_red_flags_decided/.test(error.message)) throw new Error("สรุปผลต้องมีวันที่วินิจฉัยและผลการตรวจสอบ");
+    if (/eval_red_flags_extension/.test(error.message)) throw new Error("ขยายเวลาต้องระบุเหตุผล");
+    throw new Error("บันทึก Red Flag ไม่สำเร็จ: " + error.message);
+  }
+  return data;
+}
+
+export async function deleteRedFlag(id) {
+  const { error } = await sb.from("eval_red_flags").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// true/false = มี Red Flag ที่ยืนยันแล้วในช่วงนี้ไหม · null จาก DB = ไม่มีสิทธิ์ถาม → throw (ห้ามตีเป็น false)
+export async function evalRedFlagConfirmed(staffId, from, to) {
+  const { data, error } = await sb.rpc("eval_red_flag_confirmed", { p_staff_id:staffId, p_from:from, p_to:to });
+  if (error) throw new Error("ตรวจ Red Flag ไม่สำเร็จ: " + error.message);
+  if (data !== true && data !== false) throw new Error("ไม่มีสิทธิ์ตรวจ Red Flag ของครูคนนี้");
+  return data;
 }
 // ---------- /ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
 

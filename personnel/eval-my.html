@@ -72,10 +72,10 @@
 </div>
 <script type="module">
 import { requireAuth, signOut, myStaffId, listMyEvalAssignments, countMyEvalResponses,
-  listStaffPicker, loadEvalForm, evalSelfDueDate, thaiShortDateText, isPersonnelHead,
+  listStaffPicker, loadEvalForm, evalSelfDueDate, thaiShortDateText, isPersonnelHead, getProfile,
   bangkokNow, toDateStr, listEvalRoundsICanSee, loadMyEvalResults, evalDecisionLabel,
   evalThaiDateStr, addWorkingDays, addDaysStr, loadEvalAppealHolidays, acknowledgeEvalResult
-} from "../supabase-client.js?v=20261011-1";
+} from "../supabase-client.js?v=20261011-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -98,8 +98,8 @@ if (!session) {
       const data = await listMyEvalAssignments(me);
       const [visibleRounds, myResults] = await Promise.all([listEvalRoundsICanSee(), loadMyEvalResults()]);
       const mine = data.assignments.filter(row => row.rater_staff_id === me);
-      const [staff, counts, head] = await Promise.all([
-        listStaffPicker(), countMyEvalResponses(mine.map(row => row.id)), isPersonnelHead()
+      const [staff, counts, head, profile] = await Promise.all([
+        listStaffPicker(), countMyEvalResponses(mine.map(row => row.id)), isPersonnelHead(), getProfile(session.user.id)
       ]);
       const names = new Map(staff.map(row => [row.id, row.full_name]));
       const forms = new Map();
@@ -110,6 +110,9 @@ if (!session) {
       let html = "";
       if (head || visibleRounds.length) html += '<section class="card"><h2>สรุปผลประเมิน</h2>' +
         '<p class="hint">ดูตาราง ก ข ค และยืนยันผลการพิจารณา</p><a class="action primary" href="eval-result.html">เปิดหน้าสรุปผลประเมิน</a></section>';
+      // Red Flag เห็นเฉพาะ admin (= ผอ.) — ไม่อยู่ในเมนูเพราะ hrOnly เปิดให้ทั้งฝ่ายบุคคล
+      if (profile?.role === "admin") html += '<section class="card"><h2>บันทึก Red Flag</h2>' +
+        '<p class="hint">บันทึกและติดตามเหตุการณ์ตามขั้นตอนในแบบประเมิน (เห็นเฉพาะผู้อำนวยการ)</p><a class="action" href="red-flags.html">เปิดหน้าบันทึก Red Flag</a></section>';
       for (const item of myResults) {
         const decision = item.decision, computed = decision.computed;
         if (!computed) continue;

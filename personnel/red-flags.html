@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บันทึก Red Flag — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap, main.academic-content { max-width:760px; margin:0 auto; min-width:0; }
+  h1 { font-size:22px; margin:4px 0; } h2 { font-size:18px; margin:0 0 10px; } h3 { font-size:15px; margin:16px 0 4px; color:var(--muted); }
+  header p,.hint { color:var(--muted); } header p { margin:0 0 8px; font-size:14px; }
+  .nav { display:flex; gap:8px; flex-wrap:wrap; padding:8px; background:var(--white); border:1px solid var(--line); border-radius:99px; margin-bottom:22px; }
+  .nav a { color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:99px; font-size:14px; } .nav a.active { color:var(--white); background:var(--teal); } .nav #btn-signout { margin-left:auto; color:var(--danger); }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; min-width:0; }
+  .hint { font-size:14px; margin:6px 0; } .empty { text-align:center; color:var(--muted); padding:24px; }
+  .toolbar,.actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; } .toolbar select { flex:1; min-width:180px; }
+  input[type="text"], input[type="date"], select, textarea { width:100%; font:inherit; font-size:16px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); padding:9px 12px; min-height:44px; }
+  textarea { min-height:84px; resize:vertical; } label { display:block; font-weight:600; margin:12px 0 5px; }
+  input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible { outline:2px solid var(--teal); outline-offset:1px; }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  button,.button { display:inline-flex; align-items:center; justify-content:center; font:inherit; font-weight:600; min-height:44px; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; text-decoration:none; background:var(--teal-soft); color:var(--teal); }
+  button.primary { background:var(--teal); color:var(--white); } button.danger { background:var(--white); color:var(--danger); border:1px solid var(--danger-soft); } button:disabled { opacity:.5; cursor:not-allowed; }
+  .banner { padding:10px 12px; border-radius:8px; margin:10px 0; font-size:14px; } .banner.warn { background:var(--amber-soft); color:var(--amber); } .banner.err { background:var(--danger-soft); color:var(--danger); } .banner.ok { background:var(--teal-soft); color:var(--ink); }
+  .item { display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-top:1px solid var(--line); } .item:first-child { border-top:0; }
+  .item .grow { flex:1; min-width:0; } .item b { display:block; } .meta { font-size:13px; color:var(--muted); }
+  .pill { display:inline-block; padding:2px 10px; border-radius:99px; font-size:12.5px; font-weight:600; white-space:nowrap; }
+  .pill.reported { background:var(--amber-soft); color:var(--amber); } .pill.investigating { background:var(--amber-soft); color:var(--amber); }
+  .pill.confirmed { background:var(--danger-soft); color:var(--danger); } .pill.dismissed { background:#eef1f0; color:var(--muted); }
+  .due { font-size:13px; margin-top:2px; } .due.overdue { color:var(--danger); font-weight:600; }
+  .calc { font-size:13px; color:var(--muted); margin-top:4px; } .calc.overdue { color:var(--danger); font-weight:600; }
+  .check { display:flex; gap:8px; align-items:center; font-weight:400; margin:6px 0; min-height:44px; } .check input { width:20px; height:20px; }
+  .field-error { color:var(--danger); font-size:13px; font-weight:600; margin-top:4px; }
+  ol.steps { margin:6px 0 0; padding-left:20px; font-size:14px; color:var(--muted); } ol.steps li { margin:2px 0; }
+  #gate[hidden], #app[hidden] { display:none !important; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:60; background:var(--ink); color:var(--white); border-radius:8px; padding:10px 16px; opacity:0; pointer-events:none; } #toast.show { opacity:1; } #toast.err { background:var(--danger); }
+  @media (max-width:560px) { .row2 { grid-template-columns:1fr; } body { padding:12px; } }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body><div class="wrap"><header><h1>บันทึก Red Flag</h1><p>บันทึกและติดตามเหตุการณ์ Red Flag ตามขั้นตอนในแบบประเมินครู 360°</p><div class="nav"><a href="index.html">ภาพรวมบุคลากร</a><a href="eval-result.html">สรุปผลประเมิน</a><a href="red-flags.html" class="active">บันทึก Red Flag</a><a href="eval-my.html">งานประเมินของฉัน</a><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261011-1"></script></header>
+<main class="academic-content">
+  <div id="gate" class="card" hidden></div>
+  <div id="app" hidden></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+</main></div>
+<script type="module">
+import { requireAuth, signOut, getProfile, checkDepartment, applyPersonnelMenuAccess, listStaffPicker,
+  listRedFlagTypes, listRedFlags, saveRedFlag, deleteRedFlag, redFlagDeadlines, loadEvalAppealHolidays,
+  thaiShortDateText, bangkokNow, toDateStr, addDaysStr } from "../supabase-client.js?v=20261011-2";
+
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้า login
+} else {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
+  let toastTimer = null;
+  const toast = (message, isError) => {
+    const box = el("toast"); box.textContent = message; box.classList.toggle("err", !!isError); box.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => box.classList.remove("show"), 4000);
+  };
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  const STATUS = { reported:"รับแจ้ง", investigating:"กำลังตรวจสอบ", confirmed:"ยืนยันว่าเป็นจริง", dismissed:"ไม่เป็นความจริง" };
+  const thai = value => value ? thaiShortDateText(value) : "—";
+  const today = toDateStr(bangkokNow());
+  const state = { types:[], flags:[], staff:[], holidays:new Set(), filter:"open", editing:null };
+
+  const [department, profile] = await Promise.all([checkDepartment("บุคลากร"), getProfile(session.user.id)]);
+  applyPersonnelMenuAccess(department);
+  // ⛔ admin เท่านั้น (= ผอ.) — RLS is_admin เป็นตัวกันจริง · หน้าเว็บไม่ยิงคิวรี eval_red_flags ให้คนอื่นเลย
+  if (profile?.role !== "admin") {
+    el("gate").hidden = false;
+    el("gate").innerHTML = '<div class="banner warn"><b>หน้านี้สำหรับผู้อำนวยการ (ผู้ดูแลระบบ) เท่านั้น</b><br>' +
+      'เหตุการณ์ Red Flag ให้รายงานผู้อำนวยการเป็นลายลักษณ์อักษรตามขั้นตอนในแบบประเมิน</div>';
+  } else {
+    el("app").hidden = false;
+    el("app").innerHTML = '<div class="card">กำลังโหลด…</div>';
+    try {
+      [state.types, state.flags, state.staff] = await Promise.all([listRedFlagTypes(), listRedFlags(), listStaffPicker()]);
+      // วันหยุดตั้งแต่รายการเก่าสุดที่ยังเปิดอยู่ ถึง 60 วันข้างหน้า (พอสำหรับกำหนด 3/7/14 วันทำการ)
+      const openDates = state.flags.filter(f => !["confirmed","dismissed"].includes(f.status)).map(f => f.reported_date).sort();
+      const from = openDates[0] || today;
+      state.holidays = await loadEvalAppealHolidays(from, addDaysStr(today, 60));
+      render();
+    } catch (error) {
+      el("app").innerHTML = '<div class="card banner err">โหลดไม่สำเร็จ: ' + esc(error.message) + '</div>';
+    }
+  }
+
+  function staffName(id) { return state.staff.find(row => row.id === id)?.full_name || "ไม่พบชื่อ (อาจพ้นสภาพแล้ว)"; }
+  function typeText(code) { return state.types.find(row => row.code === code)?.text || "ประเภท " + code; }
+
+  function renderList() {
+    const rows = state.flags.filter(flag => state.filter === "all" ||
+      (state.filter === "open" ? !["confirmed","dismissed"].includes(flag.status) : flag.status === state.filter));
+    const items = rows.map(flag => {
+      const due = redFlagDeadlines(flag, state.holidays, today);
+      const next = due.next ? '<div class="due' + (due.next.overdue ? ' overdue' : '') + '">' + esc(due.next.label) +
+        (due.next.date ? ' · ภายใน ' + esc(thai(due.next.date)) : '') + (due.next.overdue ? ' · เลยกำหนด' : '') + '</div>' : '';
+      return '<div class="item"><div class="grow"><b>' + esc(staffName(flag.staff_id)) + '</b>' +
+        '<div class="meta">ข้อ ' + esc(flag.type_code) + ' · ' + esc(typeText(flag.type_code)) + '</div>' +
+        '<div class="meta">รับแจ้ง ' + esc(thai(flag.reported_date)) + (flag.decided_date ? ' · วินิจฉัย ' + esc(thai(flag.decided_date)) : '') + '</div>' + next +
+        '</div><div><span class="pill ' + esc(flag.status) + '">' + esc(STATUS[flag.status]) + '</span><br>' +
+        '<button type="button" data-edit="' + esc(flag.id) + '" style="margin-top:8px">เปิด</button></div></div>';
+    }).join("");
+    return '<section class="card"><div class="toolbar"><h2 style="margin:0;flex:1">รายการ Red Flag</h2>' +
+      '<button type="button" class="primary" data-new>＋ บันทึกเหตุการณ์ใหม่</button></div>' +
+      '<label for="filter">แสดง</label><select id="filter">' +
+      [["open","ยังไม่สรุปผล"],["confirmed","ยืนยันว่าเป็นจริง"],["dismissed","ไม่เป็นความจริง"],["all","ทั้งหมด"]]
+        .map(([v,l]) => '<option value="' + v + '"' + (state.filter === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' +
+      (items || '<p class="empty">ไม่มีรายการ</p>') + '</section>';
+  }
+
+  function dateField(id, label, value, calc) {
+    return '<div><label for="' + id + '">' + label + '</label><input type="date" id="' + id + '" value="' + esc(value || "") + '">' +
+      (calc || '') + '</div>';
+  }
+
+  function renderForm() {
+    const f = state.editing;
+    const due = redFlagDeadlines(f, state.holidays, today);
+    const calc = (date, ok) => date ? '<div class="calc' + (!ok && today > date ? ' overdue' : '') + '">กำหนด ' + esc(thai(date)) + (!ok && today > date ? ' · เลยกำหนด' : '') + '</div>' : '';
+    const decided = ["confirmed","dismissed"].includes(f.status);
+    const staffOptions = state.staff.map(row => '<option value="' + esc(row.id) + '"' + (row.id === f.staff_id ? ' selected' : '') + '>' + esc(row.full_name) + '</option>').join("");
+    const cp = f.child_protection || {};
+    return '<section class="card" id="flag-form"><h2>' + (f.id ? 'Red Flag · ' + esc(staffName(f.staff_id)) : 'บันทึกเหตุการณ์ใหม่') + '</h2>' +
+      '<div class="banner warn">การแสดงความเห็นต่าง การร้องเรียน หรือการรวมตัวยื่นข้อเรียกร้องตามช่องทางที่กฎหมายรับรอง <b>ไม่ถือเป็น Red Flag</b></div>' +
+      '<h3>เหตุการณ์</h3>' +
+      '<label for="f-staff">ครูผู้ถูกกล่าวหา</label><select id="f-staff"' + (f.id ? ' disabled' : '') + '><option value="">— เลือก —</option>' + staffOptions + '</select><div class="field-error" id="e-staff"></div>' +
+      '<label for="f-type">ประเภท</label><select id="f-type"><option value="">— เลือก —</option>' +
+        state.types.filter(t => t.active || t.code === f.type_code).map(t => '<option value="' + t.code + '"' + (t.code === f.type_code ? ' selected' : '') + '>' + t.code + '. ' + esc(t.text) + '</option>').join("") +
+      '</select><div class="field-error" id="e-type"></div>' +
+      '<div class="row2">' + dateField("f-incident", "วันเกิดเหตุ", f.incident_date) + dateField("f-reported", "วันรับแจ้ง", f.reported_date) + '</div>' +
+      '<label for="f-reporter">ผู้รายงาน</label><input type="text" id="f-reporter" value="' + esc(f.reporter || "") + '">' +
+      '<label for="f-details">รายละเอียด</label><textarea id="f-details">' + esc(f.details || "") + '</textarea><div class="field-error" id="e-details"></div>' +
+      '<label for="f-evidence">หลักฐานเบื้องต้น</label><textarea id="f-evidence" placeholder="เช่น ข้อความ พยาน วันเวลา">' + esc(f.evidence || "") + '</textarea>' +
+      '<div id="child-box"' + (Number(f.type_code) === 1 ? '' : ' hidden') + '><h3>ขั้นที่ 2 (ประเภท 1 · ทำได้ทันที)</h3>' +
+        [["reassigned","มอบหมายให้ปฏิบัติงานอื่นที่ไม่เกี่ยวกับนักเรียนผู้เสียหายชั่วคราว (ยังได้รับค่าจ้างตามปกติ)"],
+         ["parents_notified","แจ้งผู้ปกครองแล้ว"],["officer_notified","แจ้งพนักงานเจ้าหน้าที่ตาม พ.ร.บ.คุ้มครองเด็ก พ.ศ. 2546 แล้ว"]]
+          .map(([key,label]) => '<label class="check"><input type="checkbox" data-cp="' + key + '"' + (cp[key] ? ' checked' : '') + '>' + label + '</label>').join("") + '</div>' +
+      '<h3>ขั้นตอนตรวจสอบ</h3>' +
+      '<div class="row2">' + dateField("f-committee", "วันแต่งตั้งกรรมการ (≥ 3 คน)", f.committee_formed_date, calc(due.committeeDue, !!f.committee_formed_date)) +
+        dateField("f-notified", "วันแจ้งข้อกล่าวหา", f.accused_notified_date) + '</div>' +
+      '<label for="f-members">รายชื่อกรรมการ (ไม่รวมผู้รายงานและผู้มีส่วนได้เสีย)</label><input type="text" id="f-members" value="' + esc(f.committee_members || "") + '">' +
+      '<div class="row2">' + dateField("f-statement", "วันรับคำชี้แจง", f.statement_received_date, calc(due.statementDue, !!f.statement_received_date)) +
+        '<div><label>ตรวจสอบเสร็จภายใน</label><div class="calc' + (due.investigationDue && !decided && today > due.investigationDue ? ' overdue' : '') + '" style="min-height:44px;display:flex;align-items:center">' +
+        (due.investigationDue ? esc(thai(due.investigationDue)) + (f.extended ? ' (ขยายแล้ว)' : '') : 'นับเมื่อแต่งตั้งกรรมการ') + '</div></div></div>' +
+      '<label class="check"><input type="checkbox" id="f-extended"' + (f.extended ? ' checked' : '') + '>ขยายเวลาตรวจสอบอีกไม่เกิน 7 วันทำการ</label>' +
+      '<div id="ext-box"' + (f.extended ? '' : ' hidden') + '><label for="f-ext-reason">เหตุผลที่ขยาย</label><input type="text" id="f-ext-reason" value="' + esc(f.extension_reason || "") + '"><div class="field-error" id="e-ext"></div></div>' +
+      '<h3>ผลการตรวจสอบ</h3>' +
+      '<label for="f-status">สถานะ</label><select id="f-status">' + Object.entries(STATUS).map(([v,l]) => '<option value="' + v + '"' + (f.status === v ? ' selected' : '') + '>' + l + '</option>').join("") + '</select>' +
+      '<div class="row2">' + dateField("f-decided", "วันที่วินิจฉัย", f.decided_date) + '<div></div></div><div class="field-error" id="e-decided"></div>' +
+      '<label for="f-result">ผลการตรวจสอบ</label><textarea id="f-result">' + esc(f.result_note || "") + '</textarea><div class="field-error" id="e-result"></div>' +
+      '<p class="hint">ยืนยันว่าเป็นจริง = ระบบจะเสนอ "ไม่ต่อสัญญาจ้าง" ในการประเมินครั้งที่ 2 ของปีการศึกษาเดียวกัน (เงื่อนไขข้อ 5) · ผลสุดท้ายเป็นของคณะกรรมการบริหารโรงเรียน</p>' +
+      '<div class="actions" style="margin-top:12px"><button type="button" class="primary" data-save>บันทึก</button><button type="button" data-cancel>ยกเลิก</button>' +
+      (f.id && f.status === "reported" ? '<button type="button" class="danger" data-delete>ลบ (บันทึกผิด)</button>' : '') + '</div>' +
+      '<details style="margin-top:14px"><summary>ขั้นตอนเมื่อพบ Red Flag (ตามแบบประเมิน)</summary><ol class="steps">' +
+        '<li>ผู้พบเหตุรายงานผู้อำนวยการทันทีเป็นลายลักษณ์อักษร พร้อมหลักฐานเบื้องต้น</li>' +
+        '<li>กรณีข้อ 1 มอบหมายงานอื่นชั่วคราวทันที แจ้งผู้ปกครอง และแจ้งพนักงานเจ้าหน้าที่ตาม พ.ร.บ.คุ้มครองเด็ก</li>' +
+        '<li>แต่งตั้งคณะกรรมการตรวจสอบอย่างน้อย 3 คน ภายใน 3 วันทำการ</li>' +
+        '<li>แจ้งข้อกล่าวหาเป็นลายลักษณ์อักษร ให้ชี้แจงภายใน 3 วันทำการ</li>' +
+        '<li>ตรวจสอบให้เสร็จภายใน 7 วันทำการ ขยายได้อีกไม่เกิน 7 วันทำการโดยบันทึกเหตุผล</li>' +
+        '<li>เสนอผลต่อคณะกรรมการบริหารโรงเรียน</li></ol></details></section>';
+  }
+
+  function render() {
+    el("app").innerHTML = state.editing ? renderForm() : renderList();
+  }
+
+  function readForm() {
+    const f = state.editing, v = id => el(id)?.value.trim() || null;
+    const child = {};
+    document.querySelectorAll("[data-cp]").forEach(box => { if (box.checked) child[box.dataset.cp] = true; });
+    const row = {
+      staff_id: f.id ? f.staff_id : v("f-staff"), type_code: v("f-type") ? Number(v("f-type")) : null,
+      incident_date: v("f-incident"), reported_date: v("f-reported") || today, reporter: v("f-reporter"),
+      details: v("f-details"), evidence: v("f-evidence"), child_protection: child,
+      committee_formed_date: v("f-committee"), committee_members: v("f-members"),
+      accused_notified_date: v("f-notified"), statement_received_date: v("f-statement"),
+      extended: el("f-extended").checked, extension_reason: el("f-extended").checked ? v("f-ext-reason") : null,
+      status: v("f-status"), decided_date: v("f-decided"), result_note: v("f-result")
+    };
+    if (f.id) row.id = f.id;
+    return row;
+  }
+
+  function validate(row) {
+    const errors = [];
+    if (!row.staff_id) errors.push(["e-staff", "f-staff", "เลือกครูผู้ถูกกล่าวหา"]);
+    if (!row.type_code) errors.push(["e-type", "f-type", "เลือกประเภท"]);
+    if (!row.details) errors.push(["e-details", "f-details", "ใส่รายละเอียดเหตุการณ์"]);
+    if (row.extended && !row.extension_reason) errors.push(["e-ext", "f-ext-reason", "ขยายเวลาต้องระบุเหตุผล"]);
+    if (["confirmed","dismissed"].includes(row.status)) {
+      if (!row.decided_date) errors.push(["e-decided", "f-decided", "สรุปผลต้องมีวันที่วินิจฉัย"]);
+      if (!row.result_note) errors.push(["e-result", "f-result", "สรุปผลต้องมีผลการตรวจสอบ"]);
+    }
+    return errors;
+  }
+
+  el("app").addEventListener("change", event => {
+    if (event.target.id === "filter") { state.filter = event.target.value; render(); }
+    if (event.target.id === "f-type") el("child-box").hidden = Number(event.target.value) !== 1;
+    if (event.target.id === "f-extended") el("ext-box").hidden = !event.target.checked;
+  });
+
+  el("app").addEventListener("click", async event => {
+    const target = event.target.closest("button");
+    if (!target) return;
+    if (target.hasAttribute("data-new")) { state.editing = { status:"reported", reported_date:today, child_protection:{} }; render(); el("flag-form").scrollIntoView(); return; }
+    if (target.dataset.edit) { state.editing = { ...state.flags.find(f => f.id === target.dataset.edit) }; render(); el("flag-form").scrollIntoView(); return; }
+    if (target.hasAttribute("data-cancel")) { state.editing = null; render(); return; }
+    if (target.hasAttribute("data-delete")) {
+      const name = staffName(state.editing.staff_id);
+      if (!await window.crsAskConfirm({ title:"ลบรายการ Red Flag", message:"ใช้เมื่อบันทึกผิดเท่านั้น · ลบแล้วกู้คืนไม่ได้",
+        okLabel:"ลบรายการ", requireText:name, danger:true })) return;
+      try { await deleteRedFlag(state.editing.id); state.flags = await listRedFlags(); state.editing = null; render(); toast("ลบแล้ว"); }
+      catch (error) { toast(error.message, true); }
+      return;
+    }
+    if (target.hasAttribute("data-save")) {
+      document.querySelectorAll(".field-error").forEach(box => box.textContent = "");
+      document.querySelectorAll("[aria-invalid]").forEach(box => { box.removeAttribute("aria-invalid"); box.removeAttribute("aria-describedby"); });
+      const row = readForm(), errors = validate(row);
+      if (errors.length) {
+        errors.forEach(([box, field, message]) => {
+          el(box).textContent = message; el(field)?.setAttribute("aria-invalid", "true"); el(field)?.setAttribute("aria-describedby", box);
+        });
+        el(errors[0][1])?.focus();
+        return;
+      }
+      const wasConfirmed = state.flags.find(f => f.id === row.id)?.status === "confirmed";
+      if (row.status === "confirmed" && !wasConfirmed && !await window.crsAskConfirm({ title:"ยืนยันว่า Red Flag เป็นจริง",
+        message:"ระบบจะเสนอ \"ไม่ต่อสัญญาจ้าง\" ให้ " + staffName(row.staff_id) + " ในการประเมินครั้งที่ 2 ของปีการศึกษาเดียวกัน",
+        okLabel:"ยืนยันผล", danger:true })) return;
+      target.disabled = true;
+      try { await saveRedFlag(row); state.flags = await listRedFlags(); state.editing = null; render(); toast("บันทึกแล้ว"); }
+      catch (error) { target.disabled = false; toast(error.message, true); }
+    }
+  });
+}
+</script>
+</body>
+</html>

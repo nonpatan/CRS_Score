@@ -40,9 +40,9 @@
 <main class="academic-content"><div id="app" class="card" role="status">กำลังโหลดผลประเมิน…</div><div id="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, isPersonnelHead,
-  listEvalRoundsICanSee, loadEvalRoundResults, loadEvalTargetResult, listStaffPicker,
+  listEvalRoundsICanSee, loadEvalRoundResults, getProfile, loadEvalTargetResult, listStaffPicker,
   computeEvalResult, evalDecisionSnapshot, evalDecisionOptions, evalDecisionLabel,
-  saveEvalDecision, thaiShortDateText } from "../supabase-client.js?v=20261011-1";
+  saveEvalDecision, thaiShortDateText } from "../supabase-client.js?v=20261011-2";
 const session = await requireAuth();
 if (session) {
   const app = document.getElementById("app"), toastBox = document.getElementById("toast");
@@ -129,8 +129,11 @@ if (session) {
   document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     const department = await checkDepartment("บุคลากร"); applyPersonnelMenuAccess(department);
-    const [head, rounds] = await Promise.all([isPersonnelHead(), listEvalRoundsICanSee()]);
+    const [head, rounds, profile] = await Promise.all([isPersonnelHead(), listEvalRoundsICanSee(), getProfile(session.user.id)]);
     state.rounds = rounds;
+    // ลิงก์ Red Flag เฉพาะ admin (= ผอ.) · วางนอก #app เพราะ #app ถูกวาดใหม่ทุกครั้ง
+    if (profile?.role === "admin") app.insertAdjacentHTML("beforebegin",
+      '<p class="hint" style="text-align:right;margin:0 0 8px"><a href="red-flags.html">บันทึก Red Flag →</a></p>');
     if (!head && !rounds.length) { app.innerHTML = '<div class="banner warn">หน้านี้สำหรับ ผอ. และหัวหน้าฝ่ายบุคคล</div>'; }
     else {
       state.staff = await listStaffPicker();
