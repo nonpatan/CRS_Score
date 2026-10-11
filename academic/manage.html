@@ -215,6 +215,7 @@
   .score-toggle { padding:0 4px; margin:0; }
   .icon-btn { min-height:36px; min-width:36px; padding:4px; }
   .collection-chips { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:0 10px 4px; }
+  .half-empty-hint { color:var(--muted); font-size:13px; padding:4px 6px; }
   .node-row.collection { display:inline-flex; gap:3px; padding:0 5px; border:0; box-shadow:inset 0 0 0 1px var(--line); border-radius:8px; font-size:12px; min-height:36px; }
   .node-row.collection .title { font-size:12px; white-space:nowrap; }
   .node-row.collection .cap { font-size:12px; margin:0; white-space:nowrap; }
@@ -447,6 +448,7 @@
 
   <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
   <div class="card" id="structure-card" style="display:none">
+    <div id="manage-half-bar" hidden></div>
     <div class="structure-heading"><div class="section-title">คะแนนวิชา</div><div class="fold-tools"><button type="button" class="ghost small" id="expand-units">กางทั้งหมด</button><button type="button" class="ghost small" id="collapse-units">พับทั้งหมด</button></div></div>
     <div id="units-vicha"></div>
     <button class="ghost small" id="btn-add-unit-vicha">+ เพิ่มหน่วยใหญ่ (คะแนนวิชา)</button>
@@ -535,6 +537,12 @@
         <div class="field-note" id="collection-max-error" role="alert" style="display:none; color:var(--danger); font-weight:600"></div>
       </div>
     </div>
+    <fieldset id="modal-half-field" class="field" hidden>
+      <legend>ช่วง</legend>
+      <label><input type="radio" name="modal-half" value="กลางปี"> กลางปี</label>
+      <label><input type="radio" name="modal-half" value="ปลายปี"> ปลายปี</label>
+      <div class="field-note">คะแนนที่กรอกแล้วไม่หาย</div>
+    </fieldset>
     <div class="field-note" id="modal-note" style="display:none"></div>
     <div class="modal-actions">
       <button class="ghost" id="m-cancel">ยกเลิก</button>
@@ -579,7 +587,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult } from "../supabase-client.js?v=20261011-5";
+import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261011-6";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -726,14 +734,15 @@ function canEditExamStatus() {
     (canEditAcademicSettings || currentSubject.owner_id === myUserId);
 }
 
-async function loadSubjectStudentIds(tableName, subjectId) {
+async function loadSubjectStudentIds(tableName, subjectId, half = null) {
   const ids = [];
   const pageSize = 1000;
   for (let page = 0; ; page++) {
-    const { data, error } = await sb.from(tableName)
+    let query = sb.from(tableName)
       .select("student_id")
-      .eq("subject_id", subjectId)
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+      .eq("subject_id", subjectId);
+    if (tableName === "exam_scores" && half) query = query.eq("half", half);
+    const { data, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1);
     if (error) throw new Error(error.message);
     for (const row of (data || [])) ids.push(row.student_id);
     if (!data || data.length < pageSize) break;
@@ -755,7 +764,7 @@ async function loadExamControl() {
     const subjectId = currentSubject.id;
     const [enrolledIds, scoredIds] = await Promise.all([
       loadSubjectStudentIds("enrollments", subjectId),
-      loadSubjectStudentIds("exam_scores", subjectId)
+      loadSubjectStudentIds("exam_scores", subjectId, primaryManage() ? manageHalf : null)
     ]);
     // ถ้าผู้ใช้เปลี่ยนวิชาระหว่าง query ให้ทิ้งผลเก่า ไม่เขียนทับการ์ดของวิชาใหม่
     if (!currentSubject || currentSubject.id !== subjectId) return;
@@ -793,7 +802,7 @@ btnManageToggleExam.addEventListener("click", async () => {
   try {
     [enrolledIds, scoredIds] = await Promise.all([
       loadSubjectStudentIds("enrollments", subjectId),
-      loadSubjectStudentIds("exam_scores", subjectId)
+      loadSubjectStudentIds("exam_scores", subjectId, primaryManage() ? manageHalf : null)
     ]);
   } catch (error) {
     showToast("นับนักเรียนที่ยังไม่มีคะแนนสอบไม่สำเร็จ: " + error.message, false);
@@ -1011,6 +1020,15 @@ let currentSubject = null;    // object วิชาที่เลือกอ�
 const collapsedUnits = new Set();
 const expandedEnrollmentRooms = new Set();
 let structureSubjectId = null;
+let manageHalf = "กลางปี";
+const primaryManage = () => currentSubject?.level === "ประถม";
+const oppositeHalf = half => half === "กลางปี" ? "ปลายปี" : "กลางปี";
+const unitCollections = unit => (unit.indicators || []).flatMap(ind => ind.collections || []);
+const halfCount = (collections, half) => collections.filter(coll => coll.half === half).length;
+function halfCountsMessage(collections, noun) {
+  const mid = halfCount(collections, "กลางปี"), end = halfCount(collections, "ปลายปี");
+  return mid && end ? `${noun}นี้มีครั้งที่อยู่ทั้งกลางปี (${mid} ครั้ง) และปลายปี (${end} ครั้ง) · ติ๊กออกแล้วจะไม่คิดคะแนนทั้งสองช่วง · คะแนนที่กรอกไว้ไม่หาย` : null;
+}
 let enrollmentSubjectId = null;
 let subjectFormSubjectId = null;
 let units = [];               // ต้นไม้โครงสร้างของวิชานี้ (units > indicators > collections > scores)
@@ -1768,6 +1786,10 @@ elSubject.addEventListener("change", async () => {
   const { data: subj, error } = await sb.from("subjects").select("*").eq("id", id).single();
   if (error) { showToast("โหลดวิชาไม่สำเร็จ", false); return; }
   currentSubject = subj;
+  if (subj.level === "ประถม") {
+    const start = selectableYears.find(row => row.year === subj.year)?.term2_start_date;
+    manageHalf = start && toDateStr(bangkokNow()) >= start ? "ปลายปี" : "กลางปี";
+  }
   fillSubjectForm(subj);
   elSubjectFormTitle.textContent = "แก้ไขข้อมูลวิชา";
   elEmptyHint.style.display = "none";
@@ -1850,8 +1872,14 @@ document.getElementById("subject-form-toggle").addEventListener("click", () => {
   body.hidden = !body.hidden;
   document.getElementById("subject-form-toggle").setAttribute("aria-expanded", String(!body.hidden));
 });
-document.getElementById("expand-units").addEventListener("click", () => { collapsedUnits.clear(); renderStructure(); });
-document.getElementById("collapse-units").addEventListener("click", () => { units.forEach(unit => collapsedUnits.add(unit.id)); renderStructure(); });
+document.getElementById("expand-units").addEventListener("click", () => {
+  units.forEach(unit => collapsedUnits.delete(unitFoldKey(unit.id)));
+  renderStructure();
+});
+document.getElementById("collapse-units").addEventListener("click", () => {
+  units.forEach(unit => collapsedUnits.add(unitFoldKey(unit.id)));
+  renderStructure();
+});
 
 // ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
 document.getElementById("btn-save-subject").addEventListener("click", async () => {
@@ -2039,16 +2067,32 @@ function countScoresInUnits(unitList) {
 }
 
 // ---------- วาดต้นไม้โครงสร้าง ----------
+const unitFoldKey = id => primaryManage() ? manageHalf + ":" + id : id;
 function renderStructure() {
   if (structureSubjectId !== currentSubject.id) {
     collapsedUnits.clear();
-    if (units.length >= 2) units.forEach(unit => collapsedUnits.add(unit.id));
+    if (primaryManage()) {
+      for (const half of ["กลางปี", "ปลายปี"]) for (const unit of units) {
+        const collections = unitCollections(unit);
+        if (units.length >= 2 || (!halfCount(collections, half) && collections.length)) collapsedUnits.add(half + ":" + unit.id);
+      }
+    } else if (units.length >= 2) units.forEach(unit => collapsedUnits.add(unit.id));
     structureSubjectId = currentSubject.id;
   }
   elUnitsVicha.innerHTML = "";
   elUnitsComp.innerHTML = "";
   const vicha = units.filter(u => u.kind === "วิชา");
   const comp = units.filter(u => u.kind === "สมรรถนะหลัก");
+  const bar = document.getElementById("manage-half-bar");
+  bar.hidden = !primaryManage();
+  if (primaryManage()) {
+    const vichaCount = vicha.filter(unit => halfCount(unitCollections(unit), manageHalf)).length;
+    const compCount = comp.filter(unit => halfCount(unitCollections(unit), manageHalf)).length;
+    renderPrimaryHalfBar(bar, manageHalf,
+      `${manageHalf} · คะแนนวิชา ${vichaCount} หน่วย · ${vicha.reduce((sum, unit) => sum + halfCount(unitCollections(unit), manageHalf), 0)} ครั้ง · ` +
+      `สมรรถนะหลัก ${compCount} ด้าน · ${comp.reduce((sum, unit) => sum + halfCount(unitCollections(unit), manageHalf), 0)} ครั้ง`,
+      half => { manageHalf = half; renderStructure(); loadExamControl(); });
+  }
 
   if (vicha.length === 0) elUnitsVicha.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีหน่วยใหญ่</div>";
   for (const u of vicha) elUnitsVicha.appendChild(renderUnit(u));
@@ -2068,18 +2112,20 @@ function renderUnit(unit) {
   head.className = "unit-head";
   const body = document.createElement("div");
   body.id = "unit-body-" + unit.id;
-  body.hidden = collapsedUnits.has(unit.id);
+  body.hidden = collapsedUnits.has(unitFoldKey(unit.id));
   const fold = document.createElement("button");
   fold.type = "button";
   fold.className = "unit-toggle";
   fold.setAttribute("aria-expanded", String(!body.hidden));
   fold.setAttribute("aria-controls", body.id);
   const indicators = unit.indicators || [];
-  const collections = indicators.reduce((total, ind) => total + (ind.collections || []).length, 0);
-  fold.innerHTML = "<span class='title'>" + escapeHtml(unit.name) + "</span><span class='hint'>" + indicators.length + " หน่วยย่อย · " + collections + " ครั้ง</span>";
+  const collections = indicators.reduce((total, ind) => total + (primaryManage() ? halfCount(ind.collections || [], manageHalf) : (ind.collections || []).length), 0);
+  const elsewhere = primaryManage() ? halfCount(unitCollections(unit), oppositeHalf(manageHalf)) : 0;
+  fold.innerHTML = "<span class='title'>" + escapeHtml(unit.name) + "</span><span class='hint'>" + indicators.length + " หน่วยย่อย · " + collections + " ครั้ง" +
+    (primaryManage() && !collections && elsewhere ? " · ยังไม่มีครั้งของ" + manageHalf + " · " + elsewhere + " ครั้งอยู่" + oppositeHalf(manageHalf) : "") + "</span>";
   fold.addEventListener("click", () => {
     body.hidden = !body.hidden;
-    body.hidden ? collapsedUnits.add(unit.id) : collapsedUnits.delete(unit.id);
+    body.hidden ? collapsedUnits.add(unitFoldKey(unit.id)) : collapsedUnits.delete(unitFoldKey(unit.id));
     fold.setAttribute("aria-expanded", String(!body.hidden));
   });
   head.appendChild(fold);
@@ -2087,6 +2133,15 @@ function renderUnit(unit) {
   cap.className = "cap";
   cap.textContent = "เต็ม " + unit.max_score;
   head.appendChild(cap);
+  if (primaryManage() && !unitCollections(unit).length) {
+    const badge = document.createElement("span"); badge.className = "not-scored-badge"; badge.textContent = "ยังไม่มีครั้ง"; head.appendChild(badge);
+  }
+  if (primaryManage() && collections && elsewhere) {
+    const link = document.createElement("button"); link.className = "primary-half-link";
+    link.textContent = `มี ${elsewhere} ครั้งอยู่${oppositeHalf(manageHalf)} →`;
+    link.addEventListener("click", () => { manageHalf = oppositeHalf(manageHalf); renderStructure(); loadExamControl(); });
+    head.appendChild(link);
+  }
   if (isUnitNotScored) {
     const badge = document.createElement("span");
     badge.className = "not-scored-badge";
@@ -2112,7 +2167,7 @@ function renderUnit(unit) {
   block.appendChild(head);
   block.appendChild(body);
 
-  for (const ind of (unit.indicators || [])) {
+  for (const ind of indicators) {
     const isNotScored = ind.counts_score === false;
     const row = document.createElement("div");
     row.className = "node-row indicator" + (isNotScored ? " not-scored" : "");
@@ -2142,12 +2197,15 @@ function renderUnit(unit) {
       row.appendChild(makeIconBtn("🗑", "del", () => deleteIndicator(ind)));
     }
     row.querySelector(".title").title = ind.name;
+    if (primaryManage() && !(ind.collections || []).length) {
+      const badge = document.createElement("span"); badge.className = "not-scored-badge"; badge.textContent = "ยังไม่มีครั้ง"; row.appendChild(badge);
+    }
     body.appendChild(row);
     const chips = document.createElement("div");
     chips.className = "collection-chips";
     body.appendChild(chips);
 
-    for (const coll of (ind.collections || [])) {
+    for (const coll of (ind.collections || []).filter(coll => !primaryManage() || coll.half === manageHalf)) {
       const crow = document.createElement("div");
       crow.className = "node-row collection" + (isNotScored ? " not-scored" : "");
       crow.innerHTML =
@@ -2160,6 +2218,13 @@ function renderUnit(unit) {
         crow.appendChild(makeIconBtn("🗑", "del", () => deleteCollection(coll)));
       }
       chips.appendChild(crow);
+    }
+
+    if (primaryManage() && !halfCount(ind.collections || [], manageHalf) && (ind.collections || []).length) {
+      const hint = document.createElement("div");
+      hint.className = "half-empty-hint";
+      hint.textContent = "ยังไม่มีครั้งของ" + manageHalf;
+      chips.appendChild(hint);
     }
 
     if (canEdit) {
@@ -2188,12 +2253,13 @@ async function updateUnitCountsScore(unit, checkbox) {
 
   if (!nextValue) {
     const scoreCount = countScoresInUnit(unit);
-    if (scoreCount > 0) {
+    const bothMessage = primaryManage() ? halfCountsMessage(unitCollections(unit), "หน่วย") : null;
+    if (scoreCount > 0 || bothMessage) {
       const agreed = await window.crsAskConfirm({
-        title: "ตั้งหน่วยใหญ่เป็นไม่คิดคะแนน",
-        message: "หน่วย ‘" + unit.name + "’ มีคะแนนอยู่ " + scoreCount +
-          " ช่อง จะไม่ถูกนำไปคิด\n\nคะแนนไม่ถูกลบ ติ๊กกลับมาได้ตลอด",
-        okLabel: "ไม่คิดคะแนนทั้งหน่วย"
+        title: bothMessage ? "ไม่คิดคะแนนหน่วย “" + unit.name + "”?" : "ตั้งหน่วยใหญ่เป็นไม่คิดคะแนน",
+        message: (bothMessage || "หน่วย ‘" + unit.name + "’ มีคะแนนอยู่ " + scoreCount + " ช่อง จะไม่ถูกนำไปคิด") +
+          (scoreCount && bothMessage ? " · มีคะแนนอยู่ " + scoreCount + " ช่อง" : "") + "\n\nคะแนนไม่ถูกลบ ติ๊กกลับมาได้ตลอด",
+        okLabel: bothMessage ? "ไม่คิดคะแนนทั้งสองช่วง" : "ไม่คิดคะแนนทั้งหน่วย"
       });
       if (!agreed) { checkbox.checked = true; return; }
     }
@@ -2223,12 +2289,13 @@ async function updateIndicatorCountsScore(indicator, checkbox) {
 
   if (!nextValue) {
     const scoreCount = countScoresInIndicator(indicator);
-    if (scoreCount > 0) {
+    const bothMessage = primaryManage() ? halfCountsMessage(indicator.collections || [], "ตัวชี้วัด") : null;
+    if (scoreCount > 0 || bothMessage) {
       const agreed = await window.crsAskConfirm({
-        title: "ตั้งตัวชี้วัดเป็นไม่คิดคะแนน",
-        message: "ตัวชี้วัด ‘" + indicator.name + "’ มีคะแนนนักเรียนอยู่แล้ว " + scoreCount +
-          " ช่อง\n\nคะแนนจะไม่ถูกลบ ติ๊กกลับมาได้ตลอด",
-        okLabel: "ไม่คิดคะแนน"
+        title: bothMessage ? "ไม่คิดคะแนนตัวชี้วัด “" + indicator.name + "”?" : "ตั้งตัวชี้วัดเป็นไม่คิดคะแนน",
+        message: (bothMessage || "ตัวชี้วัด ‘" + indicator.name + "’ มีคะแนนนักเรียนอยู่แล้ว " + scoreCount + " ช่อง") +
+          (scoreCount && bothMessage ? " · มีคะแนนอยู่ " + scoreCount + " ช่อง" : "") + "\n\nคะแนนจะไม่ถูกลบ ติ๊กกลับมาได้ตลอด",
+        okLabel: bothMessage ? "ไม่คิดคะแนนทั้งสองช่วง" : "ไม่คิดคะแนน"
       });
       if (!agreed) {
         checkbox.checked = true;
@@ -2285,6 +2352,14 @@ function openNodeModal(type, mode, ref) {
   document.getElementById("collection-max-note").style.display = type === "collection" && mode === "edit" ? "block" : "none";
   mNote.style.display = "none";
   mCoreField.style.display = "none";
+  const halfField = document.getElementById("modal-half-field");
+  const halfCollections = type === "unit" && mode === "edit" ? unitCollections(ref) :
+    type === "collection" && mode === "edit" ? [ref] : [];
+  halfField.hidden = !primaryManage() || mode !== "edit" || type === "indicator" || !halfCollections.length;
+  const currentHalves = new Set(halfCollections.map(coll => coll.half));
+  halfField.querySelectorAll('input[name="modal-half"]').forEach(input => {
+    input.checked = currentHalves.size === 1 && currentHalves.has(input.value);
+  });
 
   // collection ไม่มีชื่อ ซ่อนฟิลด์ชื่อ
   mNameField.style.display = (type === "collection") ? "none" : "block";
@@ -2446,7 +2521,13 @@ async function saveNode() {
   } else {
     table = "collections";
     payload = { max_score: max, seq };
-    if (mode === "add") payload.indicator_id = modalContext.parent.id;
+    if (mode === "add") {
+      payload.indicator_id = modalContext.parent.id;
+      if (primaryManage()) payload.half = manageHalf;
+    } else if (primaryManage()) {
+      const chosen = document.querySelector('input[name="modal-half"]:checked')?.value;
+      if (chosen) payload.half = chosen;
+    }
   }
 
   if (type === "collection" && mode === "edit" && max < Number(modalContext.node.max_score)) {
@@ -2468,8 +2549,20 @@ async function saveNode() {
   }
   if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
 
+  if (type === "unit" && mode === "edit" && primaryManage()) {
+    const chosen = document.querySelector('input[name="modal-half"]:checked')?.value;
+    const ids = chosen ? unitCollections(modalContext.node).filter(coll => coll.half !== chosen).map(coll => coll.id) : [];
+    if (ids.length) {
+      const { data:moved, error:moveError } = await sb.from("collections").update({ half:chosen }).in("id", ids).select("id");
+      if (moveError || moved?.length !== ids.length) {
+        showToast("ย้ายช่วงไม่สำเร็จ: " + (moveError?.message || "บันทึกได้ไม่ครบ"), false);
+        await loadStructure(); return;
+      }
+    }
+  }
+
   elOverlay.classList.remove("show");
-  showToast("บันทึกแล้ว", true);
+  showToast(type === "collection" && mode === "add" && primaryManage() ? "เพิ่มครั้งที่ " + seq + " · เป็น" + manageHalf : "บันทึกแล้ว", true);
   await loadStructure();
 }
 

@@ -1483,7 +1483,7 @@ export async function getRosterForSubject(subjectId) {
 }
 
 // ความคืบหน้าหน้ากรอกคะแนนนับเฉพาะนักเรียนที่อยู่ใน roster และห้องที่เลือก
-export function computeEntryProgress({ units = [], roster = [], examScores = [], roomFilter = "" }) {
+export function computeEntryProgress({ units = [], roster = [], examScores = [], roomFilter = "", half = null }) {
   const visible = (roster || []).filter(student => !roomFilter || attendanceRoomLabel(student.grade_level, student.classroom) === roomFilter);
   const ids = new Set(visible.map(student => student.id));
   const kinds = { "วิชา": [], "สมรรถนะหลัก": [] };
@@ -1491,7 +1491,8 @@ export function computeEntryProgress({ units = [], roster = [], examScores = [],
   for (const unit of (units || []).filter(u => u.counts_score !== false)) {
     const indicators = [];
     for (const indicator of (unit.indicators || []).slice().sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).filter(i => i.counts_score !== false)) {
-      const collections = (indicator.collections || []).slice().sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).map(collection => {
+      const collections = (indicator.collections || []).filter(collection => !half || collection.half === half)
+        .slice().sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0)).map(collection => {
         const filled = new Set((collection.scores || []).filter(score => ids.has(score.student_id)).map(score => score.student_id)).size;
         const total = visible.length;
         const state = total > 0 && filled === total ? "done" : filled > 0 ? "part" : "empty";
@@ -1502,11 +1503,11 @@ export function computeEntryProgress({ units = [], roster = [], examScores = [],
         }
         return { ...collection, collectionId: collection.id, seq: collection.seq, max: Number(collection.max_score), filled, total, state };
       });
-      indicators.push({ ...indicator, collections, doneCount:collections.filter(c => c.state === "done").length, collectionCount:collections.length });
+      if (!half || collections.length) indicators.push({ ...indicator, collections, doneCount:collections.filter(c => c.state === "done").length, collectionCount:collections.length });
     }
-    if (kinds[unit.kind]) kinds[unit.kind].push({ ...unit, indicators });
+    if (kinds[unit.kind] && (!half || indicators.length)) kinds[unit.kind].push({ ...unit, indicators });
   }
-  const scored = new Set((examScores || []).filter(score => ids.has(score.student_id)).map(score => score.student_id));
+  const scored = new Set((examScores || []).filter(score => ids.has(score.student_id) && (!half || score.half === half)).map(score => score.student_id));
   return { kinds, units:kinds, collectDone, collectTotal, partCount, exam:{ filled:scored.size, total:visible.length } };
 }
 
@@ -2032,7 +2033,7 @@ export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
       .select("*, attendance_records(*)")
       .eq("subject_id", subjectId),
     sb.from("makeup_hours").select("*").eq("subject_id", subjectId),
-    sb.from("exam_scores").select("id, subject_id, student_id, raw_score, updated_at").eq("subject_id", subjectId),
+    sb.from("exam_scores").select("id, subject_id, student_id, half, raw_score, updated_at").eq("subject_id", subjectId),
     weightsPromise
   ]);
   const namedResults = [
@@ -2064,6 +2065,147 @@ export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
 // แต่ละตัวที่เป็นสมาชิกของวิชาบูรณาการ
 // skipMs = true เมื่อวิชานี้เป็นสมาชิกของวิชาบูรณาการ — มส. ของวิชาย่อยไม่ตัดสินรายตัว
 // แต่ไปคิด "แบบรวม" ที่ระดับวิชาบูรณาการแทน (ยืนยันกับผู้ใช้แล้ว 2026-07 ดู computeIntegratedResult)
+const PRIMARY_HALVES = ["กลางปี", "ปลายปี"];
+
+// แถบเลือกช่วงใช้หน้าตาและพฤติกรรมเดียวกันในหน้าจัดการโครงสร้างกับหน้ากรอกคะแนน
+export function renderPrimaryHalfBar(container, half, summary, onChange) {
+  if (!document.getElementById("crs-primary-half-style")) {
+    const style = document.createElement("style");
+    style.id = "crs-primary-half-style";
+    style.textContent = `.primary-half-bar{display:grid;gap:8px;padding:12px 14px;margin-bottom:14px;background:var(--white);border:1px solid var(--line);border-radius:12px}` +
+      `.primary-half-pick{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}` +
+      `.primary-half-pick button{flex:1;font:inherit;font-size:17px;font-weight:600;min-height:48px;border:0;border-radius:0;background:var(--white);color:var(--muted);cursor:pointer}` +
+      `.primary-half-pick button+button{border-left:1px solid var(--line)}` +
+      `.primary-half-pick button[aria-pressed=true][data-half='กลางปี']{background:var(--teal);color:var(--white)}` +
+      `.primary-half-pick button[aria-pressed=true][data-half='ปลายปี']{background:var(--end,#3d4f8a);color:var(--white)}` +
+      `.primary-half-pick button:focus-visible{outline:3px solid var(--amber);outline-offset:-3px}` +
+      `.primary-half-summary{font-size:14px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}` +
+      `.primary-half-link{font:inherit;color:var(--teal);background:none;border:0;text-decoration:underline;min-height:44px;padding:6px;cursor:pointer}`;
+    document.head.appendChild(style);
+  }
+  container.innerHTML = `<div class="primary-half-pick" role="group" aria-label="เลือกช่วงคะแนน">` +
+    PRIMARY_HALVES.map(value => `<button type="button" data-half="${value}" aria-pressed="${value === half}">${value}</button>`).join("") +
+    `</div><div class="primary-half-summary" role="status">${summary}</div>`;
+  container.classList.add("primary-half-bar");
+  container.querySelectorAll("[data-half]").forEach(button => button.addEventListener("click", () => {
+    if (button.dataset.half !== half) onChange(button.dataset.half);
+  }));
+}
+
+// ครั้งที่เป็นตัวแบ่งช่วง ส่วนคะแนนของข้อ/หน่วยใช้ฐานทั้งปีเพื่อไม่ให้ข้อที่แบ่งสองช่วงถูกนับซ้ำ
+function computePrimaryHalves(studentId, subj, unitsTree, examScores, collectWeight, examWeight) {
+  const halves = Object.fromEntries(PRIMARY_HALVES.map(half => [half, {
+    hasStructure:false, collectPart:0, examPart:0, score:0, complete:false,
+    partialPercent:null, examScored:false, examOverCap:false,
+    collectScoredCount:0, collectExpectedCount:0
+  }]));
+  const subjectUnits = [], competencyUnits = [], notScoredUnits = [];
+  let notScoredIndicatorCount = 0;
+  for (const unit of unitsTree) {
+    if (unit.counts_score === false) {
+      if (unit.kind === "วิชา") notScoredUnits.push(unit.name);
+      continue;
+    }
+    const indicators = (unit.indicators || []).filter(ind => ind.counts_score !== false);
+    const notScoredCount = (unit.indicators || []).length - indicators.length;
+    if (unit.kind === "วิชา") notScoredIndicatorCount += notScoredCount;
+    const active = indicators.map(ind => {
+      const collections = ind.collections || [];
+      return { ind, collections, cap:collections.reduce((sum, coll) => sum + Number(coll.max_score || 0), 0) };
+    }).filter(row => row.collections.length);
+    const indMaxAll = active.reduce((sum, row) => sum + Number(row.ind.max_score), 0);
+    const unitMax = Number(unit.max_score);
+    const parts = {};
+    for (const half of PRIMARY_HALVES) {
+      let earned = 0, available = 0, partialEarned = 0, partialAvailable = 0;
+      let expected = 0, scored = 0;
+      for (const { ind, collections, cap } of active) {
+        const chosen = collections.filter(coll => coll.half === half);
+        if (!chosen.length || cap <= 0) continue;
+        let raw = 0, capH = 0, rawPartial = 0, capPartial = 0;
+        for (const coll of chosen) {
+          const max = Number(coll.max_score) || 0;
+          capH += max; expected++;
+          const score = (coll.scores || []).find(row => row.student_id === studentId);
+          if (score) { raw += Number(score.raw_score); rawPartial += Number(score.raw_score); capPartial += max; scored++; }
+        }
+        available += Number(ind.max_score) * capH / cap;
+        earned += Number(ind.max_score) * raw / cap;
+        if (capPartial > 0) {
+          partialEarned += Number(ind.max_score) * rawPartial / capPartial;
+          partialAvailable += Number(ind.max_score);
+        }
+      }
+      const max = indMaxAll > 0 ? unitMax * available / indMaxAll : 0;
+      const scaled = indMaxAll > 0 ? unitMax * earned / indMaxAll : 0;
+      const partialScaled = partialAvailable > 0 ? unitMax * partialEarned / partialAvailable : 0;
+      parts[half] = { scaled, max, partialScaled, hasPartial:partialAvailable > 0 };
+      if (unit.kind === "วิชา" && max > 0) {
+        const h = halves[half];
+        h._raw = (h._raw || 0) + scaled;
+        h._cap = (h._cap || 0) + max;
+        if (partialAvailable > 0) {
+          h._partialRaw = (h._partialRaw || 0) + partialScaled;
+          h._partialCap = (h._partialCap || 0) + unitMax;
+        }
+        h.collectExpectedCount += expected;
+        h.collectScoredCount += scored;
+      }
+    }
+    const totalScaled = parts["กลางปี"].scaled + parts["ปลายปี"].scaled;
+    if (unit.kind === "วิชา") subjectUnits.push({ name:unit.name, scaled:totalScaled, max:unit.max_score, notScoredCount, halves:parts });
+    else {
+      const availableHalves = PRIMARY_HALVES.filter(half => parts[half].max > 0);
+      const scaled = availableHalves.length ? availableHalves.reduce((sum, half) => sum +
+        (parts[half].scaled / parts[half].max) * unitMax, 0) / availableHalves.length : 0;
+      competencyUnits.push({ name:unit.name, scaled, max:unit.max_score, notScoredCount,
+        halves:Object.fromEntries(PRIMARY_HALVES.map(half => [half, {
+          scaled:parts[half].max > 0 ? parts[half].scaled / parts[half].max * unitMax : null,
+          max:unit.max_score
+        }])) });
+    }
+  }
+  for (const half of PRIMARY_HALVES) {
+    const h = halves[half];
+    h.hasStructure = h._cap > 0 && h.collectExpectedCount > 0;
+    h.collectPart = h.hasStructure ? h._raw / h._cap * collectWeight : 0;
+    const examRow = (examScores || []).find(row => row.student_id === studentId && row.half === half);
+    h.examPart = examRow ? Number(examRow.raw_score) : 0;
+    h.examOverCap = Boolean(examRow) && h.examPart > examWeight + 0.000001;
+    h.examScored = Boolean(examRow) && !h.examOverCap;
+    h.score = h.collectPart + h.examPart;
+    h.complete = h.hasStructure && h.collectExpectedCount === h.collectScoredCount && h.examScored;
+    const partialCollect = h._partialCap > 0 ? h._partialRaw / h._partialCap * collectWeight : null;
+    const partialEarned = (partialCollect ?? 0) + (h.examScored ? h.examPart : 0);
+    const partialCap = (partialCollect === null ? 0 : collectWeight) + (h.examScored ? examWeight : 0);
+    h.partialPercent = partialCap > 0 ? partialEarned / partialCap * 100 : null;
+    delete h._raw; delete h._cap; delete h._partialRaw; delete h._partialCap;
+  }
+  const mid = halves["กลางปี"], end = halves["ปลายปี"];
+  const collectPart = (mid.collectPart + end.collectPart) / 2;
+  const examPart = (mid.examPart + end.examPart) / 2;
+  const scoring = {
+    expectedCount:mid.collectExpectedCount + end.collectExpectedCount + 2,
+    scoredCount:mid.collectScoredCount + end.collectScoredCount + Number(mid.examScored) + Number(end.examScored),
+    collectExpectedCount:mid.collectExpectedCount + end.collectExpectedCount,
+    collectScoredCount:mid.collectScoredCount + end.collectScoredCount,
+    notScoredIndicatorCount, notScoredUnits, emptyIndicatorCount:0, emptyUnitCount:0,
+    hasCollectStructure:mid.hasStructure && end.hasStructure,
+    examScored:mid.examScored && end.examScored,
+    examOverCap:mid.examOverCap || end.examOverCap,
+    complete:mid.complete && end.complete,
+    partialPercent:[mid.partialPercent,end.partialPercent].filter(value => value !== null).length
+      ? [mid.partialPercent,end.partialPercent].filter(value => value !== null).reduce((sum,value) => sum + value, 0) /
+        [mid.partialPercent,end.partialPercent].filter(value => value !== null).length : null
+  };
+  const percentScore = (mid.score + end.score) / 2;
+  return { halves, subjectUnits, competencyUnits, subjectScaled:(mid.collectPart + end.collectPart) / 2 *
+    (collectWeight > 0 ? Number(subj.max_score) / collectWeight : 0),
+    collectPercent:collectWeight > 0 ? collectPart / collectWeight * 100 : 0,
+    collectPart, examPart, scoring,
+    result:{ type:"grade", grade:percentToGrade(percentScore), percentScore, makeupTotal:0 } };
+}
+
 export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, sessionsArr, makeupArr, options = {}) {
   const { skipMs = false, examScores = [], gradeWeight = null } = options || {};
   if (!gradeWeight || gradeWeight.level !== subj.level || gradeWeight.year !== subj.year) {
@@ -2076,6 +2218,11 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   const examWeight = Number(gradeWeight.exam_weight);
   if (!Number.isFinite(collectWeight) || !Number.isFinite(examWeight) || Math.abs(collectWeight + examWeight - 100) > 0.000001) {
     throw new Error("อัตราส่วนคะแนนของระดับ “" + subj.level + "” ไม่ถูกต้อง");
+  }
+  const primaryCollections = unitsTree.flatMap(unit => unit.indicators || []).flatMap(ind => ind.collections || []);
+  if (subj.level === "ประถม" && (primaryCollections.length === 0 ||
+    primaryCollections.some(coll => PRIMARY_HALVES.includes(coll.half)))) {
+    return computePrimaryHalves(studentId, subj, unitsTree, examScores, collectWeight, examWeight);
   }
   const examRow = (examScores || []).find(row => row.student_id === studentId) || null;
   const examPart = examRow ? Number(examRow.raw_score) : 0;
@@ -2259,6 +2406,13 @@ export function computeIntegratedResult(studentId, memberDataList) {
   let examOverCap = false;
   let partialWeightedSum = 0, partialWeightSum = 0;
   let totalBase = 0, rawMissed = 0, makeupTotal = 0, anySessions = false;
+  const halfTotals = Object.fromEntries(PRIMARY_HALVES.map(half => [half, {
+    weightedScore:0, weightedCollect:0, weightedExam:0, weight:0,
+    complete:memberDataList.length > 0, hasStructure:memberDataList.length > 0,
+    examScored:memberDataList.length > 0, examOverCap:false,
+    collectScoredCount:0, collectExpectedCount:0, partialWeighted:0, partialWeight:0
+  }]));
+  let hasPrimaryHalves = false;
 
   for (const md of memberDataList) {
     // skipMs = true: วิชาย่อยไม่ตัดสิน มส. รายตัว (คิดรวมข้างล่างแทน) — ผลรายวิชาจึงมีแค่ ร./เกรด
@@ -2272,7 +2426,29 @@ export function computeIntegratedResult(studentId, memberDataList) {
     // เก็บสมรรถนะหลักของวิชาย่อยนี้ไว้ด้วย (ถ้ามี) — แสดงแยกตามวิชาที่กรอกไว้จริง ไม่ถัวเฉลี่ยรวม
     // เพราะสมรรถนะหลักมักกรอกแค่บางวิชา ถัวเฉลี่ยรวมกับวิชาที่ไม่มีข้อมูลจะทำให้คะแนนต่ำลงผิดๆ
     // missedPeriods เก็บไว้โชว์รายวิชา ให้ครูเห็นว่าเด็กขาดหนักที่วิชาย่อยไหน
-    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed, scoring: r.scoring });
+    memberResults.push({ subject: md.subject, result: r.result, weight, competencyUnits: r.competencyUnits, missedPeriods: missed, scoring: r.scoring, halves:r.halves });
+    if (r.halves) {
+      hasPrimaryHalves = true;
+      for (const half of PRIMARY_HALVES) {
+        const part = r.halves[half], total = halfTotals[half];
+        if (weight > 0) {
+          total.weight += weight;
+          total.weightedScore += part.score * weight;
+          total.weightedCollect += part.collectPart * weight;
+          total.weightedExam += part.examPart * weight;
+          if (part.partialPercent !== null) {
+            total.partialWeighted += part.partialPercent * weight;
+            total.partialWeight += weight;
+          }
+        }
+        total.complete &&= part.complete;
+        total.hasStructure &&= part.hasStructure;
+        total.examScored &&= part.examScored;
+        total.examOverCap ||= part.examOverCap;
+        total.collectScoredCount += part.collectScoredCount;
+        total.collectExpectedCount += part.collectExpectedCount;
+      }
+    }
     expectedCount += r.scoring.expectedCount;
     scoredCount += r.scoring.scoredCount;
     collectExpectedCount += r.scoring.collectExpectedCount;
@@ -2342,10 +2518,24 @@ export function computeIntegratedResult(studentId, memberDataList) {
     hasCollectStructure,
     examScored,
     examOverCap,
-    complete: hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount && emptyIndicatorCount === 0 && emptyUnitCount === 0,
+    complete: hasPrimaryHalves ? PRIMARY_HALVES.every(half => halfTotals[half].complete) :
+      hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount && emptyIndicatorCount === 0 && emptyUnitCount === 0,
     partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null
   };
-  return { memberResults, overall, scoring, totalBase, rawMissed, makeupTotal, noPeriodSubjects };
+  const halves = hasPrimaryHalves ? Object.fromEntries(PRIMARY_HALVES.map(half => {
+    const total = halfTotals[half], weight = total.weight;
+    return [half, {
+      hasStructure:total.hasStructure && weight > 0,
+      collectPart:weight > 0 ? total.weightedCollect / weight : 0,
+      examPart:weight > 0 ? total.weightedExam / weight : 0,
+      score:weight > 0 ? total.weightedScore / weight : 0,
+      complete:total.complete && weight > 0,
+      partialPercent:total.partialWeight > 0 ? total.partialWeighted / total.partialWeight : null,
+      examScored:total.examScored, examOverCap:total.examOverCap,
+      collectScoredCount:total.collectScoredCount, collectExpectedCount:total.collectExpectedCount
+    }];
+  })) : undefined;
+  return { memberResults, overall, scoring, halves, totalBase, rawMissed, makeupTotal, noPeriodSubjects };
 }
 
 // ---------- วิชาที่ "นับได้" ในรายงานเกรด/ซ้ำชั้น ----------

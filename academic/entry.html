@@ -39,6 +39,12 @@ button:disabled { opacity:.55; cursor:default; } .primary,.save { background:var
 .tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-bottom:16px; border-bottom:1px solid var(--line); } .tabs button { background:transparent; color:var(--muted); white-space:normal; overflow-wrap:anywhere; border-radius:0; border-bottom:3px solid transparent; padding:8px 4px; }
 .tabs button.active { color:var(--teal); border-color:var(--teal); font-weight:600; }
 .unit { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; } .unit-title { font-weight:600; background:var(--bg); margin:-12px -12px 8px; padding:6px 12px 6px 16px; border-bottom:1px solid var(--line); border-radius:9px 9px 0 0; box-shadow:inset 4px 0 0 var(--teal); }
+.primary-inactive-units { border:1px solid var(--line); border-radius:10px; padding:6px 10px; margin-top:12px; background:var(--bg); }
+.primary-inactive-units > summary { min-height:44px; display:flex; align-items:center; cursor:pointer; font-weight:600; color:var(--ink); }
+.primary-inactive-units > summary::before { content:"▸"; margin-right:8px; color:var(--teal); }
+.primary-inactive-units[open] > summary::before { content:"▾"; }
+.primary-inactive-units .unit { background:var(--white); }
+.primary-empty-indicator { color:var(--muted); font-size:13px; align-self:center; }
 .indicator { border-top:1px solid var(--line); padding:10px 0; } .unit-title + .indicator { border-top:0; } .indicator-title { font-weight:600; }
 .unit-title,.indicator-title { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 .tree-heading-text { flex:1 1 120px; min-width:0; overflow-wrap:anywhere; }
@@ -181,6 +187,7 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 </section>
 <section id="subject-view" hidden>
   <div class="card"><div class="toolbar subject-toolbar"><button id="back-subjects" class="ghost">‹ วิชาของฉัน</button><select id="desktop-subject-select" class="desktop-only" aria-label="เปลี่ยนวิชา"></select><span id="subject-student-count" class="meta desktop-only subject-student-count"></span></div><h2 id="subject-title"></h2><div id="subject-meta" class="meta"></div><div id="room-chips" class="room-chips"></div></div>
+  <div id="entry-half-bar" hidden></div>
   <div class="entry-grid"><div class="tree-pane"><div class="card"><div class="tabs" role="tablist"><button data-tab="วิชา" class="active">คะแนนเก็บ</button><button data-tab="สมรรถนะหลัก">สมรรถนะหลัก</button><button data-tab="สอบ">สอบปลายภาค · ร.</button></div><div id="structure-tree"></div></div></div><div id="right-pane"><div class="card empty">เลือกครั้งที่จากต้นไม้เพื่อกรอกคะแนน</div></div></div>
 </section>
 <section id="entry-view" hidden>
@@ -193,12 +200,12 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
   <div id="mobile-score-list" class="card"></div><div id="mobile-exam-details"></div>
 </section>
 <div id="save-bar" class="save-bar" hidden><button id="prev-collection" class="ghost mobile-only" aria-label="ครั้งก่อน">‹</button><div class="save-main"><button id="save-scores" class="primary">บันทึกคะแนน</button><div id="save-status" class="hint" role="status"></div></div><button id="next-collection" class="ghost mobile-only" aria-label="ครั้งถัดไป">›</button></div>
-<div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" hidden><label id="confirm-type-label" for="confirm-type-input"></label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="field" id="confirm-note-field" hidden><label id="confirm-note-label" for="confirm-note-input">หมายเหตุ (ไม่บังคับ)</label><input id="confirm-note-input" type="text" maxlength="100" placeholder="เช่น ใบงานที่ 3 · 12 ก.ย." autocomplete="off"></div><div class="modal-actions"><button id="confirm-cancel" class="ghost">ยกเลิก</button><button id="confirm-ok" class="primary">ยืนยัน</button></div></div></div>
+<div class="overlay" id="confirm-overlay"><div class="modal"><h3 id="confirm-title">ยืนยัน</h3><div class="meta" id="confirm-message"></div><div class="field" id="confirm-type-field" hidden><label id="confirm-type-label" for="confirm-type-input"></label><input id="confirm-type-input" type="text" autocomplete="off"></div><div class="field" id="confirm-note-field" hidden><label id="confirm-note-label" for="confirm-note-input">หมายเหตุ (ไม่บังคับ)</label><input id="confirm-note-input" type="text" maxlength="100" placeholder="เช่น ใบงานที่ 3 · 12 ก.ย." autocomplete="off"></div><fieldset id="confirm-half-field" class="field" hidden><legend>ช่วง</legend><label><input type="radio" name="confirm-half" value="กลางปี"> กลางปี</label><label><input type="radio" name="confirm-half" value="ปลายปี"> ปลายปี</label><div class="hint">คะแนนที่กรอกแล้วไม่หาย</div></fieldset><div class="modal-actions"><button id="confirm-cancel" class="ghost">ยกเลิก</button><button id="confirm-ok" class="primary">ยืนยัน</button></div></div></div>
 <div class="overlay" id="remark-overlay"><div class="modal remark-dialog" role="dialog" aria-modal="true" aria-labelledby="remark-dialog-title" aria-describedby="remark-dialog-student"><h3 id="remark-dialog-title">ติด ร. วิชานี้</h3><div id="remark-dialog-student" class="meta"></div><form id="remark-form"><div class="field"><label>งานที่ค้าง *</label><div class="hint">ระบบดึงครั้งที่ยังไม่มีคะแนนมาให้ · ติ๊กงานที่ต้องส่ง</div><div id="remark-work-list" class="remark-work-list"></div></div><div class="field"><label for="remark-note">หมายเหตุเพิ่มเติม</label><div class="hint">ไม่บังคับถ้าติ๊กงานแล้ว · พิมพ์บรรทัดละเรื่อง</div><textarea id="remark-note" rows="4" placeholder="พิมพ์บรรทัดละเรื่อง เช่น ส่งงานภายในวันที่…"></textarea></div><div id="remark-preview" class="remark-preview" aria-live="polite" hidden></div><div id="remark-error" class="remark-error" role="alert" hidden></div><div class="remark-save-note">กดยืนยันแล้วบันทึกทันที ไม่ต้องกดบันทึกคะแนน</div><div class="modal-actions"><button id="remark-cancel" type="button" class="ghost">ยกเลิก</button><button id="remark-submit" type="submit" class="primary">ติด ร.</button></div></form></div></div>
 <div id="toast" class="toast"></div>
 </main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs } from "../supabase-client.js?v=20261011-5";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261011-6";
 const $ = id => document.getElementById(id);
 function escapeHtml(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const session = await requireAuth();
@@ -214,6 +221,15 @@ let overviewUnits = new Map(), overviewRosters = new Map(), overviewExams = new 
 let roomFilter = "", tab = "วิชา", selection = null, showAll = false, view = "subjects", busy = false;
 let inputOriginal = new Map(), inputNext = new Map(), inputsLoadedFor = null;
 let currentGradeWeight = null, currentExamScores = [], remarkRecords = [];
+let academicYears = [], entryHalf = "กลางปี";
+const isPrimaryEntry = () => currentSubject?.level === "ประถม";
+const otherHalf = half => half === "กลางปี" ? "ปลายปี" : "กลางปี";
+const examScoresForHalf = () => isPrimaryEntry() ? currentExamScores.filter(row => row.half === entryHalf) : currentExamScores;
+const visibleCollections = indicator => (indicator?.collections || []).filter(coll => !isPrimaryEntry() || coll.half === entryHalf);
+const halfForSubject = subject => {
+  const start = academicYears.find(row => String(row.year) === String(subject.year))?.term2_start_date;
+  return start && toDateStr(bangkokNow()) >= start ? "ปลายปี" : "กลางปี";
+};
 let remarkOnly = false, examDetailsExpanded = false, currentExamRemarkState = new Map();
 const subjectById = id => allSubjects.find(s => s.id === id);
 // โหมดคะแนนเก็บยังใช้ได้เมื่อปี/ระดับนี้ยังไม่มีอัตราส่วนสอบ
@@ -223,7 +239,7 @@ function loadEntrySubjectData(id) { return loadSubjectData(id, entryWeightsFor(i
 const chunks = (list, size = 100) => Array.from({ length:Math.ceil(list.length/size) }, (_, i) => list.slice(i*size,(i+1)*size));
 const scoreKey = (collectionId, studentId) => collectionId + ":" + studentId;
 const visibleStudents = () => students.filter(s => !roomFilter || attendanceRoomLabel(s.grade_level,s.classroom) === roomFilter);
-const progress = () => computeEntryProgress({ units:subjectData?.units || [], roster:students, examScores:currentExamScores, roomFilter });
+const progress = () => computeEntryProgress({ units:subjectData?.units || [], roster:students, examScores:currentExamScores, roomFilter, half:isPrimaryEntry() ? entryHalf : null });
 const allCollections = () => (subjectData?.units || []).flatMap(u => u.indicators || []).flatMap(i => i.collections || []);
 function currentIndicator() { return (subjectData?.units || []).flatMap(u => u.indicators || []).find(i => i.id === selection?.indicatorId); }
 function currentCollection() { return allCollections().find(c => c.id === selection?.collectionId); }
@@ -249,7 +265,7 @@ function saveBarVisible() {
   return !!(currentSubject && (view === "entry" || (view === "subject" && ((window.innerWidth >= 1200 && selection?.collectionId) || (tab === "สอบ" && currentGradeWeight)))));
 }
 function showToast(message, ok = false) { const el = $("toast"); el.textContent = message; el.className = "toast " + (ok ? "ok" : "err"); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => el.className = "toast", 4500); }
-function askConfirm({ title, message, requireText = null, okLabel = "ยืนยัน", cancelLabel = "ยกเลิก", numberInput = null, textInput = null }) {
+function askConfirm({ title, message, requireText = null, okLabel = "ยืนยัน", cancelLabel = "ยกเลิก", numberInput = null, textInput = null, halfInput = null }) {
   return new Promise(resolve => {
     const overlay = $("confirm-overlay"), input = $("confirm-type-input"), noteInput = $("confirm-note-input"), ok = $("confirm-ok"), cancel = $("confirm-cancel");
     $("confirm-title").textContent = title; $("confirm-message").textContent = message;
@@ -260,11 +276,14 @@ function askConfirm({ title, message, requireText = null, okLabel = "ยืน�
     $("confirm-note-field").hidden = !textInput;
     $("confirm-note-label").textContent = textInput?.label || "หมายเหตุ (ไม่บังคับ)";
     noteInput.value = String(textInput?.value ?? "");
+    $("confirm-half-field").hidden = !halfInput;
+    if (halfInput) $("confirm-half-field").querySelectorAll('input[name="confirm-half"]').forEach(radio => { radio.checked = radio.value === halfInput; });
     ok.textContent = okLabel; cancel.textContent = cancelLabel;
     const sync = () => { const n = Number(input.value); ok.disabled = numberInput ? !(input.value !== "" && Number.isInteger(n) && n > 0) : requireText ? input.value.trim() !== requireText : false; };
     const close = result => { overlay.classList.remove("show"); ok.onclick = cancel.onclick = input.oninput = overlay.onclick = null; document.removeEventListener("keydown", onKey); resolve(result); };
     const onKey = event => { if (event.key === "Escape") close(false); };
-    ok.onclick = () => close(numberInput && textInput ? { maxScore:Number(input.value), note:noteInput.value } : numberInput ? Number(input.value) : textInput ? noteInput.value : true); cancel.onclick = () => close(false);
+    ok.onclick = () => close(numberInput && textInput ? { maxScore:Number(input.value), note:noteInput.value,
+      ...(halfInput ? { half:$("confirm-half-field").querySelector('input[name="confirm-half"]:checked')?.value } : {}) } : numberInput ? Number(input.value) : textInput ? noteInput.value : true); cancel.onclick = () => close(false);
     overlay.onclick = event => { if (event.target === overlay) close(false); }; input.oninput = sync; document.addEventListener("keydown", onKey); sync(); overlay.classList.add("show"); setTimeout(() => (requireText || numberInput ? input : textInput ? noteInput : ok).focus(), 0);
   });
 }
@@ -314,12 +333,12 @@ async function loadOverview(ids) {
   // แบ่งก้อนเพื่อไม่ยิงหนึ่งคำขอต่อวิชา และดึงคะแนนแยกเพื่อไม่ชนเพดาน embed 1,000 แถว
   const groups = chunks(ids);
   const unitResults = await Promise.all(groups.map(group => sb.from("units")
-    .select("id,subject_id,name,kind,max_score,seq,counts_score,indicators(id,unit_id,name,max_score,seq,counts_score,collections(id,seq,max_score))")
+    .select("id,subject_id,name,kind,max_score,seq,counts_score,indicators(id,unit_id,name,max_score,seq,counts_score,collections(id,seq,max_score,half))")
     .in("subject_id", group)));
   const enrollmentResults = await Promise.all(groups.map(group => fetchAllRows(() => sb.from("enrollments")
     .select("id,subject_id,student:student_id(id,name,student_no,classroom,grade_level)").in("subject_id", group))));
   const examResults = await Promise.all(groups.map(group => fetchAllRows(() => sb.from("exam_scores")
-    .select("id,subject_id,student_id,raw_score").in("subject_id", group))));
+    .select("id,subject_id,student_id,half,raw_score").in("subject_id", group))));
   for (const result of [...unitResults, ...enrollmentResults, ...examResults]) if (result.error) throw new Error(result.error.message);
   for (const unit of unitResults.flatMap(r => r.data || [])) { const list = overviewUnits.get(unit.subject_id) || []; list.push(unit); overviewUnits.set(unit.subject_id, list); }
   for (const row of enrollmentResults.flatMap(r => r.data || [])) { if (!row.student) continue; const list = overviewRosters.get(row.subject_id) || []; list.push(row.student); overviewRosters.set(row.subject_id, list); }
@@ -339,12 +358,13 @@ async function renderSubjects() {
   if (!list.length) { $("subject-list").innerHTML = "<div class='card empty'>ยังไม่มีวิชาที่คุณเป็นเจ้าของในภาคนี้</div>"; return; }
   const groups = showAll ? [...new Set(list.map(s => s.grade_level))].sort((a,b) => GRADE_ORDER.indexOf(a) - GRADE_ORDER.indexOf(b)) : [null];
   $("subject-list").innerHTML = groups.map(grade => (grade ? "<div class='kind-group section'>" + escapeHtml(grade) + "</div>" : "") + list.filter(s => !grade || s.grade_level === grade).map(s => {
-    const p = computeEntryProgress({ units:overviewUnits.get(s.id) || [], roster:overviewRosters.get(s.id) || [], examScores:overviewExams.get(s.id) || [] });
+    const subjectHalf = s.level === "ประถม" ? halfForSubject(s) : null;
+    const p = computeEntryProgress({ units:overviewUnits.get(s.id) || [], roster:overviewRosters.get(s.id) || [], examScores:overviewExams.get(s.id) || [], half:subjectHalf });
     const member = memberships.get(s.id);
     const weight = gradeWeights.find(w => w.year === s.year && w.level === s.level);
     const missingExam = Math.max(0, p.exam.total - p.exam.filled);
     const action = nextEntryAction(p);
-    const remaining = [!p.exam.total ? "ยังไม่มีรายชื่อนักเรียน" : weight ? (missingExam ? "สอบปลายภาค (ขาด " + missingExam + " คน)" : "") : "ยังไม่มีอัตราส่วนคะแนนสอบ", !s.exam_closed_at ? "ยังไม่ปิดคะแนนสอบ" : ""].filter(Boolean);
+    const remaining = [!p.exam.total ? "ยังไม่มีรายชื่อนักเรียน" : weight ? (missingExam ? "สอบ" + (subjectHalf || "ปลายภาค") + " (ขาด " + missingExam + " คน)" : "") : "ยังไม่มีอัตราส่วนคะแนนสอบ", !s.exam_closed_at ? "ยังไม่ปิดคะแนนสอบ" : ""].filter(Boolean);
     return `<div class="subject-card" data-subject="${escapeHtml(s.id)}"><button class="subject-open"><div class="meta">${escapeHtml(s.code || "ไม่มีรหัส")} · ${escapeHtml(s.grade_level || "")} ${s.level === "มัธยม" && s.credits != null ? "· " + escapeHtml(s.credits) + " หน่วยกิต" : ""}</div><div class="subject-name">${escapeHtml(s.name)}</div>${member ? `<div class="meta">วิชาย่อยของ “${escapeHtml(member.name)}”</div>` : ""}<div class="meta">ปี ${escapeHtml(s.year)}${s.term ? " · ภาค " + escapeHtml(s.term) : ""}</div></button><div class="subject-progress"><div class="progress"><span style="width:${p.collectTotal ? 100*p.collectDone/p.collectTotal : 0}%"></span></div><span class="hint">ครบ ${p.collectDone}/${p.collectTotal} ครั้ง</span></div><button class="${action.type === "view" ? "ghost" : "primary"} subject-continue" data-entry-action="${action.type}" data-collection="${escapeHtml(action.id || "")}">${escapeHtml(action.label)}${action.detail ? `<small title="${escapeHtml(action.detail)}">${escapeHtml(action.detail)}</small>` : ""}</button><div class="meta subject-remaining">${escapeHtml(remaining.length ? "ยังมี: " + remaining.join(" · ") : "สอบ: ครบ " + p.exam.filled + " คน")}</div>${action.type === "open" ? `<a href="manage.html" class="meta">จัดการโครงสร้าง ›</a>` : ""}</div>`;
   }).join("")).join("");
   $("subject-list").querySelectorAll(".subject-card").forEach(card => card.addEventListener("click", async event => {
@@ -359,6 +379,7 @@ async function loadSubjects() {
   const [subjectResult, memberResult, years] = await Promise.all([sb.from("subjects").select("*").order("created_at"), sb.from("integration_members").select("member_subject_id,integrated:integrated_subject_id(id,name)"), getAcademicYears()]);
   if (subjectResult.error) throw new Error(subjectResult.error.message); if (memberResult.error) throw new Error(memberResult.error.message);
   allSubjects = subjectResult.data || []; memberships = new Map((memberResult.data || []).map(row => [row.member_subject_id, row.integrated]));
+  academicYears = years;
   const yearsAvailable = distinctYears(allSubjects); $("filter-year").innerHTML = "<option value=''>ทุกปี</option>" + yearsAvailable.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
   const saved = getActiveYear(); $("filter-year").value = yearsAvailable.includes(saved) ? saved : "";
   const today = toDateStr(bangkokNow()), currentYear = academicYearOf(today, years);
@@ -385,6 +406,7 @@ async function openSubject(id, push = true) {
     currentGradeWeight = gradeWeights.find(
       row => row.year === currentSubject.year && row.level === currentSubject.level
     ) || null;
+    entryHalf = halfForSubject(currentSubject);
     roomFilter = ""; tab = "วิชา"; selection = null; remarkOnly = false; examDetailsExpanded = false; remarkRecords = remarksResult.data || []; resetInputs(); fillDesktopSubjectSelect();
     const params = new URLSearchParams(location.search);
     const requestedCollection = !push && params.get("subject") === id ? params.get("collection") : null;
@@ -414,19 +436,58 @@ function renderWorkspace() {
   $("subject-student-count").textContent = students.length + " คน";
   $("subject-meta").textContent = [currentSubject.code, currentSubject.grade_level, currentSubject.term ? "ภาค " + currentSubject.term : "ทั้งปี", "ปี " + currentSubject.year, students.length + " คน"].filter(Boolean).join(" · ");
   renderRooms(); $("subject-view").querySelectorAll("[data-tab]").forEach(button => button.classList.toggle("active", button.dataset.tab === tab));
+  $("subject-view").querySelector('[data-tab="สอบ"]').textContent = isPrimaryEntry() ? "สอบ" : "สอบปลายภาค · ร.";
+  const bar = $("entry-half-bar"); bar.hidden = !isPrimaryEntry();
+  if (isPrimaryEntry()) {
+    const p = progress();
+    const comp = p.kinds["สมรรถนะหลัก"].flatMap(unit => unit.indicators).flatMap(ind => ind.collections);
+    renderPrimaryHalfBar(bar, entryHalf,
+      `${entryHalf} · เก็บแล้ว ${p.collectDone}/${p.collectTotal} ครั้ง · สมรรถนะ ${comp.filter(coll => coll.state === "done").length}/${comp.length} ครั้ง · สอบ${entryHalf} ${p.exam.filled}/${p.exam.total} คน`,
+      changeEntryHalf);
+  }
   $("mobile-exam-details").replaceChildren(); $("mobile-exam-head").replaceChildren();
   renderTree(); renderRightPane();
   if (view === "entry") renderMobileEntry();
   if (tab === "สอบ") applyRemarkFilter();
   renderSaveBar();
 }
+async function changeEntryHalf(half) {
+  if (!isPrimaryEntry() || half === entryHalf || !await allowLeave()) return;
+  entryHalf = half; resetInputs(); selection = null; remarkOnly = false; examDetailsExpanded = false;
+  setView("subject");
+}
 $("subject-view").querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", async () => { if (!await allowLeave()) return; resetInputs(); tab = button.dataset.tab; selection = null; remarkOnly = false; examDetailsExpanded = false; setView(tab === "สอบ" && currentGradeWeight && window.innerWidth < 1200 ? "entry" : "subject"); }));
+function primaryEntryTreeUnits(kind, sourceUnits, activeUnits) {
+  const activeById = new Map(activeUnits.map(unit => [unit.id, unit]));
+  const decorate = unit => {
+    const current = activeById.get(unit.id);
+    const currentIndicators = new Map((current?.indicators || []).map(ind => [ind.id, ind]));
+    return { ...(current || unit), indicators:(unit.indicators || []).filter(ind => ind.counts_score !== false).map(ind =>
+      currentIndicators.get(ind.id) || { ...ind, collections:[], doneCount:0, collectionCount:0 }) };
+  };
+  const scoreable = sourceUnits.filter(unit => unit.kind === kind && unit.counts_score !== false);
+  return {
+    active:activeUnits.map(unit => decorate(scoreable.find(source => source.id === unit.id) || unit)),
+    inactive:scoreable.filter(unit => !activeById.has(unit.id)).map(decorate)
+  };
+}
 function renderTree() {
-  if (tab === "สอบ") { $("structure-tree").innerHTML = "<div class='hint'>คะแนนสอบและ ร. แสดงในรายการถัดไป</div>"; return; }
-  const units = progress().kinds[tab] || [];
-  const emptyTree = "<div class='empty'>ไม่มีตัวชี้วัดที่คิดคะแนน · เปิดคืนได้ที่ <a href='manage.html'>หน้าจัดการโครงสร้าง</a></div>";
-  if (!units.length) { $("structure-tree").innerHTML = emptyTree; return; }
-  $("structure-tree").innerHTML = units.map(unit => `<div class="unit"><div class="unit-title"><span class="tree-heading-text">${escapeHtml(unit.name)} · เต็ม ${escapeHtml(unit.max_score)}</span>${entryCountsScoreToggle("unit", unit)}</div>${unit.indicators.length ? unit.indicators.map(indicator => `<div class="indicator ${selection?.indicatorId === indicator.id ? "open-indicator" : ""}"><div class="indicator-title"><span class="tree-heading-text">${escapeHtml(indicator.name)} · เต็ม ${escapeHtml(indicator.max_score)} <span class="badge">${indicator.doneCount}/${indicator.collectionCount}</span></span>${entryCountsScoreToggle("indicator", indicator)}</div><div class="collection-list">${indicator.collections.map(collection => `<button class="tree-button ${collection.state} ${selection?.collectionId === collection.id ? "selected" : ""}" data-collection="${escapeHtml(collection.id)}">ครั้งที่ ${escapeHtml(collection.seq)}<small>${collection.state === "done" ? "✓ ครบ " + collection.total : collection.state === "part" ? collection.filled + "/" + collection.total : "ยังไม่กรอก"}</small>${collection.note ? `<small class="collection-note" title="${escapeHtml(collection.note)}">${escapeHtml(collection.note)}</small>` : ""}</button>`).join("")}<button class="ghost" data-add="${escapeHtml(indicator.id)}">+ เพิ่มครั้ง</button></div></div>`).join("") : emptyTree}</div>`).join("");
+  if (tab === "สอบ") { $("structure-tree").innerHTML = "<div class='hint'>" + (isPrimaryEntry() ? "คะแนนสอบ" + entryHalf : "คะแนนสอบและ ร.") + "แสดงในรายการถัดไป</div>"; return; }
+  const activeUnits = progress().kinds[tab] || [];
+  const sections = isPrimaryEntry() ? primaryEntryTreeUnits(tab, subjectData.units, activeUnits) : { active:activeUnits, inactive:[] };
+  const hasIndicators = [...sections.active, ...sections.inactive].some(unit => unit.indicators.length);
+  const emptyTree = isPrimaryEntry()
+    ? (hasIndicators ? "<div class='empty'>ยังไม่มีครั้งที่ของ" + entryHalf + " · กด “+ เพิ่มครั้ง” ที่ผลลัพธ์ด้านล่างได้เลย</div>"
+      : "<div class='empty'>ยังไม่มีผลลัพธ์ให้เพิ่มครั้ง · <a href='manage.html'>ไปหน้าจัดการโครงสร้าง</a></div>")
+    : "<div class='empty'>ไม่มีตัวชี้วัดที่คิดคะแนน · เปิดคืนได้ที่ <a href='manage.html'>หน้าจัดการโครงสร้าง</a></div>";
+  const renderUnit = unit => {
+    const source = subjectData.units.find(row => row.id === unit.id);
+    const away = isPrimaryEntry() ? (source?.indicators || []).flatMap(ind => ind.collections || []).filter(coll => coll.half === otherHalf(entryHalf)).length : 0;
+    return `<div class="unit"><div class="unit-title"><span class="tree-heading-text">${escapeHtml(unit.name)} · เต็ม ${escapeHtml(unit.max_score)}</span>${entryCountsScoreToggle("unit", unit)}</div>${away && unit.indicators.some(ind => ind.collectionCount) ? `<button class="primary-half-link" data-switch-half="${otherHalf(entryHalf)}">มีบางครั้งอยู่${otherHalf(entryHalf)} →</button>` : ""}${unit.indicators.length ? unit.indicators.map(indicator => `<div class="indicator ${selection?.indicatorId === indicator.id ? "open-indicator" : ""}"><div class="indicator-title"><span class="tree-heading-text">${escapeHtml(indicator.name)} · เต็ม ${escapeHtml(indicator.max_score)} ${indicator.collectionCount ? `<span class="badge">${indicator.doneCount}/${indicator.collectionCount}</span>` : ""}</span>${entryCountsScoreToggle("indicator", indicator)}</div><div class="collection-list">${indicator.collections.map(collection => `<button class="tree-button ${collection.state} ${selection?.collectionId === collection.id ? "selected" : ""}" data-collection="${escapeHtml(collection.id)}">ครั้งที่ ${escapeHtml(collection.seq)}<small>${collection.state === "done" ? "✓ ครบ " + collection.total : collection.state === "part" ? collection.filled + "/" + collection.total : "ยังไม่กรอก"}</small>${collection.note ? `<small class="collection-note" title="${escapeHtml(collection.note)}">${escapeHtml(collection.note)}</small>` : ""}</button>`).join("")}${isPrimaryEntry() && !indicator.collectionCount ? `<span class="primary-empty-indicator">ยังไม่มีครั้งของ${entryHalf}</span>` : ""}<button class="ghost" data-add="${escapeHtml(indicator.id)}">+ เพิ่มครั้ง</button></div></div>`).join("") : (isPrimaryEntry() ? "<div class='hint'>ยังไม่มีผลลัพธ์ · เพิ่มที่หน้าจัดการโครงสร้าง</div>" : emptyTree)}</div>`;
+  };
+  $("structure-tree").innerHTML = (sections.active.length ? sections.active.map(renderUnit).join("") : emptyTree) +
+    (sections.inactive.length ? `<details class="primary-inactive-units" ${sections.active.length ? "" : "open"}><summary>หน่วยที่ยังไม่มีครั้งของ${entryHalf} (${sections.inactive.length})</summary>${sections.inactive.map(renderUnit).join("")}</details>` : "");
+  $("structure-tree").querySelectorAll("[data-switch-half]").forEach(button => button.addEventListener("click", () => changeEntryHalf(button.dataset.switchHalf)));
   $("structure-tree").querySelectorAll("[data-collection]").forEach(button => button.addEventListener("click", async () => { if (!await allowLeave()) return; resetInputs(); selectCollection(button.dataset.collection); }));
   $("structure-tree").querySelectorAll("[data-add]").forEach(button => button.addEventListener("click", () => addCollection(button.dataset.add)));
   $("structure-tree").querySelectorAll("[data-counts-unit]").forEach(checkbox => checkbox.addEventListener("change", () => updateEntryCountsScore("unit", checkbox.dataset.countsUnit, checkbox)));
@@ -450,6 +511,16 @@ async function updateEntryCountsScore(kind, id, checkbox) {
   entryCountsScoreBusy = true; checkbox.disabled = true;
   try {
     if (includesSelection && !await allowLeave()) { checkbox.checked = true; return; }
+    if (isPrimaryEntry()) {
+      const all = kind === "unit" ? (unit.indicators || []).flatMap(ind => ind.collections || []) : (target.collections || []);
+      const mid = all.filter(coll => coll.half === "กลางปี").length;
+      const end = all.filter(coll => coll.half === "ปลายปี").length;
+      if (mid && end && !await window.crsAskConfirm({
+        title:`ไม่คิดคะแนน${kind === "unit" ? "หน่วย" : "ตัวชี้วัด"} “${target.name}”?`,
+        message:`${kind === "unit" ? "หน่วย" : "ตัวชี้วัด"}นี้มีครั้งที่อยู่ทั้งกลางปี (${mid} ครั้ง) และปลายปี (${end} ครั้ง) · ติ๊กออกแล้วจะไม่คิดคะแนนทั้งสองช่วง · คะแนนที่กรอกไว้ไม่หาย`,
+        okLabel:"ไม่คิดคะแนนทั้งสองช่วง"
+      })) { checkbox.checked = true; return; }
+    }
     let count = 0;
     try {
       if (collectionIds.length) {
@@ -493,6 +564,8 @@ async function updateEntryCountsScore(kind, id, checkbox) {
 }
 function selectCollection(id, push = true) {
   for (const unit of subjectData.units) for (const indicator of unit.indicators || []) if ((indicator.collections || []).some(c => c.id === id) && unit.counts_score !== false && indicator.counts_score !== false) {
+    const collection = indicator.collections.find(coll => coll.id === id);
+    if (isPrimaryEntry() && collection?.half) entryHalf = collection.half;
     tab = unit.kind; selection = { unitId:unit.id, indicatorId:indicator.id, collectionId:id }; resetInputs();
     setView(window.innerWidth >= 1200 ? "subject" : "entry", push); return;
   }
@@ -504,7 +577,8 @@ function fillInputs(collectionIds) {
   inputOriginal = new Map();
   const ids = new Set(visibleStudents().map(s => s.id));
   for (const collection of allCollections()) if (collectionIds.includes(collection.id)) for (const score of collection.scores || []) if (ids.has(score.student_id)) inputOriginal.set(scoreKey(collection.id,score.student_id), String(score.raw_score));
-  if (scope === "exam") for (const score of currentExamScores) if (ids.has(score.student_id)) inputOriginal.set("exam:" + score.student_id, String(score.raw_score));
+  if (scope === "exam") for (const score of currentExamScores) if (ids.has(score.student_id) &&
+    (currentSubject?.level !== "ประถม" || score.half === entryHalf)) inputOriginal.set("exam:" + score.student_id, String(score.raw_score));
   inputNext = new Map(inputOriginal);
   inputsLoadedFor = scope;
 }
@@ -517,7 +591,7 @@ function renderMobileEntry() {
   const exam = tab === "สอบ"; const collection = exam ? null : currentCollection();
   if (!exam && !collection) return;
   const indicator = currentIndicator(), unit = subjectData.units.find(u => u.id === selection?.unitId), max = exam ? Number(currentGradeWeight?.exam_weight) : Number(collection.max_score);
-  $("entry-title").textContent = exam ? "คะแนนสอบ · เต็ม " + max : "ครั้งที่ " + collection.seq + " · เต็ม " + max;
+  $("entry-title").textContent = exam ? "สอบ" + (isPrimaryEntry() ? entryHalf : "ปลายภาค") + " · เต็ม " + max : (isPrimaryEntry() ? entryHalf + " · " : "") + "ครั้งที่ " + collection.seq + " · เต็ม " + max;
   $("entry-path").textContent = exam ? currentSubject.name : unit.name + " (เต็ม " + unit.max_score + ") › " + indicator.name + " (เต็ม " + indicator.max_score + ")";
   $("entry-path").title = $("entry-path").textContent;
   $("entry-note-row").hidden = exam;
@@ -541,12 +615,12 @@ function renderMobileEntry() {
   $("delete-mobile").hidden = exam;
   const p = exam ? progress().exam : progress().kinds[tab].flatMap(u => u.indicators).flatMap(i => i.collections).find(c => c.id === collection.id);
   $("entry-progress").textContent = p.filled + "/" + p.total; $("entry-progress-bar").style.width = p.total ? (p.filled/p.total*100) + "%" : "0%";
-  fillInputs(exam ? ["exam"] : indicator.collections.map(c => c.id));
+  fillInputs(exam ? ["exam"] : visibleCollections(indicator).map(c => c.id));
   $("mobile-score-list").innerHTML = (visibleStudents().length ? visibleStudents().map(student => exam ? examStudentRow(student, max, currentExamRemarkState.get(student.id), "mobile") : `<div class="student-row" data-row-key="${escapeHtml(scoreKey(collection.id,student.id))}"><div><span class="name">${escapeHtml(student.student_no || "—")} · ${escapeHtml(student.name)}</span>${studentRoomMeta(student)}</div>${scoreInput({ student, collectionId:collection.id, max, step:"0.5" })}<div class="row-message"></div></div>`).join("") : "<div class='empty'>ไม่มีนักเรียนในห้องที่เลือก</div>") + (exam ? orphanRemarksHtml(getOrphanRemarkRecords()) : "");
   $("mobile-exam-details").replaceChildren();
   if (exam) {
     const cap = Number(currentGradeWeight?.exam_weight);
-    $("mobile-score-list").querySelectorAll(".student-row").forEach(row => row.classList.toggle("exam-over-cap", currentExamScores.some(score => "exam:" + score.student_id === row.dataset.rowKey && Number(score.raw_score) > cap + 0.000001)));
+    $("mobile-score-list").querySelectorAll(".student-row").forEach(row => row.classList.toggle("exam-over-cap", examScoresForHalf().some(score => "exam:" + score.student_id === row.dataset.rowKey && Number(score.raw_score) > cap + 0.000001)));
     // สรุปและสถานะสอบอยู่ในการ์ดหัว รายละเอียดเต็มคะแนนคงใต้รายชื่อ
     $("right-pane").querySelectorAll(".remark-summary,.exam-status").forEach(node => $("mobile-exam-head").appendChild(node));
     $("right-pane").querySelectorAll(".full-note,.exam-over-cap-note").forEach(node => {
@@ -554,13 +628,13 @@ function renderMobileEntry() {
     });
   }
   bindScoreInputs($("mobile-score-list"));
-  const siblings = indicator?.collections || []; const index = siblings.findIndex(c => c.id === collection?.id);
+  const siblings = visibleCollections(indicator); const index = siblings.findIndex(c => c.id === collection?.id);
   $("prev-collection").disabled = exam || index <= 0; $("next-collection").disabled = exam || index < 0 || index >= siblings.length - 1;
   updateInputStyles();
   if (exam) applyRemarkFilter();
 }
-$("prev-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at-1].id); });
-$("next-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = currentIndicator().collections; const at = list.findIndex(c => c.id === selection.collectionId); selectCollection(list[at+1].id); });
+$("prev-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = visibleCollections(currentIndicator()); const at = list.findIndex(c => c.id === selection.collectionId); if (at > 0) selectCollection(list[at-1].id); });
+$("next-collection").addEventListener("click", async () => { if (!await allowLeave()) return; const list = visibleCollections(currentIndicator()); const at = list.findIndex(c => c.id === selection.collectionId); if (at >= 0 && at < list.length - 1) selectCollection(list[at+1].id); });
 $("delete-mobile").addEventListener("click", () => deleteCollection(selection?.collectionId));
 $("edit-mobile-note").addEventListener("click", () => editCollection(selection?.collectionId));
 // ผูกที่ pane ครั้งเดียว เพื่อให้ใช้กับตารางที่วาดใหม่ทุกครั้งได้
@@ -577,11 +651,11 @@ function renderRightPane() {
   if (tab === "สอบ") { renderExamPane(); return; }
   if (!selection) { $("right-pane").innerHTML = "<div class='card empty'>เลือกครั้งที่จากต้นไม้เพื่อกรอกคะแนน</div>"; return; }
   const indicator = currentIndicator(), unit = subjectData.units.find(u => u.id === selection.unitId); if (!indicator || !unit) return;
-  const collections = [...indicator.collections].sort((a,b) => Number(a.seq)-Number(b.seq)); fillInputs(collections.map(c => c.id));
+  const collections = visibleCollections(indicator).slice().sort((a,b) => Number(a.seq)-Number(b.seq)); fillInputs(collections.map(c => c.id));
   const totalMax = collections.reduce((sum,c) => sum+Number(c.max_score),0);
   const notedCollections = collections.filter(c => c.note);
   const collectionNotes = notedCollections.length ? `<div class="collection-notes" aria-label="หมายเหตุของแต่ละครั้ง">${notedCollections.map(c => `<div class="collection-notes-row"><b>ครั้งที่ ${escapeHtml(c.seq)}</b><span>${escapeHtml(c.note)}</span></div>`).join("")}</div>` : "";
-  $("right-pane").innerHTML = `<div class="card"><div class="meta">${escapeHtml(unit.name)} (เต็ม ${escapeHtml(unit.max_score)}) ›</div><div class="toolbar"><h2>${escapeHtml(indicator.name)} (เต็ม ${escapeHtml(indicator.max_score)})</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div>${collectionNotes}<div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span><button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้ครั้งที่ ${escapeHtml(c.seq)}" title="แก้ครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวมคะแนนดิบ<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div><div class="score-legend"><span><i class="empty-example" aria-hidden="true"></i>ยังไม่กรอก</span><span><i aria-hidden="true"></i>กรอกแล้ว</span><span><i class="changed-example" aria-hidden="true"></i>แก้แล้วยังไม่บันทึก</span></div></div>`;
+  $("right-pane").innerHTML = `<div class="card"><div class="meta">${isPrimaryEntry() ? `<span class="badge">${entryHalf}</span> · ` : ""}${escapeHtml(unit.name)} (เต็ม ${escapeHtml(unit.max_score)}) ›</div><div class="toolbar"><h2>${escapeHtml(indicator.name)} (เต็ม ${escapeHtml(indicator.max_score)})</h2><button class="ghost" id="add-desktop">+ เพิ่มครั้ง</button></div>${collectionNotes}<div class="table-wrap"><table class="score-table"><thead><tr><th>เลขที่</th><th>ชื่อ</th>${collections.map(c => `<th>ครั้งที่ ${escapeHtml(c.seq)}<br><span class="meta">เต็ม ${escapeHtml(c.max_score)}</span><button class="ghost note-edit" data-edit-note="${escapeHtml(c.id)}" aria-label="แก้ครั้งที่ ${escapeHtml(c.seq)}" title="แก้ครั้งที่ ${escapeHtml(c.seq)}">✎</button><button class="danger" data-delete="${escapeHtml(c.id)}" aria-label="ลบครั้งที่ ${escapeHtml(c.seq)}">🗑</button></th>`).join("")}<th>รวมคะแนนดิบ<br><span class="meta">เต็ม ${totalMax}</span></th></tr></thead><tbody>${visibleStudents().map(student => `<tr><td>${escapeHtml(student.student_no || "—")}</td><td>${escapeHtml(student.name)}${student.grade_level && student.grade_level !== currentSubject.grade_level ? `<span class="meta">เรียนซ้ำ · ${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</span>` : ""}</td>${collections.map(c => `<td class="score-cell" data-row-key="${escapeHtml(scoreKey(c.id,student.id))}">${scoreInput({ student, collectionId:c.id, max:c.max_score, step:"0.5" })}<span class="meta row-message"></span></td>`).join("")}<td data-total-for="${escapeHtml(student.id)}">—</td></tr>`).join("")}</tbody><tfoot><tr><th colspan="2">กรอกแล้ว</th>${collections.map(c => `<th>${(c.scores || []).filter(score => visibleStudents().some(s => s.id === score.student_id)).length}/${visibleStudents().length}</th>`).join("")}<th></th></tr></tfoot></table></div><div class="score-legend"><span><i class="empty-example" aria-hidden="true"></i>ยังไม่กรอก</span><span><i aria-hidden="true"></i>กรอกแล้ว</span><span><i class="changed-example" aria-hidden="true"></i>แก้แล้วยังไม่บันทึก</span></div></div>`;
   $("add-desktop").addEventListener("click", () => addCollection(indicator.id));
   $("right-pane").querySelectorAll("[data-edit-note]").forEach(button => button.addEventListener("click", () => editCollection(button.dataset.editNote)));
   $("right-pane").querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => deleteCollection(button.dataset.delete)));
@@ -622,7 +696,7 @@ function examStudentRow(student, max, remark, mode) {
   const detail = kind === "manual" ? remarkReasonHtml(remark.record.reason) : kind === "auto" ? `<div class="remark-auto-note">ปิดคะแนนสอบแล้วยังไม่มีคะแนน</div>` : "";
   const room = mode === "mobile" ? studentRoomMeta(student) : `<div class="meta">${student.grade_level && student.grade_level !== currentSubject.grade_level ? "เรียนซ้ำ · " : ""}${escapeHtml(attendanceRoomLabel(student.grade_level,student.classroom))}</div>`;
   const cap = Number(currentGradeWeight?.exam_weight);
-  const overCap = currentExamScores.some(score => score.student_id === student.id && Number(score.raw_score) > cap + 0.000001);
+  const overCap = examScoresForHalf().some(score => score.student_id === student.id && Number(score.raw_score) > cap + 0.000001);
   return `<div class="student-row exam-student-row ${kind ? "remark-" + kind : ""} ${overCap ? "exam-over-cap" : ""}" data-student-id="${id}" data-remark-kind="${kind}" data-row-key="exam:${id}"><div><div class="remark-name"><span class="name">${escapeHtml(student.student_no || "—")} · ${name}</span>${badge}</div>${room}${detail}</div>${scoreInput({ student, collectionId:"exam", max, step:"0.01" })}${slot}<div class="row-message"></div></div>`;
 }
 function examSummaryHtml(closed, note, missingCount, remarkCount) {
@@ -637,9 +711,9 @@ function applyRemarkFilter() {
 }
 function renderExamPane() {
   if (!currentGradeWeight) { $("right-pane").innerHTML = `<div class="card access-note">ยังไม่ได้ตั้งอัตราส่วนคะแนนของปีการศึกษา ${escapeHtml(currentSubject.year || "(ไม่ระบุ)")} ระดับ${escapeHtml(currentSubject.level || "(ไม่ระบุ)")} — ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “จัดการโครงสร้าง” ก่อน</div>`; currentExamRemarkState = new Map(); return; }
-  const examWeight = Number(currentGradeWeight.exam_weight), scoredIds = new Set(currentExamScores.map(row => row.student_id));
+  const examWeight = Number(currentGradeWeight.exam_weight), scoredIds = new Set(examScoresForHalf().map(row => row.student_id));
   const missingCount = visibleStudents().filter(student => !scoredIds.has(student.id)).length;
-  const overCapIds = new Set(visibleStudents().filter(student => currentExamScores.some(row => row.student_id === student.id && Number(row.raw_score) > examWeight + 0.000001)).map(student => student.id));
+  const overCapIds = new Set(visibleStudents().filter(student => examScoresForHalf().some(row => row.student_id === student.id && Number(row.raw_score) > examWeight + 0.000001)).map(student => student.id));
   const closed = Boolean(currentSubject.exam_closed_at);
   const note = currentSubject.level === "ประถม"
     ? (closed ? "ปิดเมื่อ " + new Date(currentSubject.exam_closed_at).toLocaleString("th-TH", { dateStyle:"medium", timeStyle:"short" }) + " · นักเรียนที่ยังไม่มีคะแนนสอบจะขึ้น 'ยังไม่ครบ' จนกว่าจะกรอก · ปิดแล้วยังกรอก/แก้คะแนนสอบได้"
@@ -651,7 +725,7 @@ function renderExamPane() {
   fillInputs(["exam"]);
   const orphanRecords = getOrphanRemarkRecords();
   const remarkCount = currentExamRemarkState.size + new Set(orphanRecords.map(row => row.student_id)).size;
-  $("right-pane").innerHTML = `<div class="card"><h2>คะแนนสอบปลายภาค/ปลายปี · เต็ม ${examWeight} คะแนน</h2><div class="full-note">ตัวเลขนี้มาจากอัตราส่วนของปีการศึกษา ${escapeHtml(currentSubject.year)} ระดับ${escapeHtml(currentSubject.level)} และเป็นคะแนนเต็มของข้อสอบโดยตรง</div>${overCapIds.size ? `<div class="exam-over-cap-note">มีคะแนนสอบเกินเพดาน ${overCapIds.size} คน · ต้องแก้ก่อนสรุปผล</div>` : ""}${examSummaryHtml(closed, note, missingCount, remarkCount)}<div id="exam-list">${visibleStudents().map(student => examStudentRow(student, examWeight, currentExamRemarkState.get(student.id), "desktop")).join("")}${orphanRemarksHtml(orphanRecords)}</div></div>`;
+  $("right-pane").innerHTML = `<div class="card"><h2>สอบ${isPrimaryEntry() ? entryHalf : "ปลายภาค"} · เต็ม ${examWeight} คะแนน</h2><div class="full-note">ตัวเลขนี้มาจากอัตราส่วนของปีการศึกษา ${escapeHtml(currentSubject.year)} ระดับ${escapeHtml(currentSubject.level)} และเป็นคะแนนเต็มของข้อสอบโดยตรง</div>${overCapIds.size ? `<div class="exam-over-cap-note">มีคะแนนสอบเกินเพดาน ${overCapIds.size} คน · ต้องแก้ก่อนสรุปผล</div>` : ""}${examSummaryHtml(closed, note, missingCount, remarkCount)}<div id="exam-list">${visibleStudents().map(student => examStudentRow(student, examWeight, currentExamRemarkState.get(student.id), "desktop")).join("")}${orphanRemarksHtml(orphanRecords)}</div></div>`;
   $("toggle-exam").addEventListener("click", toggleExam);
   bindScoreInputs($("exam-list")); updateInputStyles(); applyRemarkFilter();
 }
@@ -796,9 +870,10 @@ function renderSaveBar() {
 $("save-scores").addEventListener("click", saveScores);
 function applySavedScoreChanges(rows, deletes, exam) {
   if (exam) {
-    const byStudent = new Map(currentExamScores.map(score => [score.student_id, score]));
-    for (const row of rows) byStudent.set(row.student_id, { ...byStudent.get(row.student_id), ...row });
-    for (const key of deletes) byStudent.delete(key.slice("exam:".length));
+    const keyFor = score => score.student_id + ":" + (score.half || "");
+    const byStudent = new Map(currentExamScores.map(score => [keyFor(score), score]));
+    for (const row of rows) byStudent.set(keyFor(row), { ...byStudent.get(keyFor(row)), ...row });
+    for (const key of deletes) byStudent.delete(key.slice("exam:".length) + ":" + (isPrimaryEntry() ? entryHalf : ""));
     currentExamScores = [...byStudent.values()];
     return;
   }
@@ -832,13 +907,13 @@ async function saveScores() {
   if (deletes.length) { const names = deletes.map(key => students.find(s => s.id === key.split(":").at(-1))?.name || "นักเรียน"); if (!await window.crsAskConfirm({ title:"ลบคะแนนเดิม", message:"ลบคะแนนของ " + deletes.length + " คน: " + names.join(", "), okLabel:"ลบและบันทึก", danger:true })) return; }
   busy = true; renderSaveBar(); const exam = tab === "สอบ", subjectId = currentSubject.id;
   const table = exam ? "exam_scores" : "scores";
-  const rows = upserts.map(({key,value}) => { const [collectionId,studentId] = key.split(":"); return exam ? { subject_id:currentSubject.id, student_id:studentId, raw_score:value, updated_at:new Date().toISOString() } : { collection_id:collectionId, student_id:studentId, raw_score:value, updated_at:new Date().toISOString() }; });
+  const rows = upserts.map(({key,value}) => { const [collectionId,studentId] = key.split(":"); return exam ? { subject_id:currentSubject.id, student_id:studentId, half:isPrimaryEntry() ? entryHalf : null, raw_score:value, updated_at:new Date().toISOString() } : { collection_id:collectionId, student_id:studentId, raw_score:value, updated_at:new Date().toISOString() }; });
   let success = true, reason = "";
   try {
-    if (rows.length) { const result = await sb.from(table).upsert(rows,{ onConflict:exam ? "subject_id,student_id" : "student_id,collection_id" }).select("id"); if (result.error || result.data?.length !== rows.length) { success = false; reason = result.error?.message || "บันทึกได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา"; } }
+    if (rows.length) { const result = await sb.from(table).upsert(rows,{ onConflict:exam ? "subject_id,student_id,half" : "student_id,collection_id" }).select("id"); if (result.error || result.data?.length !== rows.length) { success = false; reason = result.error?.message || "บันทึกได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา"; } }
     if (deletes.length) {
       const groups = new Map(); for (const key of deletes) { const [collectionId,studentId] = key.split(":"); const list = groups.get(collectionId) || []; list.push(studentId); groups.set(collectionId,list); }
-      for (const [collectionId, ids] of groups) { const result = exam ? await sb.from("exam_scores").delete().eq("subject_id",currentSubject.id).in("student_id",ids).select("id") : await sb.from("scores").delete().eq("collection_id",collectionId).in("student_id",ids).select("id"); if (result.error || result.data?.length !== ids.length) { success = false; reason += " ลบได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา"; } }
+      for (const [collectionId, ids] of groups) { const result = exam ? await (isPrimaryEntry() ? sb.from("exam_scores").delete().eq("subject_id",currentSubject.id).eq("half",entryHalf) : sb.from("exam_scores").delete().eq("subject_id",currentSubject.id).is("half",null)).in("student_id",ids).select("id") : await sb.from("scores").delete().eq("collection_id",collectionId).in("student_id",ids).select("id"); if (result.error || result.data?.length !== ids.length) { success = false; reason += " ลบได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา"; } }
     }
     if (success) applySavedScoreChanges(rows, deletes, exam);
     else await reloadTouchedScores([...upserts.map(row => row.key), ...deletes], exam, subjectId);
@@ -857,9 +932,9 @@ async function addCollection(indicatorId) {
   const seq = (indicator.collections || []).reduce((max,c) => Math.max(max,Number(c.seq)||0),0)+1;
   const details = await askConfirm({ title:"เพิ่มครั้งที่ " + seq, message:"กำหนดคะแนนเต็มของครั้งนี้", numberInput:{ label:"คะแนนเต็ม (จำนวนเต็มมากกว่า 0)", value:10 }, textInput:{ label:"หมายเหตุ (ไม่บังคับ)" }, okLabel:"สร้าง" });
   if (details === false) return;
-  const { data,error } = await sb.from("collections").insert({ indicator_id:indicatorId, seq, max_score:details.maxScore, note:details.note.trim() || null }).select().single();
+  const { data,error } = await sb.from("collections").insert({ indicator_id:indicatorId, seq, max_score:details.maxScore, note:details.note.trim() || null, ...(isPrimaryEntry() ? { half:entryHalf } : {}) }).select().single();
   if (error || !data) { showToast("สร้างครั้งที่ไม่สำเร็จ: " + (error?.message || ""),false); return; }
-  indicator.collections.push({ ...data, scores:[] }); resetInputs(); selectCollection(data.id); showToast("สร้างครั้งที่ " + seq + " แล้ว",true);
+  indicator.collections.push({ ...data, scores:[] }); resetInputs(); selectCollection(data.id); showToast("สร้างครั้งที่ " + seq + (isPrimaryEntry() ? " · เป็น" + entryHalf : "") + " แล้ว",true);
 }
 async function editCollection(id) {
   if (!id || !canEdit(currentSubject) || !await allowLeave()) return;
@@ -868,12 +943,14 @@ async function editCollection(id) {
   const details = await askConfirm({ title:"แก้ครั้งที่ " + collection.seq,
     message:scored ? "ครั้งนี้มีคะแนนแล้ว " + scored + " คน · เปลี่ยนคะแนนเต็มแล้ว คะแนนที่กรอกไว้จะถูกคิดสัดส่วนใหม่" : "แก้คะแนนเต็มหรือหมายเหตุของครั้งนี้",
     numberInput:{ label:"คะแนนเต็ม (จำนวนเต็มมากกว่า 0)", value:collection.max_score },
-    textInput:{ label:"หมายเหตุ (ไม่บังคับ)", value:collection.note || "" }, okLabel:"บันทึก" });
+    textInput:{ label:"หมายเหตุ (ไม่บังคับ)", value:collection.note || "" },
+    halfInput:isPrimaryEntry() ? collection.half : null, okLabel:"บันทึก" });
   if (details === false) return;
   const note = details.note.trim() || null, maxScore = details.maxScore;
   const payload = {};
   if (maxScore !== Number(collection.max_score)) payload.max_score = maxScore;
   if (note !== (collection.note || null)) payload.note = note;
+  if (isPrimaryEntry() && details.half && details.half !== collection.half) payload.half = details.half;
   if (!Object.keys(payload).length) return;
   if (maxScore < Number(collection.max_score)) {
     const { data:scores,error:scoreError } = await sb.from("scores").select("raw_score").eq("collection_id",id).gt("raw_score",maxScore);
@@ -888,6 +965,7 @@ async function editCollection(id) {
   if (error || data?.length !== 1) { showToast("บันทึกไม่สำเร็จ — ตรวจสิทธิ์วิชา", false); return; }
   if ("max_score" in payload) collection.max_score = maxScore;
   if ("note" in payload) collection.note = note;
+  if ("half" in payload) collection.half = details.half;
   resetInputs(); renderWorkspace(); showToast("บันทึกครั้งที่ " + collection.seq + " แล้ว", true);
 }
 async function deleteCollection(id) {
@@ -913,7 +991,7 @@ async function toggleExam() {
   if (!currentSubject || !canEdit(currentSubject) || tab !== "สอบ") return;
   if (dirtyCount() > 0) { showToast("บันทึกคะแนนสอบก่อนปิด", false); return; }
   const subjectId = currentSubject.id, closed = Boolean(currentSubject.exam_closed_at);
-  const scoredIds = new Set(currentExamScores.map(row => row.student_id));
+  const scoredIds = new Set(examScoresForHalf().map(row => row.student_id));
   const missingIds = students.filter(student => !scoredIds.has(student.id)).map(student => student.id);
   const missingCount = missingIds.length;
   let message = closed ? "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบจะพ้นสถานะ ร. จากระบบ และกลับเป็นข้อมูลยังไม่ครบ" : "นักเรียน " + missingCount + " คนที่ยังไม่มีคะแนนสอบที่บันทึกแล้วจะติด ร. ทันที";
