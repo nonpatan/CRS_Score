@@ -115,7 +115,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261010-3"></script>
+    <script src="../app-shell.js?v=20261011-1"></script>
   </header>
   <main class="academic-content">
     <div id="gate" class="card" hidden></div>
@@ -132,8 +132,8 @@ import {
   setEvalAssignmentRater, deleteEvalAssignment, reopenEvalAssignment,
   upsertEvalSection4, deleteEvalSection4, upsertEvalAttendanceSnapshots,
   evalAssignmentProblems, evalSection4Check, buildEvalAttendanceSnapshot,
-  loadWorkContext, summarizeStaff
-} from "../supabase-client.js?v=20261010-3";
+  loadWorkContext, summarizeStaff, loadEvalRoundResults, evalDecisionLabel, evalThaiDateStr, publishEvalRound
+} from "../supabase-client.js?v=20261011-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -142,7 +142,7 @@ if (!session) {
   const el = id => document.getElementById(id);
   const esc = value => String(value ?? "").replace(/[&<>"']/g, ch =>
     ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
-  const state = { forms:[], rounds:[], staff:[], years:[], data:null, form:null,
+  const state = { forms:[], rounds:[], staff:[], years:[], data:null, form:null, resultData:null,
     showForm:false, editing:false, showPicker:false, search:"", preview:null, previewWarnings:[] };
   let toastTimer = null;
   const toast = (message, error = false) => {
@@ -179,6 +179,8 @@ if (!session) {
     const selected = state.rounds.find(row => row.id === requested) || state.rounds[0] || null;
     state.data = selected ? await loadEvalRoundAdmin(selected.id) : null;
     state.form = selected ? await loadEvalForm(selected.form_id) : null;
+    state.resultData = selected && ["closed","published"].includes(selected.status)
+      ? await loadEvalRoundResults(selected.id) : null;
     const url = new URL(location.href);
     if (selected) url.searchParams.set("round", selected.id);
     else url.searchParams.delete("round");
@@ -315,7 +317,7 @@ if (!session) {
     if (!targets.length) return html + '<div class="empty">ยังไม่มีครูในรอบนี้</div></section>';
     html += '<div class="table-scroll" role="region" aria-label="ตารางความคืบหน้า" tabindex="0"><table><thead><tr><th>ครู</th>' +
       sections.map(section => '<th>' + esc(section.title) + '</th>').join("") +
-      '<th>เวลาเข้างาน</th></tr></thead><tbody>';
+      '<th>เวลาเข้างาน</th><th>ผล</th>' + (state.data.round.status === "published" ? '<th>รับทราบ</th>' : '') + '</tr></thead><tbody>';
     for (const target of targets) {
       const rows = targetAssignments(target.id);
       html += '<tr><td>' + esc(staffName(target.staff_id)) + '</td>';
@@ -326,6 +328,8 @@ if (!session) {
         } else {
           const matching = rows.filter(row => row.section_code === section.code);
           html += '<td>' + (matching.length ? matching.map(row =>
+            row.status === "submitted" && state.data.round.status === "published" ?
+              '✓ ส่งแล้ว · ' + esc(staffName(row.rater_staff_id)) :
             row.status === "submitted" ? actionButton("reopen-assignment",
               "✓ ส่งแล้ว · " + esc(staffName(row.rater_staff_id)), "ghost",
               'data-assignment="' + esc(row.id) + '" data-target="' + esc(target.id) + '"') :
@@ -333,9 +337,18 @@ if (!session) {
             "ยังไม่จัด") + '</td>';
         }
       }
-      html += '<td>' + (targetSnapshot(target.id) ? "ล็อกแล้ว" : "ยังไม่ล็อกตัวเลข") + '</td></tr>';
+      const decision = state.resultData?.decisions.find(row => row.target_id === target.id);
+      const ack = state.resultData?.acknowledgements.find(row => row.target_id === target.id);
+      html += '<td>' + (targetSnapshot(target.id) ? "ล็อกแล้ว" : "ยังไม่ล็อกตัวเลข") + '</td>' +
+        '<td>' + (state.resultData ? '<a href="eval-result.html?target=' + encodeURIComponent(target.id) + '">' +
+          esc(decision ? evalDecisionLabel(decision.final) : "ยังไม่ยืนยัน") + '</a>' : "—") + '</td>' +
+        (state.data.round.status === "published" ? '<td>' + (ack ? "รับทราบแล้ว " +
+          esc(thaiShortDateText(evalThaiDateStr(ack.acknowledged_at))) : "ยังไม่รับทราบ") + '</td>' : '') + '</tr>';
     }
-    return html + '</tbody></table></div><p class="hint">กด “ส่งแล้ว” เพื่อเปิดแบบคืนให้ผู้ประเมินแก้ไข · หน้านี้ไม่แสดงคะแนนรายข้อ</p></section>';
+    return html + '</tbody></table></div><p class="hint">' +
+      (state.data.round.status === "published" ? "ผลประกาศแล้ว · ไม่เปิดแบบคืนให้แก้" :
+        "กด “ส่งแล้ว” เพื่อเปิดแบบคืนให้ผู้ประเมินแก้ไข") +
+      ' · หน้านี้ไม่แสดงคะแนนรายข้อ</p></section>';
   }
   function renderAttendance() {
     const round = state.data.round;
@@ -409,11 +422,14 @@ if (!session) {
     }
     html += renderProgress() + renderAttendance();
     if (round.status === "open" || round.status === "closed") {
+      const undecided = round.status === "closed" ? state.data.targets.length - (state.resultData?.decisions.length || 0) : 0;
       html += '<section class="card"><h2>รับคะแนน</h2>' +
         (round.status === "open" ?
           actionButton("close-round", "ปิดรับคะแนน", "ghost") :
           actionButton("reopen-round", "เปิดรับคะแนนอีกครั้ง", "ghost")) +
-        '<p class="hint">การประกาศผลทำในหน้าสรุปผล (เร็ว ๆ นี้)</p></section>';
+        (round.status === "closed" ? actionButton("publish-round", "ประกาศผล", "primary", undecided ? "disabled" : "") +
+          '<p class="hint">' + (undecided ? "ยังไม่ยืนยันผล " + undecided + " คน" :
+          'ยืนยันผลครบแล้ว · <a href="eval-result.html?round=' + encodeURIComponent(round.id) + '">ตรวจผลทั้งรอบ</a>') + '</p>' : "") + '</section>';
     }
     el("app").innerHTML = html;
     el("app").hidden = false;
@@ -694,7 +710,13 @@ if (!session) {
           const pending = [];
           for (const target of state.data.targets) {
             const rows = targetAssignments(target.id);
-            if (rows.some(row => row.status !== "submitted")) pending.push(staffName(target.staff_id) + ": ยังมีแบบไม่ส่ง");
+            const missingWeighted = state.form.sections.filter(section => Number(section.weight) > 0 &&
+              rows.some(row => row.section_code === section.code && row.status !== "submitted"));
+            if (missingWeighted.length) pending.push(staffName(target.staff_id) + ": ยังมีแบบไม่ส่ง (ส่วนที่ " +
+              missingWeighted.map(section => section.code).join(", ") + ")");
+            if (state.form.sections.some(section => section.kind === "self" &&
+              rows.some(row => row.section_code === section.code && row.status !== "submitted")))
+              pending.push(staffName(target.staff_id) + ": ยังไม่ประเมินตนเอง (ไม่มีผลต่อคะแนน)");
             if (variantSection() && !targetEntry(target.id)) pending.push(staffName(target.staff_id) + ": ยังไม่คีย์ส่วนที่ 4");
             if (!targetSnapshot(target.id)) pending.push(staffName(target.staff_id) + ": ยังไม่ล็อกตัวเลข");
           }
@@ -708,6 +730,12 @@ if (!session) {
             message:"ผู้ประเมินจะกลับมากรอกและส่งแบบได้", okLabel:"เปิดรับคะแนน" })) return;
           await setEvalRoundStatus(state.data.round.id, "open");
           await refresh(state.data.round.id); toast("เปิดรับคะแนนอีกครั้งแล้ว");
+        } else if (action === "publish-round") {
+          if (!await window.crsAskConfirm({ title:"ประกาศผลรอบ " + roundLabel(state.data.round),
+            message:"ครูทุกคนในรอบจะเห็นผลของตัวเองทันที และแก้ผลไม่ได้อีก",
+            requireText:"ประกาศผล", danger:false, okLabel:"ประกาศผล" })) return;
+          await publishEvalRound(state.data.round.id);
+          await refresh(state.data.round.id); toast("ประกาศผลแล้ว");
         }
       });
     });

@@ -7853,7 +7853,43 @@ export function evalDecisionSnapshot(result) {
   const snapshot = JSON.parse(JSON.stringify(result));
   for (const section of snapshot.sections || []) delete section.raterCount;
   delete snapshot.self;
+  delete snapshot.suggested;
+  delete snapshot.reasons;
+  delete snapshot.warnings;
   return snapshot;
+}
+
+export function evalDecisionOptions(roundNo) {
+  return Number(roundNo) === 2 ? [
+    { value:"renew", label:"ต่อสัญญาจ้าง" },
+    { value:"renew_conditional", label:"ต่อสัญญาจ้างแบบมีเงื่อนไข (แนบ IDP)" },
+    { value:"not_renew", label:"ไม่ต่อสัญญาจ้างเมื่อครบกำหนด" }
+  ] : [
+    { value:"pass", label:"ผ่าน" },
+    { value:"watch", label:"เฝ้าระวัง" },
+    { value:"watch_strict", label:"เฝ้าระวังเข้มข้น" }
+  ];
+}
+
+export function evalDecisionLabel(value) {
+  return [...evalDecisionOptions(1), ...evalDecisionOptions(2)]
+    .find(option => option.value === value)?.label || "ยังไม่ยืนยัน";
+}
+
+export function addWorkingDays(dateStr, n, holidays = new Set()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return null;
+  let date = dateStr;
+  for (let count = 0; count < Number(n);) {
+    date = addDaysStr(date, 1);
+    if (isoWeekday(date) <= 5 && !holidays.has(date)) count++;
+  }
+  return date;
+}
+
+export function evalThaiDateStr(timestamp) {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : toDateStr(new Date(date.getTime() + 7 * 60 * 60_000));
 }
 
 export function evalItemRequirement({ item, sectionKind, score, evidence, rules = {}, snapshot = null }) {
@@ -8050,6 +8086,157 @@ export const saveEvalTexts = (assignmentId, texts) => evalWrite(sb.from("eval_as
   .update({ texts }).eq("id", assignmentId).select().single());
 export const submitEvalAssignment = assignmentId => evalWrite(sb.from("eval_assignments")
   .update({ status:"submitted" }).eq("id", assignmentId).select().single());
+
+export async function listEvalRoundsICanSee() {
+  const head = await isPersonnelHead();
+  const me = await myStaffId();
+  const { data, error } = await sb.from("eval_rounds").select("*")
+    .in("status", ["closed", "published"])
+    .order("academic_year", { ascending:false }).order("round_no", { ascending:false });
+  if (error) throw new Error("โหลดรอบสรุปผลไม่สำเร็จ: " + error.message);
+  return (data || []).filter(round => head || (me && round.director_staff_id === me));
+}
+
+async function evalResultAccess(roundId) {
+  const { data, error } = await sb.from("eval_rounds").select("*").eq("id", roundId).maybeSingle();
+  if (error) throw new Error("โหลดรอบประเมินไม่สำเร็จ: " + error.message);
+  if (!data || !["closed", "published"].includes(data.status)) throw new Error("รอบนี้ยังไม่เปิดให้สรุปผล");
+  if (!await isPersonnelHead() && data.director_staff_id !== await myStaffId())
+    throw new Error("หน้านี้สำหรับ ผอ. และหัวหน้าฝ่ายบุคคล");
+  return data;
+}
+
+async function evalHistories(round, targets) {
+  const empty = () => ({ round1:null, prevYear:null, redFlagConfirmed:false });
+  const output = Object.fromEntries(targets.map(target => [target.id, empty()]));
+  if (Number(round.round_no) !== 2 || !targets.length) return output;
+  const previousYear = /^\d+$/.test(round.academic_year) ? String(Number(round.academic_year) - 1) : null;
+  const years = [round.academic_year, previousYear].filter(Boolean);
+  const { data:rounds, error:roundError } = await sb.from("eval_rounds")
+    .select("id,academic_year,round_no").in("academic_year", years);
+  if (roundError) throw new Error("โหลดประวัติรอบประเมินไม่สำเร็จ: " + roundError.message);
+  const relevant = (rounds || []).filter(row =>
+    (row.academic_year === round.academic_year && Number(row.round_no) === 1) ||
+    (row.academic_year === previousYear && Number(row.round_no) === 2));
+  if (!relevant.length) return output;
+  const { data:pastTargets, error:targetError } = await sb.from("eval_targets")
+    .select("id,round_id,staff_id").in("staff_id", targets.map(target => target.staff_id))
+    .in("round_id", relevant.map(row => row.id));
+  if (targetError) throw new Error("โหลดประวัติครูไม่สำเร็จ: " + targetError.message);
+  if (!pastTargets?.length) return output;
+  const { data:decisions, error:decisionError } = await sb.from("eval_decisions")
+    .select("target_id,final,deficiencies").in("target_id", pastTargets.map(row => row.id));
+  if (decisionError) throw new Error("โหลดผลพิจารณาเดิมไม่สำเร็จ: " + decisionError.message);
+  const pick = (staffId, year, no) => {
+    const foundRound = relevant.find(row => row.academic_year === year && Number(row.round_no) === no);
+    const target = pastTargets.find(row => row.round_id === foundRound?.id && row.staff_id === staffId);
+    return decisions?.find(row => row.target_id === target?.id) || null;
+  };
+  for (const target of targets) output[target.id] = {
+    round1:pick(target.staff_id, round.academic_year, 1),
+    prevYear:previousYear ? pick(target.staff_id, previousYear, 2) : null,
+    redFlagConfirmed:false
+  };
+  return output;
+}
+
+export async function loadEvalTargetResult(targetId) {
+  const { data:target, error:targetError } = await sb.from("eval_targets")
+    .select("*").eq("id", targetId).maybeSingle();
+  if (targetError || !target) throw new Error("ไม่พบครูในรอบประเมินนี้");
+  const round = await evalResultAccess(target.round_id);
+  const form = await loadEvalForm(round.form_id);
+  const [assignRes, section4Res, decisionRes, ackRes, history] = await Promise.all([
+    sb.from("eval_assignments").select("id,target_id,section_code,rater_staff_id,status,texts,submitted_at").eq("target_id", targetId),
+    sb.from("eval_section4_entries").select("*").eq("target_id", targetId).maybeSingle(),
+    sb.from("eval_decisions").select("*").eq("target_id", targetId).maybeSingle(),
+    sb.from("eval_acknowledgements").select("*").eq("target_id", targetId).maybeSingle(),
+    evalHistories(round, [target])
+  ]);
+  for (const [result, label] of [[assignRes,"ผู้ประเมิน"],[section4Res,"ส่วนที่ 4"],
+    [decisionRes,"ผลพิจารณา"],[ackRes,"การรับทราบ"]])
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ` + result.error.message);
+  const assignments = assignRes.data || [];
+  const responseRes = assignments.length ? await sb.from("eval_responses")
+    .select("assignment_id,item_id,score,evidence").in("assignment_id", assignments.map(row => row.id)) : { data:[], error:null };
+  if (responseRes.error) throw new Error("โหลดคะแนนไม่สำเร็จ: " + responseRes.error.message);
+  return { round, target, form, assignments, responses:responseRes.data || [], section4:section4Res.data,
+    decision:decisionRes.data, acknowledgement:ackRes.data, history:history[target.id] };
+}
+
+export async function loadEvalRoundResults(roundId) {
+  const round = await evalResultAccess(roundId);
+  const form = await loadEvalForm(round.form_id);
+  const { data:targets, error:targetError } = await sb.from("eval_targets")
+    .select("*").eq("round_id", roundId).order("created_at");
+  if (targetError) throw new Error("โหลดครูในรอบไม่สำเร็จ: " + targetError.message);
+  const ids = (targets || []).map(row => row.id);
+  if (!ids.length) return { round, form, targets:[], assignments:[], responses:[], section4:[], decisions:[], acknowledgements:[], histories:{} };
+  const [assignRes, section4Res, decisionRes, ackRes] = await Promise.all([
+    sb.from("eval_assignments").select("id,target_id,section_code,rater_staff_id,status,texts,submitted_at").in("target_id", ids),
+    sb.from("eval_section4_entries").select("*").in("target_id", ids),
+    sb.from("eval_decisions").select("*").in("target_id", ids),
+    sb.from("eval_acknowledgements").select("*").in("target_id", ids)
+  ]);
+  for (const [result, label] of [[assignRes,"ผู้ประเมิน"],[section4Res,"ส่วนที่ 4"],
+    [decisionRes,"ผลพิจารณา"],[ackRes,"การรับทราบ"]])
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ` + result.error.message);
+  const assignments = assignRes.data || [];
+  const responseRes = assignments.length ? await sb.from("eval_responses")
+    .select("assignment_id,item_id,score,evidence").in("assignment_id", assignments.map(row => row.id)) : { data:[], error:null };
+  if (responseRes.error) throw new Error("โหลดคะแนนไม่สำเร็จ: " + responseRes.error.message);
+  const histories = await evalHistories(round, targets);
+  return { round, form, targets, assignments, responses:responseRes.data || [], section4:section4Res.data || [],
+    decisions:decisionRes.data || [], acknowledgements:ackRes.data || [], histories };
+}
+
+export async function saveEvalDecision(row) {
+  const { data, error } = await sb.from("eval_decisions").upsert(row, { onConflict:"target_id" }).select().single();
+  if (error) throw new Error(error.message.includes("eval_decisions_reason") ?
+    "เลือกผลต่างจากที่ระบบเสนอ ต้องเขียนเหตุผล" : "ยืนยันผลไม่สำเร็จ: " + error.message);
+  return data;
+}
+
+export const publishEvalRound = roundId => evalWrite(
+  sb.from("eval_rounds").update({ status:"published" }).eq("id", roundId).select().single());
+
+export async function loadMyEvalResults() {
+  const staffId = await myStaffId();
+  if (!staffId) return [];
+  const { data:targets, error:targetError } = await sb.from("eval_targets")
+    .select("id,round_id").eq("staff_id", staffId);
+  if (targetError) throw new Error("โหลดผลประเมินของฉันไม่สำเร็จ: " + targetError.message);
+  if (!targets?.length) return [];
+  const { data:rounds, error:roundError } = await sb.from("eval_rounds")
+    .select("id,status").in("id", targets.map(row => row.round_id));
+  if (roundError) throw new Error("โหลดรอบประเมินไม่สำเร็จ: " + roundError.message);
+  const published = new Set((rounds || []).filter(row => row.status === "published").map(row => row.id));
+  const results = [];
+  for (const roundId of new Set(targets.filter(row => published.has(row.round_id)).map(row => row.round_id))) {
+    const { data, error } = await sb.rpc("my_eval_result", { p_round_id:roundId });
+    if (error) throw new Error("โหลดผลประเมินของฉันไม่สำเร็จ: " + error.message);
+    if (data?.decision) results.push(data);
+  }
+  return results;
+}
+
+export async function acknowledgeEvalResult(targetId, comment) {
+  const { data:existing, error:readError } = await sb.from("eval_acknowledgements")
+    .select("acknowledged_at").eq("target_id", targetId).maybeSingle();
+  if (readError) throw new Error("โหลดการรับทราบไม่สำเร็จ: " + readError.message);
+  const row = { target_id:targetId, comment:String(comment || "").trim() || null, updated_at:new Date().toISOString() };
+  if (existing?.acknowledged_at) row.acknowledged_at = existing.acknowledged_at;
+  const { data, error } = await sb.from("eval_acknowledgements").upsert(row, { onConflict:"target_id" }).select().single();
+  if (error) throw new Error("บันทึกรับทราบไม่สำเร็จ: " + error.message);
+  return data;
+}
+
+export async function loadEvalAppealHolidays(from, to) {
+  const { data, error } = await sb.from("work_holidays").select("holiday_date")
+    .gte("holiday_date", from).lte("holiday_date", to);
+  if (error) throw new Error("โหลดวันหยุดไม่สำเร็จ: " + error.message);
+  return new Set((data || []).map(row => row.holiday_date));
+}
 // ---------- /ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
 
 // ใช้สูตรเดียวกับ transport-report.html buildStudents/outstandingStudents; จำกัดข้อมูลที่ห้องครู

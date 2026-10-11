@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="th"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>พิมพ์ผลประเมิน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df; }
+  * { box-sizing:border-box; } body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:16px; font-size:16px; line-height:1.5; }
+  .wrap,main.academic-content { max-width:1040px; margin:0 auto; min-width:0; } h1 { font-size:22px; margin:4px 0; } h2 { font-size:18px; margin:16px 0 6px; } h3 { font-size:16px; margin:10px 0 4px; }
+  header p { color:var(--muted); margin:0 0 8px; font-size:14px; } .nav { display:flex; gap:8px; flex-wrap:wrap; padding:8px; background:var(--white); border:1px solid var(--line); border-radius:99px; margin-bottom:18px; }
+  .nav a { color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:99px; font-size:14px; } .nav #btn-signout { margin-left:auto; color:var(--danger); }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; } button,.button { font:inherit; font-weight:600; min-height:44px; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; background:var(--teal); color:var(--white); text-decoration:none; }
+  button:focus-visible,a:focus-visible { outline:2px solid var(--teal); outline-offset:2px; } .hint { color:var(--muted); font-size:14px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { border:1px solid var(--line); padding:5px 7px; text-align:left; vertical-align:top; } th { background:var(--bg); }
+  .table-scroll { overflow-x:auto; } .doc-head { text-align:center; } .doc-head h2 { margin:0; } .meta-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 20px; }
+  .signature-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin-top:20px; } .signature { text-align:center; min-height:96px; }
+  .avoid-break { break-inside:avoid; } .choice-line { margin:5px 0; } .note { white-space:pre-wrap; }
+  @media (max-width:720px) { .meta-grid,.signature-grid { grid-template-columns:1fr; } } @media (max-width:420px) { body { padding:12px; } }
+  @media print {
+    @page { size:A4 portrait; margin:12mm; }
+    .nav,.app-shell,.app-sidebar,.workflow,.toast,.no-print { display:none !important; }
+    body { padding:0; background:#fff; font-size:14px; } .wrap,main.academic-content { max-width:none; margin:0; }
+    .card { box-shadow:none; border:0; padding:0; margin:0 0 12px; }
+    tr,.avoid-break,table { break-inside:avoid; } a[href]::after { content:""; }
+    .table-scroll { overflow:visible; } table { font-size:12px; }
+  }
+</style><link rel="stylesheet" href="../app-shell.css?v=20261003-1"></head>
+<body><div class="wrap"><header class="no-print"><h1>พิมพ์ผลประเมิน</h1><p>ตรวจเอกสารก่อนพิมพ์แบบลงนาม</p><div class="nav"><a href="index.html">ภาพรวมบุคลากร</a><a href="eval-result.html">สรุปผลประเมิน</a><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261011-1"></script></header>
+<main class="academic-content"><div class="toolbar no-print"><a class="button" id="back-link" href="eval-result.html">← กลับไปสรุปผล</a><button type="button" id="print-button">พิมพ์</button></div><div id="app" class="card">กำลังโหลดแบบพิมพ์…</div><div id="toast" class="toast no-print" role="status" aria-live="polite"></div></main></div>
+<script type="module">
+import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, loadEvalTargetResult,
+  listStaffPicker, computeEvalResult, evalDecisionOptions, evalDecisionLabel } from "../supabase-client.js?v=20261011-1";
+const session = await requireAuth();
+if (session) {
+  const app = document.getElementById("app");
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
+  const num = value => value == null ? "—" : Number(value).toFixed(2);
+  const targetId = new URLSearchParams(location.search).get("target");
+  const table = (heads, rows) => '<div class="table-scroll"><table><thead><tr>' + heads.map(x => '<th>' + esc(x) + '</th>').join("") + '</tr></thead><tbody>' + rows.join("") + '</tbody></table></div>';
+  document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
+  document.getElementById("print-button").addEventListener("click", () => window.print());
+  try {
+    if (!targetId) throw new Error("ไม่ได้ระบุครูที่จะพิมพ์ผล");
+    const department = await checkDepartment("บุคลากร"); applyPersonnelMenuAccess(department);
+    const data = await loadEvalTargetResult(targetId);
+    document.getElementById("back-link").href = "eval-result.html?target=" + encodeURIComponent(targetId);
+    const staff = await listStaffPicker();
+    const name = id => staff.find(row => row.id === id)?.full_name || "................................";
+    const liveResult = computeEvalResult({ form:data.form, target:data.target,
+      assignments:data.assignments, responses:data.responses, section4:data.section4,
+      roundNo:Number(data.round.round_no), history:data.history });
+    const result = data.decision?.computed || liveResult;
+    const response = new Map(data.responses.map(row => [row.assignment_id + ":" + row.item_id, row]));
+    let html = '<article class="card"><div class="doc-head"><h2>โรงเรียนเจริญศึกษา</h2><div>แบบประเมินครู 360° · ฉบับ ' + esc(data.form.code) + '</div><div>ปีการศึกษา ' + esc(data.round.academic_year) + ' · ครั้งที่ ' + esc(data.round.round_no) + '</div></div>' +
+      '<div class="meta-grid"><p><b>ผู้รับการประเมิน:</b> ' + esc(name(data.target.staff_id)) + '</p><p><b>ภาระงาน:</b> ' + esc(data.target.workload || "—") + '</p></div>';
+    for (const part of data.form.sections.filter(row => ["committee","dept_head"].includes(row.kind))) {
+      const assignments = data.assignments.filter(row => row.section_code === part.code);
+      html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(part.code + " " + part.title) + '</h2>';
+      const rows = assignments.flatMap(assignment => part.domains.flatMap(domain => domain.items.map(item => {
+        const answer = response.get(assignment.id + ":" + item.id);
+        return '<tr><td>' + esc(domain.code + "(" + item.no + ") " + item.text) + '</td><td>' + esc(answer?.score ?? "—") + '</td><td class="note">' + esc(answer?.evidence || "—") + '</td></tr>';
+      })));
+      html += table(["ข้อ","คะแนน","หลักฐาน"], rows) + '</section>';
+    }
+    const peer = data.form.sections.find(row => row.kind === "peer");
+    const peerResult = result.sections.find(row => row.kind === "peer");
+    if (peer) html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(peer.code + " " + peer.title) + '</h2><p>จำนวนผู้ประเมิน ' + esc(peerResult?.raterCount ?? data.assignments.filter(row => row.section_code === peer.code && row.status === "submitted").length) + ' คน</p>' +
+      table(["ข้อ","ค่าเฉลี่ย"], (peerResult?.items || []).map(item => '<tr><td>' + esc(item.code + " " + item.text) + '</td><td>' + num(item.value) + '</td></tr>')) + '</section>';
+    const part4 = data.form.sections.find(row => row.kind === "summary_entry");
+    if (part4) html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(part4.code + " " + part4.title) + '</h2><p>แบบ ' + esc(data.section4?.variant_code || "—") + ' · ค่าเฉลี่ย ' + num(data.section4?.avg_score) + ' · จำนวนผู้ตอบ/ผู้สังเกต ' + esc(data.section4?.respondents ?? "—") + '</p>' +
+      table(["ข้อ ★","คะแนน"], Object.entries(data.section4?.star_values || {}).map(([code,value]) => '<tr><td>' + esc(code) + '</td><td>' + num(value) + '</td></tr>')) + '</section>';
+    const selfPart = data.form.sections.find(row => row.kind === "self");
+    const selfAssignment = data.assignments.find(row => row.section_code === selfPart?.code);
+    if (selfPart) html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(selfPart.code + " " + selfPart.title) + '</h2><p>' + esc(Object.values(selfAssignment?.texts || {}).filter(Boolean).join(" · ") || "—") + '</p></section>';
+    const domains = result.sections.find(row => row.kind === "committee")?.domains || [];
+    html += '<section class="avoid-break"><h2>ตาราง ก · รายด้าน</h2>' + table(["ด้าน","เฉลี่ย","เกณฑ์ขั้นต่ำ","ผล"], domains.map(row => '<tr><td>' + esc(row.code + " " + row.title) + '</td><td>' + num(row.avg) + '</td><td>' + num(row.minAvg) + '</td><td>' + (row.pass ? "ผ่าน" : "ไม่ผ่าน") + '</td></tr>')) + '</section>';
+    html += '<section class="avoid-break"><h2>ตาราง ข · ผลรวม</h2>' + table(["ส่วน","เฉลี่ย","น้ำหนัก","คะแนนถ่วงน้ำหนัก"], result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '</td><td>' + num(row.avg) + '</td><td>' + esc(row.weight) + '%</td><td>' + num(row.weighted) + '</td></tr>').concat('<tr><th>รวม · ' + esc(result.level || "—") + '</th><th colspan="2"></th><th>' + num(result.total) + '</th></tr>')) + '</section>';
+    html += '<section class="avoid-break"><h2>ตาราง ค · ข้อ ★</h2>' + table(["ข้อ","คะแนน","ผล"], result.stars.map(row => '<tr><td>' + esc(row.code) + '</td><td>' + num(row.value) + '</td><td>' + (row.fail ? "ไม่ผ่าน" : "ผ่าน") + '</td></tr>')) + '</section>';
+    html += '<section class="avoid-break"><h2>ผลการพิจารณา</h2>' + evalDecisionOptions(data.round.round_no).map(option => '<p class="choice-line">' + (data.decision?.final === option.value ? "☑" : "☐") + ' ' + esc(option.label) + '</p>').join("") +
+      '<p><b>เหตุผล:</b> ' + esc(data.decision?.reason || liveResult.reasons?.join(" · ") || "—") + '</p></section>' +
+      '<section class="avoid-break"><h2>ความเห็นของผู้รับการประเมิน</h2><p class="note">' + esc(data.acknowledgement?.comment || "........................................................................................") + '</p></section>' +
+      '<section class="signature-grid avoid-break">' + [
+        ["ผู้รับการประเมิน",name(data.target.staff_id)], ["ผู้อำนวยการ",name(data.round.director_staff_id)],
+        ["กรรมการร่วม",data.round.committee_staff_id ? name(data.round.committee_staff_id) : ".........."],
+        ["หัวหน้าฝ่ายบุคคล","................................"]
+      ].map(([label,person]) => '<div class="signature">ลงชื่อ ........................................<br>(' + esc(person) + ')<br>' + esc(label) + '<br>วันที่ ........../........../..........</div>').join("") + '</section></article>';
+    app.outerHTML = html;
+  } catch (error) { app.textContent = error.message; }
+}
+</script></body></html>

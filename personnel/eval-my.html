@@ -37,7 +37,14 @@
   .action.primary { color:var(--white); background:var(--teal); }
   .round-meta { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:14px; }
   .footer-link { display:inline-block; min-height:44px; padding:9px 0; }
-  a:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  .result-hero { background:var(--teal-soft); border-radius:9px; padding:12px; margin:10px 0; }
+  .result-hero b { font-size:20px; color:var(--teal); } .result-table { width:100%; border-collapse:collapse; font-size:14px; }
+  .result-table th,.result-table td { border-bottom:1px solid var(--line); padding:7px; text-align:left; }
+  .result-table th { background:var(--bg); } .result-table td:last-child { text-align:right; }
+  .result-card details { margin-top:12px; } .result-card summary { cursor:pointer; min-height:44px; padding:8px 0; }
+  .result-card textarea { width:100%; min-height:86px; font:inherit; font-size:16px; padding:9px; border:1px solid var(--line); border-radius:8px; }
+  .result-card button { font:inherit; min-height:44px; border:0; border-radius:8px; padding:8px 14px; background:var(--teal); color:var(--white); cursor:pointer; margin-top:8px; }
+  a:focus-visible,button:focus-visible,textarea:focus-visible,summary:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
   #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:60; max-width:min(90vw,520px);
     padding:10px 16px; background:var(--danger); color:var(--white); border-radius:9px; opacity:0; pointer-events:none; }
   #toast.show { opacity:1; }
@@ -56,7 +63,7 @@
       <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261010-3"></script>
+    <script src="../app-shell.js?v=20261011-1"></script>
   </header>
   <main class="academic-content">
     <div id="app" class="card" role="status">กำลังโหลดงานประเมิน…</div>
@@ -66,7 +73,9 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, listMyEvalAssignments, countMyEvalResponses,
   listStaffPicker, loadEvalForm, evalSelfDueDate, thaiShortDateText, isPersonnelHead,
-  bangkokNow, toDateStr } from "../supabase-client.js?v=20261010-3";
+  bangkokNow, toDateStr, listEvalRoundsICanSee, loadMyEvalResults, evalDecisionLabel,
+  evalThaiDateStr, addWorkingDays, addDaysStr, loadEvalAppealHolidays, acknowledgeEvalResult
+} from "../supabase-client.js?v=20261011-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -87,6 +96,7 @@ if (!session) {
       app.innerHTML = "บัญชีนี้ยังไม่ได้ผูกกับทะเบียนบุคลากร ติดต่อฝ่ายบุคคล";
     } else {
       const data = await listMyEvalAssignments(me);
+      const [visibleRounds, myResults] = await Promise.all([listEvalRoundsICanSee(), loadMyEvalResults()]);
       const mine = data.assignments.filter(row => row.rater_staff_id === me);
       const [staff, counts, head] = await Promise.all([
         listStaffPicker(), countMyEvalResponses(mine.map(row => row.id)), isPersonnelHead()
@@ -98,6 +108,43 @@ if (!session) {
       const targetById = new Map(data.targets.map(row => [row.id, row]));
       const today = toDateStr(bangkokNow());
       let html = "";
+      if (head || visibleRounds.length) html += '<section class="card"><h2>สรุปผลประเมิน</h2>' +
+        '<p class="hint">ดูตาราง ก ข ค และยืนยันผลการพิจารณา</p><a class="action primary" href="eval-result.html">เปิดหน้าสรุปผลประเมิน</a></section>';
+      for (const item of myResults) {
+        const decision = item.decision, computed = decision.computed;
+        if (!computed) continue;
+        let form = forms.get(item.round.form_id);
+        if (!form) { form = await loadEvalForm(item.round.form_id); forms.set(item.round.form_id, form); }
+        const publishedDay = evalThaiDateStr(item.round.published_at);
+        const holidays = publishedDay ? await loadEvalAppealHolidays(publishedDay, addDaysStr(publishedDay, 30)) : new Set();
+        const appeal = publishedDay ? addWorkingDays(publishedDay, Number(form.rules?.appeal_working_days || 7), holidays) : null;
+        const committee = form.sections.find(row => row.kind === "committee");
+        const committeeText = (committee?.text_fields || []).map(field => '<p><b>' + esc(field.label) + ':</b> ' +
+          esc(item.committee_texts?.[field.key] || "—") + '</p>').join("");
+        const parts = (computed.sections || []).filter(row => row.weight > 0);
+        const starFails = (computed.stars || []).filter(row => row.fail);
+        html += '<section class="card result-card" data-result="' + esc(item.target_id) + '"><h2>ผลประเมินของฉัน · ' +
+          esc(item.round.academic_year + " ครั้งที่ " + item.round.round_no) + '</h2>' +
+          '<div class="result-hero"><b>' + esc(evalDecisionLabel(decision.final)) + '</b><div>รวม ' +
+          (computed.total == null ? "—" : Number(computed.total).toFixed(2)) + ' · ' + esc(computed.level || "—") +
+          ' · ประกาศเมื่อ ' + esc(publishedDay ? thaiShortDateText(publishedDay) : "—") + '</div></div>' +
+          '<table class="result-table"><thead><tr><th>ส่วน</th><th>เฉลี่ย</th><th>น้ำหนัก</th></tr></thead><tbody>' +
+          parts.map(row => '<tr><td>' + esc(row.title) + (row.kind === "peer" ? " (ค่าเฉลี่ยเพื่อนครู)" : "") +
+            '</td><td>' + (row.avg == null ? "—" : Number(row.avg).toFixed(2)) + '</td><td>' + esc(row.weight) + '%</td></tr>').join("") + '</tbody></table>' +
+          (starFails.length ? '<h3>ข้อ ★ ที่ไม่ผ่าน</h3><p>' + esc(starFails.map(row => row.code + " " + row.label).join(" · ")) + '</p>' : "") +
+          (decision.reason ? '<p><b>เหตุผลประกอบการพิจารณา:</b> ' + esc(decision.reason) + '</p>' : "") +
+          committeeText + '<details><summary>ดูคะแนนรายข้อ</summary>' + parts.filter(row => ["committee","dept_head","peer"].includes(row.kind)).map(row =>
+            '<h3>' + esc(row.title) + '</h3><table class="result-table"><tbody>' + (row.items || []).map(score =>
+              '<tr><td>' + esc(score.code + " " + score.text) + '</td><td>' +
+              (score.value == null ? "—" : Number(score.value).toFixed(2)) + '</td></tr>').join("") + '</tbody></table>').join("") + '</details>' +
+          '<div class="group"><h3>รับทราบผล</h3><p class="hint">การลงนามเป็นการรับทราบผล ไม่ได้หมายความว่าเห็นด้วยกับผลการประเมิน</p>' +
+          (appeal ? '<p>ยื่นขอทบทวนผลต่อคณะกรรมการบริหารโรงเรียนได้ถึง ' + esc(thaiShortDateText(appeal)) + '</p>' : "") +
+          '<p data-ack-status>' + (item.acknowledgement ? 'รับทราบเมื่อ ' + esc(submittedDay(item.acknowledgement.acknowledged_at)) + ' · แก้คำชี้แจงได้' : '') + '</p>' +
+          '<label for="comment-' + esc(item.target_id) + '">คำชี้แจง (ไม่บังคับ)</label>' +
+          '<textarea id="comment-' + esc(item.target_id) + '">' + esc(item.acknowledgement?.comment || "") + '</textarea>' +
+          '<button type="button" data-ack="' + esc(item.target_id) + '">' +
+          (item.acknowledgement ? "บันทึกคำชี้แจง" : "รับทราบผล") + '</button></div></section>';
+      }
       for (const round of [...data.rounds].sort((a,b) => b.created_at.localeCompare(a.created_at))) {
         const assignments = mine.filter(row => targetById.get(row.target_id)?.round_id === round.id);
         if (!assignments.length) continue;
@@ -139,6 +186,18 @@ if (!session) {
       }
       app.className = "";
       app.innerHTML = html || '<div class="card empty">ยังไม่มีแบบประเมินที่ต้องกรอก</div>';
+      app.addEventListener("click", async event => {
+        const button = event.target.closest("[data-ack]"); if (!button) return;
+        const card = button.closest(".result-card"); button.disabled = true;
+        try {
+          const saved = await acknowledgeEvalResult(button.dataset.ack, card.querySelector("textarea").value);
+          card.querySelector("[data-ack-status]").textContent = "รับทราบเมื่อ " + submittedDay(saved.acknowledged_at) + " · แก้คำชี้แจงได้";
+          button.textContent = "บันทึกคำชี้แจง";
+        } catch (error) {
+          document.getElementById("toast").textContent = error.message;
+          document.getElementById("toast").classList.add("show");
+        } finally { button.disabled = false; }
+      });
       if (head) app.insertAdjacentHTML("beforeend", '<p><a class="footer-link" href="eval-rounds.html">ไปหน้ารอบประเมิน</a></p>');
     }
   } catch (error) {

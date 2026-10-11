@@ -366,7 +366,7 @@ function syncFinanceKpiTones() {
       // หน้าที่เป็นงานของฝ่ายบุคคลโดยเฉพาะ — ครูทั่วไปเห็นตารางเวรรวมและข้อมูลของตัวเอง
       // ซ่อนไว้ก่อนเสมอ (fail-closed) แล้วให้หน้าเว็บเรียก applyPersonnelMenuAccess() เปิดให้
       // ถ้าลืมเรียก คนมีสิทธิ์จะเห็นเมนูไม่ครบ (สังเกตได้ทันที) ดีกว่าเผลอเปิดให้คนไม่มีสิทธิ์
-      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "coverage.html", "duty.html", "staff.html", "hr-settings.html", "teaching-gap.html", "work-summary.html", "eval-rounds.html"],
+      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "coverage.html", "duty.html", "staff.html", "hr-settings.html", "teaching-gap.html", "work-summary.html", "eval-rounds.html", "eval-result.html"],
       groups: [
         {
           label: "บันทึก",
@@ -396,7 +396,7 @@ function syncFinanceKpiTones() {
         },
         {
           label: "ประเมิน",
-          items: [["eval-my.html", "งานประเมินของฉัน"], ["eval-rounds.html", "ประเมินครู 360°"]]
+          items: [["eval-my.html", "งานประเมินของฉัน"], ["eval-rounds.html", "ประเมินครู 360°"], ["eval-result.html", "สรุปผลประเมิน"]]
         }
       ],
       workflows: {
@@ -414,6 +414,16 @@ function syncFinanceKpiTones() {
           title: "ประเมินครู 360°",
           description: "เปิดรอบ จัดผู้ประเมิน ติดตามการส่ง และคีย์ผลส่วนที่ 4",
           steps: ["เปิดรอบ", "จัดผู้ประเมิน", "ติดตามและปิดรับ"]
+        },
+        "eval-result.html": {
+          title: "สรุปผลประเมิน",
+          description: "ตาราง ก ข ค ผลที่เข้าเงื่อนไข และยืนยันผลการพิจารณา",
+          steps: ["เลือกรอบ", "ดูผลรายคน", "ยืนยันผล"]
+        },
+        "eval-print.html": {
+          title: "พิมพ์ผลประเมิน",
+          description: "ตรวจเอกสารและพิมพ์แบบลงนาม",
+          steps: ["ตรวจผล", "พิมพ์แบบลงนาม"]
         },
         "leave.html": {
           title: "บันทึกการลา",
