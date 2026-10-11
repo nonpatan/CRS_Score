@@ -8323,6 +8323,210 @@ export async function evalRedFlagConfirmed(staffId, from, to) {
 }
 // ---------- /ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
 
+// ============================================================
+// 🎨 ส่งผลงานตามธีม — หน่วยส่ง, การตรวจฟอร์ม และคำสั่งฐานข้อมูล
+// ============================================================
+export function buildThemeWorkUnits({ subjects = [], members = [], works = [], parts = [], term }) {
+  const allowed = subject => !subject.term || String(subject.term) === String(term);
+  const subjectsById = new Map(subjects.map(subject => [subject.id, subject]));
+  const memberIds = new Set(members.map(member => member.member_subject_id));
+  const worksBySubject = new Map(works.filter(work => String(work.term) === String(term))
+    .map(work => [work.subject_id, work]));
+  const partsBySubject = new Map(parts.filter(part => String(part.term) === String(term))
+    .map(part => [part.subject_id, part]));
+  const byCode = (a, b) => String(a.code || "").localeCompare(String(b.code || ""), "th");
+  return subjects.filter(subject => allowed(subject) && !memberIds.has(subject.id)
+      && (subject.subject_type === "พื้นฐาน" || subject.subject_type === "บูรณาการ"))
+    .sort(byCode).map(subject => {
+      const children = subject.subject_type === "บูรณาการ"
+        ? members.filter(member => member.integrated_subject_id === subject.id)
+          .map(member => subjectsById.get(member.member_subject_id)).filter(Boolean).sort(byCode)
+        : [];
+      const kind = children.length ? "integrated" : "single";
+      return {
+        kind, subject, work: worksBySubject.get(subject.id) || null,
+        parts: (children.length ? children : [subject]).map(item => ({
+          subject: item, ownerId: item.owner_id, part: partsBySubject.get(item.id) || null
+        }))
+      };
+    });
+}
+
+export function groupThemeWorkByOwner(units) {
+  const groups = [];
+  for (const unit of units || []) {
+    const byOwner = new Map();
+    for (const item of unit.parts || []) {
+      const ownerId = item.ownerId || null;
+      if (!byOwner.has(ownerId)) byOwner.set(ownerId, []);
+      byOwner.get(ownerId).push({ subject:item.subject, part:item.part });
+    }
+    for (const [ownerId, items] of byOwner) {
+      const submitted = items.filter(item => item.part);
+      const statuses = new Set(submitted.map(item => item.part.status));
+      const reviewedCount = items.filter(item => item.part?.reviewed_at).length;
+      const dates = submitted.map(item => item.part.submitted_at).filter(Boolean).sort();
+      groups.push({ key:`${unit.subject.id}:${ownerId || "unknown"}`, unit, ownerId, items,
+        status:submitted.length === 0 ? "missing"
+          : submitted.length !== items.length || statuses.size !== 1 ? "mixed" : submitted[0].part.status,
+        submittedAt:dates[0] || null,
+        reviewed:reviewedCount === items.length ? "all" : reviewedCount ? "some" : "none" });
+    }
+  }
+  return groups;
+}
+
+function themeWorkThaiDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(date);
+  const get = type => parts.find(item => item.type === type)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function themeWorkDayNumber(dateStr) {
+  return Date.parse(`${dateStr}T00:00:00Z`) / 86400000;
+}
+
+export function themeWorkLateDays(submittedAt, dueDate) {
+  if (!submittedAt || !dueDate) return 0;
+  const sent = themeWorkThaiDate(submittedAt);
+  if (!sent) return 0;
+  return Math.max(0, themeWorkDayNumber(sent) - themeWorkDayNumber(dueDate));
+}
+
+export function themeWorkCountdown(today, window) {
+  if (!window?.due_date) return null;
+  const date = typeof today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(today)
+    ? today : themeWorkThaiDate(today);
+  if (!date) return null;
+  const days = themeWorkDayNumber(window.due_date) - themeWorkDayNumber(date);
+  const due = `ปิดรับ ${thaiShortDateText(window.due_date)}`;
+  return days > 0 ? `${due} · อีก ${days} วัน`
+    : days === 0 ? `${due} · วันนี้วันสุดท้าย`
+      : `${due} · เลยกำหนด ${-days} วัน`;
+}
+
+export function summarizeThemeWorks(units) {
+  const result = { total: 0, missing: 0, match: 0, adjust: 0, none: 0,
+    unreviewed: 0, reviewed: 0, late: 0, missingTeachers: 0 };
+  const teachers = new Set();
+  for (const unit of units || []) for (const item of unit.parts || []) {
+    result.total++;
+    const part = item.part;
+    if (!part) {
+      result.missing++;
+      if (item.ownerId) teachers.add(item.ownerId);
+      continue;
+    }
+    if (part.status in result && ["match", "adjust", "none"].includes(part.status)) result[part.status]++;
+    if (part.reviewed_at) result.reviewed++;
+    else result.unreviewed++;
+    if (themeWorkLateDays(part.submitted_at, unit.dueDate)) result.late++;
+  }
+  result.missingTeachers = teachers.size;
+  return result;
+}
+
+export function validateThemeWorkForm({ workName, themeUrl, status, note, nextPlan, workUrl, headLocked = false }) {
+  const errors = {};
+  const urlOk = value => /^https?:\/\/\S+/i.test(String(value || "").trim());
+  if (!headLocked && !String(workName || "").trim()) errors.workName = "ระบุชื่อผลงาน";
+  if (!headLocked && !urlOk(themeUrl)) errors.themeUrl = "ใส่ลิงก์เอกสารธีมที่ขึ้นต้นด้วย http:// หรือ https://";
+  if (!["match", "adjust", "none"].includes(status)) errors.status = "เลือกสถานะผลงาน";
+  if (["adjust", "none"].includes(status) && !String(note || "").trim()) errors.note = "ระบุหมายเหตุ";
+  if (status === "none" && !String(nextPlan || "").trim()) errors.nextPlan = "ระบุแผนต่อ";
+  if (status !== "none" && String(workUrl || "").trim() && !urlOk(workUrl))
+    errors.workUrl = "ใส่ลิงก์ผลงานที่ขึ้นต้นด้วย http:// หรือ https://";
+  return errors;
+}
+
+export async function loadThemeWorkData({ year, term }) {
+  const requests = [
+    ["subjects", fetchAllRows(() => sb.from("subjects")
+      .select("id,name,code,year,term,grade_level,owner_id,subject_type").eq("year", year))],
+    ["members", fetchAllRows(() => sb.from("integration_members")
+      .select("integrated_subject_id,member_subject_id"), ["integrated_subject_id", "member_subject_id"])],
+    ["works", fetchAllRows(() => sb.from("theme_works").select("*").eq("term", term))],
+    ["parts", fetchAllRows(() => sb.from("theme_work_parts").select("*").eq("term", term))],
+    ["profiles", fetchAllRows(() => sb.from("profiles").select("id,name"))],
+    ["windows", fetchAllRows(() => sb.from("theme_work_windows").select("*")
+      .eq("year", year).eq("term", term), ["year", "term"])]
+  ];
+  const values = await Promise.all(requests.map(async ([label, request]) => {
+    const result = await request;
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
+    return result.data || [];
+  }));
+  const [subjects, allMembers, allWorks, allParts, profiles, windows] = values;
+  const subjectIds = new Set(subjects.map(subject => subject.id));
+  const members = allMembers.filter(member => subjectIds.has(member.integrated_subject_id)
+    && subjectIds.has(member.member_subject_id));
+  const works = allWorks.filter(work => subjectIds.has(work.subject_id));
+  const parts = allParts.filter(part => subjectIds.has(part.subject_id));
+  return { subjects, members, works, parts, profiles, window: windows[0] || null };
+}
+
+export async function submitThemeWorkPart({ unit, ownSubjectIds, term, form }) {
+  const ids = [...new Set(ownSubjectIds || [])];
+  const own = ids.map(id => unit.parts.find(item => item.subject.id === id));
+  if (!ids.length || own.some(item => !item)) throw new Error("ไม่พบส่วนของวิชาที่จะส่ง");
+  let work = unit.work;
+  if (!work) {
+    const result = await sb.from("theme_works").insert({
+      subject_id: unit.subject.id, term, work_name: form.workName.trim(),
+      theme_url: form.themeUrl.trim()
+    }).select("*").single();
+    if (result.error?.code === "23505") {
+      const current = await sb.from("theme_works").select("*")
+        .eq("subject_id", unit.subject.id).eq("term", term).single();
+      if (current.error) throw new Error(current.error.message);
+      work = current.data;
+    } else if (result.error) throw new Error(result.error.message);
+    else work = result.data;
+  } else if (String(work.work_name) !== form.workName.trim()) {
+    const result = await sb.from("theme_works").update({ work_name: form.workName.trim() })
+      .eq("id", work.id).select("*").single();
+    if (result.error) throw new Error(result.error.message);
+    work = result.data;
+  }
+  const fields = { status: form.status, note: form.note.trim() || null,
+    next_plan: form.status === "none" ? form.nextPlan.trim() : null,
+    work_url: form.status === "none" ? null : form.workUrl.trim() || null };
+  const parts = [];
+  for (const item of own) {
+    if (item.part?.reviewed_at) continue;
+    const result = item.part
+      ? await sb.from("theme_work_parts").update(fields).eq("id", item.part.id).select("*").single()
+      : await sb.from("theme_work_parts").insert({
+        ...fields, work_id: work.id, subject_id: item.subject.id, term
+      }).select("*").single();
+    if (result.error) throw new Error(`บันทึกแล้ว ${parts.length} จาก ${ids.length} วิชา: ${result.error.message}`);
+    parts.push(result.data);
+  }
+  return { work, parts };
+}
+
+export async function saveThemeWorkWindow({ year, term, openDate, dueDate }) {
+  const { data, error } = await sb.from("theme_work_windows").upsert({
+    year, term, open_date: openDate, due_date: dueDate
+  }, { onConflict: "year,term" }).select("*").single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function setThemeWorkReviewed(partIds, reviewed) {
+  if (!partIds?.length) return [];
+  const { data, error } = await sb.from("theme_work_parts")
+    .update({ reviewed_at: reviewed ? new Date().toISOString() : null })
+    .in("id", partIds).select("*");
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 // ใช้สูตรเดียวกับ transport-report.html buildStudents/outstandingStudents; จำกัดข้อมูลที่ห้องครู
 export async function loadRoomTransportDebtors({ year, yearRange, today, grade_level, classroom }) {
   const placementRes = await fetchAllRows(() => sb.from("student_year_placements")
