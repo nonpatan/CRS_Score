@@ -108,6 +108,8 @@
   .picker-row:last-child { border-bottom:0; }
   .picker-row input { width:20px; height:20px; flex:none; }
   .picker-row small { color:var(--muted); }
+  .dept-list { border:1px solid var(--line); border-radius:9px; max-height:240px; overflow:auto; }
+  .dept-list .picker-row:last-child { border-bottom:0; }
   .table-scroll { overflow-x:auto; max-width:100%; border:1px solid var(--line); border-radius:9px; }
   table { border-collapse:collapse; width:100%; min-width:700px; font-size:14px; }
   th, td { border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; white-space:nowrap; }
@@ -165,14 +167,14 @@
 <script type="module">
 import {
   requireAuth, signOut, checkDepartment, isPersonnelHead, applyPersonnelMenuAccess,
-  listStaffPicker, getAcademicYears, academicYearOf, bangkokNow, toDateStr, thaiShortDateText,
+  listStaffPicker, getSetting, getAcademicYears, academicYearOf, bangkokNow, toDateStr, thaiShortDateText,
   listEvalForms, loadEvalForm, listEvalRounds, loadEvalRoundAdmin, saveEvalRound, deleteEvalRound,
   setEvalRoundStatus, upsertEvalTarget, deleteEvalTarget, addEvalAssignment,
   setEvalAssignmentRater, deleteEvalAssignment, reopenEvalAssignment,
   upsertEvalSection4, deleteEvalSection4, upsertEvalAttendanceSnapshots,
-  evalAssignmentProblems, evalSection4Check, buildEvalAttendanceSnapshot,
+  evalAssignmentProblems, evalDeptHeadsFor, evalSection4Check, buildEvalAttendanceSnapshot,
   loadWorkContext, summarizeStaff, loadEvalRoundResults, evalDecisionLabel, evalThaiDateStr, publishEvalRound
-} from "../supabase-client.js?v=20261011-2";
+} from "../supabase-client.js?v=20261011-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -181,7 +183,7 @@ if (!session) {
   const el = id => document.getElementById(id);
   const esc = value => String(value ?? "").replace(/[&<>"']/g, ch =>
     ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
-  const state = { forms:[], rounds:[], staff:[], years:[], data:null, form:null, resultData:null,
+  const state = { forms:[], rounds:[], staff:[], years:[], deptPositions:"", data:null, form:null, resultData:null,
     showForm:false, editing:false, showPicker:false, search:"", preview:null, previewWarnings:[], editingTarget:null };
   let toastTimer = null;
   const toast = (message, error = false) => {
@@ -209,6 +211,9 @@ if (!session) {
   const targetAssignments = id => (state.data?.assignments || []).filter(row => row.target_id === id);
   const targetEntry = id => (state.data?.section4 || []).find(row => row.target_id === id);
   const targetSnapshot = id => (state.data?.snapshots || []).find(row => row.target_id === id);
+  const deptCandidates = targetStaffId => evalDeptHeadsFor(state.staff, state.deptPositions, targetStaffId);
+  const deptChoice = (id, checked) => '<label class="picker-row"><input type="checkbox" data-role="dept" value="' +
+    esc(id) + '"' + (checked ? ' checked' : '') + '><span>' + esc(staffName(id)) + '</span></label>';
   const problems = () => state.data ? evalAssignmentProblems({
     form:state.form, round:state.data.round, targets:state.data.targets, assignments:state.data.assignments
   }) : [];
@@ -287,7 +292,10 @@ if (!session) {
     const round = state.data.round, mine = targetAssignments(target.id);
     const deptSection = state.form.sections.find(section => section.kind === "dept_head");
     const peerSection = state.form.sections.find(section => section.kind === "peer");
-    const dept = mine.find(row => row.section_code === deptSection?.code)?.rater_staff_id || "";
+    const assignedDepts = mine.filter(row => row.section_code === deptSection?.code).map(row => row.rater_staff_id);
+    const depts = assignedDepts.length ? assignedDepts : deptCandidates(target.staff_id);
+    const candidates = deptCandidates(target.staff_id);
+    const customDepts = depts.filter(id => !candidates.includes(id));
     const peers = mine.filter(row => row.section_code === peerSection?.code).map(row => row.rater_staff_id);
     const variant = variantOf(target.variant_code);
     const entry = targetEntry(target.id);
@@ -296,8 +304,12 @@ if (!session) {
     let html = '<article class="teacher-card" id="teacher-' + esc(target.id) + '" data-target="' + esc(target.id) + '">' +
       '';
     if (showAssignment) {
-      html += '<div class="row2"><div class="field"><label>หัวหน้าฝ่ายผู้ประเมิน (1 คน)</label>' +
-        '<select data-role="dept">' + staffOptions(dept, "— เลือกหัวหน้าฝ่าย —", true, [target.staff_id]) + '</select>' +
+      html += '<div class="row2"><div class="field"><label data-dept-count>หัวหน้าฝ่ายผู้ประเมิน (' + depts.length + ' คน)</label>' +
+        (!state.deptPositions?.trim() ? '<div class="banner warn">ยังไม่ได้ตั้งตำแหน่งหัวหน้าฝ่าย — เลือกเองจาก “เพิ่มคนอื่น…”</div>' : '') +
+        '<div class="dept-list">' + candidates.concat(customDepts).map(id => deptChoice(id, depts.includes(id))).join("") + '</div>' +
+        '<p class="hint">คนที่ควบหลายตำแหน่งกรอกแบบเดียว</p>' +
+        '<select data-role="dept-add" aria-label="เพิ่มหัวหน้าฝ่ายผู้ประเมินคนอื่น">' +
+        staffOptions("", "เพิ่มคนอื่น…", false, [target.staff_id, ...candidates, ...customDepts]) + '</select>' +
         '<div class="field-error" data-problem="dept"></div></div>' +
         '<div class="field"><label>แบบส่วนที่ 4</label><select data-role="variant">' +
         '<option value="">— เลือกแบบ —</option>' + (variantSection()?.variants || []).map(row =>
@@ -306,7 +318,7 @@ if (!session) {
         '</select><div class="field-error" data-problem="variant"></div></div></div>' +
         '<div class="field"><label>เพื่อนครูผู้ประเมิน (2–3 คน)</label><div class="row3">' +
         [0,1,2].map(index => '<select data-role="peer" aria-label="เพื่อนครูคนที่ ' + (index + 1) + '">' +
-          staffOptions(peers[index], "— ไม่เลือก —", false, [target.staff_id, round.director_staff_id]) + '</select>').join("") +
+          staffOptions(peers[index], "— ไม่เลือก —", false, [target.staff_id, round.director_staff_id, ...depts]) + '</select>').join("") +
         '</div><div class="field-error" data-problem="peer"></div>' +
         '<p class="peer-note">ญาติ/เพื่อนสนิท ระบบตรวจไม่ได้ — ฝ่ายบุคคลเลือกตามคำชี้แจงข้อ 8</p></div>' +
         '<div class="field"><label>ภาระงาน (ไม่บังคับ)</label><input type="text" data-role="workload" value="' +
@@ -315,7 +327,7 @@ if (!session) {
           'data-target="' + esc(target.id) + '"') + actionButton("close-editor", "ปิด") +
           (round.status === "setup" ? actionButton("remove-target", "เอาครูออกจากรอบ", "danger", 'data-target="' + esc(target.id) + '"') : '') + '</div>';
     } else {
-      html += '<p class="meta">หัวหน้าฝ่าย: ' + esc(staffName(dept)) + ' · เพื่อนครู ' + peers.length +
+      html += '<p class="meta">หัวหน้าฝ่าย ' + assignedDepts.length + ' คน · เพื่อนครู ' + peers.length +
         ' คน · แบบ ' + esc(target.variant_code || "ยังไม่เลือก") + '</p>';
     }
     if (round.status === "open" || round.status === "closed") {
@@ -373,7 +385,9 @@ if (!session) {
           html += '<td>' + (entry ? esc(entry.variant_code) + ' · ' + Number(entry.avg_score).toFixed(2) : "ยังไม่คีย์") + '</td>';
         } else {
           const matching = rows.filter(row => row.section_code === section.code);
-          html += '<td>' + (matching.length ? matching.map(row =>
+          const sent = matching.filter(row => row.status === "submitted").length;
+          html += '<td>' + (section.kind === "dept_head" && matching.length ?
+            '<b>ส่งแล้ว ' + sent + '/' + matching.length + '</b><br>' : '') + (matching.length ? matching.map(row =>
             row.status === "submitted" && state.data.round.status === "published" ?
               '✓ ส่งแล้ว · ' + esc(staffName(row.rater_staff_id)) :
             row.status === "submitted" ? actionButton("reopen-assignment",
@@ -470,7 +484,7 @@ if (!session) {
     const head = '<div class="trow thead"><span>ครู</span><span>หัวหน้าฝ่าย</span><span>เพื่อนครู</span><span>ส่วนที่ 4</span><span>สถานะ</span><span></span></div>';
     const rows = state.data.targets.map(target => {
       const mine = targetAssignments(target.id);
-      const dept = mine.find(row => row.section_code === deptSection?.code)?.rater_staff_id;
+      const depts = mine.filter(row => row.section_code === deptSection?.code).map(row => row.rater_staff_id);
       const peers = mine.filter(row => row.section_code === peerSection?.code).map(row => staffName(row.rater_staff_id));
       const mineIssues = issue.filter(row => row.targetId === target.id).map(row => row.message.replace(/^ส่วน \S+: /, ""));
       const entry = targetEntry(target.id);
@@ -483,7 +497,8 @@ if (!session) {
       const label = round.status === "setup" ? (mineIssues.length ? "จัด" : "แก้") : keying ? (entry ? "แก้ส่วนที่ 4" : "คีย์ส่วนที่ 4") : "";
       let html = '<div class="trow' + (open ? " open" : "") + '" id="row-' + esc(target.id) + '">' +
         '<span class="who"><b>' + esc(staffName(target.staff_id)) + '</b>' + (target.workload ? '<span class="muted">' + esc(target.workload) + '</span>' : "") + '</span>' +
-        '<span class="cell"><span class="cell-label">หัวหน้าฝ่าย: </span>' + (dept ? esc(staffName(dept)) : '<span class="muted">—</span>') + '</span>' +
+        '<span class="cell"' + (depts.length ? ' title="' + esc(depts.map(staffName).join(", ")) + '"' : '') + '><span class="cell-label">หัวหน้าฝ่าย </span>' +
+        (depts.length ? depts.length + ' คน' : '<span class="muted">—</span>') + '</span>' +
         '<span class="cell"><span class="cell-label">เพื่อนครู: </span>' + (peers.length ? esc(peers.join(", ")) : '<span class="muted">—</span>') + '</span>' +
         '<span class="cell"><span class="cell-label">ส่วนที่ 4: </span>' + esc(target.variant_code || "—") + (entry ? " · " + Number(entry.avg_score).toFixed(2) : "") + '</span>' +
         '<span class="cell">' + status + '</span>' +
@@ -573,10 +588,20 @@ if (!session) {
   function cardOf(id) { return el("teacher-" + id); }
   function cardValues(id) {
     const card = cardOf(id);
-    return { dept:card.querySelector('[data-role="dept"]')?.value || "",
+    return { depts:[...card.querySelectorAll('[data-role="dept"]:checked')].map(node => node.value),
       peers:[...card.querySelectorAll('[data-role="peer"]')].map(node => node.value).filter(Boolean),
       variant:card.querySelector('[data-role="variant"]')?.value || null,
       workload:card.querySelector('[data-role="workload"]')?.value.trim() || null };
+  }
+  function syncDeptChoices(card) {
+    const depts = [...card.querySelectorAll('[data-role="dept"]:checked')].map(node => node.value);
+    card.querySelector('label[data-dept-count]').textContent = 'หัวหน้าฝ่ายผู้ประเมิน (' + depts.length + ' คน)';
+    const target = state.data.targets.find(row => row.id === card.dataset.target);
+    for (const peer of card.querySelectorAll('[data-role="peer"]')) {
+      const selected = depts.includes(peer.value) ? "" : peer.value;
+      peer.innerHTML = staffOptions(selected, "— ไม่เลือก —", false,
+        [target.staff_id, state.data.round.director_staff_id, ...depts]);
+    }
   }
   function projectedProblems(id, values) {
     const target = state.data.targets.find(row => row.id === id);
@@ -584,8 +609,8 @@ if (!session) {
     const sections = state.form.sections;
     const editableCodes = sections.filter(row => ["dept_head","peer"].includes(row.kind)).map(row => row.code);
     const kept = state.data.assignments.filter(row => row.target_id !== id || !editableCodes.includes(row.section_code));
-    const created = sections.filter(row => row.kind === "dept_head" && values.dept)
-      .map(row => ({ target_id:id, section_code:row.code, rater_staff_id:values.dept }))
+    const created = sections.filter(row => row.kind === "dept_head")
+      .flatMap(row => values.depts.map(dept => ({ target_id:id, section_code:row.code, rater_staff_id:dept })))
       .concat(sections.filter(row => row.kind === "peer").flatMap(row =>
         values.peers.map(peer => ({ target_id:id, section_code:row.code, rater_staff_id:peer }))));
     return evalAssignmentProblems({ form:state.form, round:state.data.round,
@@ -608,7 +633,7 @@ if (!session) {
     if (issues.length) return;
     const target = state.data.targets.find(row => row.id === id);
     const sections = state.form.sections.filter(row => ["dept_head","peer"].includes(row.kind));
-    const desired = sections.flatMap(section => (section.kind === "dept_head" ? [values.dept] : values.peers)
+    const desired = sections.flatMap(section => (section.kind === "dept_head" ? values.depts : values.peers)
       .map(person => ({ section_code:section.code, rater_staff_id:person })));
     const existing = targetAssignments(id).filter(row => sections.some(section => section.code === row.section_code));
     const removed = existing.filter(row => !desired.some(next =>
@@ -695,8 +720,8 @@ if (!session) {
     el("app").innerHTML = '<div class="card">กำลังโหลดรอบประเมิน…</div>';
     el("app").hidden = false;
     try {
-      [state.forms, state.staff, state.years] = await Promise.all([
-        listEvalForms(), listStaffPicker(), getAcademicYears()
+      [state.forms, state.staff, state.years, state.deptPositions] = await Promise.all([
+        listEvalForms(), listStaffPicker(), getAcademicYears(), getSetting("eval_dept_head_positions")
       ]);
       await refresh();
     } catch (error) {
@@ -718,7 +743,16 @@ if (!session) {
         await refresh(event.target.value);
       });
       const card = event.target.closest(".teacher-card");
-      if (card && event.target.matches('[data-role="dept"], [data-role="peer"], [data-role="variant"]'))
+      if (card && event.target.matches('[data-role="dept-add"]')) {
+        const id = event.target.value;
+        if (id && !card.querySelector('[data-role="dept"][value="' + CSS.escape(id) + '"]'))
+          card.querySelector('.dept-list').insertAdjacentHTML('beforeend', deptChoice(id, true));
+        event.target.querySelector('option[value="' + CSS.escape(id) + '"]')?.remove();
+        event.target.value = "";
+        syncDeptChoices(card);
+      }
+      if (card && event.target.matches('[data-role="dept"]')) syncDeptChoices(card);
+      if (card && event.target.matches('[data-role="dept"], [data-role="dept-add"], [data-role="peer"], [data-role="variant"]'))
         showCardProblems(card.dataset.target, projectedProblems(card.dataset.target, cardValues(card.dataset.target)));
     });
     el("app").addEventListener("click", event => {
@@ -773,9 +807,12 @@ if (!session) {
           for (const staffId of ids) {
             const target = await upsertEvalTarget({ round_id:round.id, staff_id:staffId });
             try {
-              for (const section of state.form.sections.filter(row => row.kind === "committee" || row.kind === "self"))
-                await addEvalAssignment({ target_id:target.id, section_code:section.code,
-                  rater_staff_id:section.kind === "committee" ? round.director_staff_id : staffId });
+              for (const section of state.form.sections.filter(row => ["committee", "self", "dept_head"].includes(row.kind))) {
+                const raters = section.kind === "committee" ? [round.director_staff_id] :
+                  section.kind === "self" ? [staffId] : deptCandidates(staffId);
+                for (const rater of raters) await addEvalAssignment({ target_id:target.id,
+                  section_code:section.code, rater_staff_id:rater });
+              }
             } catch (error) { await deleteEvalTarget(target.id); throw error; }
           }
           state.showPicker = false; await refresh(round.id); toast("เพิ่มครูเข้ารอบแล้ว");

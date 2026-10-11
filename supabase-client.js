@@ -7653,7 +7653,7 @@ export function evalAssignmentProblems({ form, round, targets = [], assignments 
     }
     for (const section of byKind("dept_head")) {
       const rows = mine.filter(row => row.section_code === section.code);
-      if (rows.length !== 1) add(`ส่วน ${section.code}: ต้องมีหัวหน้าฝ่ายผู้ประเมิน 1 คน`);
+      if (rows.length < 1) add(`ส่วน ${section.code}: ยังไม่ได้จัดหัวหน้าฝ่ายผู้ประเมิน`);
     }
     const deptIds = new Set(byKind("dept_head").flatMap(section => mine
       .filter(row => row.section_code === section.code).map(row => row.rater_staff_id)));
@@ -7678,6 +7678,14 @@ export function evalAssignmentProblems({ form, round, targets = [], assignments 
     }
   }
   return problems;
+}
+
+export function evalDeptHeadsFor(staffList, positionsSetting, targetStaffId) {
+  const positions = new Set(String(positionsSetting || "").split(",").map(value => value.trim()).filter(Boolean));
+  if (!positions.size) return [];
+  return [...new Set((staffList || []).filter(row => row.id !== targetStaffId &&
+    String(row.staff_position || "").split("·").some(value => positions.has(value.trim())))
+    .map(row => row.id))];
 }
 
 export function buildEvalAttendanceSnapshot(summary, autoRule, round) {
@@ -7741,8 +7749,13 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
       continue;
     }
 
-    const required = section.kind === "peer" ? Number(rules.min_raters?.peer) : 1;
-    if (section.kind !== "self" && raterCount !== required &&
+    const assigned = assignments.filter(a => String(a.section_code) === sectionCode).length;
+    const required = section.kind === "peer" ? Number(rules.min_raters?.peer) :
+      section.kind === "dept_head" ? assigned : 1;
+    if (section.kind === "dept_head" && !assigned) {
+      completeSection = false;
+      missing.push(`ส่วนที่ ${sectionCode}: ยังไม่ได้จัดหัวหน้าฝ่าย`);
+    } else if (section.kind !== "self" && raterCount !== required &&
         (section.kind !== "peer" || raterCount < required)) {
       completeSection = false;
       missing.push(`ส่วนที่ ${sectionCode}: ส่งแล้ว ${raterCount} จาก ${required} คน`);
@@ -7762,7 +7775,7 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
         if (item.is_star) knownCodes.add(`★${code}`);
         const values = submitted.map(a => responseByAssignment.get(a.id)?.get(item.id));
         const valid = enoughRaters && values.length > 0 && values.every(value => value != null);
-        const value = valid ? (section.kind === "peer" ?
+        const value = valid ? (["peer", "dept_head"].includes(section.kind) ?
           evalRound2(values.reduce((sum, score) => sum + score, 0) / values.length) : values[0]) : null;
         if (completeSection && !valid) completeSection = false;
         const itemResult = { itemId:item.id, code, text:item.text, value, isStar:Boolean(item.is_star) };

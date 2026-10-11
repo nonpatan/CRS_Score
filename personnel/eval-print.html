@@ -30,7 +30,7 @@
 <main class="academic-content"><div class="toolbar no-print"><a class="button" id="back-link" href="eval-result.html">← กลับไปสรุปผล</a><button type="button" id="print-button">พิมพ์</button></div><div id="app" class="card">กำลังโหลดแบบพิมพ์…</div><div id="toast" class="toast no-print" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, loadEvalTargetResult,
-  listStaffPicker, computeEvalResult, evalDecisionOptions, evalDecisionLabel } from "../supabase-client.js?v=20261011-2";
+  listStaffPicker, computeEvalResult, evalDecisionOptions, evalDecisionLabel } from "../supabase-client.js?v=20261011-3";
 const session = await requireAuth();
 if (session) {
   const app = document.getElementById("app");
@@ -54,7 +54,7 @@ if (session) {
     const response = new Map(data.responses.map(row => [row.assignment_id + ":" + row.item_id, row]));
     let html = '<article class="card"><div class="doc-head"><h2>โรงเรียนเจริญศึกษา</h2><div>แบบประเมินครู 360° · ฉบับ ' + esc(data.form.code) + '</div><div>ปีการศึกษา ' + esc(data.round.academic_year) + ' · ครั้งที่ ' + esc(data.round.round_no) + '</div></div>' +
       '<div class="meta-grid"><p><b>ผู้รับการประเมิน:</b> ' + esc(name(data.target.staff_id)) + '</p><p><b>ภาระงาน:</b> ' + esc(data.target.workload || "—") + '</p></div>';
-    for (const part of data.form.sections.filter(row => ["committee","dept_head"].includes(row.kind))) {
+    for (const part of data.form.sections.filter(row => row.kind === "committee")) {
       const assignments = data.assignments.filter(row => row.section_code === part.code);
       html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(part.code + " " + part.title) + '</h2>';
       const rows = assignments.flatMap(assignment => part.domains.flatMap(domain => domain.items.map(item => {
@@ -62,6 +62,19 @@ if (session) {
         return '<tr><td>' + esc(domain.code + "(" + item.no + ") " + item.text) + '</td><td>' + esc(answer?.score ?? "—") + '</td><td class="note">' + esc(answer?.evidence || "—") + '</td></tr>';
       })));
       html += table(["ข้อ","คะแนน","หลักฐาน"], rows) + '</section>';
+    }
+    const dept = data.form.sections.find(row => row.kind === "dept_head");
+    const deptResult = result.sections.find(row => row.kind === "dept_head");
+    if (dept) {
+      const texts = data.assignments.filter(row => row.section_code === dept.code && row.status === "submitted")
+        .map(row => (dept.text_fields || []).filter(field => row.texts?.[field.key]?.trim()).map(field =>
+          '<p><b>' + esc(field.label) + ':</b> ' + esc(row.texts[field.key]) + '</p>').join(""))
+        .filter(Boolean);
+      html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(dept.code + " " + dept.title) +
+        '</h2><p>ค่าเฉลี่ยรายข้อ · จำนวนผู้ประเมิน ' + esc(liveResult.sections.find(row => row.kind === "dept_head")?.raterCount ?? 0) + ' คน</p>' +
+        table(["ข้อ","ค่าเฉลี่ย"], (deptResult?.items || []).map(item =>
+          '<tr><td>' + esc(item.code + " " + item.text) + '</td><td>' + num(item.value) + '</td></tr>')) +
+        (texts.length ? '<h3>ข้อความจากผู้ประเมิน</h3>' + texts.map(value => '<div class="note">' + value + '</div>').join("") : '') + '</section>';
     }
     const peer = data.form.sections.find(row => row.kind === "peer");
     const peerResult = result.sections.find(row => row.kind === "peer");

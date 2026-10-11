@@ -64,7 +64,7 @@
 import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, isPersonnelHead,
   listEvalRoundsICanSee, loadEvalRoundResults, getProfile, loadEvalTargetResult, listStaffPicker,
   computeEvalResult, evalDecisionSnapshot, evalDecisionOptions, evalDecisionLabel,
-  saveEvalDecision, thaiShortDateText } from "../supabase-client.js?v=20261011-2";
+  saveEvalDecision, thaiShortDateText } from "../supabase-client.js?v=20261011-3";
 const session = await requireAuth();
 if (session) {
   const app = document.getElementById("app"), toastBox = document.getElementById("toast");
@@ -98,14 +98,19 @@ if (session) {
   }
   const suggestTone = value => ["pass","renew"].includes(value) ? "ok" : ["watch_strict","not_renew"].includes(value) ? "bad" : "warn";
   function resultTables(result) {
+    const dept = result.sections.find(row => row.kind === "dept_head");
     const domainRows = (result.sections.find(row => row.kind === "committee")?.domains || []).map(row =>
       '<tr><td>' + esc(row.code + " " + row.title) + '</td><td class="num">' + number(row.avg) + '</td><td class="num">' + number(row.minAvg) + '</td>' + passCell(row.pass) + '</tr>');
-    const sectionRows = result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '<br><span class="muted">น้ำหนัก ' + esc(row.weight) + '% · ขั้นต่ำ ' + number(row.minAvg) + '</span></td><td class="num">' + number(row.avg) + '</td><td class="num">' + number(row.weighted) + '</td>' + passCell(row.pass) + '</tr>');
+    const sectionRows = result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '<br><span class="muted">' +
+      (row.kind === "dept_head" ? 'ค่าเฉลี่ยรายข้อ · จำนวนผู้ประเมิน ' + row.raterCount + ' คน · ' : '') +
+      'น้ำหนัก ' + esc(row.weight) + '% · ขั้นต่ำ ' + number(row.minAvg) + '</span></td><td class="num">' + number(row.avg) + '</td><td class="num">' + number(row.weighted) + '</td>' + passCell(row.pass) + '</tr>');
     sectionRows.push('<tr><th>รวม · ' + esc(result.level || "—") + '</th><th></th><th class="num">' + number(result.total) + '</th><th></th></tr>');
     const starRows = result.stars.map(row => '<tr><td>' + esc(row.code + " " + row.label) + '</td><td class="num">' + number(row.value) + '</td>' + passCell(!row.fail) + '</tr>');
     return '<section class="card"><h2>ตาราง ก · รายด้าน (ส่วนที่ 1)</h2>' + table(["ด้าน","#เฉลี่ย","#ขั้นต่ำ","ผล"], domainRows) + '</section>' +
       '<section class="card"><h2>ตาราง ข · คะแนนรวม</h2>' + table(["ส่วน","#เฉลี่ย","#ถ่วงน้ำหนัก","ผล"], sectionRows) + '</section>' +
-      '<section class="card"><h2>ตาราง ค · ข้อสำคัญ ★</h2>' + (starRows.length ? table(["ข้อ","#คะแนน","ผล"], starRows) : '<p class="hint">ไม่มีข้อ ★</p>') + '</section>';
+      '<section class="card"><h2>ตาราง ค · ข้อสำคัญ ★</h2>' + (starRows.length ? table(["ข้อ","#คะแนน","ผล"], starRows) : '<p class="hint">ไม่มีข้อ ★</p>') + '</section>' +
+      (dept ? '<section class="card"><h2>ส่วนที่ ' + esc(dept.code) + ' · ค่าเฉลี่ยรายข้อ</h2><p class="hint">จำนวนผู้ประเมิน ' + dept.raterCount + ' คน</p>' +
+        table(["ข้อ","#ค่าเฉลี่ย"], dept.items.map(item => '<tr><td>' + esc(item.code + " " + item.text) + '</td><td class="num">' + number(item.value) + '</td></tr>')) + '</section>' : '');
   }
   function privateDetails(data) {
     const responses = new Map(data.responses.map(row => [row.assignment_id + ":" + row.item_id, row]));
@@ -161,8 +166,14 @@ if (session) {
     app.className = "";
     const decided = data.decision, final = decided?.final || result.suggested;
     const texts = data.form.sections.filter(row => ["committee","dept_head"].includes(row.kind)).flatMap(part =>
-      data.assignments.filter(row => row.section_code === part.code).map(row => ({ part, row })));
-    const textHtml = texts.flatMap(({part,row}) => (part.text_fields || []).map(field => '<p><b>' + esc(field.label) + ':</b> ' + esc(row.texts?.[field.key] || "—") + '</p>')).join("");
+      data.assignments.filter(row => row.section_code === part.code &&
+        (part.kind !== "dept_head" || row.status === "submitted") &&
+        (part.kind !== "dept_head" || (part.text_fields || []).some(field => row.texts?.[field.key]?.trim())))
+        .map(row => ({ part, row })));
+    const textHtml = texts.map(({part,row}) => '<div><p class="hint">ส่วนที่ ' + esc(part.code) +
+      (part.kind === "dept_head" ? ' · ความเห็นจากผู้ประเมิน' : '') + '</p>' +
+      (part.text_fields || []).filter(field => part.kind !== "dept_head" || row.texts?.[field.key]?.trim())
+        .map(field => '<p><b>' + esc(field.label) + ':</b> ' + esc(row.texts?.[field.key] || "—") + '</p>').join("") + '</div>').join("");
     const nav = siblings();
     const navLink = (row, label) => row ? '<a class="button" href="?target=' + encodeURIComponent(row.id) + '" data-open-target="' + esc(row.id) + '">' + label + '</a>' : '';
     const deficits = result.deficiencies.map(code => '<li>' + esc(deficitText(code, data.form, result, true)) + '</li>').join("");
