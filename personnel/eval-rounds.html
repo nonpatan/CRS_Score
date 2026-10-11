@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ประเมินครู 360° — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+    --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea;
+    --amber:#8a5a00; --amber-soft:#fff4df; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg);
+    margin:0; padding:16px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:1040px; margin:0 auto; }
+  .wrap > .academic-content { max-width:1040px; min-width:0; }
+  h1 { font-size:22px; margin:4px 0; } h2 { font-size:18px; margin:0 0 12px; }
+  h3 { font-size:16px; margin:0 0 8px; }
+  header p, .hint, .meta { color:var(--muted); }
+  header p { margin:0 0 8px; font-size:14px; }
+  .nav { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:8px; background:var(--white);
+    border:1px solid var(--line); border-radius:99px; margin-bottom:22px; }
+  .nav a { color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:99px; font-size:14px; }
+  .nav a.active { color:var(--white); background:var(--teal); }
+  .nav #btn-signout { margin-left:auto; color:var(--danger); }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; min-width:0; }
+  #gate[hidden], #app[hidden] { display:none !important; }
+  .section { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin:0 0 10px; }
+  .hint { font-size:14px; margin:4px 0 10px; } .meta { font-size:13px; margin:2px 0; }
+  .empty { color:var(--muted); padding:22px 10px; text-align:center; }
+  .toolbar, .actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .toolbar > select { flex:1; min-width:190px; }
+  .actions { margin-top:12px; }
+  .actions > button { flex:0 1 auto; }
+  .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .row3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  .field { margin:0 0 14px; min-width:0; }
+  label { display:block; font-size:15px; font-weight:600; margin:0 0 5px; }
+  input[type="text"], input[type="number"], input[type="date"], input[type="search"], select, textarea {
+    width:100%; min-height:44px; padding:9px 11px; border:1px solid var(--line); border-radius:8px;
+    background:var(--white); color:var(--ink); font:inherit; font-size:16px; }
+  textarea { min-height:86px; resize:vertical; }
+  input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible {
+    outline:2px solid var(--teal); outline-offset:2px; }
+  input[aria-invalid="true"], select[aria-invalid="true"] { border-color:var(--danger) !important; }
+  button { font:inherit; font-size:15px; font-weight:600; border:0; border-radius:8px;
+    min-height:44px; padding:9px 14px; cursor:pointer; }
+  button.primary { background:var(--teal); color:var(--white); }
+  button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.danger { background:var(--danger-soft); color:var(--danger); }
+  button:disabled { opacity:.52; cursor:not-allowed; }
+  .field-error, .error-summary { color:var(--danger); font-size:14px; margin:4px 0 0; }
+  .error-summary { font-weight:600; margin-bottom:12px; }
+  .banner { padding:11px 13px; border-radius:9px; margin:10px 0; font-size:14px; }
+  .banner.warn { background:var(--amber-soft); color:var(--amber); }
+  .banner.err { background:var(--danger-soft); color:var(--danger); }
+  .banner.ok { background:var(--teal-soft); color:var(--teal); }
+  .hero { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 18px; }
+  .hero b { display:block; font-size:13px; color:var(--muted); font-weight:500; }
+  .badge { display:inline-block; border-radius:99px; padding:2px 10px; background:var(--amber-soft); color:var(--amber); font-size:13px; font-weight:600; }
+  .badge.open { background:var(--teal-soft); color:var(--teal); }
+  .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+  .kpi { border:1px solid var(--line); border-radius:9px; padding:10px; }
+  .kpi b { display:block; font-size:22px; line-height:1.2; }
+  .kpi span { color:var(--muted); font-size:13px; }
+  .teacher-card { border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; scroll-margin-top:24px; }
+  .teacher-card > .toolbar { justify-content:space-between; }
+  .teacher-card h3 { margin:0; }
+  .peer-note { color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:8px 10px; font-size:13px; }
+  .picker-list { max-height:360px; overflow:auto; border:1px solid var(--line); border-radius:9px; }
+  .picker-row { display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--line); margin:0; font-weight:400; min-height:44px; }
+  .picker-row:last-child { border-bottom:0; }
+  .picker-row input { width:20px; height:20px; flex:none; }
+  .picker-row small { color:var(--muted); }
+  .table-scroll { overflow-x:auto; max-width:100%; border:1px solid var(--line); border-radius:9px; }
+  table { border-collapse:collapse; width:100%; min-width:700px; font-size:14px; }
+  th, td { border-bottom:1px solid var(--line); padding:9px 10px; text-align:left; white-space:nowrap; }
+  th { background:var(--bg); font-weight:600; }
+  td:first-child, th:first-child { position:sticky; left:0; background:var(--white); z-index:1; min-width:130px; }
+  th:first-child { background:var(--bg); z-index:2; }
+  tr:last-child td { border-bottom:0; }
+  .dot { display:inline-block; margin-right:5px; }
+  .dot.sent { color:var(--teal); } .dot.pending { color:var(--amber); }
+  .table-scroll button { min-height:36px; padding:4px 7px; font-size:13px; background:var(--teal-soft); color:var(--teal); }
+  .mini { border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
+  .check-label { display:flex; gap:8px; align-items:center; font-weight:400; }
+  .check-label input { width:20px; height:20px; }
+  #toast { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:60;
+    max-width:min(90vw,520px); padding:10px 16px; border-radius:9px; color:var(--white);
+    background:var(--ink); opacity:0; pointer-events:none; transition:opacity .18s; }
+  #toast.show { opacity:1; } #toast.err { background:var(--danger); }
+  @media (max-width:720px) {
+    .row2, .row3, .hero { grid-template-columns:1fr; }
+    .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width:420px) {
+    body { padding:12px; }
+    .toolbar > select { min-width:0; width:100%; }
+    .toolbar > button, .actions > button { flex:1 1 100%; }
+  }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ประเมินครู 360°</h1>
+    <p>เปิดรอบ จัดผู้ประเมิน ติดตามการส่ง และคีย์ผลส่วนที่ 4</p>
+    <div class="nav">
+      <a href="index.html">ภาพรวมบุคลากร</a>
+      <a href="eval-rounds.html" class="active">ประเมินครู 360°</a>
+      <a href="work-summary.html">สรุปเวลาทำงาน</a>
+      <a href="my-work.html">ข้อมูลการทำงานของฉัน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20261010-3"></script>
+  </header>
+  <main class="academic-content">
+    <div id="gate" class="card" hidden></div>
+    <div id="app" hidden></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </main>
+</div>
+<script type="module">
+import {
+  requireAuth, signOut, checkDepartment, isPersonnelHead, applyPersonnelMenuAccess,
+  listStaffPicker, getAcademicYears, academicYearOf, bangkokNow, toDateStr, thaiShortDateText,
+  listEvalForms, loadEvalForm, listEvalRounds, loadEvalRoundAdmin, saveEvalRound, deleteEvalRound,
+  setEvalRoundStatus, upsertEvalTarget, deleteEvalTarget, addEvalAssignment,
+  setEvalAssignmentRater, deleteEvalAssignment, reopenEvalAssignment,
+  upsertEvalSection4, deleteEvalSection4, upsertEvalAttendanceSnapshots,
+  evalAssignmentProblems, evalSection4Check, buildEvalAttendanceSnapshot,
+  loadWorkContext, summarizeStaff
+} from "../supabase-client.js?v=20261010-3";
+
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้าเข้าสู่ระบบ
+} else {
+  const el = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
+  const state = { forms:[], rounds:[], staff:[], years:[], data:null, form:null,
+    showForm:false, editing:false, showPicker:false, search:"", preview:null, previewWarnings:[] };
+  let toastTimer = null;
+  const toast = (message, error = false) => {
+    const box = el("toast"); box.textContent = message; box.classList.toggle("err", error);
+    box.classList.add("show"); clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => box.classList.remove("show"), 4500);
+  };
+  const staffName = id => state.staff.find(row => row.id === id)?.full_name || "ไม่พบชื่อ";
+  const roundLabel = row => String(row.academic_year) + " · ครั้งที่ " + row.round_no;
+  const today = () => toDateStr(bangkokNow());
+  const actionButton = (action, label, className = "ghost", extra = "") =>
+    '<button type="button" class="' + className + '" data-action="' + action + '" ' + extra + '>' + label + '</button>';
+  const staffOptions = (selected = "", blank = "— เลือกบุคลากร —", headFirst = false) => {
+    const rows = [...state.staff].sort((a,b) => headFirst
+      ? Number((b.staff_position || "").includes("หัวหน้าฝ่าย")) - Number((a.staff_position || "").includes("หัวหน้าฝ่าย")) ||
+        a.full_name.localeCompare(b.full_name, "th") : a.full_name.localeCompare(b.full_name, "th"));
+    return '<option value="">' + esc(blank) + '</option>' + rows.map(row =>
+      '<option value="' + esc(row.id) + '"' + (row.id === selected ? ' selected' : '') + '>' +
+      esc(row.full_name) + ((row.staff_position || "").includes("หัวหน้าฝ่าย") && headFirst ? " · แนะนำ" : "") +
+      '</option>').join("");
+  };
+  const variantSection = () => state.form?.sections.find(section => section.kind === "summary_entry");
+  const variantOf = code => variantSection()?.variants.find(variant => variant.code === code);
+  const targetAssignments = id => (state.data?.assignments || []).filter(row => row.target_id === id);
+  const targetEntry = id => (state.data?.section4 || []).find(row => row.target_id === id);
+  const targetSnapshot = id => (state.data?.snapshots || []).find(row => row.target_id === id);
+  const problems = () => state.data ? evalAssignmentProblems({
+    form:state.form, round:state.data.round, targets:state.data.targets, assignments:state.data.assignments
+  }) : [];
+
+  async function refresh(preferredId) {
+    state.rounds = await listEvalRounds();
+    const requested = preferredId || new URLSearchParams(location.search).get("round");
+    const selected = state.rounds.find(row => row.id === requested) || state.rounds[0] || null;
+    state.data = selected ? await loadEvalRoundAdmin(selected.id) : null;
+    state.form = selected ? await loadEvalForm(selected.form_id) : null;
+    const url = new URL(location.href);
+    if (selected) url.searchParams.set("round", selected.id);
+    else url.searchParams.delete("round");
+    history.replaceState(null, "", url.pathname + url.search);
+    render();
+  }
+  function renderRoundForm() {
+    if (!state.showForm) return "";
+    const row = state.editing ? state.data.round : {};
+    const defaultYear = academicYearOf(today(), state.years) || "";
+    const active = state.forms.filter(form => form.status === "active");
+    const canEditAll = !state.editing || row.status === "setup";
+    const formOptions = active.map(form => '<option value="' + esc(form.id) + '"' +
+      (form.id === (row.form_id || active[0]?.id) ? ' selected' : '') + '>' + esc(form.code) + '</option>').join("");
+    return '<section class="card" id="round-form-card"><h2>' + (state.editing ? "แก้หัวรอบ" : "เปิดรอบใหม่") + '</h2>' +
+      '<div id="round-errors" class="error-summary" role="alert" tabindex="-1" hidden></div>' +
+      '<form id="round-form" novalidate>' +
+      '<div class="row2"><div class="field"><label for="form-id">ฉบับแบบประเมิน</label><select id="form-id" ' +
+      (!canEditAll || (state.editing && state.data.targets.length) ? 'disabled' : '') + '>' + formOptions + '</select></div>' +
+      '<div class="field"><label for="academic-year">ปีการศึกษา</label><input id="academic-year" type="text" value="' +
+      esc(row.academic_year || defaultYear) + '" ' + (canEditAll ? '' : 'disabled') + '></div></div>' +
+      '<div class="row2"><div class="field"><label for="round-no">ครั้งที่</label><select id="round-no" ' +
+      (canEditAll ? '' : 'disabled') + '><option value="1"' + (Number(row.round_no || 1) === 1 ? ' selected' : '') +
+      '>ครั้งที่ 1</option><option value="2"' + (Number(row.round_no) === 2 ? ' selected' : '') + '>ครั้งที่ 2</option></select></div>' +
+      '<div class="field"><label for="director-id">ผู้อำนวยการ (ผู้กรอกส่วนที่ 1)</label><select id="director-id" ' +
+      (canEditAll ? '' : 'disabled') + '>' + staffOptions(row.director_staff_id) + '</select></div></div>' +
+      '<div class="row2"><div class="field"><label for="period-from">ช่วงนับเวลาเข้างาน จาก</label><input id="period-from" type="date" value="' +
+      esc(row.period_from || "") + '" ' + (canEditAll ? '' : 'disabled') + '></div>' +
+      '<div class="field"><label for="period-to">ถึง</label><input id="period-to" type="date" value="' +
+      esc(row.period_to || "") + '" ' + (canEditAll ? '' : 'disabled') + '></div></div>' +
+      '<div class="row2"><div class="field"><label for="eval-date">วันประเมิน</label><input id="eval-date" type="date" value="' +
+      esc(row.eval_date || "") + '"></div><div class="field"><label for="due-date">กำหนดส่งคะแนน</label>' +
+      '<input id="due-date" type="date" value="' + esc(row.due_date || "") + '"></div></div>' +
+      '<div class="field"><label for="committee-id">กรรมการร่วม (ไม่บังคับ)</label><select id="committee-id" ' +
+      (canEditAll ? '' : 'disabled') + '>' + staffOptions(row.committee_staff_id, "— ไม่ระบุ —") + '</select>' +
+      '<p class="hint">ใช้แสดงชื่อในเอกสารเท่านั้น ไม่มีสิทธิ์กรอกในระบบ</p></div>' +
+      '<div class="actions">' + actionButton("save-round", "บันทึกรอบ", "primary") +
+      actionButton("cancel-round", "ยกเลิก") + '</div></form></section>';
+  }
+  function renderPicker() {
+    if (!state.showPicker || !state.data || state.data.round.status !== "setup") return "";
+    const excluded = new Set(state.data.targets.map(row => row.staff_id));
+    const available = state.staff.filter(row => !excluded.has(row.id) && row.id !== state.data.round.director_staff_id);
+    return '<section class="card" id="picker"><h2>เลือกครูเข้ารอบ</h2>' +
+      '<p class="hint">ติ๊กครูผู้สอนให้ก่อน ตรวจรายชื่อก่อนเพิ่ม เพราะทะเบียนมีตำแหน่งอื่นอยู่ด้วย</p>' +
+      '<div class="field"><label for="staff-search">ค้นหาชื่อ</label><input id="staff-search" type="search" value="' +
+      esc(state.search) + '"></div><div class="picker-list">' +
+      available.map(row => '<label class="picker-row" data-name="' + esc(row.full_name.toLowerCase()) + '">' +
+        '<input type="checkbox" name="picked-staff" value="' + esc(row.id) + '"' +
+        ((row.staff_position || "").includes("ครูผู้สอน") ? ' checked' : '') + '><span>' +
+        esc(row.full_name) + '<br><small>' + esc(row.staff_position || "ไม่ระบุตำแหน่ง") +
+        '</small></span></label>').join("") +
+      (available.length ? '' : '<div class="empty">ไม่มีรายชื่อที่เพิ่มได้</div>') + '</div>' +
+      '<div class="actions">' + actionButton("add-targets", "เพิ่มครูที่เลือก", "primary") +
+      actionButton("close-picker", "ยกเลิก") + '</div></section>';
+  }
+  function renderTarget(target) {
+    const round = state.data.round, mine = targetAssignments(target.id);
+    const deptSection = state.form.sections.find(section => section.kind === "dept_head");
+    const peerSection = state.form.sections.find(section => section.kind === "peer");
+    const dept = mine.find(row => row.section_code === deptSection?.code)?.rater_staff_id || "";
+    const peers = mine.filter(row => row.section_code === peerSection?.code).map(row => row.rater_staff_id);
+    const variant = variantOf(target.variant_code);
+    const entry = targetEntry(target.id);
+    const check = variant ? evalSection4Check(variantSection(), variant, entry, state.form.rules) : null;
+    const showAssignment = round.status === "setup" || round.status === "open";
+    let html = '<article class="teacher-card" id="teacher-' + esc(target.id) + '" data-target="' + esc(target.id) + '">' +
+      '<div class="toolbar"><h3>' + esc(staffName(target.staff_id)) + '</h3>' +
+      (round.status === "setup" ? actionButton("remove-target", "เอาครูออก", "danger", 'data-target="' + esc(target.id) + '"') : '') +
+      '</div>';
+    if (showAssignment) {
+      html += '<div class="row2"><div class="field"><label>หัวหน้าฝ่ายผู้ประเมิน (1 คน)</label>' +
+        '<select data-role="dept">' + staffOptions(dept, "— เลือกหัวหน้าฝ่าย —", true) + '</select>' +
+        '<div class="field-error" data-problem="dept"></div></div>' +
+        '<div class="field"><label>แบบส่วนที่ 4</label><select data-role="variant">' +
+        '<option value="">— เลือกแบบ —</option>' + (variantSection()?.variants || []).map(row =>
+          '<option value="' + esc(row.code) + '"' + (row.code === target.variant_code ? ' selected' : '') +
+          '>' + esc(row.code + " · " + row.title) + '</option>').join("") +
+        '</select><div class="field-error" data-problem="variant"></div></div></div>' +
+        '<div class="field"><label>เพื่อนครูผู้ประเมิน (2–3 คน)</label><div class="row3">' +
+        [0,1,2].map(index => '<select data-role="peer" aria-label="เพื่อนครูคนที่ ' + (index + 1) + '">' +
+          staffOptions(peers[index], "— ไม่เลือก —") + '</select>').join("") +
+        '</div><div class="field-error" data-problem="peer"></div>' +
+        '<p class="peer-note">ญาติ/เพื่อนสนิท ระบบตรวจไม่ได้ — ฝ่ายบุคคลเลือกตามคำชี้แจงข้อ 8</p></div>' +
+        '<div class="field"><label>ภาระงาน (ไม่บังคับ)</label><input type="text" data-role="workload" value="' +
+        esc(target.workload || "") + '"></div><div class="field-error" data-problem="other"></div>' +
+        '<div class="actions">' + actionButton("save-assignment", "บันทึกการจัดผู้ประเมิน", "ghost",
+          'data-target="' + esc(target.id) + '"') + '</div>';
+    } else {
+      html += '<p class="meta">หัวหน้าฝ่าย: ' + esc(staffName(dept)) + ' · เพื่อนครู ' + peers.length +
+        ' คน · แบบ ' + esc(target.variant_code || "ยังไม่เลือก") + '</p>';
+    }
+    if (round.status === "open" || round.status === "closed") {
+      html += '<div class="mini"><h3>คีย์ผลส่วนที่ 4' + (variant ? " · " + esc(variant.code) : "") + '</h3>';
+      if (!variant) html += '<p class="banner warn">เลือกแบบ 4ก/4ข ก่อนคีย์ผล</p>';
+      else {
+        html += '<div class="row2"><div class="field"><label>' + esc(variant.avg_label) +
+          '</label><input data-s4="avg" type="number" inputmode="decimal" min="1" max="5" step="0.01" value="' +
+          esc(entry?.avg_score ?? "") + '"></div><div class="field"><label>' + esc(variant.respondent_label) +
+          '</label><input data-s4="respondents" type="number" inputmode="numeric" min="0" step="1" value="' +
+          esc(entry?.respondents ?? "") + '"></div></div>' +
+          (variant.star_items || []).map(item =>
+            '<div class="field"><label>★ ' + esc(item.code + " " + item.label) +
+            '</label><input data-s4-star="' + esc(item.code) +
+            '" type="number" inputmode="decimal" min="1" max="5" step="0.01" value="' +
+            esc(entry?.star_values?.[item.code] ?? "") + '"></div>').join("") +
+          '<div class="field"><label>หมายเหตุ</label><textarea data-s4="note">' +
+          esc(entry?.note || "") + '</textarea></div><div class="field-error" data-problem="section4"></div>' +
+          '<div class="actions">' + actionButton("save-section4", "บันทึกส่วนที่ 4", "ghost",
+            'data-target="' + esc(target.id) + '"') +
+          (entry ? actionButton("clear-section4", "ล้างค่าส่วนที่ 4", "danger",
+            'data-target="' + esc(target.id) + '"') : '') + '</div>';
+        if (entry && check) html += '<p class="banner ' + (check.pass ? "ok" : "err") + '">' +
+          (check.pass ? "ผ่านส่วนที่ 4" : "ไม่ผ่านส่วนที่ 4" +
+            (check.starFails.length ? " · ★ " + esc(check.starFails[0]) + " ได้ " +
+              Number(entry.star_values[check.starFails[0]]).toFixed(2) +
+              " (≤ " + Number(state.form.rules.star_fail_max).toFixed(2) + ")" : " · ค่าเฉลี่ยต่ำกว่าเกณฑ์")) +
+          '</p>';
+      }
+      html += '</div>';
+    }
+    return html + '</article>';
+  }
+  function renderProgress() {
+    const targets = state.data.targets, sections = state.form.sections;
+    const unsent = target => targetAssignments(target.id).some(row => row.status !== "submitted") ||
+      (variantSection() && !targetEntry(target.id));
+    const missingSetup = new Set(problems().map(row => row.targetId).filter(Boolean)).size;
+    const done = targets.filter(target => !unsent(target)).length;
+    let html = '<section class="card"><h2>ความคืบหน้า</h2><div class="kpis">' +
+      [[targets.length,"ครูในรอบ"],[done,"ส่งครบทุกส่วน"],[targets.length - done,"ยังค้าง"],[missingSetup,"ยังไม่ได้จัดผู้ประเมิน"]]
+        .map(([number,label]) => '<div class="kpi"><b>' + number + '</b><span>' + label + '</span></div>').join("") +
+      '</div>';
+    if (!targets.length) return html + '<div class="empty">ยังไม่มีครูในรอบนี้</div></section>';
+    html += '<div class="table-scroll" role="region" aria-label="ตารางความคืบหน้า" tabindex="0"><table><thead><tr><th>ครู</th>' +
+      sections.map(section => '<th>' + esc(section.title) + '</th>').join("") +
+      '<th>เวลาเข้างาน</th></tr></thead><tbody>';
+    for (const target of targets) {
+      const rows = targetAssignments(target.id);
+      html += '<tr><td>' + esc(staffName(target.staff_id)) + '</td>';
+      for (const section of sections) {
+        if (section.kind === "summary_entry") {
+          const entry = targetEntry(target.id);
+          html += '<td>' + (entry ? esc(entry.variant_code) + ' · ' + Number(entry.avg_score).toFixed(2) : "ยังไม่คีย์") + '</td>';
+        } else {
+          const matching = rows.filter(row => row.section_code === section.code);
+          html += '<td>' + (matching.length ? matching.map(row =>
+            row.status === "submitted" ? actionButton("reopen-assignment",
+              "✓ ส่งแล้ว · " + esc(staffName(row.rater_staff_id)), "ghost",
+              'data-assignment="' + esc(row.id) + '" data-target="' + esc(target.id) + '"') :
+              '<span class="dot pending">–</span> ยังไม่ส่ง · ' + esc(staffName(row.rater_staff_id))).join("<br>") :
+            "ยังไม่จัด") + '</td>';
+        }
+      }
+      html += '<td>' + (targetSnapshot(target.id) ? "ล็อกแล้ว" : "ยังไม่ล็อกตัวเลข") + '</td></tr>';
+    }
+    return html + '</tbody></table></div><p class="hint">กด “ส่งแล้ว” เพื่อเปิดแบบคืนให้ผู้ประเมินแก้ไข · หน้านี้ไม่แสดงคะแนนรายข้อ</p></section>';
+  }
+  function renderAttendance() {
+    const round = state.data.round;
+    if (!["open","closed"].includes(round.status)) return "";
+    const ended = round.period_to < today();
+    const canPull = ended && state.canDepartment;
+    let html = '<section class="card" id="attendance-card"><h2>ล็อกตัวเลขเวลาเข้างาน</h2>' +
+      '<p class="hint">ดึงตัวเลขช่วง ' + esc(thaiShortDateText(round.period_from)) + ' – ' + esc(thaiShortDateText(round.period_to)) +
+      ' แล้วตรวจกับหน้า <a href="work-summary.html" target="_blank" rel="noopener">สรุปเวลาทำงาน</a> ช่วงเดียวกันก่อนบันทึก</p>' +
+      actionButton("preview-attendance", "ดึงตัวเลขเวลาเข้างาน", "ghost", canPull ? "" : "disabled") +
+      (!state.canDepartment ? '<p class="banner warn">ต้องได้รับสิทธิ์ฝ่ายบุคลากรจึงดึงตัวเลขได้</p>' :
+        !ended ? '<p class="banner warn">ช่วงที่นับยังไม่จบ ถึง ' + esc(thaiShortDateText(round.period_to)) + '</p>' : "");
+    if (state.preview) {
+      html += '<div class="table-scroll" role="region" aria-label="ตัวอย่างเวลาเข้างาน" tabindex="0"><table><thead><tr>' +
+        '<th>ครู</th><th>สาย</th><th>ไม่ลงเวลา</th><th>มีใบอนุญาต (ไม่นับ)</th><th>รวม</th><th>คะแนนแนะนำ</th></tr></thead><tbody>' +
+        state.preview.map(row => '<tr><td>' + esc(staffName(row.staff_id)) + '</td><td>' + row.data.late +
+        '</td><td>' + row.data.absent + '</td><td>' + row.data.permitted + '</td><td>' + row.data.count +
+        '</td><td>' + (row.data.suggested_score ?? "–") + '</td></tr>').join("") + '</tbody></table></div>';
+      if (state.previewWarnings.length) html += '<div class="banner err" role="alert">ไม่พบเวลาเข้างานของ ' +
+        esc(state.previewWarnings.join(", ")) + ' ทั้งช่วง — ตรวจการซิงก์ Jibble ก่อน</div>' +
+        '<label class="check-label"><input id="attendance-verified" type="checkbox">ตรวจแล้ว ถูกต้อง</label>';
+      html += '<div class="actions">' + actionButton("save-attendance", "บันทึกตัวเลขที่ตรวจแล้ว", "primary") + '</div>';
+    }
+    return html + '</section>';
+  }
+  function render() {
+    let html = '<section class="card"><div class="toolbar"><label for="round-select">รอบประเมิน</label>' +
+      '<select id="round-select">' + (state.rounds.length ? state.rounds.map(row =>
+        '<option value="' + esc(row.id) + '"' + (row.id === state.data?.round.id ? ' selected' : '') +
+        '>' + esc(roundLabel(row)) + '</option>').join("") : '<option>ยังไม่มีรอบ</option>') + '</select>' +
+      actionButton("new-round", "＋ เปิดรอบใหม่", "ghost") + '</div></section>' + renderRoundForm();
+    if (!state.data) {
+      el("app").innerHTML = html + '<div class="card empty">ยังไม่มีรอบประเมิน · กด “เปิดรอบใหม่” เพื่อเริ่ม</div>';
+      el("app").hidden = false;
+      return;
+    }
+    const round = state.data.round;
+    const statusLabels = { setup:"จัดผู้ประเมิน", open:"เปิดรับคะแนน", closed:"ปิดรับแล้ว", published:"ประกาศผลแล้ว" };
+    const issue = problems();
+    html += '<section class="card"><div class="toolbar"><h2>' + esc(roundLabel(round)) + '</h2>' +
+      '<span class="badge ' + (round.status === "open" ? "open" : "") + '">' +
+      esc(statusLabels[round.status] || round.status) + '</span></div>' +
+      '<div class="hero">' +
+      [['ฉบับ',state.form.code],['ช่วงนับเวลา',thaiShortDateText(round.period_from) + " – " + thaiShortDateText(round.period_to)],
+        ['วันประเมิน',round.eval_date ? thaiShortDateText(round.eval_date) : "ยังไม่กำหนด"],
+        ['กำหนดส่ง',round.due_date ? thaiShortDateText(round.due_date) : "ยังไม่กำหนด"],
+        ['ผู้อำนวยการ',staffName(round.director_staff_id)],
+        ['กรรมการร่วม',round.committee_staff_id ? staffName(round.committee_staff_id) : "ไม่ระบุ"]]
+        .map(([label,value]) => '<div><b>' + esc(label) + '</b>' + esc(value) + '</div>').join("") + '</div>' +
+      '<div class="actions">' +
+      (round.status === "setup" || round.status === "open" || round.status === "closed" ?
+        actionButton("edit-round", "แก้หัวรอบ") : "") +
+      (round.status === "setup" ? actionButton("delete-round", "ลบรอบ", "danger") : "") +
+      '</div></section>';
+    if (round.status === "setup") html += '<section class="card"><div class="toolbar"><h2>ครูในรอบ</h2>' +
+      actionButton("open-picker", "เลือกครูเข้ารอบ", "ghost") + '</div>' +
+      (state.data.targets.length ? '<p class="hint">เลือกครูแล้ว ' + state.data.targets.length + ' คน</p>' :
+        '<div class="empty">ยังไม่มีครูในรอบนี้</div>') + '</section>' + renderPicker();
+    if (round.status !== "published") {
+      html += '<section class="card"><h2>จัดผู้ประเมินและคีย์ส่วนที่ 4</h2>' +
+        (state.data.targets.length ? state.data.targets.map(renderTarget).join("") :
+          '<div class="empty">เลือกครูเข้ารอบก่อนจัดผู้ประเมิน</div>') + '</section>';
+    }
+    if (round.status === "setup") {
+      html += '<section class="card"><h2>เริ่มรอบ</h2>' +
+        (issue.length ? '<div class="banner warn">ยังจัดไม่ครบ ' +
+          new Set(issue.map(row => row.targetId).filter(Boolean)).size + ' คน · ' +
+          '<a href="#teacher-' + esc(issue.find(row => row.targetId)?.targetId || "") + '">' +
+          esc(issue[0].message) + '</a></div>' : '<p class="hint">จัดผู้ประเมินครบแล้ว เริ่มรับคะแนนได้</p>') +
+        actionButton("start-round", "เริ่มรอบ", "primary", issue.length ? "disabled" : "") + '</section>';
+    }
+    html += renderProgress() + renderAttendance();
+    if (round.status === "open" || round.status === "closed") {
+      html += '<section class="card"><h2>รับคะแนน</h2>' +
+        (round.status === "open" ?
+          actionButton("close-round", "ปิดรับคะแนน", "ghost") :
+          actionButton("reopen-round", "เปิดรับคะแนนอีกครั้ง", "ghost")) +
+        '<p class="hint">การประกาศผลทำในหน้าสรุปผล (เร็ว ๆ นี้)</p></section>';
+    }
+    el("app").innerHTML = html;
+    el("app").hidden = false;
+  }
+  function roundValues() {
+    const row = state.editing ? state.data.round : {};
+    const setup = !state.editing || row.status === "setup";
+    return {
+      ...(state.editing ? { id:row.id } : {}),
+      form_id:setup ? el("form-id").value : row.form_id,
+      academic_year:setup ? el("academic-year").value.trim() : row.academic_year,
+      round_no:setup ? Number(el("round-no").value) : row.round_no,
+      period_from:setup ? el("period-from").value : row.period_from,
+      period_to:setup ? el("period-to").value : row.period_to,
+      director_staff_id:setup ? el("director-id").value : row.director_staff_id,
+      committee_staff_id:setup ? el("committee-id").value || null : row.committee_staff_id,
+      eval_date:el("eval-date").value, due_date:el("due-date").value
+    };
+  }
+  function showRoundErrors(errors) {
+    el("round-form").querySelectorAll(".field-error").forEach(node => node.remove());
+    el("round-form").querySelectorAll("[aria-invalid]").forEach(node => node.removeAttribute("aria-invalid"));
+    const summary = el("round-errors");
+    summary.hidden = errors.length === 0;
+    summary.textContent = errors.length ? "มี " + errors.length + " ช่องที่ต้องแก้" : "";
+    for (const [id,message] of errors) {
+      const input = el(id); input.setAttribute("aria-invalid", "true");
+      const note = document.createElement("p"); note.className = "field-error";
+      note.textContent = message; input.closest(".field").appendChild(note);
+    }
+    if (errors.length) { summary.focus(); el(errors[0][0]).focus(); }
+  }
+  function validateRound(row) {
+    const errors = [];
+    if (!row.form_id) errors.push(["form-id","เลือกฉบับแบบประเมิน"]);
+    if (!row.academic_year) errors.push(["academic-year","กรอกปีการศึกษา"]);
+    if (!row.period_from) errors.push(["period-from","เลือกวันเริ่มช่วงนับ"]);
+    if (!row.period_to) errors.push(["period-to","เลือกวันสิ้นสุดช่วงนับ"]);
+    if (row.period_from && row.period_to && row.period_to < row.period_from)
+      errors.push(["period-to","วันสิ้นสุดต้องไม่ก่อนวันเริ่ม"]);
+    if (!row.eval_date) errors.push(["eval-date","เลือกวันประเมิน"]);
+    if (!row.due_date) errors.push(["due-date","เลือกกำหนดส่งคะแนน"]);
+    if (!row.director_staff_id) errors.push(["director-id","เลือกผู้อำนวยการ"]);
+    return errors;
+  }
+  function cardOf(id) { return el("teacher-" + id); }
+  function cardValues(id) {
+    const card = cardOf(id);
+    return { dept:card.querySelector('[data-role="dept"]')?.value || "",
+      peers:[...card.querySelectorAll('[data-role="peer"]')].map(node => node.value).filter(Boolean),
+      variant:card.querySelector('[data-role="variant"]')?.value || null,
+      workload:card.querySelector('[data-role="workload"]')?.value.trim() || null };
+  }
+  function projectedProblems(id, values) {
+    const target = state.data.targets.find(row => row.id === id);
+    const changedTarget = { ...target, variant_code:values.variant };
+    const sections = state.form.sections;
+    const editableCodes = sections.filter(row => ["dept_head","peer"].includes(row.kind)).map(row => row.code);
+    const kept = state.data.assignments.filter(row => row.target_id !== id || !editableCodes.includes(row.section_code));
+    const created = sections.filter(row => row.kind === "dept_head" && values.dept)
+      .map(row => ({ target_id:id, section_code:row.code, rater_staff_id:values.dept }))
+      .concat(sections.filter(row => row.kind === "peer").flatMap(row =>
+        values.peers.map(peer => ({ target_id:id, section_code:row.code, rater_staff_id:peer }))));
+    return evalAssignmentProblems({ form:state.form, round:state.data.round,
+      targets:[changedTarget], assignments:kept.concat(created) }).filter(row => row.targetId === id);
+  }
+  function showCardProblems(id, issues) {
+    const card = cardOf(id);
+    for (const node of card.querySelectorAll("[data-problem]")) node.textContent = "";
+    for (const issue of issues) {
+      let role = "other";
+      if (issue.message.includes("แบบส่วนที่ 4")) role = "variant";
+      else if (issue.message.includes("หัวหน้าฝ่าย")) role = "dept";
+      else if (issue.message.includes("เพื่อนครู") || issue.message.includes("ซ้ำ")) role = "peer";
+      card.querySelector('[data-problem="' + role + '"]').textContent += issue.message + " ";
+    }
+  }
+  async function saveAssignment(id) {
+    const values = cardValues(id), issues = projectedProblems(id, values);
+    showCardProblems(id, issues);
+    if (issues.length) return;
+    const target = state.data.targets.find(row => row.id === id);
+    const sections = state.form.sections.filter(row => ["dept_head","peer"].includes(row.kind));
+    const desired = sections.flatMap(section => (section.kind === "dept_head" ? [values.dept] : values.peers)
+      .map(person => ({ section_code:section.code, rater_staff_id:person })));
+    const existing = targetAssignments(id).filter(row => sections.some(section => section.code === row.section_code));
+    const removed = existing.filter(row => !desired.some(next =>
+      next.section_code === row.section_code && next.rater_staff_id === row.rater_staff_id));
+    if (removed.some(row => row.status === "submitted")) {
+      if (!await window.crsAskConfirm({ title:"เปลี่ยนผู้ประเมินที่ส่งแล้ว",
+        message:"คะแนนที่ส่งแล้วของ " + removed.filter(row => row.status === "submitted")
+          .map(row => staffName(row.rater_staff_id)).join(", ") + " จะถูกลบถาวร",
+        okLabel:"ลบคะแนนและเปลี่ยนผู้ประเมิน", danger:true })) return;
+    }
+    if (target.variant_code !== values.variant || (target.workload || null) !== values.workload)
+      await upsertEvalTarget({ id, round_id:target.round_id, staff_id:target.staff_id,
+        variant_code:values.variant, workload:values.workload });
+    for (const row of removed) await deleteEvalAssignment(row.id);
+    for (const row of desired) if (!existing.some(old => old.section_code === row.section_code &&
+      old.rater_staff_id === row.rater_staff_id))
+      await addEvalAssignment({ target_id:id, section_code:row.section_code, rater_staff_id:row.rater_staff_id });
+    await refresh(state.data.round.id); toast("บันทึกการจัดผู้ประเมินแล้ว");
+  }
+  async function saveSection4(id) {
+    const card = cardOf(id), target = state.data.targets.find(row => row.id === id);
+    const variant = variantOf(target.variant_code);
+    const avg = card.querySelector('[data-s4="avg"]').value.trim();
+    const respondents = card.querySelector('[data-s4="respondents"]').value.trim();
+    const starValues = {};
+    const errors = [];
+    const validScore = value => /^(?:[1-4](?:\.\d{1,2})?|5(?:\.0{1,2})?)$/.test(value);
+    if (!validScore(avg)) errors.push("ค่าเฉลี่ยรวมต้องอยู่ 1.00–5.00 และทศนิยมไม่เกิน 2 ตำแหน่ง");
+    for (const item of variant.star_items || []) {
+      const value = card.querySelector('[data-s4-star="' + item.code + '"]').value.trim();
+      if (!validScore(value)) errors.push("★ " + item.code + " ต้องอยู่ 1.00–5.00 และทศนิยมไม่เกิน 2 ตำแหน่ง");
+      else starValues[item.code] = Number(value);
+    }
+    if (!/^\d+$/.test(respondents)) errors.push(variant.respondent_label + " ต้องเป็นจำนวนเต็มตั้งแต่ 0");
+    card.querySelector('[data-problem="section4"]').textContent = errors.join(" · ");
+    if (errors.length) return;
+    await upsertEvalSection4({ target_id:id, variant_code:variant.code, avg_score:Number(avg),
+      star_values:starValues, respondents:Number(respondents),
+      note:card.querySelector('[data-s4="note"]').value.trim() || null });
+    await refresh(state.data.round.id); toast("บันทึกส่วนที่ 4 แล้ว");
+  }
+  async function previewAttendance() {
+    const round = state.data.round;
+    const ctx = await loadWorkContext(round.period_from, round.period_to);
+    const rule = state.form.sections.flatMap(section => section.domains || [])
+      .flatMap(domain => domain.items || []).find(item => item.auto_rule?.source === "attendance")?.auto_rule;
+    const preview = [], warnings = [];
+    for (const target of state.data.targets) {
+      const staff = ctx.staff.find(row => row.id === target.staff_id);
+      if (!staff) throw new Error("ไม่พบข้อมูลเวลาเข้างานของ " + staffName(target.staff_id));
+      const summary = summarizeStaff(staff, round.period_from, round.period_to, ctx);
+      preview.push({ target_id:target.id, staff_id:target.staff_id,
+        data:buildEvalAttendanceSnapshot(summary, rule, round) });
+      if (summary.workDays > 0 && summary.present + summary.leaveDays + summary.offsiteDays === 0)
+        warnings.push(staffName(target.staff_id));
+    }
+    if (!ctx.attendance.size) for (const target of state.data.targets) {
+      const name = staffName(target.staff_id);
+      if (!warnings.includes(name)) warnings.push(name);
+    }
+    state.preview = preview; state.previewWarnings = warnings;
+    render();
+    el("attendance-card").scrollIntoView({ block:"start" });
+  }
+  async function run(handler) {
+    try { await handler(); }
+    catch (error) { toast(error.message || "ดำเนินการไม่สำเร็จ", true); }
+  }
+  el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
+  const canDepartment = await checkDepartment("บุคลากร");
+  applyPersonnelMenuAccess(canDepartment);
+  const canHead = await isPersonnelHead();
+  if (!canHead) {
+    el("gate").hidden = false;
+    el("gate").innerHTML = '<div class="banner warn"><b>หน้านี้สำหรับหัวหน้าฝ่ายบุคคล</b><br>' +
+      'หากต้องจัดรอบประเมิน ให้ติดต่อผู้ดูแลระบบ</div>';
+  } else {
+    state.canDepartment = canDepartment;
+    el("app").innerHTML = '<div class="card">กำลังโหลดรอบประเมิน…</div>';
+    el("app").hidden = false;
+    try {
+      [state.forms, state.staff, state.years] = await Promise.all([
+        listEvalForms(), listStaffPicker(), getAcademicYears()
+      ]);
+      await refresh();
+    } catch (error) {
+      el("app").innerHTML = '<div class="card banner err">โหลดหน้ารอบประเมินไม่สำเร็จ: ' +
+        esc(error.message) + '</div>';
+    }
+    el("app").addEventListener("input", event => {
+      if (event.target.id === "staff-search") {
+        state.search = event.target.value.toLowerCase();
+        el("picker").querySelectorAll(".picker-row").forEach(row => {
+          row.hidden = !row.dataset.name.includes(state.search);
+        });
+      }
+    });
+    el("app").addEventListener("change", event => {
+      if (event.target.id === "round-select") run(async () => {
+        state.showForm = false; state.showPicker = false; state.preview = null;
+        await refresh(event.target.value);
+      });
+      const card = event.target.closest(".teacher-card");
+      if (card && event.target.matches('[data-role="dept"], [data-role="peer"], [data-role="variant"]'))
+        showCardProblems(card.dataset.target, projectedProblems(card.dataset.target, cardValues(card.dataset.target)));
+    });
+    el("app").addEventListener("click", event => {
+      const button = event.target.closest("[data-action]");
+      if (!button || button.disabled) return;
+      const action = button.dataset.action, id = button.dataset.target;
+      run(async () => {
+        if (action === "new-round" || action === "edit-round") {
+          state.showForm = true; state.editing = action === "edit-round"; render();
+          el("round-form-card").scrollIntoView({ block:"start" });
+        } else if (action === "cancel-round") { state.showForm = false; render(); }
+        else if (action === "save-round") {
+          const row = roundValues(), errors = validateRound(row);
+          showRoundErrors(errors); if (errors.length) return;
+          const oldDirector = state.editing ? state.data.round.director_staff_id : null;
+          let saved;
+          try { saved = await saveEvalRound(row); }
+          catch (error) {
+            if (/duplicate key|eval_rounds_academic_year_round_no_key/.test(error.message))
+              throw new Error("มีรอบ " + row.academic_year + " ครั้งที่ " + row.round_no + " แล้ว");
+            throw error;
+          }
+          if (oldDirector && oldDirector !== row.director_staff_id)
+            for (const target of state.data.targets)
+              for (const section of state.form.sections.filter(section => section.kind === "committee"))
+                for (const assignment of targetAssignments(target.id).filter(item => item.section_code === section.code))
+                  await setEvalAssignmentRater(assignment.id, row.director_staff_id);
+          state.showForm = false; state.editing = false; await refresh(saved.id);
+          toast("บันทึกรอบแล้ว");
+        } else if (action === "delete-round") {
+          const round = state.data.round, label = round.academic_year + "/" + round.round_no;
+          if (!await window.crsAskConfirm({ title:"ลบรอบประเมิน " + roundLabel(round),
+            message:"ครูในรอบ " + state.data.targets.length + " คนและแบบที่จัดไว้จะถูกลบถาวร",
+            requireText:label, okLabel:"ลบรอบ", danger:true })) return;
+          await deleteEvalRound(round.id); state.showForm = false; await refresh(null); toast("ลบรอบแล้ว");
+        } else if (action === "open-picker") { state.showPicker = true; state.search = ""; render(); }
+        else if (action === "close-picker") { state.showPicker = false; render(); }
+        else if (action === "add-targets") {
+          const ids = [...el("picker").querySelectorAll('input[name="picked-staff"]:checked')].map(node => node.value);
+          if (!ids.length) { toast("เลือกครูอย่างน้อย 1 คน", true); return; }
+          const round = state.data.round;
+          for (const staffId of ids) {
+            const target = await upsertEvalTarget({ round_id:round.id, staff_id:staffId });
+            try {
+              for (const section of state.form.sections.filter(row => row.kind === "committee" || row.kind === "self"))
+                await addEvalAssignment({ target_id:target.id, section_code:section.code,
+                  rater_staff_id:section.kind === "committee" ? round.director_staff_id : staffId });
+            } catch (error) { await deleteEvalTarget(target.id); throw error; }
+          }
+          state.showPicker = false; await refresh(round.id); toast("เพิ่มครูเข้ารอบแล้ว");
+        } else if (action === "remove-target") {
+          const target = state.data.targets.find(row => row.id === id);
+          if (!await window.crsAskConfirm({ title:"เอาครูออกจากรอบ",
+            message:staffName(target.staff_id) + " และแบบที่จัดไว้ทั้งหมดจะถูกลบถาวร",
+            requireText:staffName(target.staff_id), okLabel:"เอาครูออก", danger:true })) return;
+          await deleteEvalTarget(id); await refresh(state.data.round.id); toast("เอาครูออกแล้ว");
+        } else if (action === "save-assignment") await saveAssignment(id);
+        else if (action === "save-section4") await saveSection4(id);
+        else if (action === "clear-section4") {
+          if (!await window.crsAskConfirm({ title:"ล้างค่าส่วนที่ 4",
+            message:"ผลที่คีย์ของ " + staffName(state.data.targets.find(row => row.id === id).staff_id) +
+              " จะถูกลบ เพื่อให้เปลี่ยนแบบ 4ก/4ข ได้",
+            okLabel:"ล้างค่า", danger:true })) return;
+          await deleteEvalSection4(id); await refresh(state.data.round.id); toast("ล้างค่าส่วนที่ 4 แล้ว");
+        } else if (action === "start-round") {
+          if (!await window.crsAskConfirm({ title:"เริ่มรอบประเมิน",
+            message:"เริ่มรอบแล้วเปลี่ยนฉบับ/ผอ. และเอาครูออกไม่ได้ ผู้ประเมินจะเริ่มกรอกได้",
+            okLabel:"เริ่มรอบ" })) return;
+          await setEvalRoundStatus(state.data.round.id, "open");
+          await refresh(state.data.round.id); toast("เริ่มรอบแล้ว");
+        } else if (action === "reopen-assignment") {
+          const row = state.data.assignments.find(item => item.id === button.dataset.assignment);
+          const target = state.data.targets.find(item => item.id === row.target_id);
+          if (!await window.crsAskConfirm({ title:"เปิดแบบคืนให้แก้",
+            message:staffName(row.rater_staff_id) + " จะกลับไปแก้แบบของ " + staffName(target.staff_id) +
+              " ได้ และสถานะจะเปลี่ยนเป็นยังไม่ส่ง", okLabel:"เปิดแบบคืน" })) return;
+          await reopenEvalAssignment(row.id); await refresh(state.data.round.id); toast("เปิดแบบคืนแล้ว");
+        } else if (action === "preview-attendance") await previewAttendance();
+        else if (action === "save-attendance") {
+          if (state.previewWarnings.length && !el("attendance-verified")?.checked) {
+            toast("ติ๊ก “ตรวจแล้ว ถูกต้อง” ก่อนบันทึกตัวเลขที่ไม่พบเวลาเข้างาน", true); return;
+          }
+          if (state.data.snapshots.length &&
+            !await window.crsAskConfirm({ title:"ดึงตัวเลขซ้ำ",
+              message:"ตัวเลขเดิมจะถูกทับ ผอ. อาจให้คะแนนจากตัวเลขเดิมไปแล้ว",
+              okLabel:"ทับตัวเลขเดิม", danger:true })) return;
+          await upsertEvalAttendanceSnapshots(state.preview.map(row => ({ target_id:row.target_id, data:row.data })));
+          state.preview = null; await refresh(state.data.round.id); toast("ล็อกตัวเลขเวลาเข้างานแล้ว");
+        } else if (action === "close-round") {
+          const pending = [];
+          for (const target of state.data.targets) {
+            const rows = targetAssignments(target.id);
+            if (rows.some(row => row.status !== "submitted")) pending.push(staffName(target.staff_id) + ": ยังมีแบบไม่ส่ง");
+            if (variantSection() && !targetEntry(target.id)) pending.push(staffName(target.staff_id) + ": ยังไม่คีย์ส่วนที่ 4");
+            if (!targetSnapshot(target.id)) pending.push(staffName(target.staff_id) + ": ยังไม่ล็อกตัวเลข");
+          }
+          if (!await window.crsAskConfirm({ title:"ปิดรับคะแนน",
+            message:pending.length ? "รายการค้าง: " + pending.join(" · ") : "ผู้ประเมินจะส่งคะแนนเพิ่มไม่ได้จนกว่าจะเปิดรับอีกครั้ง",
+            okLabel:"ปิดรับคะแนน" })) return;
+          await setEvalRoundStatus(state.data.round.id, "closed");
+          await refresh(state.data.round.id); toast("ปิดรับคะแนนแล้ว");
+        } else if (action === "reopen-round") {
+          if (!await window.crsAskConfirm({ title:"เปิดรับคะแนนอีกครั้ง",
+            message:"ผู้ประเมินจะกลับมากรอกและส่งแบบได้", okLabel:"เปิดรับคะแนน" })) return;
+          await setEvalRoundStatus(state.data.round.id, "open");
+          await refresh(state.data.round.id); toast("เปิดรับคะแนนอีกครั้งแล้ว");
+        }
+      });
+    });
+  }
+}
+</script>
+</body>
+</html>

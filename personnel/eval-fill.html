@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>กรอกแบบประเมิน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+    --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea;
+    --amber:#8a5a00; --amber-soft:#fff4df; }
+  * { box-sizing:border-box; }
+  body { font-family:"Sarabun",sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:16px 16px 100px; font-size:16px; line-height:1.6; }
+  .wrap { max-width:560px; margin:0 auto; }
+  main.academic-content { max-width:560px !important; margin-left:auto; margin-right:auto; }
+  h1 { font-size:22px; margin:4px 0; } h2 { font-size:18px; margin:0 0 8px; } h3 { font-size:16px; margin:0 0 8px; }
+  header p, .hint { color:var(--muted); } header p { margin:0 0 8px; font-size:14px; }
+  .nav { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:8px; background:var(--white);
+    border:1px solid var(--line); border-radius:99px; margin-bottom:22px; }
+  .nav a { color:var(--muted); text-decoration:none; padding:8px 12px; border-radius:99px; font-size:14px; }
+  .nav a.active { color:var(--white); background:var(--teal); }
+  .nav #btn-signout { margin-left:auto; color:var(--danger); }
+  .card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; min-width:0; }
+  .hint { font-size:14px; margin:4px 0 10px; } .meta { color:var(--muted); font-size:13px; }
+  .sticky-head { position:sticky; top:0; z-index:5; background:var(--bg); padding:10px 0; }
+  .sticky-head .card { margin:0; } .sticky-head h2 { margin:0; }
+  .progress { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
+  .progress span { display:block; height:100%; background:var(--teal); }
+  .domain { scroll-margin-top:180px; } .item { border-top:1px solid var(--line); padding:16px 0; scroll-margin-top:180px; }
+  .item:first-of-type { border-top:0; } .item-title { font-weight:600; margin:0 0 8px; }
+  .star { color:var(--amber); } .star-note { color:var(--amber); font-size:13px; display:block; }
+  .score { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; margin:10px 0; }
+  .score label { position:relative; min-width:0; } .score input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+  .score span { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:52px; border:1px solid var(--line);
+    border-radius:8px; font-weight:600; font-size:18px; line-height:1.2; text-align:center; overflow-wrap:anywhere; }
+  .score small { color:var(--muted); font-size:10px; font-weight:500; }
+  .score input:checked + span { background:var(--teal); border-color:var(--teal); color:var(--white); }
+  .score input:checked + span small { color:var(--white); }
+  .score input:checked + span.low { background:var(--danger); border-color:var(--danger); }
+  .score input:focus-visible + span { outline:2px solid var(--teal); outline-offset:2px; }
+  .score input:disabled + span { opacity:.7; cursor:not-allowed; }
+  .anchors { font-size:13px; color:var(--muted); margin:10px 0; } .anchors p { margin:3px 0; }
+  .anchors b { color:var(--ink); }
+  .field { margin:14px 0 0; } .field label { display:block; font-weight:600; font-size:15px; margin-bottom:5px; }
+  textarea { width:100%; min-height:80px; resize:vertical; padding:9px 11px; border:1px solid var(--line);
+    border-radius:8px; font:inherit; font-size:16px; color:var(--ink); background:var(--white); }
+  textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  textarea[aria-invalid="true"] { border-color:var(--danger) !important; }
+  .error { color:var(--danger); font-size:14px; margin:4px 0 0; }
+  .sys { background:var(--teal-soft); padding:10px 12px; border-radius:9px; font-size:14px; margin:10px 0; }
+  .warn { background:var(--amber-soft); color:var(--amber); padding:10px 12px; border-radius:9px; font-size:14px; margin:10px 0; }
+  details { margin-top:6px; } summary { cursor:pointer; min-height:44px; padding:8px 0; font-weight:600; }
+  .daily { padding-left:20px; margin:0; }
+  .choice { display:flex; flex-wrap:wrap; gap:8px; } .choice label { flex:1 1 auto; position:relative; }
+  .choice input { position:absolute; opacity:0; width:100%; height:100%; }
+  .choice span { display:flex; align-items:center; justify-content:center; min-height:44px; padding:8px; background:var(--white);
+    border:1px solid var(--line); border-radius:8px; text-align:center; }
+  .choice input:checked + span { color:var(--white); background:var(--teal); border-color:var(--teal); }
+  .choice input:focus-visible + span { outline:2px solid var(--teal); outline-offset:2px; }
+  button, .button-link { min-height:44px; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-size:15px; font-weight:600; cursor:pointer; }
+  button.primary, .button-link.primary { background:var(--teal); color:var(--white); }
+  button.ghost, .button-link.ghost { background:var(--teal-soft); color:var(--teal); }
+  button:disabled { opacity:.5; cursor:not-allowed; } .button-link { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+  .footbar { position:fixed; z-index:6; bottom:0; left:0; right:0; border-top:1px solid var(--line); background:var(--white); padding:10px 16px; }
+  .footbar-inner { max-width:560px; margin:auto; display:flex; gap:8px; justify-content:space-between; }
+  .footbar-inner > * { flex:1; }
+  .submit-hint { margin:0 0 8px; font-size:14px; color:var(--amber); }
+  .success { background:var(--teal-soft); padding:16px; border-radius:10px; }
+  #toast { position:fixed; z-index:60; bottom:78px; left:50%; transform:translateX(-50%); max-width:min(90vw,520px);
+    padding:10px 16px; background:var(--ink); color:var(--white); border-radius:9px; opacity:0; pointer-events:none; }
+  #toast.err { background:var(--danger); } #toast.show { opacity:1; }
+  @media (max-width:420px) { body { padding:12px 12px 100px; } .score { gap:3px; } .score small { font-size:9px; } }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>กรอกแบบประเมิน</h1>
+    <p>ให้คะแนนตามตัวอย่างพฤติกรรม บันทึกร่างได้ ส่งเมื่อครบ</p>
+    <div class="nav">
+      <a href="eval-my.html">งานประเมินของฉัน</a>
+      <a href="eval-fill.html" class="active">กรอกแบบประเมิน</a>
+      <a href="#" id="btn-signout">ออกจากระบบ</a>
+    </div>
+    <script src="../app-shell.js?v=20261010-3"></script>
+  </header>
+  <main class="academic-content">
+    <div id="app" class="card" role="status">กำลังโหลดแบบประเมิน…</div>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </main>
+</div>
+<script type="module">
+import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
+  saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
+  thaiShortDateText } from "../supabase-client.js?v=20261010-3";
+
+const session = await requireAuth();
+if (!session) {
+  // requireAuth กำลังพาไปหน้าเข้าสู่ระบบ
+} else {
+  const app = document.getElementById("app");
+  const toastBox = document.getElementById("toast");
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, ch =>
+    ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[ch]);
+  const submittedText = value => value ? new Intl.DateTimeFormat("th-TH", {
+    timeZone:"Asia/Bangkok", day:"numeric", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit"
+  }).format(new Date(value)) : "";
+  let toastTimer;
+  const toast = (message, error = false) => {
+    toastBox.textContent = message; toastBox.classList.toggle("err", error); toastBox.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => toastBox.classList.remove("show"), 4500);
+  };
+  document.getElementById("btn-signout").addEventListener("click", async event => {
+    event.preventDefault(); await signOut();
+  });
+  const id = new URLSearchParams(location.search).get("a");
+  try {
+    const me = await myStaffId();
+    const data = id && me ? await loadEvalFillData(id, me) : { forbidden:true };
+    if (data.forbidden || data.assignment?.rater_staff_id !== me) {
+      app.textContent = "เปิดได้เฉพาะผู้ประเมินของแบบนี้";
+    } else {
+      const { assignment, target, round, form, section, snapshot } = data;
+      const staff = await listStaffPicker();
+      const name = staff.find(row => row.id === target.staff_id)?.full_name || "ไม่พบชื่อ";
+      const self = section.kind === "self";
+      let readonly = assignment.status === "submitted" || round.status !== "open";
+      const domains = section.domains;
+      const allItems = domains.flatMap(domain => domain.items);
+      const itemById = new Map(allItems.map(item => [item.id, item]));
+      const responses = new Map(data.responses.map(row => [row.item_id, row]));
+      const texts = { ...(assignment.texts || {}) };
+      const pending = new Set(), timers = new Map(), revision = new Map(), inFlight = new Set();
+      let domainIndex = 0, lastSaved = "", textSaving = Promise.resolve(), submitting = false;
+      const getProgress = () => evalFillProgress({ section, responses:[...responses.values()], rules:form.rules, snapshot });
+      const statusText = () => readonly ? assignment.status === "submitted" ? "ส่งแล้ว" : "อ่านอย่างเดียว" :
+        inFlight.size ? "กำลังบันทึก…" : pending.size ?
+        `มี ${[...pending].filter(key => itemById.has(key)).length || pending.size} ข้อที่ยังไม่บันทึก` :
+        lastSaved ? "บันทึกแล้ว " + lastSaved : "ยังไม่มีการแก้ไข";
+      const updateStatus = () => {
+        const status = document.getElementById("save-status");
+        if (status) status.textContent = statusText();
+        const progress = getProgress();
+        const bar = document.getElementById("progress-bar");
+        if (bar) bar.style.width = (progress.total ? progress.answered / progress.total * 100 : 0) + "%";
+        const counter = document.getElementById("progress-count");
+        if (counter) counter.textContent = `${progress.answered}/${progress.total} ข้อ`;
+        const submit = document.getElementById("submit-button");
+        if (submit) submit.disabled = !progress.canSubmit || pending.size > 0 || inFlight.size > 0 || submitting;
+        const hint = document.getElementById("submit-hint");
+        if (hint) {
+          const missing = allItems.filter(item => responses.get(item.id)?.score == null);
+          hint.innerHTML = missing.length ? `ยังไม่ได้ให้คะแนน ${missing.length} ข้อ · <a href="#" data-jump="${esc(missing[0].id)}">ไปข้อแรกที่ขาด</a>` :
+            progress.invalid.length ? `มี ${progress.invalid.length} ข้อที่ต้องแก้ · <a href="#" data-jump="${esc(progress.invalid[0])}">ไปข้อแรกที่ต้องแก้</a>` : "";
+        }
+      };
+      const requirement = item => {
+        const row = responses.get(item.id);
+        return evalItemRequirement({ item, sectionKind:section.kind, score:row?.score,
+          evidence:row?.evidence, rules:form.rules, snapshot });
+      };
+      const refreshItem = item => {
+        const box = document.getElementById("item-" + item.id);
+        if (!box) return;
+        const rule = requirement(item);
+        const row = responses.get(item.id);
+        box.querySelectorAll('input[type="radio"][data-score]').forEach(input => {
+          input.checked = Number(input.value) === Number(row?.score);
+          input.nextElementSibling.classList.toggle("low", Number(input.value) <= Number(form.rules.evidence_required_max));
+        });
+        const evidence = box.querySelector("textarea[data-evidence]");
+        if (evidence) {
+          evidence.setAttribute("aria-invalid", String(Boolean(rule.reason)));
+          box.querySelector("[data-required]").textContent = rule.needsEvidence ? " *" : "";
+          box.querySelector("[data-error]").textContent = rule.reason || "";
+        }
+        updateStatus();
+      };
+      const saveItem = async itemId => {
+        const item = itemById.get(itemId);
+        if (!item || inFlight.has(itemId) || requirement(item).reason) return;
+        const row = responses.get(itemId);
+        if (row?.score == null) return;
+        const version = revision.get(itemId);
+        inFlight.add(itemId); updateStatus();
+        try {
+          await saveEvalResponse({ assignment_id:assignment.id, item_id:itemId,
+            score:Number(row.score), evidence:String(row.evidence || "").trim() || null });
+          if (revision.get(itemId) === version) {
+            pending.delete(itemId);
+            lastSaved = new Intl.DateTimeFormat("th-TH", { timeZone:"Asia/Bangkok", hour:"2-digit", minute:"2-digit", hour12:false }).format(new Date());
+          }
+        } catch (error) { toast(error.message, true); }
+        finally {
+          inFlight.delete(itemId); updateStatus();
+          if (revision.get(itemId) !== version && pending.has(itemId)) queueItem(itemId, 0);
+        }
+      };
+      const queueItem = (itemId, delay = 800) => {
+        clearTimeout(timers.get(itemId));
+        pending.add(itemId); revision.set(itemId, (revision.get(itemId) || 0) + 1);
+        const item = itemById.get(itemId);
+        refreshItem(item);
+        if (!requirement(item).reason && responses.get(itemId)?.score != null)
+          timers.set(itemId, setTimeout(() => saveItem(itemId), delay));
+      };
+      const saveText = key => {
+        textSaving = textSaving.catch(() => {}).then(async () => {
+          try {
+            await saveEvalTexts(assignment.id, { ...texts });
+            pending.delete("text:" + key);
+            lastSaved = new Intl.DateTimeFormat("th-TH", { timeZone:"Asia/Bangkok", hour:"2-digit", minute:"2-digit", hour12:false }).format(new Date());
+          } catch (error) { toast(error.message, true); }
+          updateStatus();
+        });
+      };
+      const renderItem = (item, domain) => {
+        const row = responses.get(item.id) || {};
+        const rule = requirement(item);
+        const autoMissing = item.auto_rule && !snapshot;
+        const scale = form.rules.scale || [];
+        const anchors = item.anchors || Object.fromEntries(scale.map(value => [value.score, value.meaning]));
+        const scoreHtml = [1,2,3,4,5].map(score => {
+          const label = scale.find(value => Number(value.score) === score)?.label || "";
+          return `<label><input type="radio" name="score-${esc(item.id)}" value="${score}" data-score="${esc(item.id)}" ${Number(row.score) === score ? "checked" : ""} ${readonly || autoMissing ? "disabled" : ""}><span class="${score <= Number(form.rules.evidence_required_max) ? "low" : ""}">${score}<small>${esc(label)}</small></span></label>`;
+        }).join("");
+        const daily = snapshot ? `<details><summary>ดูรายวัน</summary><div>สาย: ${esc((snapshot.late_dates || []).map(thaiShortDateText).join(", ") || "ไม่มี")}</div><div>ไม่ลงเวลา: ${esc((snapshot.absent_dates || []).map(thaiShortDateText).join(", ") || "ไม่มี")}</div></details>` : "";
+        const system = item.auto_rule ? snapshot ?
+          `<div class="sys">ระบบลงเวลา ${esc(thaiShortDateText(snapshot.period_from))} – ${esc(thaiShortDateText(snapshot.period_to))}: สาย ${Number(snapshot.late || 0)} · ไม่ลงเวลา ${Number(snapshot.absent || 0)} · มีใบอนุญาต ${Number(snapshot.permitted || 0)} (ไม่นับ) ⟹ นับ ${Number(snapshot.count || 0)} ครั้ง → แนะนำ ${esc(rule.suggested ?? "–")}${daily}</div>` :
+          '<div class="warn">ฝ่ายบุคคลยังไม่ล็อกตัวเลขเวลาเข้างาน — ให้คะแนนข้อนี้ได้หลังฝ่ายบุคคลล็อก</div>' : "";
+        return `<article class="item" id="item-${esc(item.id)}"><p class="item-title">${esc(domain.code)}(${item.no}) ${esc(item.text)} ${item.is_star ? '<span class="star" title="ข้อสำคัญ ได้ ≤ 2 ถือว่าไม่ผ่านด้านนี้">★</span><span class="star-note">ข้อสำคัญ ได้ ≤ 2 ถือว่าไม่ผ่านด้านนี้</span>' : ""}</p>
+          ${item.note ? `<p class="meta">${esc(item.note)}</p>` : ""}${system}
+          <div class="score" role="radiogroup" aria-label="${esc(item.text)}">${scoreHtml}</div>
+          <div class="anchors">${[5,4,3,2,1].filter(score => anchors[score]).map(score => `<p><b>${score}</b> ${esc(anchors[score])}</p>`).join("")}</div>
+          <div class="field"><label for="evidence-${esc(item.id)}">${esc(section.evidence_label)}<span data-required class="error">${rule.needsEvidence ? " *" : ""}</span></label>
+          <textarea id="evidence-${esc(item.id)}" data-evidence="${esc(item.id)}" aria-invalid="${Boolean(rule.reason)}" ${readonly || autoMissing ? "disabled" : ""}>${esc(row.evidence || "")}</textarea>
+          <p class="error" data-error>${esc(rule.reason || "")}</p></div></article>`;
+      };
+      const renderTexts = () => (section.text_fields || []).map(field => {
+        const value = texts[field.key] || "";
+        if (field.type === "choice") return `<div class="field"><label>${esc(field.label)}</label><div class="choice" role="radiogroup" aria-label="${esc(field.label)}">${(field.options || []).map(option => {
+          const choice = typeof option === "string" ? option : option.value;
+          const label = typeof option === "string" ? option : option.label;
+          return `<label><input type="radio" name="text-${esc(field.key)}" value="${esc(choice)}" data-choice="${esc(field.key)}" ${value === choice ? "checked" : ""} ${readonly ? "disabled" : ""}><span>${esc(label)}</span></label>`;
+        }).join("")}</div></div>`;
+        return `<div class="field"><label for="text-${esc(field.key)}">${esc(field.label)}</label><textarea id="text-${esc(field.key)}" data-text="${esc(field.key)}" ${readonly ? "disabled" : ""}>${esc(value)}</textarea></div>`;
+      }).join("");
+      const render = () => {
+        const progress = getProgress();
+        const selected = readonly ? domains : [domains[domainIndex]];
+        app.className = "";
+        app.innerHTML = `<div class="sticky-head"><div class="card"><h2>${self ? "ประเมินตนเอง" : esc(name)}</h2>
+          <div class="meta">ส่วนที่ ${esc(section.code)} · ${esc(section.title)}</div>
+          <div class="meta">${readonly ? "อ่านอย่างเดียว" : domains.length === 1 ? `ด้าน ${esc(domains[domainIndex].code)}` : `ด้าน ${esc(domains[domainIndex].code)} จาก ${domains.length}`} · <span id="progress-count">${progress.answered}/${progress.total} ข้อ</span></div>
+          <div class="progress"><span id="progress-bar" style="width:${progress.total ? progress.answered / progress.total * 100 : 0}%"></span></div>
+          <div class="meta" id="save-status" aria-live="polite">${esc(statusText())}</div></div></div>
+          ${readonly ? `<div class="card ${assignment.status === "submitted" ? "success" : "warn"}">${assignment.status === "submitted" ? "ส่งแล้ว " + esc(submittedText(assignment.submitted_at)) : "ปิดรับคะแนนแล้ว"}</div>` : ""}
+          ${selected.map(domain => `<section class="card domain" id="domain-${esc(domain.code)}"><h3>ด้าน ${esc(domain.code)} · ${esc(domain.title)}</h3>
+            ${domain.items.map(item => renderItem(item, domain)).join("")}
+            ${domain === domains[domains.length - 1] ? renderTexts() : ""}</section>`).join("")}
+          <div class="footbar"><div class="footbar-inner">${readonly ? '<a class="button-link ghost" href="eval-my.html">กลับงานประเมินของฉัน</a>' :
+            `<button class="ghost" id="prev-domain" ${domainIndex === 0 ? "disabled" : ""}>← ด้านก่อน</button>
+            ${domainIndex < domains.length - 1 ? '<button class="primary" id="next-domain">ด้านถัดไป →</button>' :
+              '<button class="primary" id="submit-button" disabled>ส่งแบบประเมิน</button>'}`}</div>
+            ${!readonly && domainIndex === domains.length - 1 ? '<p class="submit-hint" id="submit-hint"></p>' : ""}</div>`;
+        updateStatus();
+      };
+      app.addEventListener("change", event => {
+        if (readonly) return;
+        const scoreId = event.target.dataset.score;
+        if (scoreId) {
+          const row = responses.get(scoreId) || { item_id:scoreId, evidence:null };
+          row.score = Number(event.target.value); responses.set(scoreId, row); queueItem(scoreId, 0);
+        }
+        const key = event.target.dataset.choice;
+        if (key) { texts[key] = event.target.value; pending.add("text:" + key); updateStatus(); saveText(key); }
+      });
+      app.addEventListener("input", event => {
+        if (readonly) return;
+        const itemId = event.target.dataset.evidence;
+        if (itemId) {
+          const row = responses.get(itemId) || { item_id:itemId, score:null };
+          row.evidence = event.target.value; responses.set(itemId, row); queueItem(itemId);
+        }
+        const key = event.target.dataset.text;
+        if (key) { texts[key] = event.target.value; pending.add("text:" + key); updateStatus(); }
+      });
+      app.addEventListener("focusout", event => {
+        if (readonly) return;
+        const itemId = event.target.dataset.evidence;
+        if (itemId && !requirement(itemById.get(itemId)).reason) queueItem(itemId, 0);
+        const key = event.target.dataset.text;
+        if (key && pending.has("text:" + key)) saveText(key);
+      });
+      app.addEventListener("click", async event => {
+        const jump = event.target.closest("[data-jump]");
+        if (jump) {
+          event.preventDefault();
+          domainIndex = domains.findIndex(domain => domain.items.some(item => item.id === jump.dataset.jump));
+          render(); document.getElementById("item-" + jump.dataset.jump)?.scrollIntoView({ block:"start" });
+          return;
+        }
+        if (event.target.id === "prev-domain" && domainIndex > 0) { domainIndex--; render(); scrollTo(0,0); }
+        if (event.target.id === "next-domain" && domainIndex < domains.length - 1) { domainIndex++; render(); scrollTo(0,0); }
+        if (event.target.id === "submit-button" && !event.target.disabled) {
+          if (!await window.crsAskConfirm({ title:"ส่งแบบประเมิน",
+            message:"ส่งแล้วแก้ไม่ได้ ถ้าต้องแก้ให้ติดต่อหัวหน้าฝ่ายบุคคลเปิดคืน",
+            okLabel:"ส่งแบบประเมิน", danger:false })) return;
+          submitting = true; updateStatus();
+          try {
+            const saved = await submitEvalAssignment(assignment.id);
+            assignment.status = saved.status; assignment.submitted_at = saved.submitted_at; readonly = true;
+            pending.clear(); render(); toast("ส่งแบบประเมินแล้ว");
+          } catch (error) { toast(error.message, true); }
+          finally { submitting = false; updateStatus(); }
+        }
+      });
+      window.addEventListener("beforeunload", event => {
+        if (pending.size || inFlight.size) { event.preventDefault(); event.returnValue = ""; }
+      });
+      render();
+    }
+  } catch (error) {
+    app.textContent = error.message;
+    toast(error.message, true);
+  }
+}
+</script>
+</body>
+</html>

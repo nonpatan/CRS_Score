@@ -366,7 +366,7 @@ function syncFinanceKpiTones() {
       // หน้าที่เป็นงานของฝ่ายบุคคลโดยเฉพาะ — ครูทั่วไปเห็นตารางเวรรวมและข้อมูลของตัวเอง
       // ซ่อนไว้ก่อนเสมอ (fail-closed) แล้วให้หน้าเว็บเรียก applyPersonnelMenuAccess() เปิดให้
       // ถ้าลืมเรียก คนมีสิทธิ์จะเห็นเมนูไม่ครบ (สังเกตได้ทันที) ดีกว่าเผลอเปิดให้คนไม่มีสิทธิ์
-      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "coverage.html", "duty.html", "staff.html", "hr-settings.html", "teaching-gap.html", "work-summary.html"],
+      hrOnly: ["index.html", "leave.html", "field-duty.html", "late-permission.html", "coverage.html", "duty.html", "staff.html", "hr-settings.html", "teaching-gap.html", "work-summary.html", "eval-rounds.html"],
       groups: [
         {
           label: "บันทึก",
@@ -393,9 +393,28 @@ function syncFinanceKpiTones() {
             ["duty-board.html", "ตารางเวรของทุกคน"],
             ["my-work.html", "ข้อมูลการทำงานของฉัน"]
           ]
+        },
+        {
+          label: "ประเมิน",
+          items: [["eval-my.html", "งานประเมินของฉัน"], ["eval-rounds.html", "ประเมินครู 360°"]]
         }
       ],
       workflows: {
+        "eval-my.html": {
+          title: "งานประเมินของฉัน",
+          description: "แบบประเมินที่ได้รับมอบหมาย และแบบประเมินตนเอง",
+          steps: ["เลือกแบบ", "กรอกทีละด้าน", "ส่ง"]
+        },
+        "eval-fill.html": {
+          title: "กรอกแบบประเมิน",
+          description: "ให้คะแนนตามตัวอย่างพฤติกรรม บันทึกร่างได้ ส่งเมื่อครบ",
+          steps: ["ให้คะแนน", "ตรวจหลักฐาน", "ส่ง"]
+        },
+        "eval-rounds.html": {
+          title: "ประเมินครู 360°",
+          description: "เปิดรอบ จัดผู้ประเมิน ติดตามการส่ง และคีย์ผลส่วนที่ 4",
+          steps: ["เปิดรอบ", "จัดผู้ประเมิน", "ติดตามและปิดรับ"]
+        },
         "leave.html": {
           title: "บันทึกการลา",
           description: "เลือกบุคลากร ช่วงวันที่ และประเภทการลา ก่อนบันทึก",

@@ -7609,6 +7609,449 @@ export function summarizeFinanceWeek({ savingsRows = [], transportRows = [], fee
   }) }));
 }
 
+// ---------- ประเมินครู 360° (สูตรกลาง) ----------
+export function evalRound2(x) {
+  if (x == null || !Number.isFinite(Number(x))) return null;
+  return Math.round(Number((Number(x) * 100).toPrecision(12))) / 100;
+}
+
+export function suggestAttendanceScore(count, autoRule) {
+  if (count == null || count === "" || !Number.isFinite(Number(count))) return null;
+  for (const band of autoRule?.bands || []) {
+    if (band.max == null || Number(count) <= Number(band.max)) return Number(band.score);
+  }
+  return null;
+}
+
+export function evalSection4Check(section, variant, entry, rules) {
+  const numeric = value => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+  const avg = numeric(entry?.avg_score);
+  const complete = Boolean(variant && entry?.variant_code === variant.code && avg != null &&
+    (variant.star_items || []).every(item => numeric(entry.star_values?.[item.code]) != null));
+  const avgPass = complete ? section.min_avg == null || avg >= Number(section.min_avg) : false;
+  const starFails = complete ? (variant.star_items || [])
+    .filter(item => numeric(entry.star_values[item.code]) <= Number(rules.star_fail_max))
+    .map(item => item.code) : [];
+  return { complete, pass:complete && avgPass && starFails.length === 0, avgPass, starFails };
+}
+
+export function evalAssignmentProblems({ form, round, targets = [], assignments = [] }) {
+  if (!targets.length) return [{ targetId:null, message:"ยังไม่มีครูในรอบนี้" }];
+  const problems = [];
+  const sections = form?.sections || [];
+  const byKind = kind => sections.filter(section => section.kind === kind);
+  const minPeer = Number(form?.rules?.min_raters?.peer);
+  const maxPeer = Number(form?.rules?.max_raters?.peer ?? 3);
+  for (const target of targets) {
+    const mine = assignments.filter(row => row.target_id === target.id);
+    const add = message => problems.push({ targetId:target.id, message });
+    if (byKind("summary_entry").length && !target.variant_code) add("ยังไม่ได้เลือกแบบส่วนที่ 4");
+    for (const section of byKind("committee")) {
+      const rows = mine.filter(row => row.section_code === section.code);
+      if (rows.length !== 1 || rows[0]?.rater_staff_id !== round.director_staff_id)
+        add(`ส่วน ${section.code}: ต้องมีแบบของ ผอ. ของรอบ 1 คน`);
+    }
+    for (const section of byKind("dept_head")) {
+      const rows = mine.filter(row => row.section_code === section.code);
+      if (rows.length !== 1) add(`ส่วน ${section.code}: ต้องมีหัวหน้าฝ่ายผู้ประเมิน 1 คน`);
+    }
+    const deptIds = new Set(byKind("dept_head").flatMap(section => mine
+      .filter(row => row.section_code === section.code).map(row => row.rater_staff_id)));
+    for (const section of byKind("peer")) {
+      const rows = mine.filter(row => row.section_code === section.code);
+      if (rows.length < minPeer || rows.length > maxPeer)
+        add(`ส่วน ${section.code}: เพื่อนครูต้องมี ${minPeer}–${maxPeer} คน (ตอนนี้ ${rows.length} คน)`);
+      if (rows.some(row => row.rater_staff_id === round.director_staff_id || deptIds.has(row.rater_staff_id)))
+        add(`ส่วน ${section.code}: เพื่อนครูต้องไม่ซ้ำ ผอ. หรือหัวหน้าฝ่าย`);
+    }
+    for (const section of byKind("self")) {
+      const rows = mine.filter(row => row.section_code === section.code);
+      if (rows.length !== 1 || rows[0]?.rater_staff_id !== target.staff_id)
+        add(`ส่วน ${section.code}: ยังไม่มีแบบประเมินตนเองของครู`);
+    }
+    for (const section of sections.filter(section => section.kind !== "summary_entry")) {
+      const rows = mine.filter(row => row.section_code === section.code);
+      if (new Set(rows.map(row => row.rater_staff_id)).size !== rows.length)
+        add(`ส่วน ${section.code}: ผู้ประเมินคนเดียวกันซ้ำในส่วนเดียว`);
+      if (section.kind !== "self" && rows.some(row => row.rater_staff_id === target.staff_id))
+        add(`ส่วน ${section.code}: ครูผู้รับการประเมินประเมินตัวเองไม่ได้`);
+    }
+  }
+  return problems;
+}
+
+export function buildEvalAttendanceSnapshot(summary, autoRule, round) {
+  const late = Number(summary.late || 0), absent = Number(summary.absent || 0);
+  return {
+    late, absent, permitted:Number(summary.permitUsed || 0), count:late + absent,
+    late_dates:(summary.rows || []).filter(row => row.status === "late").map(row => row.date).sort(),
+    absent_dates:(summary.rows || []).filter(row => row.status === "absent").map(row => row.date).sort(),
+    suggested_score:suggestAttendanceScore(late + absent, autoRule),
+    period_from:round.period_from, period_to:round.period_to
+  };
+}
+
+export function computeEvalResult({ form, target, assignments = [], responses = [], section4 = null,
+                                    roundNo, history = {} }) {
+  const rules = form.rules || {};
+  const sections = [], stars = [], deficiencies = [], missing = [], warnings = [], reasons = [];
+  const scoreNumber = value => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+  const responseByAssignment = new Map();
+  for (const row of responses) {
+    if (!responseByAssignment.has(row.assignment_id)) responseByAssignment.set(row.assignment_id, new Map());
+    responseByAssignment.get(row.assignment_id).set(row.item_id, scoreNumber(row.score));
+  }
+  const knownCodes = new Set();
+  let self = null;
+
+  for (const section of form.sections || []) {
+    const sectionCode = String(section.code);
+    const weight = Number(section.weight);
+    const minAvg = scoreNumber(section.min_avg);
+    const submitted = assignments.filter(a => String(a.section_code) === sectionCode && a.status === "submitted");
+    const raterCount = submitted.length;
+    const domains = [], items = [];
+    let avg = null, weighted = null, pass = null, completeSection = true;
+    let sectionStarFail = false;
+    const sectionDeficiency = `ส่วน${sectionCode}`;
+    if (minAvg != null) knownCodes.add(sectionDeficiency);
+
+    if (section.kind === "summary_entry") {
+      const variant = (section.variants || []).find(v => v.code === target?.variant_code);
+      const check = evalSection4Check(section, variant, section4, rules);
+      completeSection = check.complete;
+      avg = completeSection ? scoreNumber(section4.avg_score) : null;
+      if (!completeSection) missing.push(`ส่วนที่ ${sectionCode}: ยังไม่คีย์ผลหรือค่า ★ ไม่ครบ`);
+      if (completeSection) {
+        for (const star of variant.star_items || []) {
+          const value = scoreNumber(section4.star_values[star.code]);
+          const fail = check.starFails.includes(star.code);
+          stars.push({ code:star.code, label:star.label, value, fail });
+          if (fail) deficiencies.push(`★${star.code}`);
+        }
+        weighted = evalRound2(avg * weight / 100);
+        pass = check.pass;
+        if (!pass && minAvg != null) deficiencies.push(sectionDeficiency);
+      }
+      for (const star of variant?.star_items || []) knownCodes.add(`★${star.code}`);
+      sections.push({ code:sectionCode, title:section.title, kind:section.kind, weight,
+        avg, weighted, minAvg, pass, raterCount, domains, items,
+        variant:variant ? { code:variant.code, title:variant.title,
+          ...(completeSection && section4.respondents != null ? { respondents:Number(section4.respondents) } : {}) } : undefined });
+      continue;
+    }
+
+    const required = section.kind === "peer" ? Number(rules.min_raters?.peer) : 1;
+    if (section.kind !== "self" && raterCount !== required &&
+        (section.kind !== "peer" || raterCount < required)) {
+      completeSection = false;
+      missing.push(`ส่วนที่ ${sectionCode}: ส่งแล้ว ${raterCount} จาก ${required} คน`);
+    }
+    if (section.kind === "self" && !raterCount) {
+      self = null;
+      completeSection = false;
+    }
+    const enoughRaters = completeSection;
+
+    for (const domain of section.domains || []) {
+      const domainCode = String(domain.code), domainItems = [];
+      const domainMin = scoreNumber(domain.min_avg);
+      if (domainMin != null) knownCodes.add(domainCode);
+      for (const item of domain.items || []) {
+        const code = `${domainCode}(${item.no})`;
+        if (item.is_star) knownCodes.add(`★${code}`);
+        const values = submitted.map(a => responseByAssignment.get(a.id)?.get(item.id));
+        const valid = enoughRaters && values.length > 0 && values.every(value => value != null);
+        const value = valid ? (section.kind === "peer" ?
+          evalRound2(values.reduce((sum, score) => sum + score, 0) / values.length) : values[0]) : null;
+        if (completeSection && !valid) completeSection = false;
+        const itemResult = { itemId:item.id, code, text:item.text, value, isStar:Boolean(item.is_star) };
+        domainItems.push(itemResult);
+        items.push(itemResult);
+      }
+      const values = domainItems.map(item => item.value);
+      const domainComplete = values.length > 0 && values.every(value => value != null);
+      const domainAvg = domainComplete ? evalRound2(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+      const domainWeighted = domainAvg == null ? null : evalRound2(domainAvg * Number(domain.weight) / 100);
+      let domainPass = domainAvg == null ? null : domainMin == null || domainAvg >= domainMin;
+      if (domainAvg != null && section.kind !== "self") {
+        for (const item of domainItems.filter(item => item.isStar)) {
+          const fail = item.value <= Number(rules.star_fail_max);
+          stars.push({ code:item.code, label:item.text, value:item.value, fail });
+          if (fail) {
+            deficiencies.push(`★${item.code}`);
+            if (domainMin != null) domainPass = false;
+            else sectionStarFail = true;
+          }
+        }
+        if (domainPass === false && domainMin != null) deficiencies.push(domainCode);
+      }
+      domains.push({ code:domainCode, title:domain.title, weight:Number(domain.weight),
+        avg:domainAvg, weighted:domainWeighted, minAvg:domainMin, pass:domainPass,
+        showStar:Boolean(domain.show_star) });
+    }
+    if (section.kind === "self") {
+      self = raterCount ? { items:items.map(item => ({ itemId:item.itemId, text:item.text, value:item.value })) } : null;
+    } else {
+      if (completeSection && domains.every(domain => domain.weighted != null)) {
+        avg = evalRound2(domains.reduce((sum, domain) => sum + domain.weighted, 0));
+        weighted = evalRound2(avg * weight / 100);
+        pass = (minAvg == null || avg >= minAvg) && domains.every(domain => domain.pass !== false) && !sectionStarFail;
+        if (minAvg != null && !pass) deficiencies.push(sectionDeficiency);
+      } else if (!missing.some(label => label.startsWith(`ส่วนที่ ${sectionCode}:`))) {
+        missing.push(`ส่วนที่ ${sectionCode}: คะแนนรายข้อไม่ครบ`);
+      }
+    }
+    sections.push({ code:sectionCode, title:section.title, kind:section.kind, weight,
+      avg, weighted, minAvg, pass, raterCount, domains, items });
+  }
+
+  const complete = missing.length === 0;
+  const total = complete ? evalRound2(sections.filter(section => section.weight > 0)
+    .reduce((sum, section) => sum + section.weighted, 0)) : null;
+  const level = total == null ? null :
+    (rules.level_bands || []).find(band => total >= Number(band.min))?.label || null;
+  let suggested = null;
+  if (!complete) reasons.push(...missing);
+  else if (roundNo === 1) {
+    if (total >= Number(rules.round1.pass_min) && !deficiencies.length) suggested = "pass";
+    else if (total < Number(rules.round1.watch_min)) suggested = "watch_strict";
+    else suggested = "watch";
+  } else if (roundNo === 2) {
+    const current = new Set(deficiencies);
+    const repeated = previous => (previous?.deficiencies || []).some(code => knownCodes.has(code) && current.has(code));
+    for (const [previous, label] of [[history.round1, "รอบ 1"], [history.prevYear, "ปีก่อน"]]) {
+      for (const code of previous?.deficiencies || []) {
+        if (!knownCodes.has(code)) warnings.push(`เทียบกับ${label} ไม่ได้: ${code}`);
+      }
+    }
+    if (total < Number(rules.round2.not_renew_below) ||
+        (["watch", "watch_strict"].includes(history.round1?.final) && repeated(history.round1)) ||
+        (history.prevYear?.final === "renew_conditional" && repeated(history.prevYear)) ||
+        history.redFlagConfirmed) suggested = "not_renew";
+    else if (total >= Number(rules.round2.renew_min) && !deficiencies.length) suggested = "renew";
+    else suggested = "renew_conditional";
+  }
+  if (suggested === "pass") reasons.push("คะแนนรวมผ่านเกณฑ์และไม่มีข้อบกพร่อง");
+  if (suggested === "watch") reasons.push("คะแนนรวมหรือข้อบกพร่องยังไม่ผ่านเกณฑ์รอบ 1");
+  if (suggested === "watch_strict") reasons.push("คะแนนรวมต่ำกว่าเกณฑ์เฝ้าระวังเข้มข้น");
+  if (suggested === "renew") reasons.push("คะแนนรวมผ่านเกณฑ์และไม่มีข้อบกพร่อง");
+  if (suggested === "renew_conditional") reasons.push("ยังไม่เข้าเกณฑ์ต่อสัญญาปกติ");
+  if (suggested === "not_renew") {
+    if (total < Number(rules.round2.not_renew_below)) reasons.push("คะแนนรวมต่ำกว่าเกณฑ์ไม่ต่อสัญญา");
+    if (["watch", "watch_strict"].includes(history.round1?.final) &&
+        (history.round1?.deficiencies || []).some(code => deficiencies.includes(code))) reasons.push("ข้อบกพร่องจากรอบ 1 ยังไม่แก้ไข");
+    if (history.prevYear?.final === "renew_conditional" &&
+        (history.prevYear?.deficiencies || []).some(code => deficiencies.includes(code))) reasons.push("ข้อบกพร่องจากปีก่อนยังไม่แก้ไข");
+    if (history.redFlagConfirmed) reasons.push("มี Red Flag ที่ยืนยันแล้ว");
+  }
+  return { formCode:form.code, roundNo, complete, missing, sections, stars, total, level,
+    deficiencies, suggested, reasons, warnings, self };
+}
+
+export function evalDecisionSnapshot(result) {
+  const snapshot = JSON.parse(JSON.stringify(result));
+  for (const section of snapshot.sections || []) delete section.raterCount;
+  delete snapshot.self;
+  return snapshot;
+}
+
+export function evalItemRequirement({ item, sectionKind, score, evidence, rules = {}, snapshot = null }) {
+  const suggested = item?.auto_rule && snapshot ? snapshot.suggested_score ?? null : null;
+  const scored = score != null && score !== "" && Number.isFinite(Number(score));
+  const low = scored && sectionKind !== "self" && Number(score) <= Number(rules.evidence_required_max);
+  const differs = scored && suggested != null && Number(score) !== Number(suggested);
+  const needsEvidence = Boolean(low || differs);
+  const missing = needsEvidence && !String(evidence || "").trim();
+  const reason = !missing ? null : differs ?
+    `คะแนนต่างจากที่ระบบเสนอ (${suggested}) ต้องระบุเหตุผล` :
+    `ให้คะแนน ≤ ${rules.evidence_required_max} ต้องระบุหลักฐาน เหตุการณ์ หรือวันที่`;
+  return { needsEvidence, reason, suggested };
+}
+
+export function evalFillProgress({ section, responses = [], rules = {}, snapshot = null }) {
+  const byId = new Map(responses.map(row => [row.item_id, row]));
+  const byDomain = (section?.domains || []).map(domain => {
+    const items = domain.items || [];
+    return { code:domain.code, total:items.length, answered:items.filter(item => {
+      const score = byId.get(item.id)?.score;
+      return score != null && score !== "";
+    }).length };
+  });
+  const items = (section?.domains || []).flatMap(domain => domain.items || []);
+  const invalid = items.filter(item => {
+    const row = byId.get(item.id);
+    return item.auto_rule && !snapshot || row?.score != null &&
+      evalItemRequirement({ item, sectionKind:section.kind, score:row.score,
+        evidence:row.evidence, rules, snapshot }).reason;
+  }).map(item => item.id);
+  const total = items.length, answered = byDomain.reduce((sum, row) => sum + row.answered, 0);
+  return { total, answered, invalid, canSubmit:total > 0 && answered === total && invalid.length === 0, byDomain };
+}
+
+export function evalSelfDueDate(round, rules = {}) {
+  if (!round?.eval_date || !Number.isFinite(Number(rules.self_due_days_before))) return null;
+  const date = new Date(`${round.eval_date}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() - Number(rules.self_due_days_before));
+  return date.toISOString().slice(0, 10);
+}
+// ---------- /ประเมินครู 360° ----------
+
+// ---------- ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
+export async function listEvalForms() {
+  const { data, error } = await sb.from("eval_forms").select("*").order("created_at", { ascending:false });
+  if (error) throw new Error("โหลดฉบับแบบประเมินไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function loadEvalForm(formId) {
+  const [formRes, sectionRes] = await Promise.all([
+    sb.from("eval_forms").select("*").eq("id", formId).single(),
+    sb.from("eval_form_sections").select("*").eq("form_id", formId).order("sort")
+  ]);
+  if (formRes.error) throw new Error("โหลดฉบับแบบประเมินไม่สำเร็จ: " + formRes.error.message);
+  if (sectionRes.error) throw new Error("โหลดส่วนแบบประเมินไม่สำเร็จ: " + sectionRes.error.message);
+  const sections = sectionRes.data || [];
+  const ids = sections.map(section => section.id);
+  if (!ids.length) return { ...formRes.data, sections:[] };
+  const [domainRes, variantRes] = await Promise.all([
+    sb.from("eval_form_domains").select("*").in("section_id", ids).order("sort"),
+    sb.from("eval_form_variants").select("*").in("section_id", ids).order("sort")
+  ]);
+  if (domainRes.error) throw new Error("โหลดด้านแบบประเมินไม่สำเร็จ: " + domainRes.error.message);
+  if (variantRes.error) throw new Error("โหลดแบบย่อยส่วนที่ 4 ไม่สำเร็จ: " + variantRes.error.message);
+  const domains = domainRes.data || [];
+  const domainIds = domains.map(domain => domain.id);
+  const itemRes = domainIds.length ? await sb.from("eval_form_items").select("*").in("domain_id", domainIds).order("sort") : { data:[], error:null };
+  if (itemRes.error) throw new Error("โหลดข้อแบบประเมินไม่สำเร็จ: " + itemRes.error.message);
+  return { ...formRes.data, sections:sections.map(section => ({ ...section,
+    domains:domains.filter(domain => domain.section_id === section.id).map(domain => ({ ...domain,
+      items:(itemRes.data || []).filter(item => item.domain_id === domain.id) })),
+    variants:(variantRes.data || []).filter(variant => variant.section_id === section.id)
+  })) };
+}
+
+export async function listEvalRounds() {
+  const { data, error } = await sb.from("eval_rounds").select("*")
+    .order("academic_year", { ascending:false }).order("round_no", { ascending:false });
+  if (error) throw new Error("โหลดรอบประเมินไม่สำเร็จ: " + error.message);
+  return data || [];
+}
+
+export async function loadEvalRoundAdmin(roundId) {
+  const roundRes = await sb.from("eval_rounds").select("*").eq("id", roundId).single();
+  if (roundRes.error) throw new Error("โหลดรอบประเมินไม่สำเร็จ: " + roundRes.error.message);
+  const targetsRes = await sb.from("eval_targets").select("*").eq("round_id", roundId).order("created_at");
+  if (targetsRes.error) throw new Error("โหลดครูในรอบไม่สำเร็จ: " + targetsRes.error.message);
+  const targets = targetsRes.data || [];
+  const ids = targets.map(target => target.id);
+  if (!ids.length) return { round:roundRes.data, targets, assignments:[], section4:[], snapshots:[] };
+  const [assignRes, section4Res, snapshotRes] = await Promise.all([
+    sb.from("eval_assignments").select("id,target_id,section_code,rater_staff_id,status,submitted_at,reopened_at").in("target_id", ids),
+    sb.from("eval_section4_entries").select("*").in("target_id", ids),
+    sb.from("eval_attendance_snapshots").select("*").in("target_id", ids)
+  ]);
+  for (const [result, label] of [[assignRes,"ผู้ประเมิน"],[section4Res,"ส่วนที่ 4"],[snapshotRes,"เวลาเข้างาน"]])
+    if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ` + result.error.message);
+  return { round:roundRes.data, targets, assignments:assignRes.data || [],
+    section4:section4Res.data || [], snapshots:snapshotRes.data || [] };
+}
+
+async function evalWrite(query) {
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data;
+}
+export const saveEvalRound = row => evalWrite(sb.from("eval_rounds").upsert(row).select().single());
+export const deleteEvalRound = id => evalWrite(sb.from("eval_rounds").delete().eq("id", id));
+export const setEvalRoundStatus = (id, status) => evalWrite(
+  sb.from("eval_rounds").update({ status }).eq("id", id).select().single());
+export const upsertEvalTarget = row => evalWrite(
+  sb.from("eval_targets").upsert(row).select().single());
+export const deleteEvalTarget = id => evalWrite(sb.from("eval_targets").delete().eq("id", id));
+export const addEvalAssignment = row => evalWrite(
+  sb.from("eval_assignments").insert(row).select().single());
+export const setEvalAssignmentRater = (id, raterStaffId) => evalWrite(
+  sb.from("eval_assignments").update({ rater_staff_id:raterStaffId }).eq("id", id).select().single());
+export const deleteEvalAssignment = id => evalWrite(
+  sb.from("eval_assignments").delete().eq("id", id));
+export const reopenEvalAssignment = id => evalWrite(
+  sb.from("eval_assignments").update({ status:"draft" }).eq("id", id).select().single());
+export const upsertEvalSection4 = row => evalWrite(
+  sb.from("eval_section4_entries").upsert(row).select().single());
+export const deleteEvalSection4 = targetId => evalWrite(
+  sb.from("eval_section4_entries").delete().eq("target_id", targetId));
+export const upsertEvalAttendanceSnapshots = rows => evalWrite(
+  sb.from("eval_attendance_snapshots").upsert(rows).select());
+
+export async function myStaffId() {
+  const { data, error } = await sb.rpc("my_staff_id");
+  if (error) throw new Error("อ่านรหัสบุคลากรของบัญชีไม่สำเร็จ: " + error.message);
+  return data || null;
+}
+
+export async function listMyEvalAssignments(staffId) {
+  if (!staffId) return { assignments:[], targets:[], rounds:[] };
+  const { data, error } = await sb.from("eval_assignments").select("*").eq("rater_staff_id", staffId);
+  if (error) throw new Error("โหลดงานประเมินของฉันไม่สำเร็จ: " + error.message);
+  const mine = (data || []).filter(row => row.rater_staff_id === staffId);
+  if (!mine.length) return { assignments:[], targets:[], rounds:[] };
+  const targetRes = await sb.from("eval_targets").select("id,round_id,staff_id").in("id", [...new Set(mine.map(row => row.target_id))]);
+  if (targetRes.error) throw new Error("โหลดครูผู้รับการประเมินไม่สำเร็จ: " + targetRes.error.message);
+  const targets = targetRes.data || [];
+  const roundRes = await sb.from("eval_rounds").select("*").in("id", [...new Set(targets.map(row => row.round_id))]);
+  if (roundRes.error) throw new Error("โหลดรอบประเมินไม่สำเร็จ: " + roundRes.error.message);
+  const rounds = (roundRes.data || []).filter(row => row.status !== "setup");
+  const roundIds = new Set(rounds.map(row => row.id));
+  const visibleTargets = targets.filter(row => roundIds.has(row.round_id));
+  const targetIds = new Set(visibleTargets.map(row => row.id));
+  return { assignments:mine.filter(row => targetIds.has(row.target_id)), targets:visibleTargets, rounds };
+}
+
+export async function countMyEvalResponses(assignmentIds) {
+  if (!assignmentIds.length) return {};
+  const { data, error } = await sb.from("eval_responses").select("assignment_id").in("assignment_id", assignmentIds);
+  if (error) throw new Error("นับคำตอบแบบประเมินไม่สำเร็จ: " + error.message);
+  return (data || []).reduce((counts, row) => {
+    counts[row.assignment_id] = (counts[row.assignment_id] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+export async function loadEvalFillData(assignmentId, staffId = null) {
+  const me = staffId || await myStaffId();
+  const assignmentRes = await sb.from("eval_assignments").select("*").eq("id", assignmentId).maybeSingle();
+  if (assignmentRes.error) throw new Error("โหลดแบบประเมินไม่สำเร็จ: " + assignmentRes.error.message);
+  const assignment = assignmentRes.data;
+  if (!assignment || assignment.rater_staff_id !== me) return { forbidden:true };
+  const targetRes = await sb.from("eval_targets").select("id,round_id,staff_id").eq("id", assignment.target_id).single();
+  if (targetRes.error) throw new Error("โหลดครูผู้รับการประเมินไม่สำเร็จ: " + targetRes.error.message);
+  const target = targetRes.data;
+  const roundRes = await sb.from("eval_rounds").select("*").eq("id", target.round_id).single();
+  if (roundRes.error) throw new Error("โหลดรอบประเมินไม่สำเร็จ: " + roundRes.error.message);
+  const round = roundRes.data;
+  const form = await loadEvalForm(round.form_id);
+  const section = form.sections.find(row => row.code === assignment.section_code);
+  if (!section) throw new Error("ไม่พบส่วนของแบบประเมินนี้");
+  const hasAuto = section.domains.some(domain => domain.items.some(item => item.auto_rule));
+  const [responseRes, snapshotRes] = await Promise.all([
+    sb.from("eval_responses").select("assignment_id,item_id,score,evidence,updated_at").eq("assignment_id", assignmentId),
+    hasAuto ? sb.from("eval_attendance_snapshots").select("data").eq("target_id", target.id).maybeSingle() : Promise.resolve({data:null,error:null})
+  ]);
+  if (responseRes.error) throw new Error("โหลดคะแนนแบบประเมินไม่สำเร็จ: " + responseRes.error.message);
+  if (snapshotRes.error) throw new Error("โหลดตัวเลขเวลาเข้างานไม่สำเร็จ: " + snapshotRes.error.message);
+  return { assignment, target, round, form, section, responses:responseRes.data || [], snapshot:snapshotRes.data?.data || null };
+}
+
+export const saveEvalResponse = row => evalWrite(sb.from("eval_responses")
+  .upsert(row, { onConflict:"assignment_id,item_id" }).select().single());
+export const saveEvalTexts = (assignmentId, texts) => evalWrite(sb.from("eval_assignments")
+  .update({ texts }).eq("id", assignmentId).select().single());
+export const submitEvalAssignment = assignmentId => evalWrite(sb.from("eval_assignments")
+  .update({ status:"submitted" }).eq("id", assignmentId).select().single());
+// ---------- /ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
+
 // ใช้สูตรเดียวกับ transport-report.html buildStudents/outstandingStudents; จำกัดข้อมูลที่ห้องครู
 export async function loadRoomTransportDebtors({ year, yearRange, today, grade_level, classroom }) {
   const placementRes = await fetchAllRows(() => sb.from("student_year_placements")
