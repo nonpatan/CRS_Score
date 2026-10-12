@@ -155,6 +155,14 @@
   }
   .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
   .toast.err { display: block; background: #fceaea; color: var(--danger); }
+  .theme-reminder { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:2px 8px; padding:7px 12px; margin-bottom:12px; border-left:4px solid var(--amber); border-radius:8px; background:var(--amber-soft); color:var(--ink); font-size:13px; line-height:1.3; }
+  .theme-reminder[hidden] { display:none; }
+  .theme-reminder.overdue { border-left-color:var(--danger); background:var(--danger-soft); }
+  .theme-reminder > div { display:contents; }
+  .theme-reminder strong { display:block; grid-column:1/-1; color:var(--amber); font-size:13px; }
+  .theme-reminder.overdue strong { color:var(--danger); }
+  .theme-reminder .subjects { min-width:0; color:var(--muted); overflow-wrap:anywhere; }
+  .theme-reminder a { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); font-weight:700; white-space:nowrap; }
 
   .hint { color: var(--muted); font-size: 14px; }
   #lesson-log-card { padding:0 !important; overflow: clip; }
@@ -416,6 +424,7 @@
   </header>
 
   <main class="academic-content">
+  <div id="theme-work-reminder" class="theme-reminder" role="status" hidden><div><strong id="theme-work-reminder-text"></strong><span class="subjects" id="theme-work-reminder-subjects"></span></div><a id="theme-work-reminder-link" href="theme-works.html">ไปส่งผลงาน →</a></div>
   <div class="card" id="subjects-card">
     <div class="subjects-heading">
       <div><h2>วิชาของฉัน</h2><div class="hint" id="my-subjects-context"></div></div>
@@ -612,7 +621,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts } from "../supabase-client.js?v=20261012-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder } from "../supabase-client.js?v=20261012-3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -3170,6 +3179,23 @@ try {
 await loadSubjects();
 await openLinkedLessonLog();
 rememberControls();
+// ข้อมูลเตือนเป็นส่วนเสริม โหลดหลังหน้าหลักพร้อมแล้วและซ่อนเงียบเมื่อ session/ข้อมูลผิดพลาด
+void (async () => {
+  const banner = document.getElementById("theme-work-reminder");
+  try {
+    const today = todayStr();
+    const year = academicYearOf(today, academicYears);
+    const reminder = year ? await loadMyThemeWorkReminder({ year, userId:session.user.id, today }) : null;
+    if (!reminder) return;
+    document.getElementById("theme-work-reminder-text").textContent = reminder.text;
+    document.getElementById("theme-work-reminder-subjects").textContent = reminder.items
+      .map(item => [item.unitSubject?.code, item.unitSubject?.name].filter(Boolean).join(" "))
+      .filter((name, index, all) => all.indexOf(name) === index).join(" · ");
+    document.getElementById("theme-work-reminder-link").href = `theme-works.html?term=${encodeURIComponent(reminder.term)}`;
+    banner.classList.toggle("overdue", reminder.overdue);
+    banner.hidden = false;
+  } catch { banner.hidden = true; }
+})();
 }
 </script>
 </body>

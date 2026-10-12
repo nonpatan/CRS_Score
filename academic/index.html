@@ -164,6 +164,13 @@
   .bar { background: var(--bg); border-radius: 999px; height: 8px; overflow: hidden; margin-top: 4px; }
   .bar > span { display: block; height: 100%; background: var(--teal); border-radius: 999px; }
   .bar.low > span { background: var(--amber); }
+  .theme-progress { margin:10px 0 14px; }
+  .theme-progress-label { display:flex; justify-content:space-between; gap:8px; font-weight:600; font-size:14px; }
+  .theme-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
+  .theme-metric { padding:8px; background:var(--bg); border-radius:8px; font-size:12px; color:var(--muted); }
+  .theme-metric strong { display:block; color:var(--ink); font-size:20px; line-height:1.2; }
+  #theme-work-card .panel-head { align-items:flex-start; }
+  #theme-work-card .panel-head .hint { text-align:right; }
 
   .warn-note {
     background: var(--amber-soft); color: var(--amber); border-radius: 8px;
@@ -355,6 +362,11 @@
         <div class="dashboard-list" id="readiness-list"></div>
       </section>
 
+      <section class="card panel" id="theme-work-card" aria-labelledby="theme-work-title" hidden>
+        <div class="panel-head"><h2 class="panel-title" id="theme-work-title">ผลงานตามธีม</h2><span class="hint" id="theme-work-deadline"></span></div>
+        <div class="panel-body" id="theme-work-body">กำลังโหลด…</div>
+      </section>
+
       <section class="card panel" aria-labelledby="urgent-title">
         <div class="panel-head"><h2 class="panel-title" id="urgent-title"><svg class="symbol" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5M12 17h.01"/></svg>ต้องช่วยด่วน</h2><span class="metric-chip" id="urgent-percent">—</span></div>
         <div class="panel-body">
@@ -403,8 +415,10 @@ import {
   getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
   listSelectableYears, academicYearOf, academicTermOf, bangkokNow, toDateStr,
   getSetting, setSetting,
-  loadAcademicOverviewData, buildAcademicOverview
-} from "../supabase-client.js?v=20261012-1";
+  loadAcademicOverviewData, buildAcademicOverview,
+  loadThemeWorkData, buildThemeWorkUnits, summarizeThemeWorks, themeWorkCountdown,
+  themeWorkDaysLeft, THEME_WORK_REMINDER_LEAD_DAYS
+} from "../supabase-client.js?v=20261012-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -420,6 +434,9 @@ const elGrades   = document.getElementById("grade-list");
 const elRemarks  = document.getElementById("remark-list");
 const elReady    = document.getElementById("readiness-list");
 const elCoverage = document.getElementById("coverage-list");
+const elThemeCard = document.getElementById("theme-work-card");
+const elThemeBody = document.getElementById("theme-work-body");
+const elThemeDeadline = document.getElementById("theme-work-deadline");
 
 const PRIMARY_SETTING_KEY = "primary_absence_warn_percent";
 const PRIMARY_DEFAULT = 5;
@@ -727,7 +744,7 @@ function filterReadiness(readiness, coverage, term2Open) {
   return { groups, waitingCount: waiting ? coverage.filter(c => c.subject.term === "2").length : 0 };
 }
 
-function renderReadiness(overview, term2Open, needsTerm2Date) {
+function renderReadiness(overview, term2Open, needsTerm2Date, themeInfo = null, currentYear = null) {
   const r = overview.readiness;
   const { groups, waitingCount } = filterReadiness(r, overview.coverage, term2Open);
   const blocks = [
@@ -740,6 +757,18 @@ function renderReadiness(overview, term2Open, needsTerm2Date) {
   ];
   const rows = [];
   if (needsTerm2Date) rows.push({ kind:"ตั้งค่า", title:"ยังไม่ได้ตั้งวันเปิดภาคเรียนที่ 2", why:"ระบบจึงแยกไม่ได้ว่าวิชาภาค 2 ค้างจริง หรือแค่ยังไม่ถึงเวลา", fix:"ตั้งวันเปิดภาคเรียน", href:"manage.html" });
+  if (themeInfo && String(themeInfo.year) === String(overview.year)
+    && String(overview.year) === String(currentYear)) {
+    const { term, window, summary, today } = themeInfo;
+    const days = themeWorkDaysLeft(today, window);
+    if (!window) rows.push({ kind:"ตั้งค่า", title:`ยังไม่ได้ตั้งวันปิดรับผลงานตามธีม ภาค ${term}`,
+      why:"ครูจะยังไม่ได้รับการเตือนให้ส่ง", fix:"ตั้งวันปิดรับ", href:`theme-works.html?term=${term}` });
+    else if (summary.missing > 0 && window.open_date && today >= window.open_date
+      && days !== null && days <= THEME_WORK_REMINDER_LEAD_DAYS) {
+      rows.push({ kind:"ค้าง", title:`ผลงานตามธีม ภาค ${term} ยังไม่ส่ง ${summary.missing} รายการ (ครู ${summary.missingTeachers} คน)`,
+        why:themeWorkCountdown(today, window), fix:"ดูรายการ", href:`theme-works.html?term=${term}` });
+    }
+  }
   for (const block of blocks) {
     const items = groups[block.key];
     if (!items.length) continue;
@@ -858,6 +887,55 @@ function renderCoverage(overview, term2Open, members) {
 
 // ---------- โหลด + วาดทั้งหน้า ----------
 let cachedRaw = null;
+let themeInfo = null;
+let readinessContext = null;
+let themeLoadGeneration = 0;
+let themeViewerPromise = null;
+
+function renderThemeWorkCard(info) {
+  const { year, term, window, summary } = info;
+  const sent = summary.total - summary.missing;
+  const pct = summary.total ? Math.round(sent / summary.total * 100) : 0;
+  const deadline = window ? themeWorkCountdown(info.today, window)
+    : info.isCurrentYear ? "ยังไม่ได้ตั้งวันปิดรับ" : null;
+  elThemeDeadline.textContent = `ภาค ${term}/${year}${deadline ? ` · ${deadline}` : ""}`;
+  const cells = [
+    ["ตรงธีม", summary.match], ["ปรับ", summary.adjust], ["ยังไม่ได้ทำ", summary.none],
+    ["ยังไม่ส่ง", summary.missing], ["ครูค้าง", `${summary.missingTeachers} คน`], ["ยังไม่ตรวจ", summary.unreviewed]
+  ];
+  elThemeBody.innerHTML = `<div class="theme-progress"><div class="theme-progress-label"><span>ส่งแล้ว ${sent} / ทั้งหมด ${summary.total}</span><span>${pct}%</span></div><div class="bar"><span style="width:${pct}%"></span></div></div>` +
+    `<div class="theme-metrics">${cells.map(([label, value]) => `<div class="theme-metric"><strong>${esc(value)}</strong>${esc(label)}</div>`).join("")}</div>` +
+    `<a class="item-link" href="theme-works.html?term=${encodeURIComponent(term)}">ดูทุกวิชา →</a>`;
+}
+
+async function loadThemeWorkOverview(year, term, today, isCurrentYear, generation) {
+  try {
+    themeViewerPromise ||= sb.rpc("theme_work_viewer").then(({ data, error }) => {
+      if (error) throw error;
+      return data === true;
+    });
+    const viewer = await themeViewerPromise;
+    if (generation !== themeLoadGeneration || !viewer) return;
+    elThemeCard.hidden = false;
+    elThemeDeadline.textContent = `ภาค ${term}/${year}`;
+    elThemeBody.textContent = "กำลังโหลด…";
+    const data = await loadThemeWorkData({ year, term });
+    if (generation !== themeLoadGeneration) return;
+    const units = buildThemeWorkUnits({ ...data, term })
+      .map(unit => ({ ...unit, dueDate:data.window?.due_date || null }));
+    themeInfo = { year, term, window:data.window, summary:summarizeThemeWorks(units), today, isCurrentYear };
+    renderThemeWorkCard(themeInfo);
+    if (readinessContext) renderReadiness(readinessContext.overview,
+      readinessContext.term2Open, readinessContext.needsTerm2Date, themeInfo, readinessContext.currentYear);
+  } catch {
+    if (generation !== themeLoadGeneration) return;
+    // เมื่อเช็คสิทธิ์ไม่ได้ ไม่ทราบว่าผู้ใช้มีสิทธิ์ดูข้อมูลโรงเรียนหรือไม่
+    if (!elThemeCard.hidden) {
+      elThemeBody.textContent = "โหลดไม่สำเร็จ";
+      elThemeDeadline.textContent = `ภาค ${term}/${year}`;
+    }
+  }
+}
 
 async function render() {
   const overview = buildAcademicOverview(cachedRaw, { primaryWarnPercent });
@@ -883,7 +961,8 @@ async function render() {
 
   renderGrades(overview);
   renderRemarks(overview);
-  renderReadiness(overview, term2Open, needsTerm2Date);
+  readinessContext = { overview, term2Open, needsTerm2Date, currentYear };
+  renderReadiness(overview, term2Open, needsTerm2Date, themeInfo, currentYear);
   renderCoverage(overview, term2Open, cachedRaw.members || []);
 
   elState.hidden = true;
@@ -892,6 +971,10 @@ async function render() {
 
 async function loadYear(year) {
   if (!year) return;
+  const generation = ++themeLoadGeneration;
+  themeInfo = null;
+  readinessContext = null;
+  elThemeCard.hidden = true;
   showState("กำลังประมวลผลข้อมูลทั้งปีการศึกษา…");
   try {
     cachedRaw = await loadAcademicOverviewData(year);
@@ -904,6 +987,11 @@ async function loadYear(year) {
     return;
   }
   await render();
+  const today = toDateStr(bangkokNow());
+  const datedYears = selectableYears.filter(y => y.start_date);
+  const isCurrentYear = String(year) === String(academicYearOf(today, datedYears));
+  const term = isCurrentYear ? academicTermOf(today, datedYears) || "1" : "2";
+  void loadThemeWorkOverview(year, term, today, isCurrentYear, generation);
 }
 
 elYear.addEventListener("change", () => {

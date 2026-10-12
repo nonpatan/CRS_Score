@@ -34,7 +34,7 @@ fieldset.field legend { margin-bottom:6px; font-weight:600; }
 .field input:focus, .field textarea:focus, button:focus-visible, a:focus-visible {
   outline:2px solid var(--teal); outline-offset:2px;
 }
-.field input[readonly] { background:var(--bg); color:var(--muted); }
+.field input[readonly], .field textarea[readonly] { background:var(--bg); color:var(--muted); }
 .field [aria-invalid="true"] { border-color:var(--danger) !important; }
 .field-error { color:var(--danger); font-size:13px; min-height:0; }
 .hint,.meta { color:var(--muted); font-size:14px; }
@@ -69,8 +69,10 @@ button:disabled { opacity:.55; cursor:default; }
 .grade-heading { margin:20px 0 8px; padding-left:10px; border-left:3px solid var(--line); font-weight:700; }
 .subject-title { margin:0; font-size:18px; overflow-wrap:anywhere; }
 .subject-meta { margin:2px 0 10px; }
-.work-value { background:var(--teal-soft); padding:10px 12px; border-radius:9px; overflow-wrap:anywhere; }
+.work-value { background:var(--teal-soft); padding:10px 12px; border-radius:9px; white-space:pre-line; overflow-wrap:anywhere; }
 .work-value strong { display:block; }
+.review-work-name { white-space:pre-line; overflow-wrap:anywhere; max-height:6.4em; overflow:auto; }
+.missing-work-url { color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:7px 10px; margin:8px 0; overflow-wrap:anywhere; }
 .links { display:flex; flex-wrap:wrap; gap:12px; margin:10px 0; }
 .links a { color:var(--teal); font-weight:700; overflow-wrap:anywhere; }
 .note-value { white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0; }
@@ -102,6 +104,7 @@ button:disabled { opacity:.55; cursor:default; }
 .integrated-part { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:7px 0; border-top:1px solid var(--line); }
 .integrated-part:first-of-type { border-top:0; }
 .filters { margin:12px 0; }
+.print-btn { margin-left:auto; }
 .teacher-group { margin-top:18px; }
 .teacher-group h3 { margin:0 0 8px; font-size:17px; }
 .review-table { width:100%; border-collapse:collapse; }
@@ -113,6 +116,7 @@ button:disabled { opacity:.55; cursor:default; }
 .toast.show { opacity:1; }
 .toast.err { background:var(--danger); }
 [hidden] { display:none !important; }
+#print-area { display:none; }
 @media(min-width:1200px) {
   .master-detail { display:grid; grid-template-columns:310px minmax(0,1fr); gap:14px; align-items:start; }
   .mobile-units { display:none; }
@@ -129,6 +133,25 @@ button:disabled { opacity:.55; cursor:default; }
   .review-table { display:none; }
   .review-card { display:block; border:1px solid var(--line); border-radius:10px; padding:12px; margin:8px 0; }
   .actions button { width:100%; }
+  .print-btn { width:100%; margin-left:0; }
+}
+@media print {
+  @page { size:A4 portrait; margin:12mm; }
+  body { padding:0; background:var(--white); color:var(--ink); font-size:12px; }
+  body::before,body::after,body > *:not(#print-area) { display:none !important; }
+  #print-area { display:block !important; }
+  #print-area h1 { font-size:18px; margin:0 0 4px; }
+  #print-area h2 { font-size:14px; margin:16px 0 4px; break-after:avoid; }
+  #print-area p { margin:3px 0 8px; }
+  #print-area table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  #print-area th,#print-area td { border:1px solid var(--muted); padding:5px 6px; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+  #print-area thead { display:table-header-group; }
+  #print-area tr { break-inside:avoid; }
+  #print-area .print-work-name { white-space:pre-line; }
+  #print-area .print-status-label { font-weight:700; }
+  #print-area .print-teacher { break-after:avoid; }
+  #print-area a[href]::after { content:""; }
+  .no-print,.app-shell,.app-sidebar,.nav,.workflow,.toast { display:none !important; }
 }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
@@ -167,13 +190,14 @@ button:disabled { opacity:.55; cursor:default; }
 <div id="loading" class="card" role="status">กำลังโหลดผลงานตามธีม…</div>
 </main>
 </div>
+<div id="print-area" aria-hidden="true"></div>
 <script type="module">
 import {
   sb, requireAuth, signOut, getActiveYear, getAcademicYears, academicYearOf, academicTermOf,
   bangkokNow, toDateStr, thaiShortDateText, bindDatePickOnly, DATE_PICK_ONLY_NOTE, GRADE_ORDER,
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
   validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed
-} from "../supabase-client.js?v=20261012-1";
+} from "../supabase-client.js?v=20261012-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -203,6 +227,11 @@ if (!session) {
   const subjectTitle = subject => esc(subject.code || "") + " " + esc(subject.name || "");
   const groupTitle = group => subjectTitle(group.unit.subject);
   const firstPart = group => group.items.find(item => item.part)?.part || null;
+  const hasWorkUrl = part => !!String(part?.work_url || "").trim();
+  const firstLinkedPart = group => group.items.find(item => hasWorkUrl(item.part))?.part || null;
+  const missingWorkUrl = group => group.items.some(item => item.part && item.part.status !== "none" && !hasWorkUrl(item.part));
+  const editableMissingWorkUrl = group => group.items.some(item => item.part && item.part.status !== "none" &&
+    !hasWorkUrl(item.part) && !item.part.reviewed_at);
   const otherCount = group => group.unit.parts.length - group.items.length;
   const childChips = group => group.unit.kind === "integrated"
     ? '<div class="meta">ส่วนของฉัน ' + group.items.length + ' วิชาย่อย:</div><div class="member-chips">' +
@@ -236,7 +265,10 @@ if (!session) {
       '" placeholder="' + hint + '"' + (readonly ? ' readonly' : '') +
       ' aria-describedby="' + key + '-' + id + '-error' + (hint ? ' ' + key + '-' + id + '-hint' : '') + '">';
     let html = '<form class="work-form" data-group="' + esc(group.key) + '" novalidate><div class="form-grid">';
-    html += field("workName", "ผลงานคืออะไร *", input("workName", "text", work?.work_name, shared, "ชื่อผลงานตามธีม 1 บรรทัด"),
+    html += field("workName", "ผลงานคืออะไร *",
+      '<textarea id="' + key + '-workName" name="workName" rows="3" placeholder="ชื่อผลงาน · มีหลายชิ้นใส่บรรทัดละ 1 ชิ้น"' +
+      (shared ? ' readonly' : '') + ' aria-describedby="' + key + '-workName-error ' + key + '-workName-hint">' +
+      val(work?.work_name) + '</textarea>',
       "ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้");
     html += field("themeUrl", "ลิงก์เอกสารธีม *", input("themeUrl", "url", work?.theme_url, locked, "https://docs.google.com/…"),
       'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้" · ส่งแล้วแก้ลิงก์นี้เองไม่ได้');
@@ -252,8 +284,9 @@ if (!session) {
       '<textarea id="' + key + '-note" name="note" aria-describedby="' + key + '-note-error">' + val(part?.note) + '</textarea>');
     html += '<div class="conditional-plan">' + field("nextPlan", "แผนต่อ *",
       '<textarea id="' + key + '-nextPlan" name="nextPlan" aria-describedby="' + key + '-nextPlan-error">' + val(part?.next_plan) + '</textarea>') + '</div>';
-    html += '<div class="conditional-link">' + field("workUrl", "ลิงก์ผลงาน (ถ้ามี)",
-      input("workUrl", "url", part?.work_url, false, "https://…")) + '</div>';
+    html += '<div class="conditional-link">' + field("workUrl", "ลิงก์ผลงาน *",
+      input("workUrl", "url", part?.work_url, false, "https://…"),
+      'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้" · มีหลายชิ้นใช้ลิงก์โฟลเดอร์') + '</div>';
     html += '</div><div class="actions"><button class="primary" type="submit" data-action="submit">' +
       (group.items.length > 1 ? 'ส่งผลงาน (ครอบ ' + group.items.length + ' วิชาย่อย)' : part ? "บันทึกการแก้ไข" : "ส่งผลงานวิชานี้") + '</button></div></form>';
     return html;
@@ -272,7 +305,9 @@ if (!session) {
       if (!editOpen) {
         html += '<div class="work-value"><strong>' + (part.status === "none" ? "ผลงานตามธีม (ยังไม่ได้ทำ)" : "ผลงาน") +
           '</strong>' + esc(work?.work_name || "") + '</div><div class="links"><span>เอกสารธีม ' + safeLink(work?.theme_url) +
-          '</span>' + (part.work_url ? '<span>ผลงาน ' + safeLink(part.work_url) + '</span>' : "") + '</div>';
+          '</span>' + (firstLinkedPart(group) ? '<span>ผลงาน ' + safeLink(firstLinkedPart(group).work_url) + '</span>' : "") + '</div>';
+        if (group.reviewed === "none" && editableMissingWorkUrl(group))
+          html += '<p class="missing-work-url">ยังไม่มีลิงก์ผลงาน — กดแก้ไขเพื่อเพิ่ม</p>';
         if (part.note) html += '<p class="note-value"><strong>หมายเหตุ:</strong> ' + esc(part.note) + '</p>';
         if (part.next_plan) html += '<p class="note-value"><strong>แผนต่อ:</strong> ' + esc(part.next_plan) + '</p>';
       }
@@ -347,13 +382,74 @@ if (!session) {
     return '<strong>' + groupTitle(group) + '</strong>' +
       '<div class="meta">' + esc(unit.subject.grade_level || "") + '</div>' +
       (unit.kind === "integrated" ? '<div class="meta">วิชาย่อย: ' + group.items.map(item => subjectTitle(item.subject)).join(' · ') + '</div>' : '') +
-      (unit.work ? '<div>ผลงาน: ' + esc(unit.work.work_name) + '</div>' : "") +
+      (unit.work ? '<div class="review-work-name">ผลงาน: ' + esc(unit.work.work_name) + '</div>' : "") +
       (part?.note ? '<div>หมายเหตุ: ' + esc(part.note) + '</div>' : "") +
       (part?.next_plan ? '<div>แผนต่อ: ' + esc(part.next_plan) + '</div>' : "") +
       (part ? '<div class="meta">ส่งเมื่อ ' + esc(dateTime(group.submittedAt)) +
         (group.reviewed === "all" ? ' · ✓ ตรวจแล้ว' : group.reviewed === "some" ? ' · ตรวจแล้วบางวิชา' : '') +
         (themeWorkLateDays(group.submittedAt, data.window?.due_date) ? ' · ส่งช้า ' +
         themeWorkLateDays(group.submittedAt, data.window?.due_date) + ' วัน' : '') + '</div>' : "");
+  }
+  function selectThemeWorkReviewGroups(entries, selectedFilter, nameFor) {
+    const matching = entries.filter(group => selectedFilter === "all" || group.items.some(item => selectedFilter === "unreviewed"
+      ? item.part && !item.part.reviewed_at : (item.part?.status || "missing") === selectedFilter));
+    const groups = new Map(), teacherTotals = new Map();
+    for (const group of entries) {
+      const id = group.ownerId || "unknown";
+      const value = teacherTotals.get(id) || { total:0, missing:0 };
+      value.total++; if (["missing", "mixed"].includes(group.status)) value.missing++;
+      teacherTotals.set(id, value);
+    }
+    for (const group of matching) {
+      const id = group.ownerId || "unknown";
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(group);
+    }
+    const teacherIds = [...groups.keys()].sort((a,b) =>
+      teacherTotals.get(b).missing - teacherTotals.get(a).missing ||
+      nameFor(a).localeCompare(nameFor(b), "th"));
+    return { matching, groups, teacherTotals, teacherIds };
+  }
+  function buildThemeWorkPrintHtml({ review, summary, selectedFilter, term, year, dueDate, printedAt, printedBy, nameFor }) {
+    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ" };
+    const statuses = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ" };
+    const printDate = value => {
+      if (!value) return "—";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "—";
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok",
+        year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(date);
+      const datePart = type => parts.find(part => part.type === type)?.value;
+      return thaiShortDateText(`${datePart("year")}-${datePart("month")}-${datePart("day")}`) || "—";
+    };
+    let html = '<h1>โรงเรียนเจริญศึกษา · รายงานการส่งผลงานตามธีม ภาคเรียนที่ ' + esc(term) + '/' + esc(year) + '</h1>' +
+      '<p>ตัวกรอง: ' + labels[selectedFilter] + ' · วันปิดรับ: ' + esc(dueDate ? thaiShortDateText(dueDate) : "ยังไม่ได้ตั้ง") +
+      ' · พิมพ์เมื่อ ' + esc(printedAt) + ' โดย ' + esc(printedBy) + '</p>' +
+      '<p>ทั้งหมด ' + summary.total + ' รายการ · ตรงธีม ' + summary.match + ' · ปรับจากธีม ' + summary.adjust +
+      ' · ยังไม่ได้ทำ ' + summary.none + ' · ยังไม่ส่ง ' + summary.missing + ' · ส่งช้า ' + summary.late +
+      ' · ตรวจแล้ว ' + summary.reviewed + ' · นับรายวิชาย่อย</p>';
+    if (!review.teacherIds.length) return html + '<p>ไม่มีรายการในตัวกรองนี้</p>';
+    for (const id of review.teacherIds) {
+      const total = review.teacherTotals.get(id);
+      html += '<section><h2 class="print-teacher">ครู' + esc(nameFor(id)) + ' · ยังไม่ส่ง ' + total.missing + ' จาก ' + total.total + ' รายการ</h2>' +
+        '<table><colgroup><col style="width:30%"><col style="width:26%"><col style="width:18%"><col style="width:26%"></colgroup>' +
+        '<thead><tr><th>วิชา</th><th>ผลงาน</th><th>สถานะ</th><th>หมายเหตุ / แผนต่อ</th></tr></thead><tbody>';
+      for (const group of review.groups.get(id)) {
+        const part = firstPart(group), unit = group.unit;
+        const subject = subjectTitle(unit.subject) + ' · ' + esc(unit.subject.grade_level || "") +
+          (unit.kind === "integrated" ? '<br>วิชาย่อย: ' + group.items.map(item => subjectTitle(item.subject)).join(' · ') : "");
+        const work = unit.work ? '<span class="print-work-name">' + esc(unit.work.work_name) + '</span><br>ลิงก์ผลงาน: ' +
+          (firstLinkedPart(group) ? "มี" : "ไม่มี") : "—";
+        const notes = (part?.note ? esc(part.note) : "") + (part?.next_plan ? '<br>แผนต่อ: ' + esc(part.next_plan) : "");
+        const late = themeWorkLateDays(group.submittedAt, dueDate);
+        const status = '<strong class="print-status-label">' + statuses[group.status] + '</strong>' +
+          (part ? '<br>ส่ง ' + esc(printDate(group.submittedAt)) + (late ? '<br>ส่งช้า ' + late + ' วัน' : "") +
+            '<br>' + (group.reviewed === "all" ? "ตรวจแล้ว" : group.reviewed === "some" ? "ตรวจแล้วบางวิชา" : "ยังไม่ตรวจ") : "");
+        html += '<tr><td>' + subject + '</td><td>' + work + '</td><td>' + status + '</td><td>' + notes + '</td></tr>';
+      }
+      html += '</tbody></table></section>';
+    }
+    return html;
   }
   function renderAll() {
     renderWindow();
@@ -381,25 +477,10 @@ if (!session) {
       ' คน · ตรวจแล้ว ' + sum.reviewed + ' · ส่งช้า ' + sum.late + '</p><div class="filters" role="group" aria-label="กรองสถานะ">';
     for (const key of Object.keys(labels)) html += '<button type="button" data-action="filter" data-filter="' + key +
       '" aria-pressed="' + (filter === key) + '">' + labels[key] + ' ' + counts[key] + '</button>';
-    html += '</div>';
-    const matching = entries.filter(group => filter === "all" || group.items.some(item => filter === "unreviewed"
-      ? item.part && !item.part.reviewed_at : (item.part?.status || "missing") === filter));
-    const groups = new Map();
-    for (const group of matching) {
-      const id = group.ownerId || "unknown";
-      if (!groups.has(id)) groups.set(id, []);
-      groups.get(id).push(group);
-    }
-    const teacherTotals = new Map();
-    for (const group of entries) {
-      const id = group.ownerId || "unknown";
-      const value = teacherTotals.get(id) || { total:0, missing:0 };
-      value.total++; if (["missing", "mixed"].includes(group.status)) value.missing++;
-      teacherTotals.set(id, value);
-    }
-    const teacherIds = [...groups.keys()].sort((a,b) =>
-      teacherTotals.get(b).missing - teacherTotals.get(a).missing ||
-      nameOf(a).localeCompare(nameOf(b), "th"));
+    const review = selectThemeWorkReviewGroups(entries, filter, nameOf);
+    html += '<button class="ghost print-btn no-print" type="button" data-action="print"' +
+      (review.matching.length ? '' : ' disabled') + '>🖨 พิมพ์รายงาน</button></div>';
+    const { groups, teacherTotals, teacherIds } = review;
     if (!teacherIds.length) html += '<p class="empty">ไม่มีรายการในตัวกรองนี้</p>';
     for (const id of teacherIds) {
       const rows = groups.get(id), t = teacherTotals.get(id);
@@ -408,13 +489,15 @@ if (!session) {
         '</span></h3><table class="review-table"><thead><tr><th>วิชา / ผลงาน</th><th>สถานะ</th><th>ลิงก์</th><th>ตรวจ</th></tr></thead><tbody>';
       for (const group of rows) html += '<tr><td>' + reviewFacts(group) + '</td><td>' + pill(group.status) +
         '</td><td>' + (group.unit.work ? 'ธีม ' + safeLink(group.unit.work.theme_url) : "—") +
-        (firstPart(group)?.work_url ? '<br>ผลงาน ' + safeLink(firstPart(group).work_url) : "") + '</td><td>' +
+        (firstLinkedPart(group) ? '<br>ผลงาน ' + safeLink(firstLinkedPart(group).work_url) : "") +
+        (missingWorkUrl(group) ? '<br><span class="meta">ไม่มีลิงก์ผลงาน</span>' : "") + '</td><td>' +
         reviewAction(group) + '</td></tr>';
       html += '</tbody></table>';
       for (const group of rows) html += '<div class="review-card">' + reviewFacts(group) +
         '<div class="row">' + pill(group.status) + '<div>' +
         (group.unit.work ? 'ธีม ' + safeLink(group.unit.work.theme_url) : "") +
-        (firstPart(group)?.work_url ? ' · ผลงาน ' + safeLink(firstPart(group).work_url) : "") +
+        (firstLinkedPart(group) ? ' · ผลงาน ' + safeLink(firstLinkedPart(group).work_url) : "") +
+        (missingWorkUrl(group) ? ' · <span class="meta">ไม่มีลิงก์ผลงาน</span>' : "") +
         '</div></div>' + reviewAction(group) + '</div>';
       html += '</div>';
     }
@@ -500,6 +583,15 @@ if (!session) {
     }
     if (button.dataset.action === "select") { selectedKey = button.dataset.group; renderMine(); return; }
     if (button.dataset.action === "filter") { filter = button.dataset.filter; renderAll(); return; }
+    if (button.dataset.action === "print") {
+      if (!isViewer) return;
+      const review = selectThemeWorkReviewGroups(workGroups, filter, nameOf);
+      if (!review.matching.length) return;
+      el("print-area").innerHTML = buildThemeWorkPrintHtml({ review, summary:summarizeThemeWorks(units), selectedFilter:filter,
+        term, year, dueDate:data.window?.due_date, printedAt:dateTime(new Date()),
+        printedBy:profiles.get(session.user.id) || "ไม่พบชื่อ", nameFor:nameOf });
+      window.print(); return;
+    }
     if (button.dataset.action === "edit") {
       const group = ownGroups.find(row => row.key === button.dataset.group);
       if (group && group.reviewed === "none") { group.editing = true; renderMine(); }

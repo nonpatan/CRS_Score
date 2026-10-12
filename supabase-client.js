@@ -4619,12 +4619,12 @@ export async function loadMyProjects(year, staffId) {
 }
 
 // โหลดเฉพาะงานส่วนตัวที่หน้าแรกต้องใช้ — ยิงพร้อมกันและไม่ดึงประวัติเช็คชื่อทั้งเดือน
-export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
+export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {}) {
   if (!staffId || !year || !today) {
-    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null };
+    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null, themeWork: null };
   }
 
-  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff] = await Promise.all([
+  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff, themeWork] = await Promise.all([
     listMyDutySwaps(),
     sb.rpc("my_coverage_from", { p_from: today }),
     sb.from("duty_roster")
@@ -4641,7 +4641,8 @@ export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
       .order("classroom"),
     loadMyTeachingGap({ staffId, year }),
     // ค่าตั้งเวลาเป็นข้อมูลเสริม — อ่านไม่ได้ต้องคงการ์ดแบบเดิม ไม่ทำให้การ์ดทั้งใบหาย
-    getDailyAttendanceCutoff().catch(() => null)
+    getDailyAttendanceCutoff().catch(() => null),
+    userId ? loadMyThemeWorkReminder({ year, userId, today }).catch(() => null) : Promise.resolve(null)
   ]);
 
   if (coverageRes.error) {
@@ -4659,7 +4660,8 @@ export async function loadMyDashboardAlerts({ staffId, year, today } = {}) {
     projects,
     homerooms: homeroomRes.data || [],
     teachingGap,
-    cutoff
+    cutoff,
+    themeWork
   };
 }
 
@@ -4684,9 +4686,16 @@ const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุ�
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
   pendingApprovals = 0, isApprover = false, pendingMakeups = 0, isMakeupApprover = false,
-  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = []
+  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = [], themeWork = null
 } = {}) {
   const alerts = [...dutyMonths];
+
+  if (themeWork) alerts.push({
+    text: themeWork.text,
+    href: `academic/theme-works.html?term=${encodeURIComponent(themeWork.term)}`,
+    linkLabel: "ไปส่งผลงาน",
+    kind: themeWork.overdue ? "ค้าง" : "รอคุณ"
+  });
 
   if (isApprover && pendingApprovals > 0) {
     alerts.push({
@@ -8592,16 +8601,119 @@ export function themeWorkLateDays(submittedAt, dueDate) {
   return Math.max(0, themeWorkDayNumber(sent) - themeWorkDayNumber(dueDate));
 }
 
-export function themeWorkCountdown(today, window) {
+export const THEME_WORK_REMINDER_LEAD_DAYS = 3;
+
+export function themeWorkDaysLeft(today, window) {
   if (!window?.due_date) return null;
   const date = typeof today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(today)
     ? today : themeWorkThaiDate(today);
   if (!date) return null;
   const days = themeWorkDayNumber(window.due_date) - themeWorkDayNumber(date);
+  return Number.isFinite(days) ? days : null;
+}
+
+export function themeWorkCountdown(today, window) {
+  const days = themeWorkDaysLeft(today, window);
+  if (days === null) return null;
   const due = `ปิดรับ ${thaiShortDateText(window.due_date)}`;
   return days > 0 ? `${due} · อีก ${days} วัน`
     : days === 0 ? `${due} · วันนี้วันสุดท้าย`
       : `${due} · เลยกำหนด ${-days} วัน`;
+}
+
+export function pickThemeWorkReminder({ windows = [], units = [], userId, today,
+  leadDays = THEME_WORK_REMINDER_LEAD_DAYS } = {}) {
+  const todayDate = /^\d{4}-\d{2}-\d{2}$/.test(String(today || "")) ? today : themeWorkThaiDate(today);
+  if (!userId || !todayDate) return null;
+  const eligible = (windows || []).map(window => ({ window, days:themeWorkDaysLeft(today, window) }))
+    .filter(({ window, days }) => window?.open_date && todayDate >= window.open_date
+      && days !== null && days <= leadDays)
+    .sort((a, b) => a.window.due_date.localeCompare(b.window.due_date));
+  if (!eligible.length) return null;
+
+  const pending = eligible.map(({ window, days }) => {
+    const items = (units || []).filter(unit => String(unit.term ?? unit.subject?.term
+      ?? (eligible.length === 1 ? window.term : "")) === String(window.term))
+      .filter(unit => (unit.parts || []).some(item => item.ownerId === userId && !item.part))
+      .map(unit => ({ unitSubject:unit.subject,
+        subject:(unit.parts || []).find(item => item.ownerId === userId && !item.part)?.subject }));
+    return { window, days, items };
+  }).filter(row => row.items.length);
+  if (!pending.length) return null;
+  const chosen = pending[0];
+  const total = pending.reduce((sum, row) => sum + row.items.length, 0);
+  const countText = pending.length === 1 ? `${total} วิชา`
+    : pending.map(row => `ภาค ${row.window.term} · ${row.items.length} วิชา`).join(", ");
+  const countdown = themeWorkCountdown(today, chosen.window);
+  const dueText = chosen.days < 0 ? `เลยกำหนด ${-chosen.days} วัน`
+    : countdown;
+  return { term:String(chosen.window.term), dueDate:chosen.window.due_date,
+    days:chosen.days, overdue:chosen.days < 0,
+    items:pending.flatMap(row => row.items),
+    text:`ยังไม่ส่งผลงานตามธีม ${countText} · ${dueText}` };
+}
+
+export async function loadMyThemeWorkReminder({ year, userId, today } = {}) {
+  if (!year || !userId || !today) return null;
+  const { data:windows, error:windowError } = await sb.from("theme_work_windows")
+    .select("year,term,open_date,due_date").eq("year", year);
+  if (windowError) throw new Error("โหลดกำหนดส่งผลงานไม่สำเร็จ: " + windowError.message);
+  const eligible = (windows || []).filter(window => {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(today)) ? today : themeWorkThaiDate(today);
+    const days = themeWorkDaysLeft(today, window);
+    return date && window.open_date && date >= window.open_date
+      && days !== null && days <= THEME_WORK_REMINDER_LEAD_DAYS;
+  });
+  if (!eligible.length) return null;
+  const requireMySession = async () => {
+    const { data, error } = await sb.auth.getSession();
+    if (error || data?.session?.user?.id !== userId) throw new Error("เซสชันหมดอายุ");
+  };
+  await requireMySession();
+  const { data:owned, error:subjectError } = await sb.from("subjects")
+    .select("id,name,code,year,term,grade_level,owner_id,subject_type")
+    .eq("year", year).eq("owner_id", userId);
+  if (subjectError) throw new Error("โหลดวิชาของฉันไม่สำเร็จ: " + subjectError.message);
+  await requireMySession();
+  const ownedIds = (owned || []).map(subject => subject.id);
+  if (!ownedIds.length) return null;
+  const { data:childLinks, error:childError } = await sb.from("integration_members")
+    .select("integrated_subject_id,member_subject_id").in("member_subject_id", ownedIds);
+  if (childError) throw new Error("โหลดวิชาบูรณาการไม่สำเร็จ: " + childError.message);
+  const ownHeads = (owned || []).filter(subject => subject.subject_type === "บูรณาการ").map(subject => subject.id);
+  let headLinks = [];
+  if (ownHeads.length) {
+    const { data, error } = await sb.from("integration_members")
+      .select("integrated_subject_id,member_subject_id").in("integrated_subject_id", ownHeads);
+    if (error) throw new Error("โหลดวิชาบูรณาการไม่สำเร็จ: " + error.message);
+    headLinks = data || [];
+  }
+  const members = [...new Map([...(childLinks || []), ...headLinks]
+    .map(link => [`${link.integrated_subject_id}:${link.member_subject_id}`, link])).values()]
+    .filter(link => ownedIds.includes(link.member_subject_id));
+  const headIds = [...new Set((childLinks || []).map(link => link.integrated_subject_id))]
+    .filter(id => !ownedIds.includes(id));
+  let heads = [];
+  if (headIds.length) {
+    const { data, error } = await sb.from("subjects")
+      .select("id,name,code,year,term,grade_level,owner_id,subject_type")
+      .eq("year", year).in("id", headIds);
+    if (error || (data || []).length !== headIds.length) throw new Error("โหลดวิชาหัวไม่สำเร็จ");
+    heads = data;
+  }
+  const activeTerms = [...new Set(eligible.map(window => String(window.term)))];
+  const { data:parts, error:partError } = await sb.from("theme_work_parts")
+    .select("subject_id,term,status,submitted_at,reviewed_at")
+    .in("subject_id", ownedIds).in("term", activeTerms);
+  if (partError) throw new Error("โหลดผลงานของฉันไม่สำเร็จ: " + partError.message);
+  await requireMySession();
+  const subjects = [...(owned || []), ...heads];
+  const units = activeTerms.flatMap(term => buildThemeWorkUnits({ subjects, members, parts:parts || [], term })
+    .filter(unit => unit.parts.some(item => item.ownerId === userId))
+    .filter(unit => !headLinks.some(link => link.integrated_subject_id === unit.subject.id)
+      || unit.kind === "integrated")
+    .map(unit => ({ ...unit, term })));
+  return pickThemeWorkReminder({ windows:eligible, units, userId, today });
 }
 
 export function summarizeThemeWorks(units) {
@@ -8633,7 +8745,7 @@ export function validateThemeWorkForm({ workName, themeUrl, status, note, nextPl
   if (!["match", "adjust", "none"].includes(status)) errors.status = "เลือกสถานะผลงาน";
   if (["adjust", "none"].includes(status) && !String(note || "").trim()) errors.note = "ระบุหมายเหตุ";
   if (status === "none" && !String(nextPlan || "").trim()) errors.nextPlan = "ระบุแผนต่อ";
-  if (status !== "none" && String(workUrl || "").trim() && !urlOk(workUrl))
+  if (status !== "none" && !urlOk(workUrl))
     errors.workUrl = "ใส่ลิงก์ผลงานที่ขึ้นต้นด้วย http:// หรือ https://";
   return errors;
 }
