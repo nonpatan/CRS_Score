@@ -59,7 +59,9 @@ button:disabled { opacity:.55; cursor:default; }
 .lifted { position:relative; margin:0; }
 .progress-line { height:9px; border-radius:99px; overflow:hidden; background:var(--line); margin:10px 0; }
 .progress-line span { display:block; height:100%; background:var(--teal); }
-.pill { display:inline-flex; align-items:center; border-radius:99px; padding:2px 9px; border:1px solid var(--line); font-size:13px; font-weight:700; white-space:normal; }
+.pill { display:inline-flex; align-items:center; gap:4px; border-radius:99px; padding:2px 9px; border:1px solid var(--line); font-size:13px; font-weight:700; white-space:normal; }
+.status-icon { width:14px; height:14px; flex:none; vertical-align:-2px; }
+.tile .status-icon,.master-list .status-icon,.lockline .status-icon,.review-done .status-icon { margin-right:4px; }
 .pill.match { background:var(--teal-soft); color:var(--teal); border-color:var(--teal-soft); }
 .pill.adjust { background:var(--bg); color:var(--muted); }
 .pill.none,.pill.missing,.pill.late { background:var(--amber-soft); color:var(--amber); border-color:var(--amber-soft); }
@@ -261,8 +263,19 @@ if (!session) {
   const dateTime = value => value ? new Date(value).toLocaleString("th-TH", {
     dateStyle:"medium", timeStyle:"short", timeZone:"Asia/Bangkok"
   }) : "—";
-  const statusText = { match:"✓ ตรงธีม", adjust:"↻ ปรับจากธีม", none:"⏸ ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ" };
-  const pill = status => '<span class="pill ' + esc(status || "missing") + '">' + statusText[status || "missing"] + '</span>';
+  const statusText = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ" };
+  const statusIcon = status => {
+    const paths = {
+      match:'<path d="m5 12 4 4L19 6"/>',
+      adjust:'<path d="M20 11a8 8 0 1 1-2.4-5.7M20 4v7h-7"/>',
+      none:'<path d="M9 5v14M15 5v14"/>',
+      locked:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'
+    };
+    return paths[status] ? '<svg class="status-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[status] + '</svg>' : '';
+  };
+  const pill = status => '<span class="pill ' + esc(status || "missing") + '">' + statusIcon(status) + statusText[status || "missing"] + '</span>';
+  const teacherProgressText = totals => 'ส่งแล้ว ' + totals.sent + '/' + totals.total +
+    (totals.sent ? ' · ตรวจแล้ว ' + totals.reviewed + '/' + totals.sent : '');
   const nameOf = id => profiles.get(id) || "ไม่พบชื่อครู";
   const today = () => toDateStr(bangkokNow());
   let year, term, years, data, units = [], workGroups = [], ownGroups = [], selectedKey = "", activeView = "mine", filter = "all";
@@ -362,7 +375,8 @@ if (!session) {
       }
       html += '<div class="row"><span class="lockline">' +
         (group.reviewed === "some" ? 'ฝ่ายวิชาการตรวจแล้วบางวิชา · ถ้าต้องแก้ ขอฝ่ายวิชาการเปิดให้' :
-          group.reviewed === "all" ? '✓ ฝ่ายวิชาการตรวจแล้ว · แก้ไม่ได้' : '🔒 ลิงก์ธีมล็อกแล้ว · รอฝ่ายวิชาการตรวจ') +
+          group.reviewed === "all" ? statusIcon("match") + 'ฝ่ายวิชาการตรวจแล้ว · แก้ไม่ได้' :
+            statusIcon("locked") + 'ลิงก์ธีมล็อกแล้ว · รอฝ่ายวิชาการตรวจ') +
         '</span>' + (!locked && !editOpen ? '<button class="line-btn" type="button" data-action="edit" data-group="' +
         esc(group.key) + '">แก้ผลงาน</button>' : "") + '</div>';
     }
@@ -392,7 +406,7 @@ if (!session) {
       return '<div class="grade-heading">' + esc(grade || "ไม่ระบุชั้น") + ' · ' + rows.length + ' รายการ</div>' +
         rows.map(group => '<button type="button" data-action="select" data-group="' + esc(group.key) +
         '" aria-current="' + (group.key === selectedKey) + '">' + groupTitle(group) +
-        '<small>' + statusText[group.status] + '</small></button>').join("");
+        '<small>' + statusIcon(group.status) + statusText[group.status] + '</small></button>').join("");
     }).join("");
     const selected = sorted.find(group => group.key === selectedKey);
     el("detail").innerHTML = renderItem(selected, "desktop");
@@ -434,7 +448,7 @@ if (!session) {
     const reviewedCount = reviewedParts.length, total = group.items.length;
     const reviewer = reviewedParts[0];
     const reviewedBy = reviewer?.reviewed_by_name || profiles.get(reviewer?.reviewed_by) || "ไม่พบชื่อผู้ตรวจ";
-    const done = group.reviewed === "all" ? '<div class="review-done">✓ ตรวจแล้ว <small>· ' +
+    const done = group.reviewed === "all" ? '<div class="review-done">' + statusIcon("match") + 'ตรวจแล้ว <small>· ' +
       esc(reviewedBy) + ' ' + esc(reviewShortDate(reviewer?.reviewed_at)) + '</small></div>' :
       group.reviewed === "some" ? '<div class="review-pending">ตรวจแล้ว ' + reviewedCount + '/' + total + ' วิชาย่อย</div>' :
       '<div class="review-pending">ยังไม่ตรวจ</div>';
@@ -539,9 +553,9 @@ if (!session) {
   function renderAll() {
     renderWindow();
     const sum = summarizeThemeWorks(units);
-    const tiles = [["missing","ยังไม่ส่ง"],["match","✓ ตรงธีม"],["adjust","↻ ปรับจากธีม"],["none","⏸ ยังไม่ได้ทำ"]];
-    el("summary-tiles").innerHTML = tiles.map(([key,label]) => '<div class="tile ' + key +
-      '"><strong>' + sum[key] + '</strong><span>' + label + '</span></div>').join("") +
+    const tiles = ["missing","match","adjust","none"];
+    el("summary-tiles").innerHTML = tiles.map(key => '<div class="tile ' + key +
+      '"><strong>' + sum[key] + '</strong><span>' + statusIcon(key) + statusText[key] + '</span></div>').join("") +
       '<p class="meta" style="grid-column:1/-1;margin:0">นับรายวิชาย่อย · วิชาบูรณาการ 1 วิชา = หลายรายการ</p>';
     const integrated = units.filter(unit => unit.kind === "integrated");
     const complete = integrated.filter(unit => unit.parts.every(item => item.part)).length;
@@ -578,8 +592,8 @@ if (!session) {
       const waitingPct = t.total ? (t.sent - t.reviewed) / t.total * 100 : 0;
       html += '<details class="teacher" data-teacher="' + esc(id) + '"' + (teacherOpenState.has(id) ? ' open' : '') +
         '><summary><span class="teacher-name"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>ครู' +
-        esc(nameOf(id)) + '</span><span class="teacher-stat">ส่งแล้ว ' + t.sent + '/' + t.total +
-        ' · ตรวจแล้ว ' + t.reviewed + '/' + t.sent + '</span><span class="teacher-bar" aria-hidden="true"><i class="ok" style="width:' +
+        esc(nameOf(id)) + '</span><span class="teacher-stat">' + teacherProgressText(t) +
+        '</span><span class="teacher-bar" aria-hidden="true"><i class="ok" style="width:' +
         reviewedPct + '%"></i><i class="wait" style="width:' + waitingPct + '%"></i></span></summary><div class="review-rows">';
       for (const group of rows) if (group.status !== "missing") html += renderReviewRow(group, 'review-note-' + noteIndex++);
       html += renderMissingReviewRows(rows.filter(group => group.status === "missing")) + '</div></details>';
