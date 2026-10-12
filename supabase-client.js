@@ -742,16 +742,17 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
 
   for (const unit of units) {
     if (unit.counts_score === false) continue;
-    const stat = subjectStat(unit.subject_id);
     const indicators = unit.indicators || [];
-    if (!indicators.length) { structureComplete = false; stat.structureIncomplete = true; }
+    if (!indicators.length) continue;
     let unitRaw = 0, unitCap = 0;
     for (const indicator of indicators) {
       if (indicator.counts_score === false) continue;
       const collections = indicator.collections || [];
-      if (!collections.length) { structureComplete = false; stat.structureIncomplete = true; }
+      // ยังไม่มีครั้งที่ = ยังไม่ใช้องค์ประกอบนี้ (มติ 2026-10-12)
+      if (!collections.length) continue;
       let indicatorRaw = 0, indicatorCap = 0;
       for (const collection of collections) {
+        const stat = subjectStat(unit.subject_id);
         expectedCount++;
         stat.expected++;
         indicatorCap += Number(collection.max_score) || 0;
@@ -782,7 +783,7 @@ export function computeSubjectCompetencySource(competencyId, unitsTree, scoreRow
     expectedCount,
     scoredCount,
     // เฉพาะวิชาที่ยังไม่ครบ — ผู้เรียกเอา subjectId ไปแปลงเป็นชื่อวิชาเอง
-    pending: [...bySubject.values()].filter(s => s.structureIncomplete || s.scored < s.expected || s.expected === 0)
+    pending: [...bySubject.values()].filter(s => s.scored < s.expected)
   };
 }
 
@@ -2252,6 +2253,8 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
     for (const ind of unitIndicators) {
       if (ind.counts_score === false) continue;
       if (unit.kind === "วิชา" && !(ind.collections || []).length) emptyIndicatorCount++;
+      // หน่วยวิชามัธยมยังนับข้อว่างเป็นศูนย์; ข้ามเฉพาะสมรรถนะหลักที่ยังไม่มีครั้งที่
+      if (unit.kind === "สมรรถนะหลัก" && !(ind.collections || []).length) continue;
       let indRaw = 0, indCap = 0, indPartialCap = 0;
       for (const coll of (ind.collections || [])) {
         const collectionMax = Number(coll.max_score) || 0;
@@ -2272,7 +2275,8 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
         unitPartialCap += ind.max_score;
       }
     }
-    const unitScaled = unitCap > 0 ? (unitRaw / unitCap) * unit.max_score : 0;
+    const unitScaled = unitCap > 0 ? (unitRaw / unitCap) * unit.max_score
+      : unit.kind === "สมรรถนะหลัก" ? null : 0;
     const unitPartialScaled = unitPartialCap > 0 ? (unitPartialRaw / unitPartialCap) * unit.max_score : 0;
     if (unit.kind === "วิชา") {
       subjectUnits.push({ name: unit.name, scaled: unitScaled, max: unit.max_score, notScoredCount });
