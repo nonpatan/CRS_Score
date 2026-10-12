@@ -942,7 +942,8 @@ function render() {
       const ir = computeIntegratedStudent(stu.id);
       const details = new Map(memberDataList.map(md => [md.subject.id, computeMemberDetail(stu.id, md)]));
       const nowBasis = integratedNowScore(ir, details);
-      return [stu.id, { stu, ir, details, now:nowBasis?.now ?? null, nowBasis, scoring:ir.scoring, result:ir.overall, half:ir.halves?.[currentReportHalf] }];
+      return [stu.id, { stu, ir, details, now:nowBasis?.now ?? null, nowBasis, scoring:ir.scoring, result:ir.overall,
+        half:ir.halves ? (nowBasis.halfBasis || emptyIntegratedHalf()) : null }];
     }
     const r = computeStudent(stu.id);
     return [stu.id, { stu, r, now:subjectNowScore(r), scoring:r.scoring, result:r.result, half:r.halves?.[currentReportHalf] }];
@@ -1001,12 +1002,47 @@ function subjectNowScore(r) {
     r.collectPart + (r.scoring.examScored ? r.examPart : 0);
 }
 
+// คะแนนที่แสดงระหว่างปีคิดเฉพาะวิชาย่อยที่มีโครงสร้างในช่วงนั้น; เกรดทางการยังใช้สูตรกลางเดิม
+function integratedHalfBasis(ir, half) {
+  const active = ir.memberResults.filter(member => member.weight > 0);
+  const counted = active.filter(member => member.halves?.[half]?.hasStructure);
+  if (!counted.length) return null;
+  let score = 0, collectPart = 0, examPart = 0, weightSum = 0;
+  let partialSum = 0, partialWeight = 0, collectScoredCount = 0, collectExpectedCount = 0;
+  let examScored = true, examOverCap = false, complete = counted.length === active.length;
+  for (const member of counted) {
+    const part = member.halves[half], weight = member.weight;
+    weightSum += weight;
+    score += part.score * weight;
+    collectPart += part.collectPart * weight;
+    examPart += part.examPart * weight;
+    if (part.partialPercent !== null) {
+      partialSum += part.partialPercent * weight;
+      partialWeight += weight;
+    }
+    collectScoredCount += part.collectScoredCount;
+    collectExpectedCount += part.collectExpectedCount;
+    examScored &&= part.examScored;
+    examOverCap ||= part.examOverCap;
+    complete &&= part.complete;
+  }
+  return { hasStructure:true, score:score / weightSum, collectPart:collectPart / weightSum,
+    examPart:examPart / weightSum, partialPercent:partialWeight ? partialSum / partialWeight : null,
+    examScored, examOverCap, complete, collectScoredCount, collectExpectedCount,
+    counted:counted.length, total:active.length };
+}
+
+function emptyIntegratedHalf() {
+  return { hasStructure:false, collectScoredCount:0, examScored:false, examOverCap:false, partialPercent:null };
+}
+
 function integratedNowScore(ir, details) {
   if (ir.halves) {
-    const half = ir.halves[currentReportHalf];
-    const active = ir.memberResults.filter(member => member.weight > 0);
-    const counted = active.filter(member => member.halves?.[currentReportHalf]?.hasStructure).length;
-    return { now:half.hasStructure && !half.examOverCap ? half.score : null, counted, total:active.length };
+    const halfBasis = integratedHalfBasis(ir, currentReportHalf);
+    return { now:halfBasis && !halfBasis.examOverCap ? halfBasis.score : null,
+      counted:halfBasis?.counted ?? 0,
+      total:halfBasis?.total ?? ir.memberResults.filter(member => member.weight > 0).length,
+      halfBasis };
   }
   if (ir.scoring.examOverCap) return null;
   let sum = 0, weightSum = 0, counted = 0, total = 0;
@@ -1057,7 +1093,9 @@ function subjectKpisHtml(now, result, scoring, examWeight, nowBasis = null, half
     const annual = scoring.complete && result.type === "grade" ? "เกรด " + result.grade + " (" + result.percentScore.toFixed(1) + "%)" : "ยังไม่ครบ";
     return "<div class='kpis'><div class='kpi kpi-now'><div class='kpi-label'>คะแนนตอนนี้ (" + currentReportHalf + ")</div><div class='kpi-value'>" +
       nowScoreText(now, half) + (now !== null && (half.collectScoredCount || half.examScored) ? " / 100" : "") +
-      "</div></div><div class='kpi'><div class='kpi-label'>ทั้งปี</div><div class='kpi-value'>" + annual +
+      "</div>" + (nowBasis && nowBasis.counted < nowBasis.total ?
+        "<div class='kpi-hint'>คิดจาก " + nowBasis.counted + "/" + nowBasis.total + " วิชาย่อย</div>" : "") +
+      "</div><div class='kpi'><div class='kpi-label'>ทั้งปี</div><div class='kpi-value'>" + annual +
       "</div><div class='kpi-hint'>" + (scoring.complete ? "ครบทั้งสองช่วง" : half.partialPercent === null ? "รอคะแนนทั้งสองช่วง" : "ทำได้ " + half.partialPercent.toFixed(1) + "% ของงานที่ตรวจแล้ว") +
       "</div></div><div class='kpi'><div class='kpi-label'>สอบ" + currentReportHalf + "</div><div class='kpi-value'>" +
       (half.examOverCap ? "เกินเพดาน · ต้องแก้" : half.examScored ? "กรอกแล้ว" : "ยังไม่ได้กรอก") +
@@ -1085,17 +1123,21 @@ function scoreLegendHtml() {
     "<span><i class='score-exam' aria-hidden='true'></i>สอบ (ยังไม่กรอก)</span></div>";
 }
 
-function primaryHalfRowsHtml(halves, scoring, result, gradeWeight) {
+function primaryHalfRowsHtml(halves, scoring, result, gradeWeight, integratedResult = null) {
   const cw = Number(gradeWeight.collect_weight), ew = Number(gradeWeight.exam_weight);
   const row = (half, label) => {
-    const data = halves[half];
+    const basis = integratedResult ? integratedHalfBasis(integratedResult, half) : null;
+    const data = integratedResult ? (basis || emptyIntegratedHalf()) : halves[half];
+    const total = integratedResult ? integratedResult.memberResults.filter(member => member.weight > 0).length : 0;
     const detail = !data.hasStructure ? "ยังไม่มีโครงสร้างช่วงนี้" :
       "เก็บ " + (data.collectScoredCount ? data.collectPart.toFixed(1) : "ยังไม่ได้กรอก") + " / " + cw +
       " · สอบ " + (data.examOverCap ? data.examPart.toFixed(1) + " · เกินเพดาน" : data.examScored ? data.examPart.toFixed(1) : "ยังไม่ได้กรอก") + " / " + ew +
       " · รวม " + data.score.toFixed(1) + " / 100 · ร้อยละ " + data.score.toFixed(1) +
       (!data.complete && data.partialPercent !== null ? " · ทำได้ " + data.partialPercent.toFixed(1) + "% ของงานที่ตรวจแล้ว" : "");
+    const counted = basis?.counted ?? 0;
     return "<div class='score-row" + (half === currentReportHalf ? " now" : "") + "'><span>" + label +
-      "</span><span class='val'>" + detail + "</span></div>";
+      "</span><span class='val'>" + detail + (integratedResult && counted < total ?
+        " · คิดจาก " + counted + "/" + total + " วิชาย่อย" : "") + "</span></div>";
   };
   const annual = scoring.complete && result.type === "grade" ? result.percentScore.toFixed(1) + " / 100 · เกรด " + result.grade : "ยังไม่ครบ";
   return "<div class='primary-half-rows'>" + row("กลางปี", "ครึ่งปี (กลางปี)") + row("ปลายปี", "ปลายปี") +
@@ -1234,9 +1276,10 @@ function renderIntegratedCard(stu, ir, details = new Map()) {
   const examWeights = [...new Set(memberDataList.map(md => Number(md.gradeWeight.exam_weight)))];
   return "<div class='card student-card'>" +
     subjectCardHeader(stu, ir.overall, ir.scoring, ir.memberResults.reduce((sum, m) => sum + m.missedPeriods, 0)) +
-    subjectKpisHtml(nowBasis?.now ?? null, ir.overall, ir.scoring, examWeights.join(" / "), nowBasis, ir.halves?.[currentReportHalf]) + scoreLegendHtml() +
+    subjectKpisHtml(nowBasis?.now ?? null, ir.overall, ir.scoring, examWeights.join(" / "), nowBasis,
+      ir.halves ? (nowBasis.halfBasis || emptyIntegratedHalf()) : null) + scoreLegendHtml() +
     (ir.halves && memberDataList[0]?.gradeWeight ? "<div class='section'><div class='section-title'>คะแนนกลางปี / ปลายปี</div>" +
-      primaryHalfRowsHtml(ir.halves, ir.scoring, ir.overall, memberDataList[0].gradeWeight) + "</div>" : "") +
+      primaryHalfRowsHtml(ir.halves, ir.scoring, ir.overall, memberDataList[0].gradeWeight, ir) + "</div>" : "") +
     "<div class='section'><div class='section-title'>รายวิชาย่อย</div>" + (memberRows || "<div class='hint'>ไม่มีวิชาย่อย</div>") + "</div>" +
     "<div class='section'>" + overallHtml + "</div>" +
     "<details class='section competency-details'><summary>สมรรถนะหลัก</summary><div class='section-title'>สมรรถนะหลัก (ตามวิชาย่อยที่กรอกไว้)</div>" +

@@ -2354,8 +2354,9 @@ function openNodeModal(type, mode, ref) {
   mCoreField.style.display = "none";
   const halfField = document.getElementById("modal-half-field");
   const halfCollections = type === "unit" && mode === "edit" ? unitCollections(ref) :
+    type === "indicator" && mode === "edit" ? (ref.collections || []) :
     type === "collection" && mode === "edit" ? [ref] : [];
-  halfField.hidden = !primaryManage() || mode !== "edit" || type === "indicator" || !halfCollections.length;
+  halfField.hidden = !primaryManage() || mode !== "edit" || !halfCollections.length;
   const currentHalves = new Set(halfCollections.map(coll => coll.half));
   halfField.querySelectorAll('input[name="modal-half"]').forEach(input => {
     input.checked = currentHalves.size === 1 && currentHalves.has(input.value);
@@ -2549,9 +2550,10 @@ async function saveNode() {
   }
   if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
 
-  if (type === "unit" && mode === "edit" && primaryManage()) {
+  if ((type === "unit" || type === "indicator") && mode === "edit" && primaryManage()) {
     const chosen = document.querySelector('input[name="modal-half"]:checked')?.value;
-    const ids = chosen ? unitCollections(modalContext.node).filter(coll => coll.half !== chosen).map(coll => coll.id) : [];
+    const halfCollections = type === "unit" ? unitCollections(modalContext.node) : (modalContext.node.collections || []);
+    const ids = chosen ? halfCollections.filter(coll => coll.half !== chosen).map(coll => coll.id) : [];
     if (ids.length) {
       const { data:moved, error:moveError } = await sb.from("collections").update({ half:chosen }).in("id", ids).select("id");
       if (moveError || moved?.length !== ids.length) {
