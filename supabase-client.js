@@ -8737,11 +8737,15 @@ export function summarizeThemeWorks(units) {
   return result;
 }
 
-export function validateThemeWorkForm({ workName, themeUrl, status, note, nextPlan, workUrl, headLocked = false }) {
+export function themeUrlEditable(part, work) {
+  return !part || (part.theme_url === work?.theme_url && !!work?.created_by && work.created_by !== part.created_by);
+}
+
+export function validateThemeWorkForm({ workName, themeUrl, status, note, nextPlan, workUrl, themeUrlLocked = false }) {
   const errors = {};
   const urlOk = value => /^https?:\/\/\S+/i.test(String(value || "").trim());
-  if (!headLocked && !String(workName || "").trim()) errors.workName = "ระบุชื่อผลงาน";
-  if (!headLocked && !urlOk(themeUrl)) errors.themeUrl = "ใส่ลิงก์เอกสารธีมที่ขึ้นต้นด้วย http:// หรือ https://";
+  if (!String(workName || "").trim()) errors.workName = "ระบุชื่อผลงาน";
+  if (!themeUrlLocked && !urlOk(themeUrl)) errors.themeUrl = "ใส่ลิงก์เอกสารธีมที่ขึ้นต้นด้วย http:// หรือ https://";
   if (!["match", "adjust", "none"].includes(status)) errors.status = "เลือกสถานะผลงาน";
   if (["adjust", "none"].includes(status) && !String(note || "").trim()) errors.note = "ระบุหมายเหตุ";
   if (status === "none" && !String(nextPlan || "").trim()) errors.nextPlan = "ระบุแผนต่อ";
@@ -8783,8 +8787,7 @@ export async function submitThemeWorkPart({ unit, ownSubjectIds, term, form }) {
   let work = unit.work;
   if (!work) {
     const result = await sb.from("theme_works").insert({
-      subject_id: unit.subject.id, term, work_name: form.workName.trim(),
-      theme_url: form.themeUrl.trim()
+      subject_id: unit.subject.id, term
     }).select("*").single();
     if (result.error?.code === "23505") {
       const current = await sb.from("theme_works").select("*")
@@ -8793,22 +8796,20 @@ export async function submitThemeWorkPart({ unit, ownSubjectIds, term, form }) {
       work = current.data;
     } else if (result.error) throw new Error(result.error.message);
     else work = result.data;
-  } else if (String(work.work_name) !== form.workName.trim()) {
-    const result = await sb.from("theme_works").update({ work_name: form.workName.trim() })
-      .eq("id", work.id).select("*").single();
-    if (result.error) throw new Error(result.error.message);
-    work = result.data;
   }
-  const fields = { status: form.status, note: form.note.trim() || null,
+  const fields = { work_name: form.workName.trim(), status: form.status, note: form.note.trim() || null,
     next_plan: form.status === "none" ? form.nextPlan.trim() : null,
     work_url: form.status === "none" ? null : form.workUrl.trim() || null };
   const parts = [];
   for (const item of own) {
     if (item.part?.reviewed_at) continue;
+    const partFields = { ...fields };
+    if (!item.part || (themeUrlEditable(item.part, work) && item.part.theme_url !== form.themeUrl.trim()))
+      partFields.theme_url = form.themeUrl.trim();
     const result = item.part
-      ? await sb.from("theme_work_parts").update(fields).eq("id", item.part.id).select("*").single()
+      ? await sb.from("theme_work_parts").update(partFields).eq("id", item.part.id).select("*").single()
       : await sb.from("theme_work_parts").insert({
-        ...fields, work_id: work.id, subject_id: item.subject.id, term
+        ...partFields, work_id: work.id, subject_id: item.subject.id, term
       }).select("*").single();
     if (result.error) throw new Error(`บันทึกแล้ว ${parts.length} จาก ${ids.length} วิชา: ${result.error.message}`);
     parts.push(result.data);

@@ -246,8 +246,8 @@ import {
   sb, requireAuth, signOut, getActiveYear, getAcademicYears, academicYearOf, academicTermOf,
   bangkokNow, toDateStr, thaiShortDateText, bindDatePickOnly, DATE_PICK_ONLY_NOTE, GRADE_ORDER,
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
-  validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed
-} from "../supabase-client.js?v=20261012-3";
+  themeUrlEditable, validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed
+} from "../supabase-client.js?v=20261013-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -314,8 +314,9 @@ if (!session) {
   }
 
   function renderForm(group, variant) {
-    const unit = group.unit, part = firstPart(group), work = unit.work, shared = unit.kind === "integrated" && !!work;
-    const locked = !!work;
+    const unit = group.unit, part = firstPart(group), work = unit.work;
+    const canEditThemeUrl = themeUrlEditable(part, work);
+    const inheritedHint = part && canEditThemeUrl;
     const key = variant + "-" + group.key.replace(/[^a-zA-Z0-9_-]/g, "-");
     const val = (field, fallback = "") => esc(field ?? fallback);
     const current = part?.status || "match";
@@ -329,13 +330,14 @@ if (!session) {
     let html = '<form class="work-form" data-group="' + esc(group.key) + '" novalidate><div class="form-grid">';
     html += field("workName", "ผลงานคืออะไร *",
       '<textarea id="' + key + '-workName" name="workName" rows="3" placeholder="ชื่อผลงาน · มีหลายชิ้นใส่บรรทัดละ 1 ชิ้น"' +
-      (shared ? ' readonly' : '') + ' aria-describedby="' + key + '-workName-error ' + key + '-workName-hint">' +
-      val(work?.work_name) + '</textarea>',
-      "ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้");
-    html += field("themeUrl", "ลิงก์เอกสารธีม *", input("themeUrl", "url", work?.theme_url, locked, "https://docs.google.com/…"),
-      'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้" · ส่งแล้วแก้ลิงก์นี้เองไม่ได้');
-    if (shared) html += '<div class="full hint">ผลงานรวมและลิงก์ธีมกรอกโดย ' + esc(work.created_by_name || "ครูคนแรกที่ส่ง") +
-      (otherCount(group) ? ' · วิชาย่อยของครูคนอื่นส่งแยกเอง' : '') + '</div>';
+      ' aria-describedby="' + key + '-workName-error ' + key + '-workName-hint">' +
+      val(part?.work_name) + '</textarea>',
+      inheritedHint ? "ตรวจว่าเป็นผลงานของวิชาคุณ · ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้" :
+        "ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้");
+    html += field("themeUrl", "ลิงก์เอกสารธีม *", input("themeUrl", "url", part?.theme_url, !canEditThemeUrl, "https://docs.google.com/…"),
+      inheritedHint ? 'ลิงก์นี้ติดมาจากผลงานรวมเดิมของ ' + esc(work.created_by_name || "ครูคนแรกที่ส่ง") +
+        ' — เปลี่ยนเป็นเอกสารธีมของคุณได้ 1 ครั้ง' :
+        'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้" · ส่งแล้วแก้ลิงก์นี้เองไม่ได้');
     html += '<fieldset class="field full" data-field="status"><legend>ผลงานเทอมนี้เป็นอย่างไร *</legend><div class="radio-set">';
     for (const [value, label, detail] of [
       ["match","ตรงธีม","ทำผลงานตามที่ธีมกำหนด"],["adjust","ปรับจากธีม","เปลี่ยนรูปแบบหรือหัวข้อ"],["none","ยังไม่ได้ทำ","เทอมนี้ยังไม่มีผลงาน"]
@@ -355,7 +357,7 @@ if (!session) {
   }
 
   function renderItem(group, variant) {
-    const unit = group.unit, part = firstPart(group), work = unit.work;
+    const unit = group.unit, part = firstPart(group);
     const late = themeWorkLateDays(group.submittedAt, data.window?.due_date);
     const locked = group.reviewed !== "none", editOpen = (group.status === "missing" || group.status === "mixed" || group.editing) && !locked;
     let html = '<article class="card own-card" data-own="' + esc(group.key) + '"><div class="row"><h3 class="subject-title">' +
@@ -366,7 +368,7 @@ if (!session) {
       html += '<div class="meta">ส่งเมื่อ ' + esc(dateTime(group.submittedAt)) + (late ? ' · <span class="pill late">ส่งช้า ' + late + ' วัน</span>' : "") + '</div>';
       if (!editOpen) {
         html += '<div class="work-value"><strong>' + (part.status === "none" ? "ผลงานตามธีม (ยังไม่ได้ทำ)" : "ผลงาน") +
-          '</strong>' + esc(work?.work_name || "") + '</div><div class="links"><span>เอกสารธีม ' + safeLink(work?.theme_url) +
+          '</strong>' + esc(part.work_name || "") + '</div><div class="links"><span>เอกสารธีม ' + safeLink(part.theme_url) +
           '</span>' + (firstLinkedPart(group) ? '<span>ผลงาน ' + safeLink(firstLinkedPart(group).work_url) + '</span>' : "") + '</div>';
         if (group.reviewed === "none" && editableMissingWorkUrl(group))
           html += '<p class="missing-work-url">ยังไม่มีลิงก์ผลงาน — กดแก้ไขเพื่อเพิ่ม</p>';
@@ -461,7 +463,7 @@ if (!session) {
   }
   function renderReviewRow(group, noteId) {
     const unit = group.unit, part = firstPart(group);
-    const works = String(unit.work?.work_name || "").split("\n").map(line => line.trim()).filter(Boolean);
+    const works = String(part?.work_name || "").split("\n").map(line => line.trim()).filter(Boolean);
     const noteLabel = part?.status === "adjust" ? "ปรับอะไร เพราะอะไร" : part?.status === "none" ? "ทำไมยังไม่ได้ทำ" : "หมายเหตุ";
     const note = part?.note || "", plan = part?.next_plan || "";
     const late = themeWorkLateDays(group.submittedAt, data.window?.due_date);
@@ -475,7 +477,7 @@ if (!session) {
         (plan ? '<span>แผนต่อ: ' + esc(plan) + '</span>' : '') + '</div>' +
         '<button class="review-more" type="button" data-action="note" aria-expanded="false" aria-controls="' + noteId + '" hidden>อ่านทั้งหมด</button></div>' : '') +
       '<div class="review-meta">ส่ง ' + esc(dateTime(group.submittedAt)) + (late ? ' · ส่งช้า ' + late + ' วัน' : '') + '</div>' +
-      '</div><div class="review-side">' + reviewLink(unit.work?.theme_url, "เอกสารธีม") +
+      '</div><div class="review-side">' + reviewLink(part?.theme_url, "เอกสารธีม") +
       (firstLinkedPart(group) ? reviewLink(firstLinkedPart(group).work_url, "ผลงาน") : '') +
       (missingWorkUrl(group) ? '<span class="review-no-link">ไม่มีลิงก์ผลงาน</span>' : '') +
       '<hr>' + reviewAction(group) + '</div></article>';
@@ -537,7 +539,7 @@ if (!session) {
         const part = firstPart(group), unit = group.unit;
         const subject = subjectTitle(unit.subject) + ' · ' + esc(unit.subject.grade_level || "") +
           (unit.kind === "integrated" ? '<br>วิชาย่อย: ' + group.items.map(item => subjectTitle(item.subject)).join(' · ') : "");
-        const work = unit.work ? '<span class="print-work-name">' + esc(unit.work.work_name) + '</span><br>ลิงก์ผลงาน: ' +
+        const work = part ? '<span class="print-work-name">' + esc(part.work_name) + '</span><br>ลิงก์ผลงาน: ' +
           (firstLinkedPart(group) ? "มี" : "ไม่มี") : "—";
         const notes = (part?.note ? esc(part.note) : "") + (part?.next_plan ? '<br>แผนต่อ: ' + esc(part.next_plan) : "");
         const late = themeWorkLateDays(group.submittedAt, dueDate);
@@ -692,8 +694,7 @@ if (!session) {
     if (!form || !event.target.name || event.target.name === "status") return;
     const name = event.target.name, group = ownGroups.find(row => row.key === form.dataset.group);
     if (!group) return;
-    const unit = group.unit;
-    const errors = validateThemeWorkForm({ ...formValues(form), headLocked:unit.kind === "integrated" && !!unit.work });
+    const errors = validateThemeWorkForm({ ...formValues(form), themeUrlLocked:!themeUrlEditable(firstPart(group), group.unit.work) });
     const box = form.querySelector('[data-field="' + name + '"] .field-error');
     if (box) box.textContent = errors[name] || "";
     event.target.setAttribute("aria-invalid", errors[name] ? "true" : "false");
@@ -767,7 +768,7 @@ if (!session) {
     const unit = group?.unit;
     if (!group || group.reviewed !== "none") return;
     const values = formValues(form);
-    const errors = validateThemeWorkForm({ ...values, headLocked:unit.kind === "integrated" && !!unit.work });
+    const errors = validateThemeWorkForm({ ...values, themeUrlLocked:!themeUrlEditable(firstPart(group), unit.work) });
     showErrors(form, errors);
     if (Object.keys(errors).length) {
       form.querySelector('[aria-invalid="true"]')?.focus();
