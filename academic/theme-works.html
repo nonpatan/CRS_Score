@@ -351,7 +351,10 @@ if (!session) {
     html += '<div class="conditional-link">' + field("workUrl", "ลิงก์ผลงาน *",
       input("workUrl", "url", part?.work_url, false, "https://…"),
       'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้" · มีหลายชิ้นใช้ลิงก์โฟลเดอร์') + '</div>';
-    html += '</div><div class="actions"><button class="primary" type="submit" data-action="submit">' +
+    html += '</div><div class="actions">' +
+      (group.editing ? '<button class="line-btn" type="button" data-action="cancel-edit" data-group="' +
+        esc(group.key) + '">ยกเลิก</button>' : '') +
+      '<button class="primary" type="submit" data-action="submit">' +
       (group.items.length > 1 ? 'ส่งผลงาน (ครอบ ' + group.items.length + ' วิชาย่อย)' : part ? "บันทึกการแก้ไข" : "ส่งผลงานวิชานี้") + '</button></div></form>';
     return html;
   }
@@ -728,6 +731,15 @@ if (!session) {
     if (button.dataset.action === "edit") {
       const group = ownGroups.find(row => row.key === button.dataset.group);
       if (group && group.reviewed === "none") { group.editing = true; renderMine(); }
+      return;
+    }
+    if (button.dataset.action === "cancel-edit") {
+      const group = ownGroups.find(row => row.key === button.dataset.group);
+      if (!group || !group.editing) return;
+      group.editing = false;
+      renderMine();
+      [...document.querySelectorAll('[data-action="edit"]')]
+        .find(editButton => editButton.dataset.group === group.key && editButton.getClientRects().length)?.focus();
       return;
     }
     if (button.dataset.action === "review") {
