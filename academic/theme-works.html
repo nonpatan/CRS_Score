@@ -246,8 +246,8 @@ import {
   sb, requireAuth, signOut, getActiveYear, getAcademicYears, academicYearOf, academicTermOf,
   bangkokNow, toDateStr, thaiShortDateText, bindDatePickOnly, DATE_PICK_ONLY_NOTE, GRADE_ORDER,
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
-  themeUrlEditable, validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed
-} from "../supabase-client.js?v=20261013-1";
+  validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed
+} from "../supabase-client.js?v=20261014-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -269,7 +269,7 @@ if (!session) {
       match:'<path d="m5 12 4 4L19 6"/>',
       adjust:'<path d="M20 11a8 8 0 1 1-2.4-5.7M20 4v7h-7"/>',
       none:'<path d="M9 5v14M15 5v14"/>',
-      locked:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>'
+      waiting:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
     };
     return paths[status] ? '<svg class="status-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[status] + '</svg>' : '';
   };
@@ -314,9 +314,7 @@ if (!session) {
   }
 
   function renderForm(group, variant) {
-    const unit = group.unit, part = firstPart(group), work = unit.work;
-    const canEditThemeUrl = themeUrlEditable(part, work);
-    const inheritedHint = part && canEditThemeUrl;
+    const part = firstPart(group);
     const key = variant + "-" + group.key.replace(/[^a-zA-Z0-9_-]/g, "-");
     const val = (field, fallback = "") => esc(field ?? fallback);
     const current = part?.status || "match";
@@ -332,12 +330,9 @@ if (!session) {
       '<textarea id="' + key + '-workName" name="workName" rows="3" placeholder="ชื่อผลงาน · มีหลายชิ้นใส่บรรทัดละ 1 ชิ้น"' +
       ' aria-describedby="' + key + '-workName-error ' + key + '-workName-hint">' +
       val(part?.work_name) + '</textarea>',
-      inheritedHint ? "ตรวจว่าเป็นผลงานของวิชาคุณ · ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้" :
-        "ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้");
-    html += field("themeUrl", "ลิงก์เอกสารธีม *", input("themeUrl", "url", part?.theme_url, !canEditThemeUrl, "https://docs.google.com/…"),
-      inheritedHint ? 'ลิงก์นี้ติดมาจากผลงานรวมเดิมของ ' + esc(work.created_by_name || "ครูคนแรกที่ส่ง") +
-        ' — เปลี่ยนเป็นเอกสารธีมของคุณได้ 1 ครั้ง' :
-        'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้" · ส่งแล้วแก้ลิงก์นี้เองไม่ได้');
+      "ถ้ายังไม่ได้ทำ ให้ใส่ชื่อผลงานที่ธีมกำหนดไว้");
+    html += field("themeUrl", "ลิงก์เอกสารธีม *", input("themeUrl", "url", part?.theme_url, false, "https://docs.google.com/…"),
+      'ตั้งแชร์เป็น "ทุกคนที่มีลิงก์ดูได้"');
     html += '<fieldset class="field full" data-field="status"><legend>ผลงานเทอมนี้เป็นอย่างไร *</legend><div class="radio-set">';
     for (const [value, label, detail] of [
       ["match","ตรงธีม","ทำผลงานตามที่ธีมกำหนด"],["adjust","ปรับจากธีม","เปลี่ยนรูปแบบหรือหัวข้อ"],["none","ยังไม่ได้ทำ","เทอมนี้ยังไม่มีผลงาน"]
@@ -381,7 +376,7 @@ if (!session) {
       html += '<div class="row"><span class="lockline">' +
         (group.reviewed === "some" ? 'ฝ่ายวิชาการตรวจแล้วบางวิชา · ถ้าต้องแก้ ขอฝ่ายวิชาการเปิดให้' :
           group.reviewed === "all" ? statusIcon("match") + 'ฝ่ายวิชาการตรวจแล้ว · แก้ไม่ได้' :
-            statusIcon("locked") + 'ลิงก์ธีมล็อกแล้ว · รอฝ่ายวิชาการตรวจ') +
+            statusIcon("waiting") + 'รอฝ่ายวิชาการตรวจ · แก้ได้จนกว่าจะตรวจ') +
         '</span>' + (!locked && !editOpen ? '<button class="line-btn" type="button" data-action="edit" data-group="' +
         esc(group.key) + '">แก้ผลงาน</button>' : "") + '</div>';
     }
@@ -697,7 +692,7 @@ if (!session) {
     if (!form || !event.target.name || event.target.name === "status") return;
     const name = event.target.name, group = ownGroups.find(row => row.key === form.dataset.group);
     if (!group) return;
-    const errors = validateThemeWorkForm({ ...formValues(form), themeUrlLocked:!themeUrlEditable(firstPart(group), group.unit.work) });
+    const errors = validateThemeWorkForm(formValues(form));
     const box = form.querySelector('[data-field="' + name + '"] .field-error');
     if (box) box.textContent = errors[name] || "";
     event.target.setAttribute("aria-invalid", errors[name] ? "true" : "false");
@@ -780,7 +775,7 @@ if (!session) {
     const unit = group?.unit;
     if (!group || group.reviewed !== "none") return;
     const values = formValues(form);
-    const errors = validateThemeWorkForm({ ...values, themeUrlLocked:!themeUrlEditable(firstPart(group), unit.work) });
+    const errors = validateThemeWorkForm(values);
     showErrors(form, errors);
     if (Object.keys(errors).length) {
       form.querySelector('[aria-invalid="true"]')?.focus();
