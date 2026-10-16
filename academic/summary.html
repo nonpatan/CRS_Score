@@ -241,6 +241,7 @@
   #competency-report .comp-bars i { height:6px; flex:1; border-radius:99px; background:var(--line); }
   #competency-report .comp-bars .comp-bar-ok { background:var(--teal); }
   #competency-report .comp-bars .comp-bar-wait { background:repeating-linear-gradient(45deg,var(--amber) 0 3px,var(--amber-soft) 3px 6px); }
+  #competency-report .comp-bars .comp-bar-no-session, #competency-report .comp-bars .comp-bar-no-structure { background:repeating-linear-gradient(45deg,var(--amber) 0 3px,var(--white) 3px 6px); }
   #competency-report .comp-bars .comp-bar-off { opacity:.4; }
   #competency-report .comp-detail { border:1px solid var(--line); border-radius:10px; padding:14px; margin-top:12px; scroll-margin-top:110px; }
   #competency-report .comp-detail h3 { margin:0 0 10px; font-size:17px; }
@@ -253,7 +254,9 @@
   #competency-report .comp-chip svg { width:15px; height:15px; flex:none; }
   #competency-report .comp-chip-ok { background:var(--teal-soft); color:var(--teal); }
   #competency-report .comp-chip-wait { background:var(--amber-soft); color:var(--amber); }
-  #competency-report .comp-chip-new, #competency-report .comp-chip-no-structure { color:var(--amber); border:1px dashed var(--amber); }
+  #competency-report .comp-chip-new, #competency-report .comp-chip-no-structure, #competency-report .comp-chip-no-session { color:var(--amber); border:1px dashed var(--amber); }
+  #competency-report .comp-chip-student-blocked { color:var(--muted); border:1px solid var(--line); background:var(--bg); }
+  #competency-report .comp-bar-student-blocked { background:var(--muted); }
   #competency-report .comp-chip-none, #competency-report .comp-chip-not-member { color:var(--muted); border:1px solid var(--line); background:var(--bg); }
   #competency-report .comp-chip-off { color:var(--muted); padding-left:0; }
   #competency-report .comp-todo-list { list-style:none; padding:0; margin:12px 0 0; }
@@ -654,6 +657,8 @@ let memberDataList = [];      // ใช้กับวิชาบูรณา�
 let allSubjects = [];         // วิชาทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
 let memberIdSet = new Set();  // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown)
 let integratedParentIdSet = new Set(); // วิชาบูรณาการตัวแม่ไม่มีหน่วยสมรรถนะหลักของตัวเอง
+let integratedParentByMember = new Map();
+let compSubjectResultsCache = new Map();
 let compStudents = [], coreCompetencies = [], sourceWeights = [], interpretationLevels = [];
 let competencyConfigError = "", competencySettingsError = "", competencyPlacementError = "", selectedCompStudentId = "";
 let compVisibleStudents = [], compRequestSeq = 0, compRoomRunSeq = 0;
@@ -673,6 +678,13 @@ let attendanceLoadToken = 0, selectedAttendanceStudentId = "";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function compSubjectLabel(id, subjectNameById = new Map()) {
+  const name = subjectNameById.get(id) || allSubjects.find(subject => subject.id === id)?.name || "วิชาที่ไม่ทราบชื่อ";
+  const parentId = integratedParentByMember.get(id);
+  const parent = parentId && (subjectNameById.get(parentId) || allSubjects.find(subject => subject.id === parentId)?.name);
+  return parent ? name + " · " + parent.split(" (")[0] : name;
 }
 
 function setReportMode(mode) {
@@ -731,6 +743,7 @@ async function loadSubjects() {
   if (memErr) { showEmpty("โหลดข้อมูลวิชาบูรณาการไม่สำเร็จ: " + memErr.message); return; }
   memberIdSet = new Set((memberRows || []).map(r => r.member_subject_id));
   integratedParentIdSet = new Set((memberRows || []).map(r => r.integrated_subject_id));
+  integratedParentByMember = new Map((memberRows || []).map(r => [r.member_subject_id, r.integrated_subject_id]));
 
   fillYearOptions();
   applySubjectFilter();
@@ -2157,6 +2170,7 @@ function competencyFiltersReady() {
 
 function renderCompetencyStudentList() {
   cancelCompRoomRun();
+  compSubjectResultsCache.clear();
   const token = ++compRequestSeq;
   selectedCompStudentId = "";
   compVisibleStudents = [];
@@ -2267,7 +2281,8 @@ async function loadCompetencyStudentResult(student) {
   if (issue) { writeCompResult(token, issue); return; }
   writeCompResult(token, "<div class='card hint' aria-busy='true'>กำลังคำนวณผลสมรรถนะ…</div>");
   let computed;
-  try { computed = await computeCompetencyForStudent(student); }
+  const blockedLoad = await loadCompSubjectResults();
+  try { computed = await computeCompetencyForStudent(student, blockedLoad.results); }
   catch (error) { computed = { ok:false, message:"คำนวณไม่สำเร็จ: " + (error?.message || String(error)) }; }
   if (token !== compRequestSeq) return;
   if (!computed.ok) {
@@ -2276,11 +2291,59 @@ async function loadCompetencyStudentResult(student) {
   }
   renderCompetencyResult(student, computed.results, elCompYear.value, elCompGrade.value,
     elCompGrade.value.startsWith("ม.") ? elCompTerm.value : "", computed.subjectNameById, computed.plannedByCompetency,
-    computed.missingCompetencySubjectIds, token);
+    computed.missingCompetencySubjects, token, blockedLoad.error);
+}
+
+function loadCompSubjectResults() {
+  const grade = elCompGrade.value, year = elCompYear.value;
+  const term = grade.startsWith("ม.") ? elCompTerm.value : "";
+  const key = [year, grade, term].join("|");
+  if (!compSubjectResultsCache.has(key)) compSubjectResultsCache.set(key,
+    computeStudentSubjectResults({ grade, year, term:term || undefined })
+      .then(results => ({ results, error:"" }))
+      .catch(error => ({ results:new Map(), error:error?.message || String(error) })));
+  return compSubjectResultsCache.get(key);
+}
+
+function blockedSubjectsFor(studentEntry, parentByMember) {
+  const blocked = new Map();
+  const reasonOf = result => result?.reason || (result?.type === "มส." && result.missedPeriods != null
+    ? "ขาด " + result.missedPeriods + " คาบ" + (result.totalBase ? " จาก " + result.totalBase + " คาบ" : "") : "");
+  for (const row of studentEntry?.subjects || []) {
+    if (row.subject.subject_type === "บูรณาการ") {
+      const overallMissed = row.result?.type === "มส.";
+      for (const member of row.memberResults || []) {
+        const id = member.subject.id;
+        if (parentByMember.get(id) !== row.subject.id) continue;
+        const type = overallMissed ? "มส." : member.result?.type;
+        if (type === "ร." || type === "มส.") blocked.set(id, { code:type, reason:reasonOf(overallMissed ? row.result : member.result) });
+      }
+    } else if (row.result?.type === "ร." || row.result?.type === "มส.") {
+      blocked.set(row.subject.id, { code:row.result.type, reason:reasonOf(row.result) });
+    }
+  }
+  return blocked;
+}
+
+function applyBlockedSubjects(sources, blockedSubjects, subjectStats) {
+  const blocked = [...blockedSubjects].filter(([id]) => subjectStats.has(id));
+  if (!blocked.length) return sources;
+  const excluded = new Set(blocked.map(([id]) => id));
+  const counts = blocked.reduce((sum, [id]) => {
+    const stat = subjectStats.get(id);
+    sum.expected += stat.expected; sum.scored += stat.scored;
+    return sum;
+  }, { expected:0, scored:0 });
+  const subject = sources.subject;
+  return { ...sources, subject:{ ...subject, complete:false, percent:null,
+    expectedCount:Math.max(0, subject.expectedCount - counts.expected),
+    scoredCount:Math.max(0, subject.scoredCount - counts.scored),
+    pending:(subject.pending || []).filter(item => !excluded.has(item.subjectId)),
+    blockedSubjects:blocked.map(([subjectId, value]) => ({ subjectId, ...value })) } };
 }
 
 // คืนผลสูตรกลางเดิมโดยไม่เขียน DOM เพื่อใช้ร่วมรายคนและใบตามงานทั้งห้อง
-async function computeCompetencyForStudent(student) {
+async function computeCompetencyForStudent(student, blockedResults = new Map()) {
   const year = elCompYear.value, grade = elCompGrade.value;
   const term = grade.startsWith("ม.") ? elCompTerm.value : "";
 
@@ -2297,6 +2360,10 @@ async function computeCompetencyForStudent(student) {
   const enrolledIds = new Set((enrollmentRows.data || []).map(r => r.subject_id));
   // ชื่อวิชาไว้บอกครูว่าค้างที่ไหน (ข้อ 4) — ก่อนหน้านี้ query ดึงมาแต่ id เลยไม่มีชื่อจะแสดง
   const subjectNameById = new Map((subjectRows.data || []).map(s => [s.id, s.name]));
+  for (const parentId of integratedParentIdSet) {
+    const parent = allSubjects.find(subject => subject.id === parentId);
+    if (parent) subjectNameById.set(parentId, parent.name);
+  }
   const subjectOwnerById = new Map((subjectRows.data || []).map(s => [s.id, s.owner_id]));
   const subjectIds = (subjectRows.data || []).map(s => s.id).filter(id => enrolledIds.has(id));
   let competencyUnits = [], subjectScoreRows = [];
@@ -2318,10 +2385,14 @@ async function computeCompetencyForStudent(student) {
       subjectScoreRows = scoreResult.data || [];
     }
   }
-  const activeCompetencySubjectIds = new Set(competencyUnits
-    .filter(unit => unit.core_competency_id != null && unit.core_competency_id !== "" && unit.counts_score !== false)
-    .map(unit => unit.subject_id));
-  const missingCompetencySubjectIds = subjectIds.filter(id => !integratedParentIdSet.has(id) && !activeCompetencySubjectIds.has(id));
+  const activeUnits = competencyUnits.filter(unit => unit.core_competency_id != null && unit.core_competency_id !== "" && unit.counts_score !== false);
+  const structuredIds = new Set(activeUnits.map(unit => unit.subject_id));
+  const sessionIds = new Set(activeUnits.filter(unit => (unit.indicators || []).some(indicator =>
+    indicator.counts_score !== false && (indicator.collections || []).length)).map(unit => unit.subject_id));
+  const missingCompetencySubjects = subjectIds.filter(id => !integratedParentIdSet.has(id) && !sessionIds.has(id))
+    .map(id => ({ id, reason:structuredIds.has(id) ? "no-session" : "no-structure",
+      structuredCount:new Set(activeUnits.filter(unit => unit.subject_id === id).map(unit => unit.core_competency_id)).size }));
+  const blockedSubjects = blockedSubjectsFor(blockedResults.get(student.id), integratedParentByMember);
 
   // ---------- แหล่งที่ 2–3: กิจกรรมและกิจวัตรที่มี snapshot นักเรียนในครั้งประเมิน ----------
   let assessmentQuery = sb.from("competency_assessments").select("id,name,source_type,term,owner_id").eq("year", year);
@@ -2413,21 +2484,38 @@ async function computeCompetencyForStudent(student) {
   }
 
   const results = coreCompetencies.map(competency => {
-    const sources = applyMissingCompetencySubjects({
+    const baseSources = {
       subject: computeSubjectCompetencySource(competency.id, competencyUnits, subjectScoreRows),
       activity: computeAssessmentCompetencySource(competency.id, activityItems),
       routine: computeAssessmentCompetencySource(competency.id, routineItems)
-    }, missingCompetencySubjectIds);
+    };
     const weight = sourceWeights.find(w => w.competency_id === competency.id);
-    return { competency, sources, weight, combined: computeCombinedCompetencyResult(weight, sources, interpretationLevels) };
+    const previousSources = applyMissingCompetencySubjects(baseSources,
+      missingCompetencySubjects.filter(item => item.reason === "no-structure"));
+    const previousComplete = computeCombinedCompetencyResult(weight, previousSources, interpretationLevels).complete;
+    const subjectStats = new Map();
+    const scoreIds = new Set(subjectScoreRows.map(score => score.collection_id));
+    for (const unit of activeUnits.filter(unit => unit.core_competency_id === competency.id)) {
+      if (!subjectStats.has(unit.subject_id)) subjectStats.set(unit.subject_id, { expected:0, scored:0 });
+      for (const indicator of unit.indicators || []) {
+        if (indicator.counts_score === false) continue;
+        for (const collection of indicator.collections || []) {
+          const stat = subjectStats.get(unit.subject_id);
+          stat.expected++;
+          if (scoreIds.has(collection.id)) stat.scored++;
+        }
+      }
+    }
+    const sources = applyBlockedSubjects(applyMissingCompetencySubjects(baseSources, missingCompetencySubjects), blockedSubjects, subjectStats);
+    return { competency, sources, weight, previousComplete, combined: computeCombinedCompetencyResult(weight, sources, interpretationLevels) };
   });
-  return { ok:true, results, subjectNameById, plannedByCompetency, subjectOwnerById, assessmentOwnerByName, missingCompetencySubjectIds };
+  return { ok:true, results, subjectNameById, plannedByCompetency, subjectOwnerById, assessmentOwnerByName, missingCompetencySubjects, blockedSubjects };
 }
 
 // วิชาที่ยังไม่สร้างสมรรถนะหลักอาจเลือกวัดด้านใดก็ได้ จึงบล็อกแหล่งรายวิชาทุกด้าน
-function applyMissingCompetencySubjects(sources, missingIds) {
-  if (!missingIds.length) return sources;
-  return { ...sources, subject:{ ...sources.subject, complete:false, percent:null, missingSubjectIds:[...missingIds] } };
+function applyMissingCompetencySubjects(sources, missingSubjects) {
+  if (!missingSubjects.length) return sources;
+  return { ...sources, subject:{ ...sources.subject, complete:false, percent:null, missingSubjects:[...missingSubjects] } };
 }
 
 function cancelCompRoomRun() {
@@ -2447,6 +2535,7 @@ function compRoomPendingText(item) {
       : "กรอกแล้ว " + item.scored + " จาก " + item.expected + " ครั้ง (รวม " + item.waitStudents + " คน)");
   }
   if (item.missingStructure) return "ยังไม่สร้างสมรรถนะหลักในวิชานี้";
+  if (item.missingSession) return "ยังไม่สร้างครั้งที่ประเมิน (มีโครงสร้าง " + item.structuredCount + " ด้านแล้ว)";
   if (item.newItems.size) parts.push("ยังไม่สร้างครั้งประเมิน" + (item.wait.size ? " (" + [...item.newItems].join(" · ") + ")" : ""));
   return parts.join(" · ");
 }
@@ -2471,11 +2560,13 @@ function compRoomPrintHtml(summary, perStudent, failures, ownerWarning, total) {
   ];
   let html = "<div class='comp-room-toolbar no-print'><h2 id='comp-room-print-heading' tabindex='-1'>ใบตามงานทั้งห้อง · " + escapeHtml(grade) + "/" + escapeHtml(room) + "</h2>" +
     "<div class='comp-room-actions'><button type='button' id='comp-room-close'>ปิด</button><button type='button' class='comp-room-button' id='comp-room-do-print'>พิมพ์</button></div></div>";
-  if (failures.length || ownerWarning) html += "<div class='comp-print-error' role='alert'>" +
+  if (failures.length || ownerWarning || summary.blockedLoadError) html += "<div class='comp-print-error' role='alert'>" +
     (failures.length ? "คำนวณไม่สำเร็จ " + failures.length + " คน: " + failures.map(row => escapeHtml(row.student.name) + " — " + escapeHtml(row.message)).join("; ") : "") +
-    (ownerWarning ? (failures.length ? "<br>" : "") + escapeHtml(ownerWarning) : "") + "</div>";
+    (ownerWarning ? (failures.length ? "<br>" : "") + escapeHtml(ownerWarning) : "") +
+    (summary.blockedLoadError ? "<br>ตรวจ ร./มส. ไม่สำเร็จ: " + escapeHtml(summary.blockedLoadError) + " — รายการค้างอาจรวมนักเรียนที่ติด ร./มส." : "") + "</div>";
   html += "<div class='comp-print-paper'><h2>ใบตามงานสมรรถนะหลัก</h2><div class='comp-print-meta'><span>" + meta + "</span><span>พิมพ์ " + escapeHtml(stamp) + " น.</span></div>" +
-    "<div class='comp-print-kpis'>" + kpis.map(([label,value]) => "<div class='comp-print-kpi'>" + escapeHtml(label) + "<strong>" + escapeHtml(value) + "</strong></div>").join("") + "</div>" +
+    "<div class='comp-print-kpis'>" + kpis.map(([label,value], index) => "<div class='comp-print-kpi'>" + escapeHtml(label) + "<strong>" + escapeHtml(value) + "</strong>" +
+      (index === 2 && summary.blockedStudentCount ? "<small>รอนักเรียนแก้ ร./มส. " + summary.blockedStudentCount + " คน</small>" : "") + "</div>").join("") + "</div>" +
     "<h3>1. ตามครู — เรียงจากขวางมากสุด</h3>";
   if (!summary.groups.length) html += "<p>ไม่มีรายการที่ต้องตามครู</p>";
   for (const group of summary.groups) {
@@ -2490,13 +2581,18 @@ function compRoomPrintHtml(summary, perStudent, failures, ownerWarning, total) {
   html += missingRows.length ? compRoomTable(["แหล่ง", "ด้านที่ยังไม่มีรายการใดวัด", "เพิ่มแล้ว (วันที่)"], missingRows) : "<p>ไม่มีแหล่งที่ขาดรายการวัด</p>";
   if (summary.notMember.length) html += "<h3>นักเรียนบางคนยังไม่อยู่ในรายการที่วัด</h3><ul>" + summary.notMember.map(item =>
     "<li>" + escapeHtml(item.sourceLabel) + " — " + item.students.size + " คน · ด้าน " + escapeHtml([...item.comps].join(" · ")) + "</li>").join("") + "</ul>";
+  if (summary.blocked.length) {
+    html += "<h3>3. รอนักเรียนแก้ ร./มส.</h3>" + compRoomTable(["วิชา", "ร.", "มส.", "รายชื่อ (เลขที่)"], summary.blocked.map(item =>
+      "<tr><td>" + escapeHtml(item.name) + "</td><td>" + item.remarks.size + " คน</td><td>" + item.missed.size + " คน</td><td>" +
+      escapeHtml(item.names.join(" · ")) + "</td></tr>"));
+  }
   html += "<p class='comp-print-note'>“ค้างกี่คน” นับนักเรียนในห้องที่รายการนั้นยังทำให้สรุปไม่ได้ · จำนวนครั้งที่กรอกเป็นยอดรวมทั้งห้อง · คำนวณด้วยสูตรเดียวกับหน้าสรุปผลการเรียน ณ เวลาที่พิมพ์</p>";
   if (failures.length) html += "<p class='comp-print-note'><strong>คำนวณไม่สำเร็จ:</strong> " + failures.map(row => escapeHtml(row.student.name) + " — " + escapeHtml(row.message)).join("; ") + "</p>";
   const studentRows = summary.studentRows.map(row => "<tr><td>" + row.number + "</td><td>" + escapeHtml(row.student.name) + "</td>" +
     row.marks.map(mark => "<td" + (mark ? "" : " class='comp-print-missing'") + ">" + (mark ? "✓" : "✕") + "</td>").join("") +
-    "<td><strong>" + row.completeCount + "/" + row.marks.length + "</strong></td></tr>");
+    "<td><strong>" + row.completeCount + "/" + row.marks.length + "</strong></td><td>" + escapeHtml(row.blockedCodes.join(" / ")) + "</td></tr>");
   html += "</div><div class='comp-print-paper comp-print-appendix'><h3>ภาคผนวก · สถานะรายคน</h3><p class='comp-print-note'>" + escapeHtml(grade) + " ห้อง " + escapeHtml(room) + " · " + escapeHtml(term) +
-    " · ✓ = สรุปได้ · ✕ = ยังไม่ครบ</p>" + compRoomTable(["เลขที่", "ชื่อ", ...coreCompetencies.map(row => row.name), "สรุปได้"], studentRows) +
+    " · ✓ = สรุปได้ · ✕ = ยังไม่ครบ</p>" + compRoomTable(["เลขที่", "ชื่อ", ...coreCompetencies.map(row => row.name), "สรุปได้", "ติด"], studentRows) +
     "<p class='comp-print-note'>ไม่แสดงคะแนน — ใบนี้ใช้ตามงาน คะแนนดูรายคนบนหน้าจอ</p></div>";
   return html;
 }
@@ -2514,16 +2610,19 @@ async function startCompRoomRun() {
   elCompRoomProgressBar.max = roster.length;
   elCompRoomProgressBar.value = 0;
   elCompRoomProgressText.textContent = "กำลังคำนวณสมรรถนะทั้งห้อง 0 / " + roster.length + " คน";
-  elCompRoomProgressStatus.textContent = "เริ่มคำนวณ " + roster.length + " คน";
+  elCompRoomProgressStatus.textContent = "กำลังตรวจ ร./มส. ทั้งชั้น…";
   let announcedQuarter = 0;
   elCompRoomPrint.hidden = true;
   elCompNav.hidden = true;
   writeCompResult(++compRequestSeq, "");
+  const blockedLoad = await loadCompSubjectResults();
+  if (token !== compRoomRunSeq) return;
+  elCompRoomProgressStatus.textContent = "เริ่มคำนวณ " + roster.length + " คน";
   const worker = async () => {
     while (token === compRoomRunSeq && next < roster.length) {
       const index = next++;
       let result;
-      try { result = await computeCompetencyForStudent(roster[index]); }
+      try { result = await computeCompetencyForStudent(roster[index], blockedLoad.results); }
       catch (error) { result = { ok:false, message:"คำนวณไม่สำเร็จ: " + (error?.message || String(error)) }; }
       if (token !== compRoomRunSeq) return;
       computedRows[index] = result;
@@ -2544,7 +2643,7 @@ async function startCompRoomRun() {
     const student = roster[index];
     if (!result?.ok) { failures.push({ student, message:result?.message || "ไม่ทราบสาเหตุ" }); return; }
     perStudent.push({ student, number:index + 1, ...result,
-      todo:buildCompetencyTodo(result.results, result.subjectNameById, result.plannedByCompetency, result.missingCompetencySubjectIds) });
+      todo:buildCompetencyTodo(result.results, result.subjectNameById, result.plannedByCompetency, result.missingCompetencySubjects, result.blockedSubjects) });
   });
   const ownerIds = [...new Set(perStudent.flatMap(row => [...row.subjectOwnerById.values(), ...row.assessmentOwnerByName.values()]).filter(Boolean))];
   let ownerNameById = new Map(), ownerWarning = "";
@@ -2557,9 +2656,12 @@ async function startCompRoomRun() {
   }
   if (token !== compRoomRunSeq) return;
   const summary = buildRoomFollowUp(perStudent, ownerNameById);
+  summary.blockedLoadError = blockedLoad.error;
   const html = compRoomPrintHtml(summary, perStudent, failures, ownerWarning, roster.length);
   if (token !== compRoomRunSeq) return;
   elCompRoomPrint.innerHTML = html;
+  elCompRoomPrint.dataset.changedStudents = String(summary.changedStudents);
+  elCompRoomPrint.dataset.changedSides = String(summary.changedSides);
   elCompRoomProgressStatus.textContent = "คำนวณเสร็จ " + roster.length + " คน";
   elCompRoomProgress.hidden = true;
   elCompRoomStart.disabled = false;
@@ -2586,10 +2688,13 @@ function plannedNames(plannedByCompetency, competencyId, sourceType) {
 // ลำดับเงื่อนไขสำคัญ: น้ำหนักศูนย์ต้องเป็น off แม้แหล่งนั้นจะกรอกครบแล้ว
 function competencySourceStatus(source, weight, planned) {
   if (Number(weight) === 0) return { kind:"off", label:"ไม่ใช้คำนวณ" };
-  if (source.missingSubjectIds?.length) {
+  if (source.missingSubjects?.length) {
     if (source.expectedCount > source.scoredCount) return { kind:"wait", label:"กรอกค้าง " + source.scoredCount + "/" + source.expectedCount };
-    return { kind:"no-structure", label:"วิชายังไม่มีสมรรถนะหลัก" };
+    if (source.missingSubjects.some(item => item.reason === "no-structure")) return { kind:"no-structure", label:"วิชายังไม่มีสมรรถนะหลัก" };
+    return { kind:"no-session", label:"ยังไม่สร้างครั้งที่ประเมิน" };
   }
+  if (source.expectedCount > source.scoredCount) return { kind:"wait", label:"กรอกค้าง " + source.scoredCount + "/" + source.expectedCount };
+  if (source.blockedSubjects?.length) return { kind:"student-blocked", label:"รอนักเรียนแก้ ร./มส." };
   if (source.complete) return { kind:"ok", label:Number(source.percent).toFixed(1) };
   if (source.expectedCount > 0) return { kind:"wait", label:"กรอกค้าง " + source.scoredCount + "/" + source.expectedCount };
   if (planned && planned.mine && planned.mine.length) return { kind:"new", label:"ยังไม่สร้างครั้งประเมิน" };
@@ -2614,6 +2719,8 @@ function compIcon(kind) {
     wait:"<circle cx='10' cy='10' r='7'/><path d='M10 6v4l3 2'/>",
     new:"<circle cx='10' cy='10' r='7'/><path d='M10 6v8M6 10h8'/>",
     "no-structure":"<circle cx='10' cy='10' r='7'/><path d='M10 6v8M6 10h8'/>",
+    "no-session":"<circle cx='10' cy='10' r='7'/><path d='M10 6v8M6 10h8'/>",
+    "student-blocked":"<circle cx='10' cy='7' r='3'/><path d='M4 18c0-4 2.5-6 6-6s6 2 6 6'/>",
     off:"<circle cx='10' cy='10' r='7'/><path d='m5 5 10 10'/>",
     none:"<circle cx='10' cy='10' r='7'/><path d='m5 5 10 10'/>",
     "not-member":"<circle cx='10' cy='7' r='3'/><path d='M4 17c0-3 2.5-5 6-5s6 2 6 5M14 5l3 3m0-3-3 3'/>",
@@ -2645,7 +2752,7 @@ function compSourceDetail(row, definition, plannedByCompetency, subjectNameById)
   let detail = "";
   if (status.kind === "wait") {
     const nameOf = definition.key === "subject"
-      ? item => subjectNameById.get(item.subjectId) || "วิชาที่ไม่ทราบชื่อ"
+      ? item => compSubjectLabel(item.subjectId, subjectNameById)
       : item => item.label || "รายการที่ไม่ทราบชื่อ";
     detail = "ค้าง: " + compPendingText(source, nameOf);
   }
@@ -2654,22 +2761,29 @@ function compSourceDetail(row, definition, plannedByCompetency, subjectNameById)
   if (status.kind === "none") detail = definition.key === "subject"
     ? "ยังไม่มีรายวิชาใดมีครั้งประเมินด้านนี้"
     : "ยังไม่มี" + definition.label + "ใดเลือกวัดด้านนี้";
-  if (source.missingSubjectIds?.length && Number((row.weight || {})[definition.weight]) > 0) {
-    const names = source.missingSubjectIds.map(id => subjectNameById.get(id) || "วิชาที่ไม่ทราบชื่อ");
-    detail += (detail ? " · " : "") + "ยังไม่สร้างสมรรถนะหลัก: " + names.join(", ");
+  if (source.missingSubjects?.length && Number((row.weight || {})[definition.weight]) > 0) {
+    for (const [reason, label] of [["no-structure", "ยังไม่สร้างสมรรถนะหลัก"], ["no-session", "ยังไม่สร้างครั้งที่ประเมิน"]]) {
+      const names = source.missingSubjects.filter(item => item.reason === reason).map(item => compSubjectLabel(item.id, subjectNameById));
+      if (names.length) detail += (detail ? " · " : "") + label + ": " + names.join(", ");
+    }
+  }
+  if (source.blockedSubjects?.length && Number((row.weight || {})[definition.weight]) > 0) {
+    detail += (detail ? " · " : "") + source.blockedSubjects.map(item => "ติด " + item.code + " วิชา" + compSubjectLabel(item.subjectId, subjectNameById) +
+      (item.reason ? " (" + item.reason + ")" : "")).join(" · ");
   }
   return detail;
 }
 
 // รายการเดียวขวางหลายด้านได้: รวมจำนวนช่องคะแนนตาม (แหล่ง, ชื่อรายการ)
-function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, missingCompetencySubjectIds = []) {
-  const items = new Map(), missing = new Map();
-  for (const subjectId of missingCompetencySubjectIds) {
-    const name = subjectNameById.get(subjectId) || "วิชาที่ไม่ทราบชื่อ";
+function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, missingCompetencySubjects = [], blockedSubjects = new Map()) {
+  const items = new Map(), missing = new Map(), studentBlocked = [];
+  for (const { id:subjectId, reason, structuredCount } of missingCompetencySubjects) {
+    const name = compSubjectLabel(subjectId, subjectNameById);
     const blocked = new Set(results.filter(row => Number((row.weight || {}).subject_weight) > 0).map(row => row.competency.name));
     if (!blocked.size) continue;
-    items.set("subject|" + name, { kind:"item", sourceKey:"subject", sourceLabel:"รายวิชา", name, subjectId,
-      scored:0, expected:0, blocked, wait:new Set(), newItems:new Set(), missingStructure:true });
+    items.set("subject|" + subjectId, { kind:"item", sourceKey:"subject", sourceLabel:"รายวิชา", name, subjectId,
+      scored:0, expected:0, blocked, wait:new Set(), newItems:new Set(), missingStructure:reason === "no-structure",
+      missingSession:reason === "no-session", structuredCount });
   }
   for (const row of results) for (const definition of compSources) {
     const source = row.sources[definition.key];
@@ -2677,11 +2791,11 @@ function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, miss
     const status = competencySourceStatus(source, (row.weight || {})[definition.weight], planned);
     if (status.kind === "wait" || status.kind === "new") {
       const pending = status.kind === "wait" ? (source.pending || []).map(item => ({
-        name:definition.key === "subject" ? subjectNameById.get(item.subjectId) || "วิชาที่ไม่ทราบชื่อ" : item.label || "รายการที่ไม่ทราบชื่อ",
+        name:definition.key === "subject" ? compSubjectLabel(item.subjectId, subjectNameById) : item.label || "รายการที่ไม่ทราบชื่อ",
         subjectId:item.subjectId || null, scored:item.scored || 0, expected:item.expected || 0, kind:"wait"
       })) : planned.mine.map(name => ({ name, scored:0, expected:0, kind:"new" }));
       for (const item of pending) {
-        const key = definition.key + "|" + item.name;
+        const key = definition.key + "|" + (definition.key === "subject" ? item.subjectId : item.name);
         if (!items.has(key)) items.set(key, { kind:"item", sourceKey:definition.key, sourceLabel:definition.label,
           name:item.name, subjectId:item.subjectId || null, scored:0, expected:0, blocked:new Set(), wait:new Set(), newItems:new Set() });
         const target = items.get(key);
@@ -2697,29 +2811,39 @@ function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, miss
       missing.get(key).blocked.add(row.competency.name);
     }
   }
+  for (const [subjectId, value] of blockedSubjects) {
+    const blocked = new Set(results.filter(row => Number((row.weight || {}).subject_weight) > 0 &&
+      row.sources.subject.blockedSubjects?.some(item => item.subjectId === subjectId)).map(row => row.competency.name));
+    if (blocked.size) studentBlocked.push({ kind:"student-blocked", sourceKey:"subject", sourceLabel:"รายวิชา",
+      name:compSubjectLabel(subjectId, subjectNameById), subjectId, code:value.code, reason:value.reason, blocked });
+  }
   const ordered = [...items.values()].sort((a,b) => b.blocked.size - a.blocked.size || a.name.localeCompare(b.name, "th"));
-  return ordered.concat([...missing.values()].sort((a,b) => compSources.findIndex(s => s.key === a.sourceKey) - compSources.findIndex(s => s.key === b.sourceKey)));
+  return ordered.concat(studentBlocked, [...missing.values()].sort((a,b) => compSources.findIndex(s => s.key === a.sourceKey) - compSources.findIndex(s => s.key === b.sourceKey)));
 }
 
 // รวมแถวตามรายการจากผลรายคน; ไม่คำนวณคะแนนซ้ำและไม่เขียน DOM
 function buildRoomFollowUp(perStudent, ownerNameById) {
-  const items = new Map(), missing = new Map(), notMember = new Map();
+  const items = new Map(), missing = new Map(), notMember = new Map(), blocked = new Map(), blockedStudentIds = new Set();
   const studentRows = [];
-  let completeStudents = 0;
-  perStudent.forEach(({ student, number, results, todo, subjectOwnerById, assessmentOwnerByName }) => {
+  let completeStudents = 0, changedStudents = 0, changedSides = 0;
+  perStudent.forEach(({ student, number, results, todo, subjectOwnerById, assessmentOwnerByName, blockedSubjects }) => {
     const completeCount = results.filter(row => row.combined.complete).length;
     if (completeCount === results.length) completeStudents++;
+    const changed = results.filter(row => row.previousComplete && !row.combined.complete).length;
+    if (changed) changedStudents++;
+    changedSides += changed;
     studentRows.push({ student, number, completeCount,
-      marks:coreCompetencies.map(competency => !!results.find(row => row.competency.id === competency.id)?.combined.complete) });
+      marks:coreCompetencies.map(competency => !!results.find(row => row.competency.id === competency.id)?.combined.complete),
+      blockedCodes:[...new Set([...blockedSubjects.values()].map(value => value.code))] });
     for (const row of todo) {
       if (row.kind === "item") {
-        const key = row.sourceKey + "|" + row.name;
+        const key = row.sourceKey + "|" + (row.sourceKey === "subject" ? row.subjectId : row.name);
         const ownerId = row.sourceKey === "subject"
           ? subjectOwnerById.get(row.subjectId) || null
           : assessmentOwnerByName.get(row.sourceLabel + "|" + row.name) || null;
         if (!items.has(key)) items.set(key, { sourceKey:row.sourceKey, sourceLabel:row.sourceLabel,
           name:row.name, ownerId, students:new Set(), comps:new Set(), scored:0, expected:0,
-          wait:new Set(), newItems:new Set(), waitStudents:new Set(), missingStructure:false });
+          wait:new Set(), newItems:new Set(), waitStudents:new Set(), missingStructure:false, missingSession:false, structuredCount:0 });
         const target = items.get(key);
         if (!target.ownerId && ownerId) target.ownerId = ownerId;
         target.students.add(student.id);
@@ -2727,9 +2851,17 @@ function buildRoomFollowUp(perStudent, ownerNameById) {
         row.wait.forEach(name => target.wait.add(name));
         row.newItems.forEach(name => target.newItems.add(name));
         target.missingStructure ||= !!row.missingStructure;
+        target.missingSession ||= !!row.missingSession;
+        target.structuredCount = Math.max(target.structuredCount, row.structuredCount || 0);
         if (row.wait.size) target.waitStudents.add(student.id);
         target.scored += row.scored;
         target.expected += row.expected;
+      } else if (row.kind === "student-blocked") {
+        blockedStudentIds.add(student.id);
+        if (!blocked.has(row.subjectId)) blocked.set(row.subjectId, { name:row.name, remarks:new Set(), missed:new Set(), names:[] });
+        const target = blocked.get(row.subjectId);
+        (row.code === "ร." ? target.remarks : target.missed).add(student.id);
+        target.names.push(student.name + " (" + number + ")");
       } else if (row.kind === "none" || row.kind === "not-member") {
         const targetMap = row.kind === "none" ? missing : notMember;
         if (!targetMap.has(row.sourceKey)) targetMap.set(row.sourceKey, {
@@ -2753,7 +2885,8 @@ function buildRoomFollowUp(perStudent, ownerNameById) {
   const groups = [...groupsByOwner.values()];
   groups.forEach(group => group.items.sort((a,b) => b.comps.size - a.comps.size || b.students - a.students || a.name.localeCompare(b.name, "th")));
   groups.sort((a,b) => Number(!a.ownerId) - Number(!b.ownerId) || b.items[0].comps.size - a.items[0].comps.size || a.ownerName.localeCompare(b.ownerName, "th"));
-  return { groups, missing:[...missing.values()], notMember:[...notMember.values()], studentRows,
+  return { groups, missing:[...missing.values()], notMember:[...notMember.values()], blocked:[...blocked.values()], studentRows,
+    blockedStudentCount:blockedStudentIds.size, changedStudents, changedSides,
     kpis:{ completeStudents, itemCount:items.size, teacherCount:groups.filter(group => group.ownerId).length, missingSourceCount:missing.size } };
 }
 
@@ -2778,29 +2911,33 @@ function compTodoHtml(todo) {
   if (!todo.length) return "<div class='hint'>ไม่มีอะไรค้าง ข้อมูลครบทุกด้าน</div>";
   return "<ul class='comp-todo-list'>" + todo.map(item => {
     const blocked = [...item.blocked];
-    const isMissing = item.kind !== "item";
+    const studentBlocked = item.kind === "student-blocked";
+    const isMissing = item.kind !== "item" && !studentBlocked;
     const title = isMissing
       ? (item.kind === "not-member" ? "นักเรียนยังไม่อยู่ใน" + item.sourceLabel + "ที่วัด " : "ยังไม่มี" + item.sourceLabel + "ใดวัด ") + blocked.length + " ด้าน"
-      : item.name;
+      : studentBlocked ? item.name + " · ติด " + item.code + " — รอนักเรียนแก้" : item.name;
     const description = isMissing
       ? blocked.join(" · ") + (item.kind === "none" && item.sourceKey !== "subject" ? " — ต้องเพิ่มที่หน้า “จัดการ" + item.sourceLabel + "”" : "")
+      : studentBlocked ? item.sourceLabel + (item.reason ? " · " + item.reason : "") + " · ขวาง: " + blocked.join(" · ")
       : item.missingStructure ? item.sourceLabel + " · ยังไม่สร้างสมรรถนะหลัก · ขวาง: " + blocked.join(" · ")
+      : item.missingSession ? item.sourceLabel + " · ยังไม่สร้างครั้งที่ประเมิน (มีโครงสร้าง " + item.structuredCount + " ด้านแล้ว) · ขวาง: " + blocked.join(" · ")
       : item.sourceLabel + " · " + [item.wait.size ? (item.newItems.size ? "กรอกค้าง " + item.scored + "/" + item.expected + " (" + [...item.wait].join(" · ") + ")" : "ครูกรอกยังไม่ครบ") : "",
         item.newItems.size ? "ยังไม่สร้างครั้งประเมิน" + (item.wait.size ? " (" + [...item.newItems].join(" · ") + ")" : "") : ""]
         .filter(Boolean).join(" · ") + " · ขวาง: " + blocked.join(" · ");
-    const number = isMissing ? blocked.length + " ด้าน" : item.missingStructure ? "ยังไม่สร้าง" : (item.expected ? item.scored + "/" + item.expected : "0 ครั้ง");
-    return "<li class='comp-todo-row'><span class='comp-todo-icon" + (isMissing ? " comp-todo-muted" : "") + "'>" + compIcon(isMissing ? "none" : item.sourceKey) + "</span>" +
+    const number = isMissing ? blocked.length + " ด้าน" : studentBlocked ? item.code : (item.missingStructure || item.missingSession) ? "ยังไม่สร้าง" : (item.expected ? item.scored + "/" + item.expected : "0 ครั้ง");
+    return "<li class='comp-todo-row'><span class='comp-todo-icon" + (isMissing || studentBlocked ? " comp-todo-muted" : "") + "'>" + compIcon(isMissing ? "none" : studentBlocked ? "student-blocked" : item.sourceKey) + "</span>" +
       "<div class='comp-todo-main'><strong>" + escapeHtml(title) + "</strong><span>" + escapeHtml(description) + "</span></div>" +
       "<div class='comp-todo-count'>" + escapeHtml(number) + (isMissing ? "" : "<small>" + blocked.length + " ด้าน</small>") + "</div></li>";
   }).join("") + "</ul>";
 }
 
-function renderCompetencyResult(student, rows, year, grade, term, subjectNameById, plannedByCompetency, missingCompetencySubjectIds, token) {
+function renderCompetencyResult(student, rows, year, grade, term, subjectNameById, plannedByCompetency, missingCompetencySubjects, token, blockedLoadError = "") {
   if (token !== compRequestSeq) return;
   const complete = rows.filter(row => row.combined.complete).length;
   const firstOpen = rows.findIndex(row => !row.combined.complete);
   const selected = firstOpen < 0 ? 0 : firstOpen;
-  const todo = buildCompetencyTodo(rows, subjectNameById, plannedByCompetency, missingCompetencySubjectIds);
+  const blockedSubjects = new Map(rows.flatMap(row => (row.sources.subject.blockedSubjects || []).map(item => [item.subjectId, { code:item.code, reason:item.reason }])));
+  const todo = buildCompetencyTodo(rows, subjectNameById, plannedByCompetency, missingCompetencySubjects, blockedSubjects);
   const blocker = todo.find(item => item.kind === "item");
   const summaryTitle = complete === rows.length ? "สรุปผลได้ครบทุกด้าน" : complete ? "สรุปได้บางด้าน — ด้านที่เหลือข้อมูลยังไม่ครบ" : "ยังสรุปไม่ได้สักด้าน — ข้อมูลยังไม่ครบ";
   const levels = interpretationLevels.slice().sort((a,b) => Number(b.min_score) - Number(a.min_score))
@@ -2812,7 +2949,8 @@ function renderCompetencyResult(student, rows, year, grade, term, subjectNameByI
     (term ? " · ภาคเรียน " + escapeHtml(term) : " · ทั้งปี") + "</p>";
   if (blocker) html += "<div class='comp-blocker'>ตัวที่ขวางมากที่สุด: <strong>" + escapeHtml(blocker.name) + "</strong> (" + blocker.sourceLabel + " · " +
     (blocker.missingStructure ? "ยังไม่สร้างสมรรถนะหลัก" : blocker.expected ? "กรอกแล้ว " + blocker.scored + "/" + blocker.expected : "ยังไม่สร้างครั้งประเมิน") + ") — ค้างอยู่ " + blocker.blocked.size + " ด้าน</div>";
-  html += "</section><section class='card'><h2 class='comp-title'>ผล " + rows.length + " ด้าน</h2><div class='hint'>แถบเล็ก 3 ช่อง = รายวิชา · กิจกรรม · กิจวัตร</div><div class='comp-grid'>";
+  html += "</section>" + (blockedLoadError ? "<div class='card comp-print-error' role='alert'>ตรวจ ร./มส. ไม่สำเร็จ: " + escapeHtml(blockedLoadError) + " — รายการค้างอาจรวมนักเรียนที่ติด ร./มส.</div>" : "") +
+    "<section class='card'><h2 class='comp-title'>ผล " + rows.length + " ด้าน</h2><div class='hint'>แถบเล็ก 3 ช่อง = รายวิชา · กิจกรรม · กิจวัตร</div><div class='comp-grid'>";
   rows.forEach((row,index) => {
     const result = row.combined;
     const weighted = compSources.filter(definition => Number((row.weight || {})[definition.weight]) > 0);
