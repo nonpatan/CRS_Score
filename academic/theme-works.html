@@ -84,6 +84,18 @@ button:disabled { opacity:.55; cursor:default; }
 .review-compose .field { margin-bottom:8px; }
 .review-compose .actions { margin-top:8px; }
 .review-pending.returned { color:var(--danger); font-weight:700; }
+.stars { display:inline-flex; align-items:center; gap:1px; color:var(--amber); vertical-align:-2px; }
+.stars svg { width:16px; height:16px; flex:none; }
+.stars .off { color:var(--line); }
+.score-text { font-weight:700; }
+.score-set { border:0; padding:0; margin:0 0 10px; }
+.score-set legend { font-weight:600; margin-bottom:6px; }
+.score-options { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.score-options label { min-height:58px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; padding:6px; border:1px solid var(--line); border-radius:10px; cursor:pointer; text-align:center; font-size:14px; }
+.score-options label:has(input:checked) { background:var(--amber-soft); border-color:var(--amber); font-weight:700; }
+.score-options label:has(input:focus-visible) { outline:2px solid var(--teal); outline-offset:2px; }
+.score-options input { position:absolute; opacity:0; width:1px; height:1px; }
+@media(max-width:479px) { .score-options { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .member-chips { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0; }
 .member-chip { display:inline-block; max-width:100%; overflow-wrap:anywhere; padding:3px 9px; border-radius:99px; background:var(--bg); border:1px solid var(--line); font-size:14px; }
 .grade-heading { margin:20px 0 8px; padding-left:10px; border-left:3px solid var(--line); font-weight:700; }
@@ -264,8 +276,8 @@ import {
   bangkokNow, toDateStr, thaiShortDateText, bindDatePickOnly, DATE_PICK_ONLY_NOTE, GRADE_ORDER,
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
   validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed,
-  themeWorkReturnState, returnThemeWork, setThemeWorkReviewNote
-} from "../supabase-client.js?v=20261017-2";
+  themeWorkReturnState, returnThemeWork, setThemeWorkReviewNote, confirmThemeWorkReview, THEME_WORK_SCORE_LABELS
+} from "../supabase-client.js?v=20261017-3";
 
 const session = await requireAuth();
 if (!session) {
@@ -294,6 +306,12 @@ if (!session) {
     };
     return paths[status] ? '<svg class="status-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[status] + '</svg>' : '';
   };
+  // ดาว 1–4: SVG ตกแต่ง + ข้อความให้โปรแกรมอ่านจอ (color-not-only: มีคำกำกับเสมอ)
+  const starSvg = on => '<svg class="' + (on ? "on" : "off") + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2.8 2.8 5.8 6.3.9-4.6 4.4 1.1 6.3L12 17.3l-5.6 2.9 1.1-6.3-4.6-4.4 6.3-.9z"/></svg>';
+  const stars = score => '<span class="stars" role="img" aria-label="' + score + ' จาก 4 ดาว">' +
+    [1,2,3,4].map(n => starSvg(n <= score)).join("") + '</span>';
+  const scoreBadge = score => score >= 1 && score <= 4
+    ? stars(score) + ' <span class="score-text">' + esc(THEME_WORK_SCORE_LABELS[score]) + '</span>' : '';
   const pill = status => '<span class="pill ' + esc(status || "missing") + '">' + statusIcon(status) + statusText[status || "missing"] + '</span>';
   const teacherProgressText = totals => 'ส่งแล้ว ' + totals.sent + '/' + totals.total +
     (totals.sent ? ' · ตรวจแล้ว ' + totals.reviewed + '/' + totals.sent : '') +
@@ -323,6 +341,7 @@ if (!session) {
       group.items.map(item => '<span class="member-chip">' + subjectTitle(item.subject) + '</span>').join("") + '</div>' : "";
   // ความเห็นฝ่ายวิชาการของกลุ่ม: ส่วนแรกที่มีค่า (ครูคนเดียวส่งครอบหลายวิชาย่อยได้ค่าเดียวกัน)
   const returnPart = group => group.items.map(item => item.part).find(part => part?.return_note && themeWorkReturnState(part)) || null;
+  const groupScore = group => group.items.map(item => item.part).find(part => part?.reviewed_at && part.review_score)?.review_score || null;
   const advicePart = group => group.items.map(item => item.part).find(part => String(part?.review_note || "").trim()) || null;
   function feedbackBoxes(group) {
     let html = "";
@@ -333,7 +352,7 @@ if (!session) {
     else if (back) html += '<div class="feedback past"><strong>เคยส่งกลับให้แก้</strong><p>' + esc(back.return_note) +
       '</p><small>คุณแก้แล้วเมื่อ ' + esc(dateTime(back.resubmitted_at)) + ' · รอฝ่ายวิชาการตรวจ</small></div>';
     const advice = advicePart(group);
-    if (advice) html += '<div class="feedback advice" role="note"><strong>ข้อแนะนำจากฝ่ายวิชาการ · ใช้เทอมหน้า</strong><p>' +
+    if (advice) html += '<div class="feedback advice" role="note"><strong>ความคิดเห็นจากฝ่ายวิชาการ</strong><p>' +
       esc(advice.review_note) + '</p></div>';
     return html;
   }
@@ -418,7 +437,8 @@ if (!session) {
       }
       html += '<div class="row"><span class="lockline">' +
         (group.reviewed === "some" ? 'ฝ่ายวิชาการตรวจแล้วบางวิชา · ถ้าต้องแก้ ขอฝ่ายวิชาการเปิดให้' :
-          group.reviewed === "all" ? statusIcon("match") + 'ฝ่ายวิชาการตรวจแล้ว · แก้ไม่ได้' :
+          group.reviewed === "all" ? statusIcon("match") + 'ฝ่ายวิชาการตรวจแล้ว' +
+            (groupScore(group) ? ' · ' + scoreBadge(groupScore(group)) : '') + ' · แก้ไม่ได้' :
             group.returned === "pending" ? statusIcon("returned") + 'ฝ่ายวิชาการส่งกลับ · กดแก้ผลงานตามที่แจ้ง' :
             statusIcon("waiting") + 'รอฝ่ายวิชาการตรวจ · แก้ได้จนกว่าจะตรวจ') +
         '</span>' + (!locked && !editOpen ? '<button class="' + (group.returned === "pending" ? "primary" : "line-btn") +
@@ -496,7 +516,8 @@ if (!session) {
     const reviewedCount = reviewedParts.length, total = group.items.length;
     const reviewer = reviewedParts[0];
     const reviewedBy = reviewer?.reviewed_by_name || profiles.get(reviewer?.reviewed_by) || "ไม่พบชื่อผู้ตรวจ";
-    const done = group.reviewed === "all" ? '<div class="review-done">' + statusIcon("match") + 'ตรวจแล้ว <small>· ' +
+    const done = group.reviewed === "all" ? '<div class="review-done">' + statusIcon("match") + 'ตรวจแล้ว' +
+      (groupScore(group) ? '<br>' + scoreBadge(groupScore(group)) : '') + ' <small>· ' +
       esc(reviewedBy) + ' ' + esc(reviewShortDate(reviewer?.reviewed_at)) + '</small></div>' :
       group.reviewed === "some" ? '<div class="review-pending">ตรวจแล้ว ' + reviewedCount + '/' + total + ' วิชาย่อย</div>' :
       group.returned === "pending" ? '<div class="review-pending returned">ส่งกลับแล้ว · รอครูแก้</div>' :
@@ -509,26 +530,35 @@ if (!session) {
     const compose = (kind, label, className) => '<button class="' + className + '" type="button" data-action="compose" data-kind="' +
       kind + '" data-group="' + esc(group.key) + '" aria-expanded="' + open(kind) + '">' + label + '</button>';
     const sendBack = group.returned === "pending" ? "" : compose("return", "ส่งกลับให้แก้", "danger-line");
-    const advice = compose("advice", advicePart(group) ? "แก้ข้อแนะนำ" : "+ ข้อแนะนำ", "text-btn");
+    const advice = compose("advice", advicePart(group) ? "แก้ความคิดเห็น" : "+ ความคิดเห็น", "text-btn");
     if (group.reviewed === "all") return done + action(true, "เปิดให้แก้", "line-btn") + sendBack + advice;
-    const confirm = action(false, "ยืนยันตรวจแล้ว", "primary");
+    const confirm = compose("review", "ยืนยันตรวจแล้ว", "primary");
     return (group.reviewed === "some" || group.returned ? done : "") + confirm +
       (group.reviewed === "some" ? action(true, "เปิดให้แก้", "line-btn") : "") + sendBack + advice;
   }
   function renderCompose(group) {
     if (!isReviewer || composing?.key !== group.key) return "";
-    const isReturn = composing.kind === "return", id = "compose-" + group.key.replace(/[^a-zA-Z0-9_-]/g, "-");
-    return '<div class="review-compose" data-compose="' + esc(group.key) + '"><div class="field"><label for="' + id + '">' +
-      (isReturn ? "บอกครูว่าต้องแก้อะไร *" : "ข้อแนะนำสำหรับเทอมหน้า (ไม่บังคับ)") + '</label><textarea id="' + id +
-      '" rows="3" aria-describedby="' + id + '-hint ' + id + '-error" placeholder="' +
-      (isReturn ? "เช่น ส่งผลงานนักเรียนมาคนเดียว ขอลิงก์โฟลเดอร์ผลงานของนักเรียนทุกคน" : "เช่น เทอมหน้าลองให้นักเรียนนำเสนอผลงานหน้าชั้น") + '">' +
-      (isReturn ? "" : esc(advicePart(group)?.review_note || "")) + '</textarea><p class="hint" id="' + id + '-hint">' +
-      (isReturn ? "ครูเห็นข้อความนี้ในการ์ดและแถบเตือนหน้าเช็คชื่อ · ส่งกลับแล้วงานนี้กลับเป็นยังไม่ตรวจ"
-        : "ครูอ่านได้ในการ์ด · ไม่ปลดล็อก · บันทึกค่าว่าง = ลบข้อแนะนำ") + '</p><div class="field-error" id="' + id +
-      '-error" role="alert"></div></div><div class="actions"><button class="line-btn" type="button" data-action="compose-cancel" data-group="' +
-      esc(group.key) + '">ยกเลิก</button><button class="' + (isReturn ? "danger-line" : "primary") +
-      '" type="button" data-action="compose-save" data-group="' + esc(group.key) + '">' + (isReturn ? "ส่งกลับให้ครู" : "บันทึกข้อแนะนำ") +
-      '</button></div></div>';
+    const kind = composing.kind, id = "compose-" + group.key.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const text = {
+      return:{ label:"บอกครูว่าต้องแก้อะไร *", placeholder:"เช่น ส่งผลงานนักเรียนมาคนเดียว ขอลิงก์โฟลเดอร์ผลงานของนักเรียนทุกคน",
+        hint:"ครูเห็นข้อความนี้ในการ์ดและแถบเตือนหน้าเช็คชื่อ · ส่งกลับแล้วงานนี้กลับเป็นยังไม่ตรวจ", save:"ส่งกลับให้ครู", cls:"danger-line" },
+      review:{ label:"ความคิดเห็น (ไม่บังคับ)", placeholder:"", hint:"ครูเห็นคะแนนและความคิดเห็นในการ์ด · ยืนยันแล้วครูแก้ไม่ได้",
+        save:"ยืนยันตรวจแล้ว", cls:"primary" },
+      advice:{ label:"ความคิดเห็น (ไม่บังคับ)", placeholder:"", hint:"ครูเห็นในการ์ด · ไม่ปลดล็อก · บันทึกค่าว่าง = ลบความคิดเห็น",
+        save:"บันทึกความคิดเห็น", cls:"primary" }
+    }[kind];
+    const scores = kind === "review" ? '<fieldset class="score-set" data-field="score"><legend>ระดับคะแนน *</legend><div class="score-options">' +
+      [1,2,3,4].map(n => '<label><input type="radio" name="' + id + '-score" value="' + n + '"' +
+        (groupScore(group) === n ? ' checked' : '') + '>' + stars(n) + '<span>' + n + ' · ' + esc(THEME_WORK_SCORE_LABELS[n]) +
+        '</span></label>').join("") + '</div><div class="field-error" id="' + id + '-score-error" role="alert"></div></fieldset>' : '';
+    return '<div class="review-compose" data-compose="' + esc(group.key) + '">' + scores + '<div class="field"><label for="' + id + '">' +
+      text.label + '</label><textarea id="' + id + '" rows="3" aria-describedby="' + id + '-hint ' + id + '-error"' +
+      (text.placeholder ? ' placeholder="' + text.placeholder + '"' : '') + '>' +
+      (kind === "return" ? "" : esc(advicePart(group)?.review_note || "")) + '</textarea><p class="hint" id="' + id + '-hint">' +
+      text.hint + '</p><div class="field-error" id="' + id + '-error" role="alert"></div></div>' +
+      '<div class="actions"><button class="line-btn" type="button" data-action="compose-cancel" data-group="' +
+      esc(group.key) + '">ยกเลิก</button><button class="' + text.cls + '" type="button" data-action="compose-save" data-group="' +
+      esc(group.key) + '">' + text.save + '</button></div></div>';
   }
   function reviewFeedback(group, noteId) {
     const box = (id, label, text) => '<div class="review-note"><span class="review-note-label">' + label + '</span>' +
@@ -537,7 +567,7 @@ if (!session) {
     const back = returnPart(group), advice = advicePart(group);
     return (back ? box(noteId + "-r", "ส่งกลับ " + reviewShortDate(back.returned_at) +
         (group.returned === "fixed" ? " · ครูแก้แล้ว " + reviewShortDate(back.resubmitted_at) : " · รอครูแก้"), back.return_note) : "") +
-      (advice ? box(noteId + "-a", "ข้อแนะนำ (เทอมหน้า)", advice.review_note) : "");
+      (advice ? box(noteId + "-a", "ความคิดเห็น", advice.review_note) : "");
   }
   function renderReviewRow(group, noteId) {
     const unit = group.unit, part = firstPart(group);
@@ -623,6 +653,7 @@ if (!session) {
           (unit.kind === "integrated" ? '<br>วิชาย่อย: ' + group.items.map(item => subjectTitle(item.subject)).join(' · ') : "");
         const work = part ? '<span class="print-work-name">' + esc(part.work_name) + '</span><br>ลิงก์ผลงาน: ' +
           (firstLinkedPart(group) ? "มี" : "ไม่มี") : "—";
+        const scoreOf = row => row.items.map(item => item.part).find(p => p?.reviewed_at && p.review_score)?.review_score || null;
         const feedback = group.items.map(item => item.part).find(row => row?.return_note && group.returned)?.return_note ||
           group.items.map(item => item.part).find(row => String(row?.review_note || "").trim())?.review_note || "";
         const notes = (part?.note ? esc(part.note) : "") + (part?.next_plan ? '<br>แผนต่อ: ' + esc(part.next_plan) : "") +
@@ -631,7 +662,8 @@ if (!session) {
         const status = '<strong class="print-status-label">' + (group.returned === "pending" ? "ส่งกลับให้แก้"
           : group.returned === "fixed" ? "แก้แล้ว รอตรวจ" : statuses[group.status]) + '</strong>' +
           (part ? '<br>ส่ง ' + esc(printDate(group.submittedAt)) + (late ? '<br>ส่งช้า ' + late + ' วัน' : "") +
-            '<br>' + (group.reviewed === "all" ? "ตรวจแล้ว" : group.reviewed === "some" ? "ตรวจแล้วบางวิชา" : "ยังไม่ตรวจ") : "");
+            '<br>' + (group.reviewed === "all" ? "ตรวจแล้ว" + (scoreOf(group) ? " · " + scoreOf(group) + "/4 ดาว" : "")
+              : group.reviewed === "some" ? "ตรวจแล้วบางวิชา" : "ยังไม่ตรวจ") : "");
         html += '<tr><td>' + subject + '</td><td>' + work + '</td><td>' + status + '</td><td>' + notes + '</td></tr>';
       }
       html += '</tbody></table></section>';
@@ -842,6 +874,11 @@ if (!session) {
       const group = workGroups.find(row => row.key === button.dataset.group);
       if (!group || !textarea) return;
       const kind = composing.kind, text = textarea.value.trim();
+      const scoreInput = box.querySelector('[data-field="score"] input:checked');
+      if (kind === "review" && !scoreInput) {
+        box.querySelector('[data-field="score"] .field-error').textContent = "เลือกระดับคะแนน 1–4 ก่อนยืนยันตรวจ";
+        box.querySelector('[data-field="score"] input')?.focus(); return;
+      }
       if (kind === "return" && !text) {
         error.textContent = "บอกครูว่าต้องแก้อะไร เช่น ขอลิงก์โฟลเดอร์ผลงานของนักเรียนทุกคน";
         textarea.setAttribute("aria-invalid", "true"); textarea.focus(); return;
@@ -852,9 +889,11 @@ if (!session) {
       try {
         const ids = group.items.map(item => item.part?.id).filter(Boolean);
         if (kind === "return") await returnThemeWork(ids, text);
+        else if (kind === "review") await confirmThemeWorkReview(ids.filter(id => !group.items.find(item => item.part?.id === id)?.part.reviewed_at), scoreInput.value, text);
         else await setThemeWorkReviewNote(ids, text);
         composing = null;
-        toast(kind === "return" ? "ส่งกลับให้ครูแล้ว" : text ? "บันทึกข้อแนะนำแล้ว" : "ลบข้อแนะนำแล้ว");
+        toast(kind === "return" ? "ส่งกลับให้ครูแล้ว" : kind === "review" ? "ตรวจแล้ว · " + scoreInput.value + " ดาว"
+          : text ? "บันทึกความคิดเห็นแล้ว" : "ลบความคิดเห็นแล้ว");
         await load(true);
       } catch (error) { toast(error.message, false); }
       finally { button.textContent = oldLabel; setBusy(false); }

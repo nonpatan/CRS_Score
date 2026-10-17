@@ -8956,6 +8956,20 @@ export async function setThemeWorkReviewNote(partIds, note) {
   return data;
 }
 
+export const THEME_WORK_SCORE_LABELS = { 1:"ควรปรับปรุง", 2:"พอใช้", 3:"ดี", 4:"ดีมาก" };
+
+// ยืนยันตรวจ = คะแนน 1–4 (บังคับ · trigger บังคับซ้ำ) + ความคิดเห็น (ไม่บังคับ · ค่าว่าง = ลบ) ใน update เดียว
+export async function confirmThemeWorkReview(partIds, score, note) {
+  const value = Number(score);
+  if (!Number.isInteger(value) || value < 1 || value > 4) throw new Error("ให้คะแนน 1–4 ก่อนยืนยันตรวจ");
+  if (!partIds?.length) return [];
+  const { data, error } = await sb.from("theme_work_parts")
+    .update({ reviewed_at: new Date().toISOString(), review_score: value, review_note: String(note || "").trim() || null })
+    .in("id", partIds).select("*");
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function setThemeWorkReviewed(partIds, reviewed) {
   if (!partIds?.length) return [];
   const { data, error } = await sb.from("theme_work_parts")
