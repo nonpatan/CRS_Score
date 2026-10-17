@@ -4774,8 +4774,8 @@ export function pickMyDashboardAlerts({
   if (themeWork) alerts.push({
     text: themeWork.text,
     href: `academic/theme-works.html?term=${encodeURIComponent(themeWork.term)}`,
-    linkLabel: "ไปส่งผลงาน",
-    kind: themeWork.overdue ? "ค้าง" : "รอคุณ"
+    linkLabel: themeWork.returned?.length ? "ไปแก้ผลงาน" : "ไปส่งผลงาน",
+    kind: themeWork.overdue && !themeWork.returned?.length ? "ค้าง" : "รอคุณ"
   });
 
   if (isApprover && pendingApprovals > 0) {
@@ -8636,6 +8636,14 @@ export function buildThemeWorkUnits({ subjects = [], members = [], works = [], p
     });
 }
 
+// ส่งกลับให้แก้ (รอบ 8): "pending" = รอครูแก้ · "fixed" = ครูแก้แล้ว รอตรวจ · null = ไม่ได้ถูกส่งกลับ / ตรวจแล้ว
+// 🔑 นิยามเดียวกับ my_theme_work_returns ใน schema.sql — แก้ที่หนึ่งต้องแก้อีกที่
+export function themeWorkReturnState(part) {
+  if (!part?.returned_at || part.reviewed_at) return null;
+  const returned = Date.parse(part.returned_at), fixed = Date.parse(part.resubmitted_at || "");
+  return Number.isFinite(fixed) && fixed >= returned ? "fixed" : "pending";
+}
+
 export function groupThemeWorkByOwner(units) {
   const groups = [];
   for (const unit of units || []) {
@@ -8649,12 +8657,14 @@ export function groupThemeWorkByOwner(units) {
       const submitted = items.filter(item => item.part);
       const statuses = new Set(submitted.map(item => item.part.status));
       const reviewedCount = items.filter(item => item.part?.reviewed_at).length;
+      const returnStates = items.map(item => themeWorkReturnState(item.part));
       const dates = submitted.map(item => item.part.submitted_at).filter(Boolean).sort();
       groups.push({ key:`${unit.subject.id}:${ownerId || "unknown"}`, unit, ownerId, items,
         status:submitted.length === 0 ? "missing"
           : submitted.length !== items.length || statuses.size !== 1 ? "mixed" : submitted[0].part.status,
         submittedAt:dates[0] || null,
-        reviewed:reviewedCount === items.length ? "all" : reviewedCount ? "some" : "none" });
+        reviewed:reviewedCount === items.length ? "all" : reviewedCount ? "some" : "none",
+        returned:returnStates.includes("pending") ? "pending" : returnStates.includes("fixed") ? "fixed" : null });
     }
   }
   return groups;
@@ -8734,8 +8744,31 @@ export function pickThemeWorkReminder({ windows = [], units = [], userId, today,
     text:`ยังไม่ส่งผลงานตามธีม ${countText} · ${dueText}` };
 }
 
+// รวมงานที่ฝ่ายวิชาการส่งกลับเข้ากับคำเตือนใกล้ปิดรับ — แถบเดียว · ส่งกลับขึ้นก่อนและเป็นสีแดงเสมอ
+export function mergeThemeWorkReturns(reminder, returned = []) {
+  const rows = [...new Map((returned || []).filter(row => row?.subject_id)
+    .map(row => [`${row.subject_id}:${row.term}`, row])).values()];
+  if (!rows.length) return reminder || null;
+  const dueText = reminder ? ` · ${String(reminder.text).replace(/^ยังไม่ส่งผลงานตามธีม /, "ยังไม่ส่ง ")}` : "";
+  return { term:String(rows[0].term), dueDate:reminder?.dueDate ?? null, days:reminder?.days ?? null,
+    overdue:true, returned:rows,
+    items:[...rows.map(row => ({ unitSubject:{ id:row.subject_id, code:row.code, name:row.name },
+      subject:{ id:row.subject_id, code:row.code, name:row.name } })), ...(reminder?.items || [])],
+    text:`ฝ่ายวิชาการส่งผลงานตามธีมกลับให้แก้ ${rows.length} วิชา${dueText}` };
+}
+
+// งานที่ถูกส่งกลับต้องเตือนทุกวัน ไม่ขึ้นกับวันปิดรับ → RPC 1 ครั้งเสมอ คู่ขนานกับคำเตือนเดิม
 export async function loadMyThemeWorkReminder({ year, userId, today } = {}) {
   if (!year || !userId || !today) return null;
+  const [due, returnsRes] = await Promise.all([
+    loadThemeWorkDueReminder({ year, userId, today }),
+    sb.rpc("my_theme_work_returns", { p_year: year })
+  ]);
+  if (returnsRes?.error) throw new Error("โหลดผลงานที่ถูกส่งกลับไม่สำเร็จ: " + returnsRes.error.message);
+  return mergeThemeWorkReturns(due, returnsRes?.data || []);
+}
+
+async function loadThemeWorkDueReminder({ year, userId, today } = {}) {
   const { data:windows, error:windowError } = await sb.from("theme_work_windows")
     .select("year,term,open_date,due_date").eq("year", year);
   if (windowError) throw new Error("โหลดกำหนดส่งผลงานไม่สำเร็จ: " + windowError.message);
@@ -8799,7 +8832,7 @@ export async function loadMyThemeWorkReminder({ year, userId, today } = {}) {
 
 export function summarizeThemeWorks(units) {
   const result = { total: 0, missing: 0, match: 0, adjust: 0, none: 0,
-    unreviewed: 0, reviewed: 0, late: 0, missingTeachers: 0 };
+    unreviewed: 0, reviewed: 0, late: 0, returned: 0, missingTeachers: 0 };
   const teachers = new Set();
   for (const unit of units || []) for (const item of unit.parts || []) {
     result.total++;
@@ -8812,6 +8845,7 @@ export function summarizeThemeWorks(units) {
     if (part.status in result && ["match", "adjust", "none"].includes(part.status)) result[part.status]++;
     if (part.reviewed_at) result.reviewed++;
     else result.unreviewed++;
+    if (themeWorkReturnState(part) === "pending") result.returned++;
     if (themeWorkLateDays(part.submitted_at, unit.dueDate)) result.late++;
   }
   result.missingTeachers = teachers.size;
@@ -8896,6 +8930,28 @@ export async function saveThemeWorkWindow({ year, term, openDate, dueDate }) {
   const { data, error } = await sb.from("theme_work_windows").upsert({
     year, term, open_date: openDate, due_date: dueDate
   }, { onConflict: "year,term" }).select("*").single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// ส่งกลับให้แก้: trigger ใส่เวลา/ชื่อผู้ส่งกลับ และปลดตรวจเอง · เหตุผลว่างไม่ยิง (check ในฐานบังคับซ้ำ)
+export async function returnThemeWork(partIds, note) {
+  const text = String(note || "").trim();
+  if (!text) throw new Error("บอกครูว่าต้องแก้อะไร");
+  if (!partIds?.length) return [];
+  const { data, error } = await sb.from("theme_work_parts")
+    .update({ returned_at: new Date().toISOString(), return_note: text })
+    .in("id", partIds).select("*");
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+// ข้อแนะนำสำหรับเทอมหน้า · ไม่ปลดล็อก · ค่าว่าง = ลบข้อแนะนำ
+export async function setThemeWorkReviewNote(partIds, note) {
+  if (!partIds?.length) return [];
+  const { data, error } = await sb.from("theme_work_parts")
+    .update({ review_note: String(note || "").trim() || null })
+    .in("id", partIds).select("*");
   if (error) throw new Error(error.message);
   return data;
 }

@@ -67,6 +67,23 @@ button:disabled { opacity:.55; cursor:default; }
 .pill.none,.pill.missing,.pill.late { background:var(--amber-soft); color:var(--amber); border-color:var(--amber-soft); }
 .pill.late { background:var(--white); border-color:var(--amber); }
 .pill.mixed { background:var(--amber-soft); color:var(--amber); border-color:var(--amber-soft); }
+.pill.returned { background:var(--danger-soft); color:var(--danger); border-color:var(--danger-soft); }
+.pill.fixed { background:var(--bg); color:var(--muted); }
+.feedback { margin:10px 0; padding:10px 12px; border-left:4px solid var(--line); border-radius:8px; background:var(--bg); overflow-wrap:anywhere; }
+.feedback strong { display:flex; align-items:center; gap:4px; }
+.feedback p { margin:4px 0 0; white-space:pre-wrap; }
+.feedback small { display:block; margin-top:4px; color:var(--muted); font-size:13px; }
+.feedback.return { background:var(--danger-soft); border-color:var(--danger); }
+.feedback.return strong { color:var(--danger); }
+.feedback.advice { background:var(--note); border-color:var(--teal); }
+.feedback.advice strong { color:var(--teal); }
+.feedback.past { color:var(--muted); }
+.danger-line { background:var(--white); color:var(--danger); border:1px solid var(--danger); }
+.text-btn { background:none; color:var(--teal); padding:4px 0; font-weight:600; }
+.review-compose { grid-column:1/-1; border-top:1px dashed var(--line); padding-top:12px; }
+.review-compose .field { margin-bottom:8px; }
+.review-compose .actions { margin-top:8px; }
+.review-pending.returned { color:var(--danger); font-weight:700; }
 .member-chips { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0; }
 .member-chip { display:inline-block; max-width:100%; overflow-wrap:anywhere; padding:3px 9px; border-radius:99px; background:var(--bg); border:1px solid var(--line); font-size:14px; }
 .grade-heading { margin:20px 0 8px; padding-left:10px; border-left:3px solid var(--line); font-weight:700; }
@@ -246,8 +263,9 @@ import {
   sb, requireAuth, signOut, getActiveYear, getAcademicYears, academicYearOf, academicTermOf,
   bangkokNow, toDateStr, thaiShortDateText, bindDatePickOnly, DATE_PICK_ONLY_NOTE, GRADE_ORDER,
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
-  validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed
-} from "../supabase-client.js?v=20261017-1";
+  validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed,
+  themeWorkReturnState, returnThemeWork, setThemeWorkReviewNote
+} from "../supabase-client.js?v=20261017-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -263,24 +281,29 @@ if (!session) {
   const dateTime = value => value ? new Date(value).toLocaleString("th-TH", {
     dateStyle:"medium", timeStyle:"short", timeZone:"Asia/Bangkok"
   }) : "—";
-  const statusText = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ" };
+  const statusText = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ",
+    returned:"ส่งกลับให้แก้", fixed:"แก้แล้ว · รอตรวจ" };
   const statusIcon = status => {
     const paths = {
       match:'<path d="m5 12 4 4L19 6"/>',
       adjust:'<path d="M20 11a8 8 0 1 1-2.4-5.7M20 4v7h-7"/>',
       none:'<path d="M9 5v14M15 5v14"/>',
-      waiting:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+      waiting:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      returned:'<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+      fixed:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
     };
     return paths[status] ? '<svg class="status-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[status] + '</svg>' : '';
   };
   const pill = status => '<span class="pill ' + esc(status || "missing") + '">' + statusIcon(status) + statusText[status || "missing"] + '</span>';
   const teacherProgressText = totals => 'ส่งแล้ว ' + totals.sent + '/' + totals.total +
-    (totals.sent ? ' · ตรวจแล้ว ' + totals.reviewed + '/' + totals.sent : '');
+    (totals.sent ? ' · ตรวจแล้ว ' + totals.reviewed + '/' + totals.sent : '') +
+    (totals.returned ? ' · รอแก้ ' + totals.returned : '');
   const nameOf = id => profiles.get(id) || "ไม่พบชื่อครู";
   const today = () => toDateStr(bangkokNow());
   let year, term, years, data, units = [], workGroups = [], ownGroups = [], selectedKey = "", activeView = "mine", filter = "all";
   let isViewer = false, isReviewer = false, busy = false;
   let teacherOpenState = null;
+  let composing = null; // { key, kind:"return" | "advice" } กล่องเขียนความเห็นที่กางอยู่ในแถว
   const profiles = new Map();
   const toast = (message, ok = true) => {
     const box = el("toast"); box.textContent = message; box.className = "toast show" + (ok ? " ok" : " err");
@@ -298,19 +321,37 @@ if (!session) {
   const childChips = group => group.unit.kind === "integrated"
     ? '<div class="meta">ส่วนของฉัน ' + group.items.length + ' วิชาย่อย:</div><div class="member-chips">' +
       group.items.map(item => '<span class="member-chip">' + subjectTitle(item.subject) + '</span>').join("") + '</div>' : "";
+  // ความเห็นฝ่ายวิชาการของกลุ่ม: ส่วนแรกที่มีค่า (ครูคนเดียวส่งครอบหลายวิชาย่อยได้ค่าเดียวกัน)
+  const returnPart = group => group.items.map(item => item.part).find(part => part?.return_note && themeWorkReturnState(part)) || null;
+  const advicePart = group => group.items.map(item => item.part).find(part => String(part?.review_note || "").trim()) || null;
+  function feedbackBoxes(group) {
+    let html = "";
+    const back = returnPart(group);
+    if (back && group.returned === "pending") html += '<div class="feedback return" role="note"><strong>' + statusIcon("returned") +
+      'ฝ่ายวิชาการส่งกลับให้แก้</strong><p>' + esc(back.return_note) + '</p><small>' +
+      esc(back.returned_by_name || "ฝ่ายวิชาการ") + ' · ' + esc(dateTime(back.returned_at)) + ' · แก้แล้วกดบันทึก ระบบส่งให้ตรวจอีกครั้ง</small></div>';
+    else if (back) html += '<div class="feedback past"><strong>เคยส่งกลับให้แก้</strong><p>' + esc(back.return_note) +
+      '</p><small>คุณแก้แล้วเมื่อ ' + esc(dateTime(back.resubmitted_at)) + ' · รอฝ่ายวิชาการตรวจ</small></div>';
+    const advice = advicePart(group);
+    if (advice) html += '<div class="feedback advice" role="note"><strong>ข้อแนะนำจากฝ่ายวิชาการ · ใช้เทอมหน้า</strong><p>' +
+      esc(advice.review_note) + '</p></div>';
+    return html;
+  }
   const setBusy = value => { busy = value; document.querySelectorAll("[data-action]").forEach(button => button.disabled = value); };
 
   function renderProgress() {
     const sent = ownGroups.filter(group => !["missing", "mixed"].includes(group.status)).length;
     const counts = { match:0, adjust:0, none:0, missing:0, mixed:0 };
     ownGroups.forEach(group => counts[group.status]++);
+    const returnedCount = ownGroups.filter(group => group.returned === "pending").length;
     const countdown = themeWorkCountdown(today(), data.window);
     el("progress").innerHTML = '<div class="row"><strong>ส่งแล้ว ' + sent + ' จาก ' + ownGroups.length + ' รายการ</strong><span>' +
       (countdown ? esc(countdown) : "ฝ่ายวิชาการยังไม่ได้ตั้งวันปิดรับ · ยังส่งได้") +
       '</span></div><div class="progress-line" aria-hidden="true"><span style="width:' +
       (ownGroups.length ? Math.round(sent / ownGroups.length * 100) : 0) + '%"></span></div>' +
       '<div class="meta">ตรงธีม ' + counts.match + ' · ปรับจากธีม ' + counts.adjust +
-      ' · ยังไม่ได้ทำ ' + counts.none + ' · ส่งไม่ครบ ' + counts.mixed + ' · ยังไม่ส่ง ' + counts.missing + '</div>';
+      ' · ยังไม่ได้ทำ ' + counts.none + ' · ส่งไม่ครบ ' + counts.mixed + ' · ยังไม่ส่ง ' + counts.missing +
+      (returnedCount ? ' · <strong style="color:var(--danger)">ส่งกลับให้แก้ ' + returnedCount + '</strong>' : '') + '</div>';
   }
 
   function renderForm(group, variant) {
@@ -359,11 +400,13 @@ if (!session) {
     const late = themeWorkLateDays(group.submittedAt, data.window?.due_date);
     const locked = group.reviewed !== "none", editOpen = (group.status === "missing" || group.status === "mixed" || group.editing) && !locked;
     let html = '<article class="card own-card" data-own="' + esc(group.key) + '"><div class="row"><h3 class="subject-title">' +
-      groupTitle(group) + '</h3>' + pill(group.status) + '</div><div class="meta subject-meta">' +
+      groupTitle(group) + '</h3><span class="row" style="gap:6px">' + pill(group.status) +
+      (group.returned ? pill(group.returned === "pending" ? "returned" : "fixed") : '') + '</span></div><div class="meta subject-meta">' +
       esc(unit.subject.grade_level || "") + (unit.kind === "integrated" ? " · บูรณาการ" : " · พื้นฐาน") + '</div>' + childChips(group);
     if (otherCount(group)) html += '<p class="hint">วิชาย่อยของครูคนอื่นอีก ' + otherCount(group) + ' วิชา · ส่งแยกเอง</p>';
     if (part) {
       html += '<div class="meta">ส่งเมื่อ ' + esc(dateTime(group.submittedAt)) + (late ? ' · <span class="pill late">ส่งช้า ' + late + ' วัน</span>' : "") + '</div>';
+      html += feedbackBoxes(group);
       if (!editOpen) {
         html += '<div class="work-value"><strong>' + (part.status === "none" ? "ผลงานตามธีม (ยังไม่ได้ทำ)" : "ผลงาน") +
           '</strong>' + esc(part.work_name || "") + '</div><div class="links"><span>เอกสารธีม ' + safeLink(part.theme_url) +
@@ -376,8 +419,10 @@ if (!session) {
       html += '<div class="row"><span class="lockline">' +
         (group.reviewed === "some" ? 'ฝ่ายวิชาการตรวจแล้วบางวิชา · ถ้าต้องแก้ ขอฝ่ายวิชาการเปิดให้' :
           group.reviewed === "all" ? statusIcon("match") + 'ฝ่ายวิชาการตรวจแล้ว · แก้ไม่ได้' :
+            group.returned === "pending" ? statusIcon("returned") + 'ฝ่ายวิชาการส่งกลับ · กดแก้ผลงานตามที่แจ้ง' :
             statusIcon("waiting") + 'รอฝ่ายวิชาการตรวจ · แก้ได้จนกว่าจะตรวจ') +
-        '</span>' + (!locked && !editOpen ? '<button class="line-btn" type="button" data-action="edit" data-group="' +
+        '</span>' + (!locked && !editOpen ? '<button class="' + (group.returned === "pending" ? "primary" : "line-btn") +
+        '" type="button" data-action="edit" data-group="' +
         esc(group.key) + '">แก้ผลงาน</button>' : "") + '</div>';
     }
     if (editOpen) html += renderForm(group, variant);
@@ -393,6 +438,7 @@ if (!session) {
     }
     const sorted = ownGroups.slice().sort((a,b) =>
       GRADE_ORDER.indexOf(a.unit.subject.grade_level) - GRADE_ORDER.indexOf(b.unit.subject.grade_level) ||
+      (a.returned === "pending" ? 0 : 1) - (b.returned === "pending" ? 0 : 1) ||
       String(a.unit.subject.code || "").localeCompare(String(b.unit.subject.code || ""), "th"));
     const grades = [...new Set(sorted.map(group => group.unit.subject.grade_level))];
     el("mobile-units").innerHTML = grades.map(grade => {
@@ -400,13 +446,15 @@ if (!session) {
       return '<div class="grade-heading">' + esc(grade || "ไม่ระบุชั้น") + ' · ' + rows.length + ' รายการ</div>' +
         rows.map(group => renderItem(group, "mobile")).join("");
     }).join("");
-    if (!sorted.some(group => group.key === selectedKey)) selectedKey = (sorted.find(group => ["missing", "mixed"].includes(group.status)) || sorted[0]).key;
+    if (!sorted.some(group => group.key === selectedKey)) selectedKey = (sorted.find(group => group.returned === "pending") ||
+      sorted.find(group => ["missing", "mixed"].includes(group.status)) || sorted[0]).key;
     el("master-list").innerHTML = grades.map(grade => {
       const rows = sorted.filter(group => group.unit.subject.grade_level === grade);
       return '<div class="grade-heading">' + esc(grade || "ไม่ระบุชั้น") + ' · ' + rows.length + ' รายการ</div>' +
         rows.map(group => '<button type="button" data-action="select" data-group="' + esc(group.key) +
         '" aria-current="' + (group.key === selectedKey) + '">' + groupTitle(group) +
-        '<small>' + statusIcon(group.status) + statusText[group.status] + '</small></button>').join("");
+        '<small>' + (group.returned === "pending" ? '<span style="color:var(--danger)">' + statusIcon("returned") + statusText.returned + '</span>'
+          : statusIcon(group.status) + statusText[group.status]) + '</small></button>').join("");
     }).join("");
     const selected = sorted.find(group => group.key === selectedKey);
     el("detail").innerHTML = renderItem(selected, "desktop");
@@ -451,13 +499,45 @@ if (!session) {
     const done = group.reviewed === "all" ? '<div class="review-done">' + statusIcon("match") + 'ตรวจแล้ว <small>· ' +
       esc(reviewedBy) + ' ' + esc(reviewShortDate(reviewer?.reviewed_at)) + '</small></div>' :
       group.reviewed === "some" ? '<div class="review-pending">ตรวจแล้ว ' + reviewedCount + '/' + total + ' วิชาย่อย</div>' :
+      group.returned === "pending" ? '<div class="review-pending returned">ส่งกลับแล้ว · รอครูแก้</div>' :
+      group.returned === "fixed" ? '<div class="review-pending">ครูแก้แล้ว · รอตรวจ</div>' :
       '<div class="review-pending">ยังไม่ตรวจ</div>';
     if (!isReviewer) return done;
     const action = (reviewed, label, className) => '<button class="' + className + '" type="button" data-action="review" data-group="' +
       esc(group.key) + '" data-reviewed="' + reviewed + '">' + label + '</button>';
-    if (group.reviewed === "all") return done + action(true, "เปิดให้แก้", "line-btn");
+    const open = kind => composing?.key === group.key && composing.kind === kind;
+    const compose = (kind, label, className) => '<button class="' + className + '" type="button" data-action="compose" data-kind="' +
+      kind + '" data-group="' + esc(group.key) + '" aria-expanded="' + open(kind) + '">' + label + '</button>';
+    const sendBack = group.returned === "pending" ? "" : compose("return", "ส่งกลับให้แก้", "danger-line");
+    const advice = compose("advice", advicePart(group) ? "แก้ข้อแนะนำ" : "+ ข้อแนะนำ", "text-btn");
+    if (group.reviewed === "all") return done + action(true, "เปิดให้แก้", "line-btn") + sendBack + advice;
     const confirm = action(false, "ยืนยันตรวจแล้ว", "primary");
-    return group.reviewed === "some" ? done + confirm + action(true, "เปิดให้แก้", "line-btn") : confirm;
+    return (group.reviewed === "some" || group.returned ? done : "") + confirm +
+      (group.reviewed === "some" ? action(true, "เปิดให้แก้", "line-btn") : "") + sendBack + advice;
+  }
+  function renderCompose(group) {
+    if (!isReviewer || composing?.key !== group.key) return "";
+    const isReturn = composing.kind === "return", id = "compose-" + group.key.replace(/[^a-zA-Z0-9_-]/g, "-");
+    return '<div class="review-compose" data-compose="' + esc(group.key) + '"><div class="field"><label for="' + id + '">' +
+      (isReturn ? "บอกครูว่าต้องแก้อะไร *" : "ข้อแนะนำสำหรับเทอมหน้า (ไม่บังคับ)") + '</label><textarea id="' + id +
+      '" rows="3" aria-describedby="' + id + '-hint ' + id + '-error" placeholder="' +
+      (isReturn ? "เช่น ส่งผลงานนักเรียนมาคนเดียว ขอลิงก์โฟลเดอร์ผลงานของนักเรียนทุกคน" : "เช่น เทอมหน้าลองให้นักเรียนนำเสนอผลงานหน้าชั้น") + '">' +
+      (isReturn ? "" : esc(advicePart(group)?.review_note || "")) + '</textarea><p class="hint" id="' + id + '-hint">' +
+      (isReturn ? "ครูเห็นข้อความนี้ในการ์ดและแถบเตือนหน้าเช็คชื่อ · ส่งกลับแล้วงานนี้กลับเป็นยังไม่ตรวจ"
+        : "ครูอ่านได้ในการ์ด · ไม่ปลดล็อก · บันทึกค่าว่าง = ลบข้อแนะนำ") + '</p><div class="field-error" id="' + id +
+      '-error" role="alert"></div></div><div class="actions"><button class="line-btn" type="button" data-action="compose-cancel" data-group="' +
+      esc(group.key) + '">ยกเลิก</button><button class="' + (isReturn ? "danger-line" : "primary") +
+      '" type="button" data-action="compose-save" data-group="' + esc(group.key) + '">' + (isReturn ? "ส่งกลับให้ครู" : "บันทึกข้อแนะนำ") +
+      '</button></div></div>';
+  }
+  function reviewFeedback(group, noteId) {
+    const box = (id, label, text) => '<div class="review-note"><span class="review-note-label">' + label + '</span>' +
+      '<div class="review-note-content" id="' + id + '">' + esc(text) + '</div>' +
+      '<button class="review-more" type="button" data-action="note" aria-expanded="false" aria-controls="' + id + '" hidden>อ่านทั้งหมด</button></div>';
+    const back = returnPart(group), advice = advicePart(group);
+    return (back ? box(noteId + "-r", "ส่งกลับ " + reviewShortDate(back.returned_at) +
+        (group.returned === "fixed" ? " · ครูแก้แล้ว " + reviewShortDate(back.resubmitted_at) : " · รอครูแก้"), back.return_note) : "") +
+      (advice ? box(noteId + "-a", "ข้อแนะนำ (เทอมหน้า)", advice.review_note) : "");
   }
   function renderReviewRow(group, noteId) {
     const unit = group.unit, part = firstPart(group);
@@ -467,18 +547,20 @@ if (!session) {
     const late = themeWorkLateDays(group.submittedAt, data.window?.due_date);
     return '<article class="row' + (group.reviewed === "all" ? ' reviewed' : '') + '"><div class="review-main">' +
       '<div class="review-title"><strong>' + groupTitle(group) + '</strong><span class="review-grade">' +
-      esc(unit.subject.grade_level || "") + '</span>' + pill(group.status) + '</div>' +
+      esc(unit.subject.grade_level || "") + '</span>' + pill(group.status) +
+      (group.returned ? pill(group.returned === "pending" ? "returned" : "fixed") : '') + '</div>' +
       (unit.kind === "integrated" ? '<div class="meta">วิชาย่อย: ' + group.items.map(item => subjectTitle(item.subject)).join(' · ') + '</div>' : '') +
       (works.length ? '<ul class="review-works">' + works.map(line => '<li>' + esc(line) + '</li>').join("") + '</ul>' : '') +
       (note || plan ? '<div class="review-note"><span class="review-note-label">' + noteLabel + '</span>' +
         '<div class="review-note-content" id="' + noteId + '">' + esc(note) +
         (plan ? '<span>แผนต่อ: ' + esc(plan) + '</span>' : '') + '</div>' +
         '<button class="review-more" type="button" data-action="note" aria-expanded="false" aria-controls="' + noteId + '" hidden>อ่านทั้งหมด</button></div>' : '') +
+      reviewFeedback(group, noteId) +
       '<div class="review-meta">ส่ง ' + esc(dateTime(group.submittedAt)) + (late ? ' · ส่งช้า ' + late + ' วัน' : '') + '</div>' +
       '</div><div class="review-side">' + reviewLink(part?.theme_url, "เอกสารธีม") +
       (firstLinkedPart(group) ? reviewLink(firstLinkedPart(group).work_url, "ผลงาน") : '') +
       (missingWorkUrl(group) ? '<span class="review-no-link">ไม่มีลิงก์ผลงาน</span>' : '') +
-      '<hr>' + reviewAction(group) + '</div></article>';
+      '<hr>' + reviewAction(group) + '</div>' + renderCompose(group) + '</article>';
   }
   function renderMissingReviewRows(rows) {
     if (!rows.length) return "";
@@ -488,12 +570,14 @@ if (!session) {
         '</span></span>').join("") + '</div></div>';
   }
   function selectThemeWorkReviewGroups(entries, selectedFilter, nameFor) {
-    const matching = entries.filter(group => selectedFilter === "all" || group.items.some(item => selectedFilter === "unreviewed"
-      ? item.part && !item.part.reviewed_at : (item.part?.status || "missing") === selectedFilter));
+    const matching = entries.filter(group => selectedFilter === "all" || (selectedFilter === "returned" ? !!group.returned
+      : group.items.some(item => selectedFilter === "unreviewed"
+        ? item.part && !item.part.reviewed_at : (item.part?.status || "missing") === selectedFilter)));
     const groups = new Map(), teacherTotals = new Map();
     for (const group of entries) {
       const id = group.ownerId || "unknown";
-      const value = teacherTotals.get(id) || { total:0, missing:0, sent:0, reviewed:0 };
+      const value = teacherTotals.get(id) || { total:0, missing:0, sent:0, reviewed:0, returned:0 };
+      if (group.returned === "pending") value.returned++;
       value.total++; if (["missing", "mixed"].includes(group.status)) value.missing++;
       if (group.items.every(item => item.part)) value.sent++;
       if (group.reviewed === "all") value.reviewed++;
@@ -510,7 +594,7 @@ if (!session) {
     return { matching, groups, teacherTotals, teacherIds };
   }
   function buildThemeWorkPrintHtml({ review, summary, selectedFilter, term, year, dueDate, printedAt, printedBy, nameFor }) {
-    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ" };
+    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ", returned:"ส่งกลับ" };
     const statuses = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ" };
     const printDate = value => {
       if (!value) return "—";
@@ -539,9 +623,13 @@ if (!session) {
           (unit.kind === "integrated" ? '<br>วิชาย่อย: ' + group.items.map(item => subjectTitle(item.subject)).join(' · ') : "");
         const work = part ? '<span class="print-work-name">' + esc(part.work_name) + '</span><br>ลิงก์ผลงาน: ' +
           (firstLinkedPart(group) ? "มี" : "ไม่มี") : "—";
-        const notes = (part?.note ? esc(part.note) : "") + (part?.next_plan ? '<br>แผนต่อ: ' + esc(part.next_plan) : "");
+        const feedback = group.items.map(item => item.part).find(row => row?.return_note && group.returned)?.return_note ||
+          group.items.map(item => item.part).find(row => String(row?.review_note || "").trim())?.review_note || "";
+        const notes = (part?.note ? esc(part.note) : "") + (part?.next_plan ? '<br>แผนต่อ: ' + esc(part.next_plan) : "") +
+          (feedback ? '<br>ฝ่ายวิชาการ: ' + esc(feedback) : "");
         const late = themeWorkLateDays(group.submittedAt, dueDate);
-        const status = '<strong class="print-status-label">' + statuses[group.status] + '</strong>' +
+        const status = '<strong class="print-status-label">' + (group.returned === "pending" ? "ส่งกลับให้แก้"
+          : group.returned === "fixed" ? "แก้แล้ว รอตรวจ" : statuses[group.status]) + '</strong>' +
           (part ? '<br>ส่ง ' + esc(printDate(group.submittedAt)) + (late ? '<br>ส่งช้า ' + late + ' วัน' : "") +
             '<br>' + (group.reviewed === "all" ? "ตรวจแล้ว" : group.reviewed === "some" ? "ตรวจแล้วบางวิชา" : "ยังไม่ตรวจ") : "");
         html += '<tr><td>' + subject + '</td><td>' + work + '</td><td>' + status + '</td><td>' + notes + '</td></tr>';
@@ -569,11 +657,12 @@ if (!session) {
           '</span>' + pill(item.part?.status) + '</div>').join("") + '</div>').join("") + '</div>' :
         '<p class="empty">ไม่มีวิชาบูรณาการในภาคนี้</p>');
     const entries = workGroups, counts = {
-      all: sum.total, missing:sum.missing, match:sum.match, adjust:sum.adjust, none:sum.none, unreviewed:sum.unreviewed
+      all: sum.total, missing:sum.missing, match:sum.match, adjust:sum.adjust, none:sum.none, unreviewed:sum.unreviewed,
+      returned: units.reduce((total, unit) => total + unit.parts.filter(item => themeWorkReturnState(item.part)).length, 0)
     };
-    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ" };
+    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ", returned:"ส่งกลับ" };
     let html = '<div class="review-head"><h3>รายการตามครู</h3><span class="meta">ครูที่ค้าง ' + sum.missingTeachers +
-      ' คน · ตรวจแล้ว ' + sum.reviewed + ' · ส่งช้า ' + sum.late + '</span></div><div class="filters" role="group" aria-label="กรองสถานะ">';
+      ' คน · ตรวจแล้ว ' + sum.reviewed + ' · ส่งช้า ' + sum.late + (sum.returned ? ' · รอครูแก้ ' + sum.returned : '') + '</span></div><div class="filters" role="group" aria-label="กรองสถานะ">';
     for (const key of Object.keys(labels)) html += '<button type="button" data-action="filter" data-filter="' + key +
       '" aria-pressed="' + (filter === key) + '">' + labels[key] + ' <span class="filter-count">' + counts[key] + '</span></button>';
     const review = selectThemeWorkReviewGroups(entries, filter, nameOf);
@@ -582,7 +671,7 @@ if (!session) {
     const { groups, teacherTotals, teacherIds } = review;
     if (teacherOpenState === null) teacherOpenState = new Set(teacherIds.filter(id => {
       const t = teacherTotals.get(id);
-      return t.missing > 0 || t.sent !== t.total || t.reviewed !== t.sent;
+      return t.missing > 0 || t.sent !== t.total || t.reviewed !== t.sent || t.returned > 0;
     }));
     if (!teacherIds.length) html += '<p class="empty">ไม่มีรายการในตัวกรองนี้</p>';
     let noteIndex = 0;
@@ -644,7 +733,7 @@ if (!session) {
       workGroups = groupThemeWorkByOwner(units);
       ownGroups = workGroups.filter(group => group.ownerId === session.user.id);
       selectedKey = "";
-      if (!preserveReviewView) { filter = "all"; teacherOpenState = null; }
+      if (!preserveReviewView) { filter = "all"; teacherOpenState = null; composing = null; }
       render(); el("page").hidden = false;
       if (scrollY !== null) requestAnimationFrame(() => window.scrollTo(0, scrollY));
     } catch (error) {
@@ -735,6 +824,40 @@ if (!session) {
       renderMine();
       [...document.querySelectorAll('[data-action="edit"]')]
         .find(editButton => editButton.dataset.group === group.key && editButton.getClientRects().length)?.focus();
+      return;
+    }
+    if (button.dataset.action === "compose" || button.dataset.action === "compose-cancel") {
+      if (!isReviewer) return;
+      const key = button.dataset.group;
+      const closing = button.dataset.action === "compose-cancel" || (composing?.key === key && composing.kind === button.dataset.kind);
+      composing = closing ? null : { key, kind:button.dataset.kind };
+      renderAll();
+      if (composing) document.querySelector('[data-compose="' + CSS.escape(key) + '"] textarea')?.focus();
+      else document.querySelector('[data-action="compose"][data-group="' + CSS.escape(key) + '"]')?.focus();
+      return;
+    }
+    if (button.dataset.action === "compose-save") {
+      if (!isReviewer || !composing) return;
+      const box = button.closest(".review-compose"), textarea = box?.querySelector("textarea"), error = box?.querySelector(".field-error");
+      const group = workGroups.find(row => row.key === button.dataset.group);
+      if (!group || !textarea) return;
+      const kind = composing.kind, text = textarea.value.trim();
+      if (kind === "return" && !text) {
+        error.textContent = "บอกครูว่าต้องแก้อะไร เช่น ขอลิงก์โฟลเดอร์ผลงานของนักเรียนทุกคน";
+        textarea.setAttribute("aria-invalid", "true"); textarea.focus(); return;
+      }
+      const oldLabel = button.textContent;
+      button.textContent = "กำลังบันทึก…";
+      setBusy(true);
+      try {
+        const ids = group.items.map(item => item.part?.id).filter(Boolean);
+        if (kind === "return") await returnThemeWork(ids, text);
+        else await setThemeWorkReviewNote(ids, text);
+        composing = null;
+        toast(kind === "return" ? "ส่งกลับให้ครูแล้ว" : text ? "บันทึกข้อแนะนำแล้ว" : "ลบข้อแนะนำแล้ว");
+        await load(true);
+      } catch (error) { toast(error.message, false); }
+      finally { button.textContent = oldLabel; setBusy(false); }
       return;
     }
     if (button.dataset.action === "review") {
