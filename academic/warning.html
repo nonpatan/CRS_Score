@@ -388,13 +388,13 @@
 <script type="module">
   import {
     sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
-    getActiveStudents, loadGradeWeights, loadSubjectData, computeAttendanceRisk, isPrimaryGrade,
+    getActiveStudents, loadGradeWeights, loadSubjectsData, computeAttendanceRisk, isPrimaryGrade,
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, MS_MAKEUP_RATIO,
     getSetting, homeroomAuditRoomLabel, SCHOOL_LETTER_CSS, renderSchoolLetter,
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
     loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
     bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-  } from "../supabase-client.js?v=20261014-1";
+  } from "../supabase-client.js?v=20261017-1";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -996,6 +996,8 @@ function decorateWarningReport(total, grade, warnPercent) {
       const loadedSubjects = [];
       const sharedGradeWeights = await loadGradeWeights();
       // โหลดข้อมูลเฉพาะวิชาที่มีเด็กในห้องนี้ลงทะเบียน (หรือเป็นวิชาบูรณาการที่มีวิชาย่อย)
+      const subjectsToLoad = [];
+      const idsToLoad = [];
       for (const subj of subjects) {
         const hasEnrolls = enrollMap[subj.id] && enrollMap[subj.id].size > 0;
         const members = intMap[subj.id] || [];
@@ -1006,19 +1008,17 @@ function decorateWarningReport(total, grade, warnPercent) {
         }
 
         if (shouldLoad) {
-          const fullData = await loadSubjectData(subj.id, sharedGradeWeights);
-          // สำหรับวิชาบูรณาการ โหลดข้อมูลวิชาย่อยด้วย
-          let membersData = [];
-          if (subj.subject_type === 'บูรณาการ') {
-            for (const m of members) {
-              const mData = await loadSubjectData(m.member.id, sharedGradeWeights);
-              membersData.push({ subj: m.member, data: mData });
-            }
-          }
-          if (fullData) {
-            loadedSubjects.push({ subj, data: fullData, membersData });
-          }
+          subjectsToLoad.push({ subj, members });
+          idsToLoad.push(subj.id);
+          if (subj.subject_type === 'บูรณาการ') idsToLoad.push(...members.map(m => m.member.id));
         }
+      }
+      const dataById = await loadSubjectsData(idsToLoad, sharedGradeWeights);
+      for (const { subj, members } of subjectsToLoad) {
+        const membersData = subj.subject_type === 'บูรณาการ'
+          ? members.map(m => ({ subj: m.member, data: dataById.get(m.member.id) }))
+          : [];
+        loadedSubjects.push({ subj, data: dataById.get(subj.id), membersData });
       }
 
       flaggedStudents = [];

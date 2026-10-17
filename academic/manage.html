@@ -587,7 +587,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261014-1";
+import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261017-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1668,48 +1668,56 @@ btnCopyStructure.addEventListener("click", async () => {
     });
     if (!agreed || !currentSubject || currentSubject.id !== targetId || elCopySourceSubject.value !== sourceId) return;
 
+    const newUnits = [];
+    const newIndicators = [];
+    const newCollections = [];
     for (const unit of plan) {
-      try {
-        const { data: newUnit, error: unitError } = await sb.from("units")
-          .insert({
-            subject_id: targetId,
-            kind: unit.kind,
-            name: unit.name,
-            max_score: unit.max_score,
-            counts_score: unit.counts_score,
-            core_competency_id: unit.core_competency_id,
-            seq: unit.seq
-          })
-          .select("id").single();
-        if (unitError) throw new Error("สร้างหน่วยใหญ่ไม่สำเร็จ: " + unitError.message);
-
-        for (const indicator of unit.indicators) {
-          const { data: newIndicator, error: indicatorError } = await sb.from("indicators")
-            .insert({
-              unit_id: newUnit.id,
-              name: indicator.name,
-              max_score: indicator.max_score,
-              seq: indicator.seq,
-              counts_score: indicator.counts_score,
-              core_competency_element_id: indicator.core_competency_element_id
-            })
-            .select("id").single();
-          if (indicatorError) throw new Error("สร้างตัวชี้วัดไม่สำเร็จ: " + indicatorError.message);
-
-          const collection = indicator.collections[0];
-          const { error: collectionError } = await sb.from("collections").insert({
-            indicator_id: newIndicator.id,
-            seq: collection.seq,
-            max_score: collection.max_score
-          });
-          if (collectionError) throw new Error("สร้างครั้งที่ 1 ไม่สำเร็จ: " + collectionError.message);
-        }
-      } catch (error) {
-        showToast("ก๊อปหยุดที่หน่วยใหญ่ ‘" + unit.name + "’: " + error.message +
-          " · ของที่สร้างไปแล้วก่อนจุดนี้ยังอยู่ กรุณาตรวจแล้วลบเองหรือกดก๊อปซ้ำเพื่อเพิ่มต่อท้าย", false);
-        await loadStructure();
-        return;
+      const unitId = crypto.randomUUID();
+      newUnits.push({
+        id: unitId,
+        subject_id: targetId,
+        kind: unit.kind,
+        name: unit.name,
+        max_score: unit.max_score,
+        counts_score: unit.counts_score,
+        core_competency_id: unit.core_competency_id,
+        seq: unit.seq
+      });
+      for (const indicator of unit.indicators) {
+        const indicatorId = crypto.randomUUID();
+        newIndicators.push({
+          id: indicatorId,
+          unit_id: unitId,
+          name: indicator.name,
+          max_score: indicator.max_score,
+          seq: indicator.seq,
+          counts_score: indicator.counts_score,
+          core_competency_element_id: indicator.core_competency_element_id
+        });
+        const collection = indicator.collections[0];
+        newCollections.push({
+          indicator_id: indicatorId,
+          seq: collection.seq,
+          max_score: collection.max_score
+        });
       }
+    }
+
+    const newUnitIds = newUnits.map(unit => unit.id);
+    const { error: unitError } = await sb.from("units").insert(newUnits);
+    if (unitError) throw new Error("สร้างหน่วยใหญ่ไม่สำเร็จ: " + unitError.message);
+    try {
+      const { error: indicatorError } = await sb.from("indicators").insert(newIndicators);
+      if (indicatorError) throw new Error("สร้างตัวชี้วัดไม่สำเร็จ: " + indicatorError.message);
+      const { error: collectionError } = await sb.from("collections").insert(newCollections);
+      if (collectionError) throw new Error("สร้างครั้งที่ 1 ไม่สำเร็จ: " + collectionError.message);
+    } catch (error) {
+      const { error: rollbackError } = await sb.from("units").delete().in("id", newUnitIds);
+      await loadStructure();
+      showToast(rollbackError
+        ? "ก๊อปไม่สำเร็จ: " + error.message + " · ของที่สร้างไปแล้วก่อนจุดนี้ยังอยู่ กรุณาตรวจแล้วลบเอง"
+        : "ก๊อปไม่สำเร็จ: " + error.message + " · ยกเลิกสิ่งที่สร้างแล้ว", false);
+      return;
     }
 
     await loadStructure();

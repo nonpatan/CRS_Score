@@ -2014,6 +2014,10 @@ function gradeWeightFor(subj, gradeWeights) {
   return weight;
 }
 
+const SUBJECT_UNITS_SELECT = "*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(student_id, raw_score)))";
+const SUBJECT_SESSIONS_SELECT = "*, attendance_records(*)";
+const SUBJECT_EXAM_SCORES_SELECT = "id, subject_id, student_id, half, raw_score, updated_at";
+
 export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
   const weightsPromise = sharedGradeWeights
     ? Promise.resolve({ data: sharedGradeWeights, error: null })
@@ -2024,17 +2028,17 @@ export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
   const [subjectResult, unitResult, remarkResult, sessionResult, makeupResult, examResult, weightsResult] = await Promise.all([
     sb.from("subjects").select("*").eq("id", subjectId).single(),
     sb.from("units")
-      .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,collections(*, scores(student_id, raw_score)))")
+      .select(SUBJECT_UNITS_SELECT)
       .eq("subject_id", subjectId)
       .order("seq")
       .order("seq", { referencedTable: "indicators" })
       .order("seq", { referencedTable: "indicators.collections" }),
     sb.from("remarks").select("*").eq("subject_id", subjectId),
     sb.from("attendance_sessions")
-      .select("*, attendance_records(*)")
+      .select(SUBJECT_SESSIONS_SELECT)
       .eq("subject_id", subjectId),
     sb.from("makeup_hours").select("*").eq("subject_id", subjectId),
-    sb.from("exam_scores").select("id, subject_id, student_id, half, raw_score, updated_at").eq("subject_id", subjectId),
+    sb.from("exam_scores").select(SUBJECT_EXAM_SCORES_SELECT).eq("subject_id", subjectId),
     weightsPromise
   ]);
   const namedResults = [
@@ -2058,6 +2062,79 @@ export async function loadSubjectData(subjectId, sharedGradeWeights = null) {
     examScores: examResult.data || [],
     gradeWeight: gradeWeightFor(subjectResult.data, gradeWeights)
   };
+}
+
+// รายงานหลายวิชาโหลดแต่ละตารางเป็นก้อน แล้วคืนรูปข้อมูลเดียวกับ loadSubjectData()
+export async function loadSubjectsData(subjectIds, sharedGradeWeights = null) {
+  const ids = [...new Set((subjectIds || []).map(id => String(id || "").trim()).filter(Boolean))];
+  const loaded = new Map();
+  if (ids.length === 0) return loaded;
+
+  const weightsPromise = sharedGradeWeights
+    ? Promise.resolve({ data: sharedGradeWeights, error: null })
+    : sb.from("grade_weights")
+      .select("year, level, collect_weight, exam_weight, updated_at")
+      .order("year")
+      .order("level");
+  const groupBySubject = rows => {
+    const grouped = new Map();
+    for (const row of (rows || [])) {
+      if (!grouped.has(row.subject_id)) grouped.set(row.subject_id, []);
+      grouped.get(row.subject_id).push(row);
+    }
+    return grouped;
+  };
+
+  for (let start = 0; start < ids.length; start += 40) {
+    const chunk = ids.slice(start, start + 40);
+    const [subjectResult, unitResult, remarkResult, sessionResult, makeupResult, examResult] = await Promise.all([
+      sb.from("subjects").select("*").in("id", chunk),
+      fetchAllRows(() => sb.from("units")
+        .select(SUBJECT_UNITS_SELECT)
+        .in("subject_id", chunk)
+        .order("seq", { referencedTable: "indicators" })
+        .order("seq", { referencedTable: "indicators.collections" }), ["seq", "id"]),
+      fetchAllRows(() => sb.from("remarks").select("*").in("subject_id", chunk), "id"),
+      fetchAllRows(() => sb.from("attendance_sessions")
+        .select(SUBJECT_SESSIONS_SELECT).in("subject_id", chunk), "id"),
+      fetchAllRows(() => sb.from("makeup_hours").select("*").in("subject_id", chunk), "id"),
+      fetchAllRows(() => sb.from("exam_scores")
+        .select(SUBJECT_EXAM_SCORES_SELECT).in("subject_id", chunk), "id")
+    ]);
+    const namedResults = [
+      ["รายวิชา", subjectResult], ["โครงสร้างคะแนน", unitResult],
+      ["สถานะ ร.", remarkResult], ["การเข้าเรียน", sessionResult],
+      ["ชั่วโมงชดเชย", makeupResult], ["คะแนนสอบ", examResult]
+    ];
+    const failed = namedResults.find(([, result]) => result.error);
+    if (failed) throw new Error("โหลด" + failed[0] + "ไม่สำเร็จ: " + failed[1].error.message);
+
+    const subjectsById = new Map((subjectResult.data || []).map(subject => [subject.id, subject]));
+    for (const id of chunk) {
+      if (!subjectsById.has(id)) throw new Error("โหลดรายวิชาไม่สำเร็จ: ไม่พบวิชา " + id);
+    }
+    const unitsBySubject = groupBySubject(unitResult.data);
+    const remarksBySubject = groupBySubject(remarkResult.data);
+    const sessionsBySubject = groupBySubject(sessionResult.data);
+    const makeupBySubject = groupBySubject(makeupResult.data);
+    const examsBySubject = groupBySubject(examResult.data);
+    for (const id of chunk) {
+      const subject = subjectsById.get(id);
+      loaded.set(id, {
+        subject,
+        units: unitsBySubject.get(id) || [],
+        remarksData: remarksBySubject.get(id) || [],
+        sessions: sessionsBySubject.get(id) || [],
+        makeupHours: makeupBySubject.get(id) || [],
+        examScores: examsBySubject.get(id) || []
+      });
+    }
+  }
+
+  const weightsResult = await weightsPromise;
+  if (weightsResult.error) throw new Error("โหลดอัตราส่วนคะแนนไม่สำเร็จ: " + weightsResult.error.message);
+  for (const data of loaded.values()) data.gradeWeight = gradeWeightFor(data.subject, weightsResult.data || []);
+  return loaded;
 }
 
 // ---------- คำนวณคะแนนของนักเรียน 1 คน ในวิชา 1 ตัว จากข้อมูลที่โหลดไว้แล้ว ----------
@@ -2585,8 +2662,7 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
   for (const id of memberSubjectIds) plainIdsToLoad.add(id);
 
   const gradeWeights = await loadGradeWeights();
-  const loadedData = new Map();
-  await Promise.all([...plainIdsToLoad].map(async id => { loadedData.set(id, await loadSubjectData(id, gradeWeights)); }));
+  const loadedData = await loadSubjectsData([...plainIdsToLoad], gradeWeights);
 
   const groupMembers = new Map(); // integrated_subject_id -> [member_subject_id, ...]
   for (const link of memberLinks) {
@@ -2596,14 +2672,19 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
 
   // รายชื่อนักเรียน = ผ่าน enrollments ของวิชาพื้นฐานเท่านั้น (วิชาบูรณาการไม่มี enrollments ของตัวเอง)
   const enrollSubjectIds = [...plainIdsToLoad];
-  const { data: enrollRows, error: enrollErr } = enrollSubjectIds.length
-    ? await sb.from("enrollments").select("student_id, subject_id, student:student_id(*)").in("subject_id", enrollSubjectIds)
-    : { data: [], error: null };
-  if (enrollErr) throw new Error("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + enrollErr.message);
+  const enrollRows = [];
+  for (let start = 0; start < enrollSubjectIds.length; start += 40) {
+    const chunk = enrollSubjectIds.slice(start, start + 40);
+    const { data, error } = await fetchAllRows(() => sb.from("enrollments")
+      .select("student_id, subject_id, student:student_id(*)")
+      .in("subject_id", chunk), ["subject_id", "student_id"]);
+    if (error) throw new Error("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + error.message);
+    enrollRows.push(...(data || []));
+  }
 
   const enrolledBySubject = new Map();
   const studentsMap = new Map();
-  for (const row of (enrollRows || [])) {
+  for (const row of enrollRows) {
     if (!enrolledBySubject.has(row.subject_id)) enrolledBySubject.set(row.subject_id, new Set());
     enrolledBySubject.get(row.subject_id).add(row.student_id);
     if (row.student) studentsMap.set(row.student_id, row.student);

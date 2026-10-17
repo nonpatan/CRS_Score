@@ -565,7 +565,7 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, getRosterForSubject,
-  loadGradeWeights, loadSubjectData, computeSubjectResult, computeIntegratedResult,
+  loadGradeWeights, loadSubjectData, loadSubjectsData, computeSubjectResult, computeIntegratedResult,
   computeStudentSubjectResults, computeGpa,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
@@ -573,7 +573,7 @@ import {
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting,
   loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr
-} from "../supabase-client.js?v=20261014-1";
+} from "../supabase-client.js?v=20261017-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -898,7 +898,8 @@ elSubject.addEventListener("change", async () => {
       .filter(m => m.member.owner_id === session.user.id)
       .map(m => m.member_subject_id));
     try {
-      memberDataList = await Promise.all(integrationMembers.map(m => loadSubjectData(m.member_subject_id, sharedGradeWeights)));
+      const membersById = await loadSubjectsData(integrationMembers.map(m => m.member_subject_id), sharedGradeWeights);
+      memberDataList = integrationMembers.map(m => membersById.get(m.member_subject_id));
     } catch (error) {
       showEmpty(error.message);
       return;
