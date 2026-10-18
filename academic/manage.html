@@ -1713,9 +1713,11 @@ btnCopyStructure.addEventListener("click", async () => {
       const { error: collectionError } = await sb.from("collections").insert(newCollections);
       if (collectionError) throw new Error("สร้างครั้งที่ 1 ไม่สำเร็จ: " + collectionError.message);
     } catch (error) {
-      const { error: rollbackError } = await sb.from("units").delete().in("id", newUnitIds);
+      // RLS/session หลุดอาจลบได้ 0 แถวโดยไม่มี error — นับแถวที่ลบได้จริง
+      const { data: rolledBack, error: rollbackError } = await sb.from("units").delete().in("id", newUnitIds).select("id");
+      const rollbackIncomplete = rollbackError || (rolledBack || []).length !== newUnitIds.length;
       await loadStructure();
-      showToast(rollbackError
+      showToast(rollbackIncomplete
         ? "ก๊อปไม่สำเร็จ: " + error.message + " · ของที่สร้างไปแล้วก่อนจุดนี้ยังอยู่ กรุณาตรวจแล้วลบเอง"
         : "ก๊อปไม่สำเร็จ: " + error.message + " · ยกเลิกสิ่งที่สร้างแล้ว", false);
       return;
