@@ -171,6 +171,12 @@
   .theme-metric strong { display:block; color:var(--ink); font-size:20px; line-height:1.2; }
   #theme-work-card .panel-head { align-items:flex-start; }
   #theme-work-card .panel-head .hint { text-align:right; }
+  .exam-group { border-bottom:1px solid var(--line); padding:11px 0; min-width:0; }
+  .exam-group:last-child { border-bottom:0; }
+  .exam-group h3 { margin:0 0 5px; font-size:15px; }
+  .exam-row { padding:5px 0; overflow-wrap:anywhere; }
+  .exam-row .meta { display:block; color:var(--muted); font-size:13px; }
+  #exam-close-more { min-height:44px; margin-top:8px; }
 
   .warn-note {
     background: var(--amber-soft); color: var(--amber); border-radius: 8px;
@@ -346,7 +352,7 @@
       <a href="retention.html">เรียนซ้ำชั้น</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261011-2"></script>
+    <script src="../app-shell.js?v=20261018-2"></script>
   </header>
 
   <main class="academic-content">
@@ -387,6 +393,11 @@
         <div class="panel-body" id="theme-work-body">กำลังโหลด…</div>
       </section>
 
+      <section class="card panel" id="exam-close-card" aria-labelledby="exam-close-title" hidden>
+        <div class="panel-head"><h2 class="panel-title" id="exam-close-title">ยังไม่ปิดคะแนนสอบ <span class="alert-count" id="exam-close-count"></span></h2><a class="item-link" id="exam-close-report-link" href="exam-close-report.html">รายงานเต็ม →</a></div>
+        <div class="panel-body" id="exam-close-body" role="status">กำลังโหลด…</div>
+      </section>
+
       <section class="card panel" aria-labelledby="coverage-title">
         <div class="panel-head"><h2 class="panel-title" id="coverage-title"><svg class="symbol" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>ความคืบหน้าการเช็คชื่อ</h2></div>
         <div class="panel-subtitle">คาบที่เช็คแล้ว เทียบคาบทั้งหมดของวิชา</div>
@@ -418,7 +429,7 @@ import {
   loadAcademicOverviewData, buildAcademicOverview,
   loadThemeWorkData, buildThemeWorkUnits, summarizeThemeWorks, themeWorkCountdown,
   themeWorkDaysLeft, THEME_WORK_REMINDER_LEAD_DAYS
-} from "../supabase-client.js?v=20261017-3";
+} from "../supabase-client.js?v=20261018-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -437,6 +448,10 @@ const elCoverage = document.getElementById("coverage-list");
 const elThemeCard = document.getElementById("theme-work-card");
 const elThemeBody = document.getElementById("theme-work-body");
 const elThemeDeadline = document.getElementById("theme-work-deadline");
+const elExamCard = document.getElementById("exam-close-card");
+const elExamBody = document.getElementById("exam-close-body");
+const elExamCount = document.getElementById("exam-close-count");
+let examExpanded = false;
 
 const PRIMARY_SETTING_KEY = "primary_absence_warn_percent";
 const PRIMARY_DEFAULT = 5;
@@ -937,6 +952,48 @@ async function loadThemeWorkOverview(year, term, today, isCurrentYear, generatio
   }
 }
 
+async function loadExamCloseOverview(year, generation) {
+  try {
+    themeViewerPromise ||= sb.rpc("theme_work_viewer").then(({ data, error }) => {
+      if (error) throw error;
+      return data === true;
+    });
+    const viewer = await themeViewerPromise;
+    if (generation !== themeLoadGeneration || !viewer) return;
+    elExamCard.hidden = false;
+    elExamBody.textContent = "กำลังโหลด…";
+    const { data, error } = await sb.rpc("exam_close_pending", { p_year: year, p_mine: false });
+    if (error) throw error;
+    if (generation !== themeLoadGeneration) return;
+    const rows = data || [];
+    elExamCount.textContent = rows.length + " วิชา";
+    document.getElementById("exam-close-report-link").href = "exam-close-report.html?year=" + encodeURIComponent(year);
+    if (!rows.length) { elExamBody.textContent = "ทุกวิชาที่มีคะแนนสอบปิดคะแนนสอบแล้ว"; return; }
+    const groups = new Map();
+    for (const row of rows) {
+      const key = String(row.owner_id || row.owner_name || "unknown");
+      if (!groups.has(key)) groups.set(key, { name: row.owner_name || "ไม่ระบุครู", subjects: [] });
+      groups.get(key).subjects.push(row);
+    }
+    const all = [...groups.values()];
+    const renderGroups = () => {
+      const shown = examExpanded ? all : all.slice(0, 5);
+      elExamBody.innerHTML = shown.map(({ name, subjects }) =>
+        "<section class='exam-group'><h3>" + esc(name) + " · " + subjects.length + " วิชา</h3>" +
+        subjects.map(row => "<div class='exam-row'><strong>" + esc([row.code, row.name].filter(Boolean).join(" ")) + "</strong><span class='meta'>" +
+          esc(row.grade_level || "ไม่ระบุชั้น") + " · " + (row.term ? "ภาค " + esc(row.term) : "ทั้งปี") + " · " +
+          (Number(row.exam_count) ? "มีคะแนนสอบ " + Number(row.exam_count) + " คน" : "ยังไม่มีคะแนนสอบ") +
+          (Number(row.r_count) ? " · ติด ร. " + Number(row.r_count) + " คน" : "") + "</span></div>").join("") + "</section>").join("") +
+        (!examExpanded && all.length > 5 ? "<button class='ghost' type='button' id='exam-close-more'>ดูทั้งหมด (" + all.length + " ครู)</button>" : "");
+      document.getElementById("exam-close-more")?.addEventListener("click", () => { examExpanded = true; renderGroups(); });
+    };
+    renderGroups();
+  } catch (error) {
+    if (generation !== themeLoadGeneration) return;
+    if (!elExamCard.hidden) elExamBody.textContent = "โหลดวิชาที่ยังไม่ปิดคะแนนสอบไม่สำเร็จ: " + (error.message || "ลองเปิดหน้าใหม่");
+  }
+}
+
 async function render() {
   const overview = buildAcademicOverview(cachedRaw, { primaryWarnPercent });
   const cells = classifyWatchRows(overview.flaggedRows);
@@ -973,6 +1030,8 @@ async function loadYear(year) {
   if (!year) return;
   const generation = ++themeLoadGeneration;
   themeInfo = null;
+  examExpanded = false;
+  elExamCard.hidden = true;
   readinessContext = null;
   elThemeCard.hidden = true;
   showState("กำลังประมวลผลข้อมูลทั้งปีการศึกษา…");
@@ -992,6 +1051,7 @@ async function loadYear(year) {
   const isCurrentYear = String(year) === String(academicYearOf(today, datedYears));
   const term = isCurrentYear ? academicTermOf(today, datedYears) || "1" : "2";
   void loadThemeWorkOverview(year, term, today, isCurrentYear, generation);
+  void loadExamCloseOverview(year, generation);
 }
 
 elYear.addEventListener("change", () => {

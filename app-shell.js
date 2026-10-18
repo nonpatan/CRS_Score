@@ -244,6 +244,7 @@ function syncFinanceKpiTones() {
             ["summary.html", "สรุปผลการเรียน"],
             ["warning.html", "เฝ้าระวัง มส."],
             ["remark-report.html", "นักเรียนติด ร."],
+            ["exam-close-report.html", "ยังไม่ปิดคะแนนสอบ"],
             ["retention.html", "เรียนซ้ำชั้น"],
             ["lesson-logs.html", "บันทึกหลังสอน"]
           ]
@@ -335,6 +336,11 @@ function syncFinanceKpiTones() {
           title: "เลือกชั้นที่ต้องการรายงาน",
           description: "ดูรายชื่อนักเรียนติด ร. แล้วพิมพ์แจกครูประจำชั้น",
           steps: ["เลือกปี/ภาค", "เลือกชั้น", "พิมพ์รายห้อง"]
+        },
+        "exam-close-report.html": {
+          title: "เลือกปีและภาคเรียน",
+          description: "ตรวจวิชาที่ยังไม่ปิดคะแนนสอบ แล้วพิมพ์แจกครูผู้สอน",
+          steps: ["เลือกปี/ภาค", "ตรวจรายการ", "พิมพ์แจกครู"]
         },
         "retention.html": {
           title: "เลือกเกณฑ์รายงาน",

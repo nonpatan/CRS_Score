@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>รายชื่อวิชาที่ยังไม่ปิดคะแนนสอบ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root { --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee; --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df; }
+* { box-sizing:border-box; }
+body { margin:0; padding:16px; color:var(--ink); background:var(--bg); font:16px/1.6 "Sarabun",sans-serif; }
+.wrap { max-width:980px; margin:auto; }
+h1 { margin:0; font-size:28px; }
+header p { margin:0 0 12px; color:var(--muted); }
+.nav { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+.nav a { color:var(--teal); padding:8px 12px; }
+.card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+.filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.field label { display:block; font-weight:600; margin-bottom:4px; }
+select { width:100%; min-height:44px; padding:8px 12px; font:inherit; color:var(--ink); border:1px solid var(--line); border-radius:8px; background:var(--white); }
+select:focus-visible,button:focus-visible,input:focus-visible,a:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+.primary,.ghost { min-height:44px; padding:8px 16px; border-radius:8px; font:inherit; cursor:pointer; }
+.primary { color:var(--white); background:var(--teal); border:1px solid var(--teal); }
+.ghost { color:var(--teal); background:var(--teal-soft); border:1px solid var(--teal); }
+.primary:disabled { opacity:.5; cursor:default; }
+.toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+.hint,.meta,.empty { color:var(--muted); }
+.error { color:var(--danger); }
+.teacher-list { display:grid; gap:8px; margin:12px 0; }
+.teacher-option { display:flex; gap:10px; align-items:center; min-height:44px; padding:8px; border:1px solid var(--line); border-radius:8px; overflow-wrap:anywhere; }
+.teacher-option input { width:20px; height:20px; accent-color:var(--teal); flex:none; }
+.table-wrap { overflow-x:auto; max-width:100%; }
+table { width:100%; border-collapse:collapse; min-width:690px; }
+th,td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { background:var(--bg); }
+#print-area { position:fixed; left:-100000px; top:0; width:186mm; height:0; overflow:hidden; }
+.report-sheet { color:#000; background:#fff; font:12px/1.45 "Sarabun",sans-serif; }
+.report-sheet + .report-sheet { break-before:page; }
+.sheet-head { text-align:center; margin-bottom:5mm; }
+.sheet-logo { width:18mm; height:18mm; object-fit:contain; }
+.sheet-school { font-size:17px; font-weight:600; }
+.sheet-title { font-size:15px; font-weight:700; margin:1mm 0; }
+.sheet-table { width:100%; min-width:0; table-layout:fixed; border-collapse:collapse; }
+.sheet-table th,.sheet-table td { border:1px solid #000; padding:1.2mm; overflow-wrap:anywhere; }
+.sheet-table thead { display:table-header-group; }
+.sheet-signatures { display:grid; grid-template-columns:1fr 1fr; gap:6mm; text-align:center; margin-top:12mm; break-inside:avoid; }
+tr { break-inside:avoid; }
+@media(max-width:640px) { .filters { grid-template-columns:1fr; } }
+@media print {
+  @page { size:A4 portrait; margin:12mm; }
+  .nav,.app-shell,.app-sidebar,.workflow,.toast,.no-print { display:none !important; }
+  html body { display:block !important; padding:0 !important; margin:0; background:#fff !important; font-size:14px; }
+  html body .wrap, .academic-content { display:block !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; }
+  #print-area { position:static; width:100%; height:auto; overflow:visible; }
+  .card { box-shadow:none; border:0; padding:0; }
+  tr,.sheet-signatures { break-inside:avoid; }
+  a[href]::after { content:""; }
+}
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+<header class="no-print"><h1>รายชื่อวิชาที่ยังไม่ปิดคะแนนสอบ</h1><p>ตรวจรายชื่อและพิมพ์แจกครูผู้สอน</p><div class="nav"><a href="index.html">ภาพรวมวิชาการ</a><a href="remark-report.html">นักเรียนติด ร.</a><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261018-2"></script></header>
+<main class="academic-content no-print">
+  <section class="card"><div class="filters"><div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"></select></div><div class="field"><label for="filter-term">ภาคเรียน</label><select id="filter-term"><option value="1">ภาคเรียนที่ 1</option><option value="2">ภาคเรียนที่ 2</option><option value="all">ทั้งปี</option></select></div></div></section>
+  <div class="card" id="report-state" role="status">กำลังโหลดข้อมูล…</div>
+  <section class="card" id="report-content" hidden><div class="toolbar"><strong id="report-count"></strong><button type="button" class="primary no-print" id="btn-print" disabled>พิมพ์</button></div><div class="teacher-list" id="teacher-list"></div><div class="table-wrap"><table><thead><tr><th>ครูผู้สอน</th><th>รหัส</th><th>รายวิชา</th><th>ชั้น</th><th>ภาค</th><th>คะแนนสอบ</th><th>ติด ร.</th><th>สิ่งที่ต้องทำ</th></tr></thead><tbody id="report-rows"></tbody></table></div></section>
+</main></div>
+<div id="print-area" aria-hidden="true"></div>
+<script type="module">
+import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, getSetting, loadLetterSigners, bangkokNow, toDateStr, thaiLetterDateText } from "../supabase-client.js?v=20261018-2";
+const $ = id => document.getElementById(id);
+const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
+const yearEl = $("filter-year"), termEl = $("filter-term"), stateEl = $("report-state"), contentEl = $("report-content");
+let allRows = [], loadedYear = "", selectedYearForChecks = "", loadedAt = null, schoolName = "", academicHead = "", token = 0, printing = false;
+const selectedOwners = new Set();
+function termMatches(row, term) { return term === "all" || (term === "2" ? row.term === "2" || row.term == null : row.term === "1"); }
+function termLabel(row) { return row.term ? "ภาค " + row.term : "ทั้งปี"; }
+function task(row) { return Number(row.exam_count) === 0 ? "กรอกคะแนนสอบ แล้วปิดคะแนนสอบ" : "ปิดคะแนนสอบ"; }
+function filteredRows() { return allRows.filter(row => termMatches(row, termEl.value)); }
+function groups(rows) {
+  const map = new Map();
+  for (const row of rows) { const key = String(row.owner_id || row.owner_name || "unknown"); if (!map.has(key)) map.set(key, { key, name:row.owner_name || "ไม่ระบุครู", rows:[] }); map.get(key).rows.push(row); }
+  return [...map.values()];
+}
+function render() {
+  const rows = filteredRows(), teachers = groups(rows);
+  const known = new Set(teachers.map(group => group.key));
+  for (const key of [...selectedOwners]) if (!known.has(key)) selectedOwners.delete(key);
+  if (loadedYear + ":" + termEl.value !== selectedYearForChecks) { selectedOwners.clear(); teachers.forEach(group => selectedOwners.add(group.key)); selectedYearForChecks = loadedYear + ":" + termEl.value; }
+  $("report-count").textContent = rows.length + " วิชา · ครู " + teachers.length + " คน";
+  $("teacher-list").innerHTML = teachers.map(group => `<label class="teacher-option"><input type="checkbox" data-owner="${escapeHtml(group.key)}" ${selectedOwners.has(group.key) ? "checked" : ""}><span>${escapeHtml(group.name)} · ${group.rows.length} วิชา</span></label>`).join("");
+  $("report-rows").innerHTML = rows.map(row => `<tr><td>${escapeHtml(row.owner_name || "ไม่ระบุครู")}</td><td>${escapeHtml(row.code || "—")}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.grade_level)}</td><td>${termLabel(row)}</td><td>${Number(row.exam_count) || "—"}</td><td>${row.level === "ประถม" ? "—" : Number(row.r_count) || "—"}</td><td>${task(row)}</td></tr>`).join("");
+  $("btn-print").disabled = !rows.length || !selectedOwners.size;
+  stateEl.hidden = !!rows.length; contentEl.hidden = !rows.length;
+  if (!rows.length) { stateEl.className = "card empty"; stateEl.textContent = "ทุกวิชาที่มีคะแนนสอบปิดคะแนนสอบแล้ว"; }
+}
+async function loadReport() {
+  const mine = ++token, year = yearEl.value;
+  if (!year) { stateEl.textContent = "ยังไม่มีปีการศึกษาให้เลือก"; return; }
+  contentEl.hidden = true; stateEl.hidden = false; stateEl.className = "card"; stateEl.textContent = "กำลังโหลดข้อมูล…";
+  try {
+    if (loadedYear !== year) {
+      const { data, error } = await sb.rpc("exam_close_pending", { p_year:year, p_mine:false });
+      if (error) throw error;
+      if (mine !== token) return;
+      const head = (await loadLetterSigners(year, null, null)).academicHeadName;
+      if (mine !== token) return;
+      allRows = data || []; loadedYear = year; loadedAt = bangkokNow(); selectedOwners.clear(); academicHead = head;
+    }
+    if (mine !== token) return;
+    render();
+  } catch (error) { if (mine !== token) return; contentEl.hidden = true; stateEl.hidden = false; stateEl.className = "card error"; stateEl.textContent = "โหลดรายงานไม่สำเร็จ: " + (error.message || "ลองเปิดหน้าใหม่"); }
+}
+function sheet(group) {
+  const dateText = thaiLetterDateText(toDateStr(loadedAt || bangkokNow()));
+  const period = termEl.value === "all" ? "ปีการศึกษา " + yearEl.value : "ภาคเรียนที่ " + termEl.value + " ปีการศึกษา " + yearEl.value;
+  const body = group.rows.map((row, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(row.code || "—")}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.grade_level)}</td><td>${termLabel(row)}</td><td>${Number(row.exam_count) || "—"}</td><td>${row.level === "ประถม" ? "—" : Number(row.r_count) || "—"}</td><td>${task(row)}</td></tr>`).join("");
+  return `<article class="report-sheet"><div class="sheet-head"><img class="sheet-logo" src="../logo.png" alt="ตราโรงเรียน"><div class="sheet-school">${escapeHtml(schoolName)}</div><h1 class="sheet-title">รายชื่อวิชาที่ยังไม่ปิดคะแนนสอบ</h1><div>ครูผู้สอน ${escapeHtml(group.name)} · ${escapeHtml(period)}</div><div>ข้อมูล ณ วันที่ ${escapeHtml(dateText)}</div></div><table class="sheet-table"><colgroup><col style="width:5%"><col style="width:11%"><col style="width:18%"><col style="width:8%"><col style="width:8%"><col style="width:10%"><col style="width:8%"><col style="width:32%"></colgroup><thead><tr><th>ที่</th><th>รหัส</th><th>รายวิชา</th><th>ชั้น</th><th>ภาค</th><th>มีคะแนนสอบ</th><th>ติด ร.</th><th>สิ่งที่ต้องทำ</th></tr></thead><tbody>${body}</tbody></table><div class="sheet-signatures"><div>ลงชื่อ ....................................... ครูผู้สอน (รับทราบ)<br>(${escapeHtml(group.name)})</div><div>ลงชื่อ ....................................... หัวหน้าฝ่ายวิชาการ<br>(${escapeHtml(academicHead || "......................................")})</div></div></article>`;
+}
+$("teacher-list").addEventListener("change", event => { const key = event.target.dataset.owner; if (!key) return; if (event.target.checked) selectedOwners.add(key); else selectedOwners.delete(key); $("btn-print").disabled = !selectedOwners.size; });
+$("btn-print").addEventListener("click", async () => {
+  if (printing) return;
+  const chosen = groups(filteredRows()).filter(group => selectedOwners.has(group.key));
+  if (!chosen.length) return;
+  printing = true; $("btn-print").disabled = true;
+  try {
+    $("print-area").innerHTML = chosen.map(sheet).join("");
+    await document.fonts.ready;
+    try { await Promise.all([...$("print-area").querySelectorAll("img")].map(img => img.decode())); } catch { /* พิมพ์ข้อความได้แม้ตราเสีย */ }
+    window.print();
+  } finally { $("print-area").innerHTML = ""; printing = false; $("btn-print").disabled = false; }
+});
+async function init() {
+  const session = await requireAuth(); if (!session) return;
+  $("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
+  try {
+    const { data:viewer, error:viewerError } = await sb.rpc("theme_work_viewer");
+    if (viewerError) throw viewerError;
+    if (viewer !== true) { stateEl.textContent = "คุณไม่มีสิทธิ์ดูรายงานนี้"; return; }
+    const [subjects, school] = await Promise.all([sb.from("subjects").select("year"), getSetting("receipt_school_name").catch(() => "")]);
+    if (subjects.error) throw subjects.error;
+    schoolName = String(school || "").trim();
+    const years = distinctYears(subjects.data || []);
+    yearEl.innerHTML = years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
+    const requested = new URLSearchParams(location.search).get("year"), active = getActiveYear();
+    if (years.includes(requested)) yearEl.value = requested; else if (years.includes(active)) yearEl.value = active;
+    yearEl.addEventListener("change", () => { setActiveYear(yearEl.value); loadReport(); });
+    termEl.addEventListener("change", render);
+    await loadReport();
+  } catch (error) { stateEl.className = "card error"; stateEl.textContent = "โหลดข้อมูลไม่สำเร็จ: " + (error.message || "ลองเปิดหน้าใหม่"); }
+}
+init();
+</script>
+</body>
+</html>

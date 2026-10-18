@@ -177,7 +177,7 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 <div class="nav">
 <a href="entry.html">กรอกคะแนน</a><a href="competency-manage.html">กำหนดกิจกรรม/กิจวัตร</a><a href="competency-core.html">กำหนดสมรรถนะหลัก</a><a href="competency-entry.html">กรอกคะแนนกิจกรรม/กิจวัตร</a><a href="attendance.html">เช็คชื่อ</a><a href="summary.html">สรุปผลการเรียน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="students.html">นักเรียน</a><a href="retention.html">เรียนซ้ำชั้น</a><a href="warning.html">เฝ้าระวัง มส.</a><a href="rollover.html">ขึ้นปีใหม่</a><a href="#" id="btn-signout">ออกจากระบบ</a>
 </div>
-<script src="../app-shell.js?v=20261011-2"></script>
+<script src="../app-shell.js?v=20261018-2"></script>
 </header>
 <main class="academic-content">
 <section id="subjects-view">
@@ -205,7 +205,7 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 <div id="toast" class="toast"></div>
 </main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261017-3";
+import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261018-2";
 const $ = id => document.getElementById(id);
 function escapeHtml(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const session = await requireAuth();
@@ -1008,6 +1008,7 @@ async function toggleExam() {
   if (!await window.crsAskConfirm({ title:closed ? "ยกเลิกการปิดคะแนนสอบ" : "ปิดคะแนนสอบวิชานี้", message, okLabel:closed ? "ยกเลิกการปิด" : "ปิดคะแนนสอบ", danger:!closed })) return;
   const {data,error} = await sb.rpc("set_subject_exam_closed",{p_subject_id:subjectId,p_closed:!closed});
   if (error) { showToast("เปลี่ยนสถานะคะแนนสอบไม่สำเร็จ: " + error.message,false); return; }
+  clearMyExamCloseCache();
   currentSubject.exam_closed_at = closed ? null : data; const source = subjectById(subjectId); if (source) source.exam_closed_at = currentSubject.exam_closed_at; renderWorkspace(); showToast(closed ? "ยกเลิกการปิดคะแนนสอบแล้ว" : "ปิดคะแนนสอบแล้ว",true);
 }
 try { await loadSubjects(); } catch (error) { $("subject-list").innerHTML = "<div class='access-note'>โหลดวิชาไม่สำเร็จ: " + escapeHtml(error.message) + "</div>"; }

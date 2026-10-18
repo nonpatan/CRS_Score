@@ -1882,6 +1882,17 @@ export async function saveLessonLog({ logId = null, subjectId, sessionIds, field
 // เคยพิมพ์ซ้ำหลายจุดแล้วเกณฑ์เพี้ยนจนเด็กที่ต้องเรียนซ้ำหายจากหน้าเฝ้าระวัง (แก้ 2026-08)
 export const MS_RETAKE_RATIO = 0.40;          // ขาดดิบเกินนี้ = เรียนซ้ำรายวิชา ชดเชยช่วยไม่ได้
 export const MS_MAKEUP_RATIO = 0.20;          // ขาดสุทธิเกินนี้ = ต้องเรียนเพิ่มให้ครบเวลา
+export const MS_MAKEUP_GRADE_CAP = 1;
+// ใช้เวลาปิดสอบครั้งแรกเท่านั้น เพื่อไม่ให้การยกเลิกแล้วปิดซ้ำเลื่อนเส้นแบ่ง
+export function msMakeupCutoff(subj) {
+  const value = subj?.exam_first_closed_at ? Date.parse(subj.exam_first_closed_at) : NaN;
+  return Number.isFinite(value) ? value : null;
+}
+export function isLateMakeup(row, subj) {
+  const cutoff = msMakeupCutoff(subj);
+  const created = Date.parse(row?.created_at);
+  return cutoff !== null && Number.isFinite(created) && created > cutoff;
+}
 export const MS_WARN_PERCENT_SECONDARY = 10;  // มัธยม: ขาดสุทธิถึงเท่านี้ = ขึ้นหน้าเฝ้าระวัง
 export const MS_WARN_PERCENT_PRIMARY = 5;     // ประถม: เตือนเร็วกว่าเพราะคาบทั้งปีมากกว่า
 export const PRIMARY_SCHOOL_DAYS = 200;
@@ -2411,9 +2422,11 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 
   // ชั่วโมงชดเชย (ทำงาน/เรียนเสริม ฯลฯ) ของนักเรียนคนนี้ในวิชานี้ — บวกเข้า attended ตรงๆ
   // ไม่ใช่การข้ามเช็ค มส. แต่เป็นการเติมตัวเลขให้ถึงเกณฑ์ (ยืนยันกับผู้ใช้แล้ว)
-  const makeupTotal = (makeupArr || [])
-    .filter(m => m.student_id === studentId)
+  const myMakeup = (makeupArr || []).filter(m => m.student_id === studentId);
+  const makeupTotal = myMakeup.reduce((sum, m) => sum + Number(m.periods), 0);
+  const makeupBeforeClose = myMakeup.filter(m => !isLateMakeup(m, subj))
     .reduce((sum, m) => sum + Number(m.periods), 0);
+  let msCapped = false;
 
   // 1) เช็ค มส. ก่อน ร. เฉพาะมัธยม — ต้องมีทั้ง total_periods
   //    กับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้ง ไม่งั้นข้ามไปคิดเกรดตามปกติ (ยัง เช็ค มส. ไม่ได้)
@@ -2438,6 +2451,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
       if (netMissed > maxMissedMakeup) {
         return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal } };
       }
+      msCapped = rawMissed - makeupBeforeClose > maxMissedMakeup;
       // ชดเชยจนขาดสุทธิไม่เกินเพดานแล้ว — หลุด มส. ไปคิดเกรดต่อ (เก็บ makeupTotal ไว้โชว์ในผลเกรด)
     }
   }
@@ -2459,8 +2473,8 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 
   // 3) แปลงเป็นเกรด
   const percentScore = collectPart + examPart;
-  const grade = percentToGrade(percentScore);
-  return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "grade", grade, percentScore, makeupTotal } };
+  const rawGrade = percentToGrade(percentScore);
+  return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "grade", grade: msCapped ? Math.min(rawGrade, MS_MAKEUP_GRADE_CAP) : rawGrade, percentScore, makeupTotal, ...(msCapped ? { msCapped: true, uncappedGrade: rawGrade } : {}) } };
 }
 
 // ---------- คำนวณผลรวมวิชาบูรณาการของนักเรียน 1 คน ----------
@@ -2486,7 +2500,7 @@ export function computeIntegratedResult(studentId, memberDataList) {
   let examScored = memberDataList.length > 0;
   let examOverCap = false;
   let partialWeightedSum = 0, partialWeightSum = 0;
-  let totalBase = 0, rawMissed = 0, makeupTotal = 0, anySessions = false;
+  let totalBase = 0, rawMissed = 0, makeupTotal = 0, makeupBeforeClose = 0, anySessions = false;
   const halfTotals = Object.fromEntries(PRIMARY_HALVES.map(half => [half, {
     weightedScore:0, weightedCollect:0, weightedExam:0, weight:0,
     complete:memberDataList.length > 0, hasStructure:memberDataList.length > 0,
@@ -2561,10 +2575,14 @@ export function computeIntegratedResult(studentId, memberDataList) {
     makeupTotal += (md.makeupHours || [])
       .filter(m => m.student_id === studentId)
       .reduce((sum, m) => sum + Number(m.periods), 0);
+    makeupBeforeClose += (md.makeupHours || [])
+      .filter(m => m.student_id === studentId && !isLateMakeup(m, md.subject))
+      .reduce((sum, m) => sum + Number(m.periods), 0);
   }
 
   // 1) เช็ค มส. รวมก่อน (มส. ชนะ ร.) — ต้องมีฐานเวลากับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้งถึงเช็คได้
   let overall = null;
+  let msCapped = false;
   if (memberDataList[0]?.subject?.level !== "ประถม" && totalBase > 0 && anySessions) {
     const maxMissedRetake = totalBase * MS_RETAKE_RATIO;
     const maxMissedMakeup = totalBase * MS_MAKEUP_RATIO;
@@ -2574,7 +2592,7 @@ export function computeIntegratedResult(studentId, memberDataList) {
       const netMissed = Math.max(0, rawMissed - makeupTotal);
       if (netMissed > maxMissedMakeup) {
         overall = { type: "มส.", subtype: "makeup", missedPeriods: rawMissed, netMissed, maxMissed: maxMissedMakeup, makeupTotal, totalBase };
-      }
+      } else msCapped = rawMissed - makeupBeforeClose > maxMissedMakeup;
     }
   }
 
@@ -2584,7 +2602,8 @@ export function computeIntegratedResult(studentId, memberDataList) {
   // 3) แปลงเป็นเกรด (ถัวเฉลี่ยถ่วงน้ำหนัก)
   if (!overall) {
     const percentScore = weightSum > 0 ? weightedSum / weightSum : 0;
-    overall = { type: "grade", grade: percentToGrade(percentScore), percentScore, weightSum, makeupTotal };
+    const rawGrade = percentToGrade(percentScore);
+    overall = { type: "grade", grade: msCapped ? Math.min(rawGrade, MS_MAKEUP_GRADE_CAP) : rawGrade, percentScore, weightSum, makeupTotal, ...(msCapped ? { msCapped: true, uncappedGrade: rawGrade } : {}) };
   }
 
   const scoring = {
@@ -2751,7 +2770,10 @@ export function computeGpa(subjectResults) {
     if (x.scoring && !x.scoring.complete && (partial === null || partial === undefined)) continue;
     const percent = partial !== null && partial !== undefined ? partial : x.result.percentScore;
     const w = x.subject.credits && x.subject.credits > 0 ? Number(x.subject.credits) : 1;
-    weightedSum += percentToGrade(percent) * w;
+    // ผลที่ตัดสินแล้วต้องใช้เกรดจริง (รวมเพดานแก้ มส. หลังปิดสอบ)
+    // เฉพาะข้อมูลยังไม่ครบจึงแปลเปอร์เซ็นต์ชั่วคราว
+    const grade = x.scoring && !x.scoring.complete ? percentToGrade(percent) : Number(x.result.grade);
+    weightedSum += grade * w;
     weightSum += w;
     countedSubjects++;
   }
@@ -4700,12 +4722,34 @@ export async function loadMyProjects(year, staffId) {
 }
 
 // โหลดเฉพาะงานส่วนตัวที่หน้าแรกต้องใช้ — ยิงพร้อมกันและไม่ดึงประวัติเช็คชื่อทั้งเดือน
+export async function loadMyExamClosePending({ year, userId, today } = {}) {
+  if (!year || !userId || !today) return null;
+  const key = `crs-exam-close:${userId}:${year}`;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    if (saved?.date === today && Array.isArray(saved.rows)) return saved.rows;
+  } catch { /* ที่เก็บข้อมูลอาจใช้ไม่ได้ ให้โหลดจากฐาน */ }
+  const { data, error } = await sb.rpc("exam_close_pending", { p_year: year, p_mine: true });
+  if (error) throw new Error("โหลดวิชาที่ยังไม่ปิดคะแนนสอบไม่สำเร็จ: " + error.message);
+  const rows = data || [];
+  try { localStorage.setItem(key, JSON.stringify({ date: today, rows })); } catch { /* ใช้ต่อได้โดยไม่แคช */ }
+  return rows;
+}
+export function clearMyExamCloseCache() {
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index--) {
+      const key = localStorage.key(index);
+      if (key?.startsWith("crs-exam-close:")) localStorage.removeItem(key);
+    }
+  } catch { /* private mode ไม่มี storage */ }
+}
+
 export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {}) {
   if (!staffId || !year || !today) {
-    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null, themeWork: null };
+    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null, themeWork: null, examClose: null };
   }
 
-  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff, themeWork] = await Promise.all([
+  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff, themeWork, examClose] = await Promise.all([
     listMyDutySwaps(),
     sb.rpc("my_coverage_from", { p_from: today }),
     sb.from("duty_roster")
@@ -4723,7 +4767,8 @@ export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {
     loadMyTeachingGap({ staffId, year }),
     // ค่าตั้งเวลาเป็นข้อมูลเสริม — อ่านไม่ได้ต้องคงการ์ดแบบเดิม ไม่ทำให้การ์ดทั้งใบหาย
     getDailyAttendanceCutoff().catch(() => null),
-    userId ? loadMyThemeWorkReminder({ year, userId, today }).catch(() => null) : Promise.resolve(null)
+    userId ? loadMyThemeWorkReminder({ year, userId, today }).catch(() => null) : Promise.resolve(null),
+    userId ? loadMyExamClosePending({ year, userId, today }).catch(() => null) : Promise.resolve(null)
   ]);
 
   if (coverageRes.error) {
@@ -4742,7 +4787,8 @@ export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {
     homerooms: homeroomRes.data || [],
     teachingGap,
     cutoff,
-    themeWork
+    themeWork,
+    examClose
   };
 }
 
@@ -4767,9 +4813,21 @@ const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุ�
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
   pendingApprovals = 0, isApprover = false, pendingMakeups = 0, isMakeupApprover = false,
-  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = [], themeWork = null
+  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = [], themeWork = null, examClose = null
 } = {}) {
   const alerts = [...dutyMonths];
+
+  if (Array.isArray(examClose) && examClose.length) {
+    const labels = examClose.slice(0, 3).map(row => [row.code, row.name].filter(Boolean).join(" ") +
+      (Number(row.exam_count) === 0 ? " (ยังไม่มีคะแนนสอบ)" : ""));
+    const extra = examClose.length > 3 ? ` และอีก ${examClose.length - 3} วิชา` : "";
+    alerts.push({
+      text: `ยังไม่ปิดคะแนนสอบ ${examClose.length} วิชา: ${labels.join(", ")}${extra}`,
+      href: "academic/entry.html",
+      linkLabel: examClose.some(row => Number(row.exam_count) === 0) ? "ไปกรอก/ปิดคะแนนสอบ" : "ไปปิดคะแนนสอบ",
+      kind: "รอคุณ"
+    });
+  }
 
   if (themeWork) alerts.push({
     text: themeWork.text,

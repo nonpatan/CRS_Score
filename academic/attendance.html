@@ -410,7 +410,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261011-2"></script>
+    <script src="../app-shell.js?v=20261018-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -591,6 +591,7 @@
                 <button type="button" data-makeup-reason="ทำโครงงาน">ทำโครงงาน</button>
               </div>
             </div>
+            <div id="makeup-close-warning" class="makeup-status amber" role="status" hidden></div>
             <button class="primary" id="btn-add-makeup" aria-describedby="makeup-feedback makeup-status" disabled>บันทึกชั่วโมงชดเชย</button>
           </div>
         </div>
@@ -621,7 +622,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder } from "../supabase-client.js?v=20261017-3";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder } from "../supabase-client.js?v=20261018-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -2709,6 +2710,7 @@ const elMakeupReason = document.getElementById("inp-makeup-reason");
 const elMakeupStatus = document.getElementById("makeup-status");
 const elMakeupAfter = document.getElementById("makeup-after");
 const elMakeupFeedback = document.getElementById("makeup-feedback");
+const elMakeupCloseWarning = document.getElementById("makeup-close-warning");
 const btnAddMakeup = document.getElementById("btn-add-makeup");
 
 // ตัดสินว่าจะแสดงการ์ดชดเชยแบบไหน:
@@ -2808,6 +2810,13 @@ function renderMakeup() {
       hintEl.textContent = "คนที่ยังขาดไม่เกิน " + pass + " คาบไม่แสดงตรงนี้ — บันทึกล่วงหน้าได้จากช่อง “นักเรียน”";
     }
   }
+  const closed = makeupBasis?.cutoffSubjects.filter(member => member.exam_first_closed_at &&
+    (makeupBasis.parentName || member.id === makeupSubjectId)) || [];
+  elMakeupCloseWarning.hidden = !closed.length;
+  elMakeupCloseWarning.textContent = closed.map(member =>
+    "ปิดคะแนนสอบ" + (makeupBasis.parentName ? "วิชา " + member.name + " " : "") + "แล้วเมื่อ " +
+    new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "long", year: "numeric" }).format(new Date(member.exam_first_closed_at)) +
+    " · ชั่วโมงชดเชยที่บันทึกจากนี้นับเป็นการแก้ มส. หลังปิดสอบ ผลการเรียนได้ไม่เกิน 1").join(" · ");
   renderMakeupCandidates(candidates); renderMakeupList(); updateMakeupForm(); renderMakeupMemberQuota();
 }
 
@@ -2941,7 +2950,7 @@ function renderMakeupList() {
     for (const record of records) {
       const subject = allSubjects.find(row => row.id === record.subject_id) || makeupBasis.members.find(row => row.id === record.subject_id);
       const row = document.createElement("div"); row.className = "makeup-hist-item";
-      row.innerHTML = "<div><div>+" + fmtPeriods(record.periods) + " คาบ · " + escapeHtml(record.reason) + "</div><div class='meta'>" + escapeHtml(subject?.name || "ไม่พบชื่อวิชาย่อย") + " · " + escapeHtml(fmtDateTH(String(record.created_at).slice(0, 10))) + "</div></div>";
+      row.innerHTML = "<div><div>+" + fmtPeriods(record.periods) + " คาบ · " + escapeHtml(record.reason) + "</div><div class='meta'>" + escapeHtml(subject?.name || "ไม่พบชื่อวิชาย่อย") + " · " + escapeHtml(fmtDateTH(String(record.created_at).slice(0, 10))) + (isLateMakeup(record, subject) ? " · <span class='pill amber'>หลังปิดสอบ</span>" : "") + "</div></div>";
       if (canEditMakeup(allSubjects.find(item => item.id === record.subject_id))) {
         const button = document.createElement("button"); button.className = "icon-btn"; button.textContent = "ลบ";
         button.setAttribute("aria-label", "ลบชั่วโมงชดเชย " + fmtPeriods(record.periods) + " คาบของ " + name);
@@ -2970,7 +2979,7 @@ async function loadMakeupBasis(subjectId, studentIds = []) {
   const parentId = blockMode && parents.includes(currentSubjectId) ? currentSubjectId : parents[0];
   const ids = [...new Set(parentId ? integrationMap.get(parentId) : [subjectId])];
   const [subjectsResult, sessionsResult, makeupResult] = await Promise.all([
-    sb.from("subjects").select("id,name,total_periods").in("id", ids),
+    sb.from("subjects").select("id,name,total_periods,exam_first_closed_at").in("id", ids),
     sb.from("attendance_sessions").select("subject_id, periods_covered, attendance_records(status, student_id)").in("subject_id", ids),
     sb.from("makeup_hours").select("*, student:student_id(*)").in("subject_id", ids).order("created_at")
   ]);
@@ -3010,7 +3019,7 @@ async function loadMakeupBasis(subjectId, studentIds = []) {
   }
   return {
     parentName: parentId ? (allSubjects.find(subject => subject.id === parentId)?.name || "วิชาบูรณาการ") : null,
-    members, base: members.reduce((sum, member) => sum + Number(member.total_periods), 0), rows, records,
+    cutoffSubjects: subjectsResult.data || [], members, base: members.reduce((sum, member) => sum + Number(member.total_periods), 0), rows, records,
     hasSessions: dataList.some(item => item.sessions.length > 0)
   };
 }
