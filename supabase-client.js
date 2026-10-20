@@ -2726,7 +2726,9 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
           result: ir.overall,
           scoring: ir.scoring,
           noPeriodSubjects: ir.noPeriodSubjects,
-          memberResults: ir.memberResults
+          memberResults: ir.memberResults,
+          // เวลาเรียนรวมทุกวิชาย่อย (ขาดดิบ ยังไม่หักชดเชย) — ใบ ปพ.6 ใช้แสดง
+          attendance: { base: ir.totalBase, missed: ir.rawMissed }
         });
       }
     } else {
@@ -2738,7 +2740,8 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
           examScores: data.examScores,
           gradeWeight: data.gradeWeight
         });
-        out.get(studentId).subjects.push({ subject: subj, result: r.result, scoring: r.scoring });
+        out.get(studentId).subjects.push({ subject: subj, result: r.result, scoring: r.scoring,
+          attendance: { base: Number(data.subject.total_periods) || 0, missed: computeMissedPeriods(studentId, data.sessions) } });
       }
     }
   }
