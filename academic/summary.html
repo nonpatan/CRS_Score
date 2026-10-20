@@ -394,6 +394,14 @@
   #subject-report .score-row.now { padding:8px; margin-top:8px; border-radius:8px; background:var(--teal-soft); font-weight:600; }
   #subject-report .score-row.now .val { color:var(--teal); }
   #subject-report .result-line { flex-wrap:wrap; gap:8px; }
+  #subject-report .comp-group + .comp-group { margin-top:12px; }
+  #subject-report .comp-group-head { font-size:15px; font-weight:700; color:var(--ink); border-left:3px solid var(--teal); padding-left:8px; margin:4px 0 6px; }
+  #subject-report .comp-group .score-row { padding:6px 0; border-bottom:1px solid var(--line); }
+  #subject-report .comp-group .score-row .val { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #subject-report .comp-group .score-row .val.pending { color:var(--amber); }
+  #subject-report .comp-group .score-row .hint { font-size:14px; }
+  #subject-report .comp-empty-line { margin-top:12px; padding:8px 10px; border-radius:9px; background:var(--bg); font-size:14px; color:var(--muted); }
+  #subject-report .comp-empty-line b { color:var(--ink); font-weight:600; }
   @media (min-width:1024px) {
     #subject-report .subject-filters { grid-template-columns:repeat(5,minmax(0,1fr)); }
     #subject-report .subject-filters > .subject-field { grid-column:auto; }
@@ -1464,13 +1472,7 @@ function renderIntegratedCard(stu, ir, details = new Map()) {
   }).join("");
 
   // สมรรถนะหลัก: แสดงแยกตามวิชาย่อยที่มีข้อมูลจริง (ไม่ถัวเฉลี่ยรวม เพราะมักกรอกแค่บางวิชา)
-  const membersWithComp = ir.memberResults.filter(m => m.competencyUnits.length > 0);
-  const competencySection = membersWithComp.map(m => {
-    const md = memberDataList.find(md => md.subject.id === m.subject.id);
-    const grid = competencyItemsHtml(m.competencyUnits, md ? md.units : [], stu.id);
-    return "<div class='hint' style='margin:8px 0 4px'>" + escapeHtml(m.subject.name) + "</div>" +
-      "<div class='comp-grid'>" + grid + "</div>";
-  }).join("");
+  const competencySection = integratedCompetencyHtml(ir.memberResults, stu.id);
 
   let overallHtml;
   if (ir.overall.type === "มส.") {
@@ -1523,8 +1525,8 @@ function renderIntegratedCard(stu, ir, details = new Map()) {
       primaryHalfRowsHtml(ir.halves, ir.scoring, ir.overall, memberDataList[0].gradeWeight, ir) + "</div>" : "") +
     "<div class='section'><div class='section-title'>รายวิชาย่อย</div>" + (memberRows || "<div class='hint'>ไม่มีวิชาย่อย</div>") + "</div>" +
     "<div class='section'>" + overallHtml + "</div>" +
-    "<details class='section competency-details'><summary>สมรรถนะหลัก</summary><div class='section-title'>สมรรถนะหลัก (ตามวิชาย่อยที่กรอกไว้)</div>" +
-    (competencySection || "<div class='hint'>ยังไม่มีวิชาย่อยไหนกรอกสมรรถนะหลักไว้</div>") + "</details>" +
+    "<details class='section competency-details'><summary>สมรรถนะหลัก · แยกตามวิชาย่อย</summary>" +
+    competencySection + "</details>" +
     (primary ? primaryAttendanceHtml(stu.id) : "") + renderActivitySummarySection(stu.id) + noPeriodWarning + "</div>";
 }
 
@@ -1574,6 +1576,44 @@ function competencyItemsHtml(competencyUnits, unitsTree, studentId) {
     (u.notScoredCount > 0 ? "<br><span class='hint'>ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
     unitEntryHint(entries[i]) + "<br><span class='val'>" + unitScoreText(u, entries[i]) + "</span></div>"
   ).join("");
+}
+
+// การ์ดบูรณาการ: จัดกลุ่มตามวิชาย่อย ซ่อนด้านที่ยังไม่มีครั้งที่ (เงื่อนไขเดียวกับ unitScoreText)
+// และรวมวิชาที่ไม่มีข้อมูลเป็นบรรทัดเดียว — การ์ดวิชาเดี่ยวยังใช้ competencyItemsHtml แบบเดิม
+function integratedCompetencyHtml(memberResults, studentId) {
+  const groups = [], emptyNames = [];
+  for (const m of memberResults) {
+    const md = memberDataList.find(md => md.subject.id === m.subject.id);
+    const comps = m.competencyUnits || [];
+    let rows;
+    if (comps.some(unit => unit.halves)) {
+      rows = comps.map(unit => {
+        const mid = unit.halves?.["กลางปี"]?.scaled, end = unit.halves?.["ปลายปี"]?.scaled;
+        const none = v => v === null || v === undefined;
+        if (none(mid) && none(end)) return "";
+        return "<div class='score-row'><span>" + escapeHtml(unit.name) + "</span><span class='val'>กลางปี " +
+          (none(mid) ? "—" : mid.toFixed(1)) + " · ปลายปี " + (none(end) ? "—" : end.toFixed(1)) + "</span></div>";
+      });
+    } else {
+      const counts = unitEntryCounts(md ? md.units : [], studentId, "สมรรถนะหลัก");
+      const entries = counts.length === comps.length ? counts : [];
+      rows = comps.map((u, i) => {
+        const entry = entries[i];
+        if (u.scaled === null || entry && entry.expected === 0) return "";
+        const pending = entry && entry.scored === 0;
+        return "<div class='score-row'><span>" + escapeHtml(u.name) +
+          (u.notScoredCount > 0 ? "<span class='hint'> · ไม่คิด " + u.notScoredCount + " ตัวชี้วัด</span>" : "") +
+          unitEntryHint(entry) + "</span><span class='val" + (pending ? " pending" : "") + "'>" +
+          unitScoreText(u, entry) + "</span></div>";
+      });
+    }
+    const body = rows.join("");
+    if (body) groups.push("<div class='comp-group'><div class='comp-group-head'>" + escapeHtml(m.subject.name) + "</div>" + body + "</div>");
+    else emptyNames.push(escapeHtml(m.subject.name));
+  }
+  if (!groups.length) return "<div class='hint'>ยังไม่มีวิชาย่อยไหนประเมินสมรรถนะหลัก</div>";
+  return groups.join("") + (emptyNames.length
+    ? "<div class='comp-empty-line'><b>" + emptyNames.join(" · ") + "</b> — ยังไม่ได้ประเมินสมรรถนะหลัก</div>" : "");
 }
 
 // รายหน่วยและคะแนนเก็บ/สอบใช้หน้าตาเดียวกันทั้งวิชาเดี่ยวและส่วนขยายวิชาย่อย
