@@ -355,7 +355,7 @@ import {
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
   loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20261021-4";
+} from "../supabase-client.js?v=20261021-5";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -823,13 +823,13 @@ async function loadReport() {
     const incompleteCount = subjList.filter(x => x.scoring && !x.scoring.complete).length;
     const cond2 = total > 0 && failCount > total / 2;
 
-    const { gpa, pending, pendingReason, missingCredits, provisionalGpa, countedSubjects } = computeGpa(subjList);
+    const { gpa, pending, pendingReason, missingCredits, missingLabel, provisionalGpa, countedSubjects } = computeGpa(subjList);
     const cond1 = gpa !== null && gpa < 1.0;
     const coverage = retentionCoverage(catalog, subjList.map(x => x.subject));
     const decided = subjList.length > 0 && subjList.every(isSubjectResultDecided);
     const official = coverage.ready && decided;
 
-    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, missingCredits, provisionalGpa, countedSubjects, coverage, decided, official, flagged: cond1 || cond2 });
+    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, missingCredits, missingLabel, provisionalGpa, countedSubjects, coverage, decided, official, flagged: cond1 || cond2 });
   }
 
   rows.sort((a, b) => {
@@ -1018,7 +1018,7 @@ function renderReport(rows, grade, year, classCoverage) {
 }
 
 function renderStudentRow(row) {
-  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, missingCredits, provisionalGpa, countedSubjects, coverage, official, flagged } = row;
+  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, missingCredits, missingLabel, provisionalGpa, countedSubjects, coverage, official, flagged } = row;
   const noPeriodSubjects = [...new Set(subjList.flatMap(item => item.noPeriodSubjects || []))];
 
   const subjRows = subjList.map(x => {
@@ -1040,7 +1040,7 @@ function renderStudentRow(row) {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge bad'>เข้าเกณฑ์ซ้ำชั้น</span></div>" +
       "<div class='result-note'>" + reasons.join(" · ") + "</div>" +
-      (missingCredits?.length ? "<div class='result-note'>เกณฑ์เกรดเฉลี่ยยังสรุปไม่ได้: ยังไม่ตั้งหน่วยกิต: " + escapeHtml(missingCredits.join(" · ")) + "</div>" : "");
+      (missingCredits?.length ? "<div class='result-note'>เกณฑ์เกรดเฉลี่ยยังสรุปไม่ได้: " + escapeHtml(missingLabel) + ": " + escapeHtml(missingCredits.join(" · ")) + "</div>" : "");
   } else if (flagged) {
     const reasons = retentionReasonLines(row); // helper เติม coverage.scopeLabel เฉพาะสาขาแนวโน้ม
     const unofficialReason = !coverage.ready
@@ -1050,7 +1050,7 @@ function renderStudentRow(row) {
       "<div class='result-line'><span>สรุป</span><span class='badge mid'>แนวโน้มซ้ำชั้น</span></div>" +
       "<div class='result-note'>" + reasons.join(" · ") + "</div>" +
       "<div class='result-note'>ยังไม่ใช่ผลตัดสิน: " + escapeHtml(unofficialReason) + "</div>" +
-      (missingCredits?.length ? "<div class='result-note'>เกณฑ์เกรดเฉลี่ยยังสรุปไม่ได้: ยังไม่ตั้งหน่วยกิต: " + escapeHtml(missingCredits.join(" · ")) + "</div>" : "");
+      (missingCredits?.length ? "<div class='result-note'>เกณฑ์เกรดเฉลี่ยยังสรุปไม่ได้: " + escapeHtml(missingLabel) + ": " + escapeHtml(missingCredits.join(" · ")) + "</div>" : "");
   } else if (pending) {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge mid'>ยังสรุปไม่ได้</span></div>" +
