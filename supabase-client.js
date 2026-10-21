@@ -2479,6 +2479,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
 
 // ---------- คำนวณผลรวมวิชาบูรณาการของนักเรียน 1 คน ----------
 // คะแนน: ถัวเฉลี่ยถ่วงน้ำหนักด้วยจำนวนคาบเรียน (total_periods) ของวิชาพื้นฐานแต่ละตัว (ยืนยันแล้ว)
+// วิชาย่อยใดได้เกรด 0 ผลรวมเป็น 0 แม้คาบเป็น 0; ร้อยละรวมยังแสดงค่าถัวเฉลี่ยจริง
 // มส.: คิด "แบบรวม" ที่ระดับวิชาบูรณาการ (ยืนยันกับผู้ใช้แล้ว 2026-07) — ไม่ใช่แยกรายวิชาย่อย:
 //   ฐานเวลาเรียนรวม = SUM(total_periods ของวิชาย่อยทุกตัว)  เช่น สังคม 20 + การงาน 20 = 40 คาบ
 //   คาบขาดสะสมรวม  = SUM(คาบขาดของนักเรียนคนนี้ในทุกวิชาย่อย)  (เช็คชื่อยังทำรายวิชาย่อย
@@ -2492,6 +2493,7 @@ export function computeIntegratedResult(studentId, memberDataList) {
   const noPeriodSubjects = [];
   let hasR = false;
   let weightedSum = 0, weightSum = 0;
+  const zeroMembers = [];
   let expectedCount = 0, scoredCount = 0;
   let collectExpectedCount = 0, collectScoredCount = 0, notScoredIndicatorCount = 0;
   let emptyIndicatorCount = 0, emptyUnitCount = 0;
@@ -2500,6 +2502,7 @@ export function computeIntegratedResult(studentId, memberDataList) {
   let examScored = memberDataList.length > 0;
   let examOverCap = false;
   let partialWeightedSum = 0, partialWeightSum = 0;
+  let partialZero = false;
   let totalBase = 0, rawMissed = 0, makeupTotal = 0, makeupBeforeClose = 0, anySessions = false;
   const halfTotals = Object.fromEntries(PRIMARY_HALVES.map(half => [half, {
     weightedScore:0, weightedCollect:0, weightedExam:0, weight:0,
@@ -2555,12 +2558,18 @@ export function computeIntegratedResult(studentId, memberDataList) {
     if (!r.scoring.hasCollectStructure) hasCollectStructure = false;
     if (!r.scoring.examScored) examScored = false;
     if (r.scoring.examOverCap) examOverCap = true;
-    if (r.scoring.partialPercent !== null && weight > 0) {
-      partialWeightedSum += r.scoring.partialPercent * weight;
-      partialWeightSum += weight;
+    if (r.scoring.partialPercent !== null) {
+      if (percentToGrade(r.scoring.partialPercent) === 0) partialZero = true;
+      if (weight > 0) {
+        partialWeightedSum += r.scoring.partialPercent * weight;
+        partialWeightSum += weight;
+      }
     }
     if (r.result.type === "ร.") hasR = true;
-    else { weightedSum += r.result.percentScore * weight; weightSum += weight; }
+    else if (r.result.type === "grade") {
+      if (Number(r.result.grade) === 0) zeroMembers.push(md.subject);
+      if (weight > 0) { weightedSum += r.result.percentScore * weight; weightSum += weight; }
+    }
 
     // ถ้าไม่มีฐานเวลา ห้ามนับคาบขาดเข้ายอดรวมฝ่ายเดียว ไม่งั้นอัตราขาดจะพุ่งและติด มส. ผิด
     // ยัง push memberResults และคิดคะแนนตามปกติ — ตัดออกเฉพาะส่วนเวลาเรียน/มส.
@@ -2599,11 +2608,13 @@ export function computeIntegratedResult(studentId, memberDataList) {
   // 2) ไม่มี มส. → เช็ค ร. ของวิชาย่อย
   if (!overall && hasR) overall = { type: "ร." };
 
-  // 3) แปลงเป็นเกรด (ถัวเฉลี่ยถ่วงน้ำหนัก)
+  // 3) ถัวร้อยละถ่วงคาบแล้วตัดเกรดครั้งเดียว; วิชาย่อยได้ 0 บังคับผลรวมเป็น 0
   if (!overall) {
     const percentScore = weightSum > 0 ? weightedSum / weightSum : 0;
-    const rawGrade = percentToGrade(percentScore);
-    overall = { type: "grade", grade: msCapped ? Math.min(rawGrade, MS_MAKEUP_GRADE_CAP) : rawGrade, percentScore, weightSum, makeupTotal, ...(msCapped ? { msCapped: true, uncappedGrade: rawGrade } : {}) };
+    const rawGrade = zeroMembers.length ? 0 : percentToGrade(percentScore);
+    overall = { type: "grade", grade: msCapped ? Math.min(rawGrade, MS_MAKEUP_GRADE_CAP) : rawGrade,
+      percentScore, weightSum, makeupTotal, zeroMembers,
+      ...(msCapped ? { msCapped: true, uncappedGrade: rawGrade } : {}) };
   }
 
   const scoring = {
@@ -2620,7 +2631,8 @@ export function computeIntegratedResult(studentId, memberDataList) {
     examOverCap,
     complete: hasPrimaryHalves ? PRIMARY_HALVES.every(half => halfTotals[half].complete) :
       hasCollectStructure && expectedCount > 0 && scoredCount === expectedCount && emptyIndicatorCount === 0 && emptyUnitCount === 0,
-    partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null
+    partialPercent: partialWeightSum > 0 ? partialWeightedSum / partialWeightSum : null,
+    partialZero
   };
   const halves = hasPrimaryHalves ? Object.fromEntries(PRIMARY_HALVES.map(half => {
     const total = halfTotals[half], weight = total.weight;
@@ -2768,16 +2780,17 @@ export function computeGpa(subjectResults) {
   let weightedSum = 0, weightSum = 0, countedSubjects = 0;
   for (const x of list) {
     if (x.result.type !== "grade") continue;
-    const partial = x.scoring && x.scoring.partialPercent;
+    const partial = x.scoring?.partialPercent;
     // ⚠ วิชาที่ยังไม่มีคะแนนเลย (ไม่มีโครงสร้าง หรือมีแต่ยังไม่กรอกสักช่อง) ต้อง **ข้าม**
     // ห้ามนับเป็นเกรด 0 — ไม่งั้นเลข "ชั่วคราว" จะสร้างบั๊กเดิมของข้อ 3 ขึ้นมาใหม่ในตัวมันเอง
     // (เคสจริง: มีคะแนนวิชาเดียวได้ 100% อีก 4 วิชายังไม่มีโครงสร้าง → เคยขึ้น 1.33 ทั้งที่ควรเป็น 4.00)
     if (x.scoring && !x.scoring.complete && (partial === null || partial === undefined)) continue;
-    const percent = partial !== null && partial !== undefined ? partial : x.result.percentScore;
     const w = x.subject.credits && x.subject.credits > 0 ? Number(x.subject.credits) : 1;
     // ผลที่ตัดสินแล้วต้องใช้เกรดจริง (รวมเพดานแก้ มส. หลังปิดสอบ)
     // เฉพาะข้อมูลยังไม่ครบจึงแปลเปอร์เซ็นต์ชั่วคราว
-    const grade = x.scoring && !x.scoring.complete ? percentToGrade(percent) : Number(x.result.grade);
+    const grade = x.scoring && !x.scoring.complete
+      ? (x.scoring.partialZero ? 0 : percentToGrade(partial))
+      : Number(x.result.grade);
     weightedSum += grade * w;
     weightSum += w;
     countedSubjects++;

@@ -355,7 +355,7 @@ import {
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
   loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20261020-2";
+} from "../supabase-client.js?v=20261021-2";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -905,6 +905,13 @@ async function renderPrimaryReport(studentResults, catalog, grade, year) {
   decoratePrimaryReport(rows);
 }
 
+function integratedZeroHint(item) {
+  if (!item.result?.zeroMembers?.length) return "";
+  return " · ไม่ผ่านวิชาย่อย " + (item.memberResults || [])
+    .filter(member => item.result.zeroMembers.includes(member.subject))
+    .map(member => escapeHtml(member.subject.name) + " " + Number(member.result.percentScore).toFixed(1) + "%").join(" · ");
+}
+
 function renderPrimaryStudentRow(row) {
   const { student: stu, subjects, coverage, promotion } = row;
   const attendance = promotion.attendance;
@@ -913,7 +920,7 @@ function renderPrimaryStudentRow(row) {
     const status = !isSubjectResultDecided(item) ? "รอผล" : item.result.grade >= 1 ? "ผ่าน" : "ไม่ผ่าน";
     return "<div class='score-row'><span>" + escapeHtml(item.subject.name) +
       "</span><span class='val'>" + statusBadge(status) +
-      (status === "รอผล" ? " ยังไม่ครบ" : " เกรด " + item.result.grade + " (" + item.result.percentScore.toFixed(1) + "%)") + "</span></div>";
+      (status === "รอผล" ? " ยังไม่ครบ" : " เกรด " + item.result.grade + " (" + item.result.percentScore.toFixed(1) + "%)" + integratedZeroHint(item)) + "</span></div>";
   }).join("");
   const activityRows = promotion.activities.map(item => "<div class='score-row'><span>" + escapeHtml(item.name) +
     "</span><span class='val'>" + statusBadge(item.passed === null ? "รอผล" : item.passed ? "ผ่าน" : "ไม่ผ่าน") + "</span></div>").join("");
@@ -922,7 +929,7 @@ function renderPrimaryStudentRow(row) {
     "<div class='result-note'>ก. เวลาเรียน: ขาด " + attendance.missedDays + " วัน · ลาป่วย " + attendance.sickLeaveCount +
       " · ลากิจ " + attendance.personalLeaveCount + " — เหตุจำเป็นหรือไม่ คณะกรรมการตัดสิน</div>" +
     "<div class='result-note'>ข. วิชาที่ไม่ผ่านและอาจสอนซ่อมเสริม: " + (promotion.failedSubjects.length
-      ? promotion.failedSubjects.map(item => escapeHtml(item.subject.name) + " " + item.result.percentScore.toFixed(1) + "%").join(" · ")
+      ? promotion.failedSubjects.map(item => escapeHtml(item.subject.name) + " เกรด " + item.result.grade + " (" + item.result.percentScore.toFixed(1) + "%)" + integratedZeroHint(item)).join(" · ")
       : "ไม่มี") + "</div>" +
     "<div class='result-note'>ค. ภาษาไทย คณิต วิทย์ สังคมฯ: " + promotion.essentials.map(item =>
       escapeHtml(item.label) + " " + (item.status === "ผ่าน" ? "✓" : item.status === "ไม่ผ่าน" ? "✗" : "?") +
@@ -1019,8 +1026,11 @@ function renderStudentRow(row) {
     const display = x.result.type === "grade" && x.scoring && !x.scoring.complete
       ? "<span class='badge " + (overCap ? "bad" : "mid") + "'>" + (overCap ? "คะแนนสอบเกินเพดาน · ต้องแก้" :
         (!x.scoring.hasCollectStructure ? "ยังไม่มีโครงสร้างคะแนน" : "ยังไม่ครบ · " + x.scoring.scoredCount + "/" + x.scoring.expectedCount + " ช่อง")) + "</span>" +
-        (x.scoring.partialPercent !== null ? " <span class='hint'>(ชั่วคราว " + x.scoring.partialPercent.toFixed(0) + "%)</span>" : "")
-      : subjBadge(x.result);
+        (x.memberResults?.length ? " <span class='hint'>(ชั่วคราว " + x.memberResults.map(m => escapeHtml(m.subject.name) + " " +
+          (m.scoring.partialPercent == null ? "—" : Number(m.scoring.partialPercent).toFixed(1).replace(/\.0$/, "") + "%")).join(" · ") + ")</span>" :
+          x.scoring.partialPercent !== null ? " <span class='hint'>(ชั่วคราว " + x.scoring.partialPercent.toFixed(0) + "%)</span>" : "")
+      : subjBadge(x.result) + (x.memberResults?.length && x.result.type === "grade" && x.scoring?.complete
+        ? " <span class='hint'>เกรด " + x.result.grade + " (" + x.result.percentScore.toFixed(1) + "%)" + integratedZeroHint(x) + "</span>" : "");
     return "<div class='score-row'><span>" + escapeHtml(x.subject.name) + "</span><span class='val'>" + display + "</span></div>";
   }).join("");
 
