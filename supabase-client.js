@@ -2606,7 +2606,12 @@ export function computeIntegratedResult(studentId, memberDataList) {
   }
 
   // 2) ไม่มี มส. → เช็ค ร. ของวิชาย่อย
-  if (!overall && hasR) overall = { type: "ร." };
+  if (!overall && hasR) {
+    const rMembers = memberResults.filter(member => member.result.type === "ร.")
+      .map(member => ({ subject: member.subject, reason:member.result.reason || "" }));
+    overall = { type:"ร.", rMembers,
+      reason:rMembers.map(member => member.subject.name + ": " + (member.reason || "ยังไม่ระบุเหตุผล")).join(" · ") };
+  }
 
   // 3) ถัวร้อยละถ่วงคาบแล้วตัดเกรดครั้งเดียว; วิชาย่อยได้ 0 บังคับผลรวมเป็น 0
   if (!overall) {
@@ -2656,6 +2661,19 @@ export function computeIntegratedResult(studentId, memberDataList) {
 export function pickCountableSubjects(subjects, memberLinks) {
   const memberIds = new Set((memberLinks || []).map(link => link.member_subject_id));
   return (subjects || []).filter(s => s.subject_type === "บูรณาการ" || !memberIds.has(s.id));
+}
+
+// หน่วยกิตมัธยมของวิชาบูรณาการมาจากวิชาย่อยเท่านั้น; ค่าเดิมบนวิชาแม่ไม่ใช้
+export function subjectCreditInfo(subject, memberSubjects = []) {
+  if (subject?.level === "ประถม" || subject?.grade_level?.startsWith("ป.")) return { credits:null, missing:[] };
+  if (subject?.subject_type === "บูรณาการ") {
+    if (!memberSubjects.length) return { credits:null, missing:[(subject?.name || "วิชาบูรณาการ") + " (ยังไม่มีวิชาย่อย)"] };
+    const missing = memberSubjects.filter(member => !Number.isFinite(Number(member?.credits)) || !(Number(member?.credits) > 0))
+      .map(member => `${subject?.name || "วิชาบูรณาการ"} (วิชาย่อย ${member?.name || "ไม่ระบุชื่อ"})`);
+    return { credits:missing.length ? null : memberSubjects.reduce((sum, member) => sum + Number(member.credits), 0), missing };
+  }
+  const credits = Number(subject?.credits);
+  return Number.isFinite(credits) && credits > 0 ? { credits, missing:[] } : { credits:null, missing:[subject?.name || "ไม่ระบุชื่อวิชา"] };
 }
 
 // ---------- รวมผลทุกวิชาของนักเรียนทุกคน ในชั้น + ปีการศึกษา (+ เทอม ถ้าส่งมา) ----------
@@ -2735,6 +2753,7 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
         const ir = computeIntegratedResult(studentId, memberDataList);
         out.get(studentId).subjects.push({
           subject: subj,
+          creditInfo: subjectCreditInfo(subj, memberDataList.map(data => data.subject)),
           result: ir.overall,
           scoring: ir.scoring,
           noPeriodSubjects: ir.noPeriodSubjects,
@@ -2753,7 +2772,7 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
           examScores: data.examScores,
           gradeWeight: data.gradeWeight
         });
-        out.get(studentId).subjects.push({ subject: subj, result: r.result, scoring: r.scoring,
+        out.get(studentId).subjects.push({ subject: subj, creditInfo: subjectCreditInfo(subj), result: r.result, scoring: r.scoring,
           attendance: { base: Number(data.subject.total_periods) || 0, missed: computeMissedPeriods(studentId, data.sessions) },
           halves: r.halves });
       }
@@ -2764,7 +2783,7 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
 }
 
 // ---------- คิดเกรดเฉลี่ย (GPA) จากผลรายวิชาของนักเรียน 1 คน ----------
-// ถ่วงน้ำหนักด้วยหน่วยกิต (credits) — ไม่มีหน่วยกิต (ประถม) ถือเป็น 1 หน่วยเท่ากัน (ยืนยันแล้ว)
+// ถ่วงน้ำหนักด้วยหน่วยกิต (credits) — ประถมถือเป็น 1 หน่วยเท่ากัน
 // pending = ยังสรุปของจริงไม่ได้เพราะมี ร./มส. หรือกรอกคะแนนไม่ครบ
 // provisionalGpa คิดจากคะแนนเฉพาะที่กรอกแล้ว ใช้ดูระหว่างทางเท่านั้น ห้ามใช้ตัดสิน
 export function computeGpa(subjectResults) {
@@ -2772,10 +2791,12 @@ export function computeGpa(subjectResults) {
   const total = list.length;
   const hasBlocked = list.some(x => x.result.type === "มส." || x.result.type === "ร.");
   const hasIncomplete = list.some(x => x.scoring && !x.scoring.complete);
-  const pending = hasBlocked || hasIncomplete;
+  const missingCredits = [...new Set(list.flatMap(x => x.creditInfo?.missing || []))];
+  const pending = hasBlocked || hasIncomplete || missingCredits.length > 0;
   const reasons = [];
   if (hasBlocked) reasons.push("มีวิชาติด ร./มส.");
   if (hasIncomplete) reasons.push("ยังกรอกคะแนนไม่ครบ");
+  if (missingCredits.length) reasons.push("ยังไม่ตั้งหน่วยกิต: " + missingCredits.join(" · "));
 
   let weightedSum = 0, weightSum = 0, countedSubjects = 0;
   for (const x of list) {
@@ -2785,7 +2806,10 @@ export function computeGpa(subjectResults) {
     // ห้ามนับเป็นเกรด 0 — ไม่งั้นเลข "ชั่วคราว" จะสร้างบั๊กเดิมของข้อ 3 ขึ้นมาใหม่ในตัวมันเอง
     // (เคสจริง: มีคะแนนวิชาเดียวได้ 100% อีก 4 วิชายังไม่มีโครงสร้าง → เคยขึ้น 1.33 ทั้งที่ควรเป็น 4.00)
     if (x.scoring && !x.scoring.complete && (partial === null || partial === undefined)) continue;
-    const w = x.subject.credits && x.subject.credits > 0 ? Number(x.subject.credits) : 1;
+    // เมื่อหน่วยกิตขาด ค่าเฉลี่ยชั่วคราวประมาณด้วยน้ำหนัก 1 เท่านั้น; ผลทางการถูกบล็อกด้านบน
+    const w = x.creditInfo
+      ? (Number(x.creditInfo.credits) > 0 ? Number(x.creditInfo.credits) : 1)
+      : (x.subject.credits && x.subject.credits > 0 ? Number(x.subject.credits) : 1);
     // ผลที่ตัดสินแล้วต้องใช้เกรดจริง (รวมเพดานแก้ มส. หลังปิดสอบ)
     // เฉพาะข้อมูลยังไม่ครบจึงแปลเปอร์เซ็นต์ชั่วคราว
     const grade = x.scoring && !x.scoring.complete
@@ -2800,6 +2824,7 @@ export function computeGpa(subjectResults) {
     gpa: pending || total === 0 ? null : value,
     pending,
     pendingReason: reasons.join(" · "),
+    missingCredits,
     provisionalGpa: countedSubjects > 0 ? value : null,
     countedSubjects,
     total

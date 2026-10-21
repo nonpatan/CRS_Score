@@ -71,6 +71,11 @@
   .field { margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
   .field-note { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .credit-readonly { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); color: var(--ink); min-height: 44px; }
+  .credit-warning { color: var(--amber); }
+  .credit-warning summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
+  .credit-warning-list { display: grid; gap: 8px; margin-top: 10px; }
+  .credit-warning-list button { width: 100%; min-height: 44px; text-align: left; background: var(--amber-soft); color: var(--ink); }
   .row2 { display: flex; gap: 12px; }
   .row2 > * { flex: 1; }
 
@@ -321,6 +326,14 @@
       <label for="sel-subject">วิชา</label>
       <select id="sel-subject"><option value="">— กำลังโหลด —</option></select>
     </div>
+    <details id="missing-credits-card" class="credit-warning" hidden>
+      <summary id="missing-credits-title">วิชามัธยมที่ยังไม่ตั้งหน่วยกิต (0)</summary>
+      <div id="missing-credits-list" class="credit-warning-list"></div>
+    </details>
+    <details id="mismatched-credits-card" class="credit-warning" hidden>
+      <summary id="mismatched-credits-title">วิชาบูรณาการที่หน่วยกิตไม่ตรงหลักสูตร (0)</summary>
+      <div id="mismatched-credits-list" class="credit-warning-list"></div>
+    </details>
     <button class="ghost" id="btn-new-subject" style="width:100%">+ สร้างวิชาใหม่</button>
   </div>
 
@@ -369,8 +382,10 @@
         <input type="number" id="f-max" min="1" step="1" value="100">
       </div>
       <div class="field" id="field-credits">
-        <label for="f-credits">หน่วยกิต</label>
-        <input type="number" id="f-credits" min="0.5" step="0.5" placeholder="เช่น 1.0">
+        <label for="f-credits" id="credits-label">หน่วยกิต</label>
+        <input type="number" id="f-credits" min="0.5" step="0.5" placeholder="เช่น 1.0" aria-describedby="credits-computed credits-error">
+        <div id="credits-computed" class="credit-readonly" role="status" hidden></div>
+        <div id="credits-error" class="field-note credit-warning" role="alert" hidden></div>
       </div>
     </div>
     <div class="row2">
@@ -587,7 +602,7 @@
 </div>
 
 <script type="module">
-import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261021-2";
+import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261021-4";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -671,6 +686,14 @@ const fTerm = document.getElementById("f-term");
 const fPeriods = document.getElementById("f-periods");
 const fOwner = document.getElementById("f-owner");
 const fieldCredits = document.getElementById("field-credits");
+const creditsComputed = document.getElementById("credits-computed");
+const creditsError = document.getElementById("credits-error");
+const missingCreditsCard = document.getElementById("missing-credits-card");
+const missingCreditsTitle = document.getElementById("missing-credits-title");
+const missingCreditsList = document.getElementById("missing-credits-list");
+const mismatchedCreditsCard = document.getElementById("mismatched-credits-card");
+const mismatchedCreditsTitle = document.getElementById("mismatched-credits-title");
+const mismatchedCreditsList = document.getElementById("mismatched-credits-list");
 const fieldTerm = document.getElementById("field-term");
 const fieldOwner = document.getElementById("field-owner");
 const btnAddAcademicYear = document.getElementById("btn-add-academic-year");
@@ -964,6 +987,7 @@ function updateGradeOptions(keepValue) {
 function updateLevelDependentFields() {
   const isMatthayom = fLevel.value === "มัธยม";
   fieldCredits.style.display = isMatthayom ? "block" : "none";
+  updateCreditsUI();
   fieldTerm.style.display = isMatthayom ? "block" : "none";
   document.getElementById("periods-label").innerHTML =
     "จำนวนคาบเรียน" + (isMatthayom ? "ทั้งภาคเรียน" : "ทั้งปีการศึกษา") +
@@ -981,6 +1005,7 @@ fLevel.addEventListener("change", () => { updateGradeOptions(); updateLevelDepen
 // วิชาบูรณาการไม่มีหน่วยใหญ่/สมรรถนะหลักเป็นของตัวเอง แต่มีวิชาพื้นฐานสมาชิกแทน
 function updateTypeDependentUI() {
   const isIntegrated = fType.value === "บูรณาการ";
+  updateCreditsUI();
   document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
   if (currentSubject) {
     elExamControlCard.style.display = isIntegrated ? "none" : "block";
@@ -993,6 +1018,11 @@ function updateTypeDependentUI() {
   syncStructureCopyCard();
 }
 fType.addEventListener("change", updateTypeDependentUI);
+fName.addEventListener("input", updateCreditsUI);
+fCredits.addEventListener("input", () => {
+  if (Number(fCredits.value) > 0) { creditsError.hidden = true; fCredits.removeAttribute("aria-invalid"); }
+  updateCreditsUI();
+});
 
 // popup
 const elOverlay = document.getElementById("overlay");
@@ -1036,6 +1066,80 @@ let units = [];               // ต้นไม้โครงสร้าง�
 let modalContext = null;      // เก็บว่ากำลังเพิ่ม/แก้ node ประเภทอะไร ของใคร
 let allSubjects = [];         // วิชาทั้งหมด (ใช้เลือกวิชาพื้นฐานมาเป็นสมาชิกวิชาบูรณาการ)
 let members = [];             // แถว integration_members ของวิชาบูรณาการที่กำลังดูอยู่
+let integrationMembers = [];  // รหัสสมาชิกทุกวิชา สำหรับรายการเตือนของปีที่เลือก
+let integrationMembersLoaded = false;
+
+function integratedCreditComparison(subject, memberSubjects) {
+  const info = subjectCreditInfo(subject, memberSubjects);
+  if (info.missing.length) return { status:"missing", info };
+  const baseline = Number(subject.credits);
+  if (subject.credits == null || subject.credits === "" || !Number.isFinite(baseline) || baseline <= 0) {
+    return { status:"unset", info };
+  }
+  return { status:Math.abs(info.credits - baseline) < 0.001 ? "match" : "mismatch", info, baseline };
+}
+
+function updateCreditsUI() {
+  const computed = fLevel.value === "มัธยม" && fType.value === "บูรณาการ";
+  document.getElementById("credits-label").textContent = computed ? "หน่วยกิตตามหลักสูตร" : fLevel.value === "มัธยม" ? "หน่วยกิต *" : "หน่วยกิต";
+  fCredits.hidden = false;
+  fCredits.required = fLevel.value === "มัธยม" && !computed;
+  creditsComputed.hidden = !computed;
+  if (!computed) return;
+  const subject = { name:fName.value.trim() || "วิชาบูรณาการ", credits:fCredits.value.trim() || null,
+    level:"มัธยม", subject_type:"บูรณาการ" };
+  const comparison = integratedCreditComparison(subject, currentSubject ? members.map(row => row.member) : []);
+  const { info, status, baseline } = comparison;
+  creditsComputed.textContent = status === "missing"
+    ? "ยังไม่ตั้งหน่วยกิต: " + info.missing.join(" · ")
+    : "รวมจากวิชาย่อย " + info.credits.toFixed(1) + " (ใช้คิด GPA)" +
+      (status === "match" ? " · ✓ ตรงกับหลักสูตร" : status === "mismatch"
+        ? " · ⚠️ ผลรวมวิชาย่อย " + info.credits.toFixed(1) + " ไม่ตรงกับหลักสูตร " + baseline.toFixed(1) + " — ตรวจหน่วยกิตวิชาย่อย"
+        : "");
+}
+
+function renderMissingCredits() {
+  const year = elFilterYear.value;
+  const missing = year ? allSubjects.filter(subject => subject.year === year && subject.level === "มัธยม" &&
+    subject.subject_type === "พื้นฐาน" && !(Number(subject.credits) > 0)) : [];
+  missingCreditsCard.hidden = !year || !missing.length;
+  missingCreditsTitle.textContent = "วิชามัธยมที่ยังไม่ตั้งหน่วยกิต (" + missing.length + ")";
+  missingCreditsList.innerHTML = missing.map(subject => "<button type='button' data-credit-subject='" + escapeHtml(subject.id) +
+    "'>" + escapeHtml((subject.code ? subject.code + " · " : "") + subject.name + " · " + subject.grade_level +
+      (subject.term ? " ภาคเรียน " + subject.term : "")) + "</button>").join("");
+}
+function renderMismatchedCredits() {
+  if (!integrationMembersLoaded) { mismatchedCreditsCard.hidden = true; return; }
+  const year = elFilterYear.value;
+  const byId = new Map(allSubjects.map(subject => [subject.id, subject]));
+  const membersByParent = new Map();
+  for (const row of integrationMembers) {
+    if (!membersByParent.has(row.integrated_subject_id)) membersByParent.set(row.integrated_subject_id, []);
+    membersByParent.get(row.integrated_subject_id).push(byId.get(row.member_subject_id));
+  }
+  const mismatched = year ? allSubjects.filter(subject => subject.year === year && subject.level === "มัธยม" &&
+    subject.subject_type === "บูรณาการ" &&
+    integratedCreditComparison(subject, membersByParent.get(subject.id) || []).status === "mismatch") : [];
+  mismatchedCreditsCard.hidden = !year || !mismatched.length;
+  mismatchedCreditsTitle.textContent = "วิชาบูรณาการที่หน่วยกิตไม่ตรงหลักสูตร (" + mismatched.length + ")";
+  mismatchedCreditsList.innerHTML = mismatched.map(subject => "<button type='button' data-credit-subject='" + escapeHtml(subject.id) +
+    "'>" + escapeHtml((subject.code ? subject.code + " · " : "") + subject.name + " · " + subject.grade_level +
+      (subject.term ? " ภาคเรียน " + subject.term : "")) + "</button>").join("");
+}
+function openCreditSubject(event) {
+  const button = event.target.closest("[data-credit-subject]");
+  if (!button) return;
+  const subject = allSubjects.find(row => row.id === button.dataset.creditSubject);
+  if (!subject) return;
+  elFilterGrade.value = subject.grade_level || "";
+  elFilterTerm.value = subject.term || "";
+  applySubjectFilter();
+  elSubject.value = subject.id;
+  elSubject.dispatchEvent(new Event("change"));
+  elSubject.scrollIntoView({ block:"center" });
+}
+missingCreditsList.addEventListener("click", openCreditSubject);
+mismatchedCreditsList.addEventListener("click", openCreditSubject);
 let savedGradeWeights = new Map();
 let selectableYears = [];
 let editingAcademicYear = null;
@@ -1751,6 +1855,11 @@ async function loadSubjects(selectId) {
   const { data, error } = await sb.from("subjects").select("*").order("created_at");
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
   allSubjects = data || [];
+  const memberResult = await fetchAllRows(() => sb.from("integration_members")
+    .select("id,integrated_subject_id,member_subject_id"));
+  integrationMembersLoaded = !memberResult.error;
+  integrationMembers = memberResult.error ? [] : memberResult.data;
+  if (memberResult.error) showToast("โหลดรายการตรวจหน่วยกิตวิชาบูรณาการไม่สำเร็จ: " + memberResult.error.message, false);
   fillYearOptions();
   try {
     await refreshSelectableYears(fYear.value);
@@ -1769,6 +1878,8 @@ async function loadSubjects(selectId) {
     }
   }
   applySubjectFilter();
+  renderMissingCredits();
+  renderMismatchedCredits();
   if (selectId) elSubject.value = selectId;
 }
 
@@ -1786,7 +1897,7 @@ function applySubjectFilter() {
   fillSelect(elSubject, filtered, subjectLabel, "— เลือกวิชา (" + filtered.length + " วิชา) —");
 }
 // เปลี่ยนปี = จำไว้ให้ทุกหน้าใช้ปีเดียวกัน (localStorage) แล้วกรองใหม่
-elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); hideAll(); });
+elFilterYear.addEventListener("change", () => { setActiveYear(elFilterYear.value); applySubjectFilter(); renderMissingCredits(); renderMismatchedCredits(); hideAll(); });
 elFilterGrade.addEventListener("change", () => { applySubjectFilter(); hideAll(); });
 elFilterTerm.addEventListener("change", () => { applySubjectFilter(); hideAll(); });
 
@@ -1848,6 +1959,10 @@ function fillSubjectForm(subj) {
   updateLevelDependentFields();
   fMax.value = subj ? subj.max_score : 100;
   fCredits.value = subj && subj.credits ? subj.credits : "";
+  creditsError.hidden = true;
+  fCredits.removeAttribute("aria-invalid");
+  members = [];
+  updateCreditsUI();
   // สร้างวิชาใหม่: เลือกปีที่ทำงานอยู่ให้อัตโนมัติเมื่อปีนั้นอยู่ในรายการกลาง
   const preferredYear = subj && subj.year ? subj.year : getActiveYear();
   fillSubjectYearOptions(preferredYear);
@@ -1910,10 +2025,18 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
   const isIntegrated = fType.value === "บูรณาการ";
 
   let credits = null;
-  if (isMatthayom && fCredits.value.trim() !== "") {
-    credits = Number(fCredits.value);
-    if (isNaN(credits) || credits <= 0) { showToast("หน่วยกิตต้องมากกว่า 0", false); return; }
+  if (isMatthayom) {
+    const enteredCredits = fCredits.value.trim();
+    credits = enteredCredits === "" ? null : Number(enteredCredits);
+    if ((!isIntegrated && credits === null) || (credits !== null && (!Number.isFinite(credits) || credits <= 0))) {
+      creditsError.textContent = isIntegrated ? "หน่วยกิตตามหลักสูตรต้องมากกว่า 0 หรือเว้นว่าง" : "กรอกหน่วยกิต (มัธยม) ให้มากกว่า 0 ก่อนบันทึก";
+      creditsError.hidden = false;
+      fCredits.setAttribute("aria-invalid", "true");
+      showToast(isIntegrated ? "ตรวจหน่วยกิตตามหลักสูตร" : "กรอกหน่วยกิต (มัธยม)", false); fCredits.focus(); return;
+    }
   }
+  creditsError.hidden = true;
+  fCredits.removeAttribute("aria-invalid");
 
   let periods = null;
   if (!isIntegrated) {
@@ -1930,11 +2053,11 @@ document.getElementById("btn-save-subject").addEventListener("click", async () =
     level: fLevel.value,
     grade_level: gradeLevel,
     max_score: maxScore,
-    credits: credits,
     year: year,
     term: isMatthayom ? fTerm.value : null,
     total_periods: periods
   };
+  payload.credits = credits;
   // หัวหน้าวิชาการและ admin เลือกหรือเปลี่ยนเจ้าของวิชาได้
   if (canEditAcademicSettings) payload.owner_id = fOwner.value;
   else if (!currentSubject) payload.owner_id = myUserId;
@@ -2802,13 +2925,19 @@ async function removeEnrollment(e) {
 
 // ---------- วิชาย่อยที่ประกอบกัน (เฉพาะวิชาบูรณาการ) ----------
 async function loadMembers() {
+  const subjectId = currentSubject.id;
   const { data, error } = await sb
     .from("integration_members")
     .select("*, member:member_subject_id(*)")
-    .eq("integrated_subject_id", currentSubject.id);
+    .eq("integrated_subject_id", subjectId);
+  if (!currentSubject || currentSubject.id !== subjectId) return;
   if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
   members = data || [];
+  integrationMembers = integrationMembers.filter(row => row.integrated_subject_id !== currentSubject.id).concat(
+    members.map(row => ({ id:row.id, integrated_subject_id:row.integrated_subject_id, member_subject_id:row.member_subject_id })));
+  updateCreditsUI();
   renderMembers();
+  renderMismatchedCredits();
 }
 
 function renderMembers() {

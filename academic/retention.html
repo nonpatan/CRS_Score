@@ -355,7 +355,7 @@ import {
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
   loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20261021-2";
+} from "../supabase-client.js?v=20261021-4";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -809,8 +809,8 @@ async function loadReport() {
   const classCoverage = retentionCoverage(catalog, unionSubjects);
 
   // ---------- ใช้เกณฑ์เรียนซ้ำชั้น 2 ข้อ (ยืนยันกับผู้ใช้แล้ว) ----------
-  // ข้อ 1: เกรดเฉลี่ยทั้งปีต่ำกว่า 1.00 — ถ่วงน้ำหนักด้วยหน่วยกิต (ไม่มีหน่วยกิตถือเป็น 1 หน่วย)
-  //         ถ้ามีวิชาติด ร./มส. ที่ยังไม่แก้ไขแม้แต่วิชาเดียว ถือว่า "ยังสรุปไม่ได้" ไม่คิดเกรดเฉลี่ยเลย
+  // ข้อ 1: เกรดเฉลี่ยทั้งปีต่ำกว่า 1.00 — ถ่วงหน่วยกิตของวิชาที่นับจริง
+  //         ถ้าติด ร./มส. หรือวิชามัธยมขาดหน่วยกิต ถือว่า "ยังสรุปไม่ได้"
   //         (คิดที่ computeGpa ใน supabase-client.js)
   // ข้อ 2: ติด 0 (เกรด 0) หรือ ร. หรือ มส. เกินครึ่งหนึ่งของรายวิชาที่ลงทะเบียนเรียนปีนี้
   // เข้าเกณฑ์ซ้ำชั้นถ้าเข้าข้อใดข้อหนึ่ง (ข้อ 2 เช็คได้แม้ข้อ 1 ยังสรุปไม่ได้)
@@ -823,13 +823,13 @@ async function loadReport() {
     const incompleteCount = subjList.filter(x => x.scoring && !x.scoring.complete).length;
     const cond2 = total > 0 && failCount > total / 2;
 
-    const { gpa, pending, pendingReason, provisionalGpa, countedSubjects } = computeGpa(subjList);
+    const { gpa, pending, pendingReason, missingCredits, provisionalGpa, countedSubjects } = computeGpa(subjList);
     const cond1 = gpa !== null && gpa < 1.0;
     const coverage = retentionCoverage(catalog, subjList.map(x => x.subject));
     const decided = subjList.length > 0 && subjList.every(isSubjectResultDecided);
     const official = coverage.ready && decided;
 
-    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, coverage, decided, official, flagged: cond1 || cond2 });
+    rows.push({ stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, missingCredits, provisionalGpa, countedSubjects, coverage, decided, official, flagged: cond1 || cond2 });
   }
 
   rows.sort((a, b) => {
@@ -1018,7 +1018,7 @@ function renderReport(rows, grade, year, classCoverage) {
 }
 
 function renderStudentRow(row) {
-  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, provisionalGpa, countedSubjects, coverage, official, flagged } = row;
+  const { stu, subjList, total, failCount, incompleteCount, cond2, gpa, cond1, pending, pendingReason, missingCredits, provisionalGpa, countedSubjects, coverage, official, flagged } = row;
   const noPeriodSubjects = [...new Set(subjList.flatMap(item => item.noPeriodSubjects || []))];
 
   const subjRows = subjList.map(x => {
@@ -1039,7 +1039,8 @@ function renderStudentRow(row) {
     const reasons = retentionReasonLines(row);
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge bad'>เข้าเกณฑ์ซ้ำชั้น</span></div>" +
-      "<div class='result-note'>" + reasons.join(" · ") + "</div>";
+      "<div class='result-note'>" + reasons.join(" · ") + "</div>" +
+      (missingCredits?.length ? "<div class='result-note'>เกณฑ์เกรดเฉลี่ยยังสรุปไม่ได้: ยังไม่ตั้งหน่วยกิต: " + escapeHtml(missingCredits.join(" · ")) + "</div>" : "");
   } else if (flagged) {
     const reasons = retentionReasonLines(row); // helper เติม coverage.scopeLabel เฉพาะสาขาแนวโน้ม
     const unofficialReason = !coverage.ready
@@ -1048,7 +1049,8 @@ function renderStudentRow(row) {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge mid'>แนวโน้มซ้ำชั้น</span></div>" +
       "<div class='result-note'>" + reasons.join(" · ") + "</div>" +
-      "<div class='result-note'>ยังไม่ใช่ผลตัดสิน: " + escapeHtml(unofficialReason) + "</div>";
+      "<div class='result-note'>ยังไม่ใช่ผลตัดสิน: " + escapeHtml(unofficialReason) + "</div>" +
+      (missingCredits?.length ? "<div class='result-note'>เกณฑ์เกรดเฉลี่ยยังสรุปไม่ได้: ยังไม่ตั้งหน่วยกิต: " + escapeHtml(missingCredits.join(" · ")) + "</div>" : "");
   } else if (pending) {
     verdictHtml =
       "<div class='result-line'><span>สรุป</span><span class='badge mid'>ยังสรุปไม่ได้</span></div>" +

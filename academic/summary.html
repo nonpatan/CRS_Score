@@ -693,7 +693,7 @@ import {
   loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText
-} from "../supabase-client.js?v=20261021-2";
+} from "../supabase-client.js?v=20261021-4";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -3319,7 +3319,10 @@ function renderGpaStudentButtons() {
 }
 
 async function loadGpaOwnerNames(map, key) {
-  const ids = [...new Set([...map.values()].flatMap(entry => (entry.subjects || []).map(item => item.subject?.owner_id)).filter(Boolean))];
+  const ids = [...new Set([...map.values()]
+    .flatMap(entry => (entry.subjects || []).flatMap(item =>
+      [item.subject?.owner_id, ...(item.memberResults || []).map(member => member.subject?.owner_id)]))
+    .filter(Boolean))];
   if (!ids.length) return;
   try {
     const profiles = await sb.from("profiles").select("id,name").in("id", ids);
@@ -3363,7 +3366,14 @@ function gpaSubjectDisplay(item) {
       ? "ขาด " + result.missedPeriods + " คาบ (เพดาน " + Number(result.maxMissed).toFixed(1) + " คาบ)" : "";
     return { group:"blocked", chip:"เข้าข่าย มส.", tone:"bad", reason:[periods, result.subtype === "retake" ? "ต้องเรียนซ้ำรายวิชา" : "เรียนเพิ่มเติมให้ครบเวลาได้"].filter(Boolean).join(" · ") + follow };
   }
-  if (result.type === "ร.") return { group:"blocked", chip:"ร.", tone:"bad", reason:(result.reason || "ยังไม่ระบุเหตุผล") + follow };
+  if (result.type === "ร.") {
+    const reason = result.rMembers?.length ? result.rMembers.map(member => {
+      const memberTeacher = gpaOwnerNameById.get(member.subject?.owner_id);
+      return member.subject.name + ": " + (member.reason || "ยังไม่ระบุเหตุผล") +
+        (memberTeacher ? " · ตาม " + memberTeacher : "");
+    }).join(" / ") : (result.reason || "ยังไม่ระบุเหตุผล") + follow;
+    return { group:"blocked", chip:"ร.", tone:"bad", reason };
+  }
   if (scoring && !scoring.complete) {
     if (scoring.examOverCap) return { group:"incomplete", chip:"สอบเกินเพดาน", tone:"bad", reason:"คะแนนสอบเกินเพดาน · ครูต้องแก้" + follow };
     const reasons = [];
@@ -3401,10 +3411,10 @@ function renderGpaStudentDetail() {
       "</div></div><div class='hint'>ยังไม่มีวิชาที่ลงทะเบียนของ" + scopeText + " (ปีการศึกษา " + escapeHtml(elGpaYear.value) + ")</div></div>";
     return;
   }
-  const { gpa, pending, provisionalGpa, countedSubjects, total } = computeGpa(subjList);
+  const { gpa, pending, pendingReason, provisionalGpa, countedSubjects, total } = computeGpa(subjList);
   const counts = gpaStatusCounts(subjList), failCount = counts.ms + counts.remark + counts.zero;
   const verdict = pending
-    ? "<div class='gpa-verdict pending'><div class='gpa-verdict-label'>เกรดเฉลี่ย" + scopeText + "</div><div class='gpa-verdict-main'>ยังสรุปไม่ได้</div><div class='gpa-verdict-note'>" + escapeHtml(gpaPendingText(counts, isPrimaryGrade(grade))) + "</div>" +
+    ? "<div class='gpa-verdict pending'><div class='gpa-verdict-label'>เกรดเฉลี่ย" + scopeText + "</div><div class='gpa-verdict-main'>ยังสรุปไม่ได้</div><div class='gpa-verdict-note'>" + escapeHtml(pendingReason || gpaPendingText(counts, isPrimaryGrade(grade))) + "</div>" +
       (provisionalGpa !== null ? "<div class='gpa-verdict-note provisional'>เกรดเฉลี่ยชั่วคราวจาก " + countedSubjects + " วิชาที่มีผล: " + provisionalGpa.toFixed(2) + " — ไม่ใช่ผลจริง</div>" : "") + "</div>"
     : "<div class='gpa-verdict done'><div class='gpa-verdict-label'>เกรดเฉลี่ย" + scopeText + "</div><div class='gpa-verdict-main'>" + gpa.toFixed(2) + "</div>" +
       (failCount ? "<div class='gpa-verdict-note'>" + (isPrimaryGrade(grade) ? "ไม่ผ่าน " : "ติด 0/ร./มส. ") + failCount + " จาก " + total + " วิชา</div>" : "") + "</div>";
@@ -3557,10 +3567,10 @@ function pp6TailHtml(d, commentTitle) {
 function buildPp6Html(d) {
   const subjects = (d.subjects || []).slice()
     .sort((a, b) => String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th", { numeric:true }));
-  const totalCredits = subjects.reduce((sum, item) => sum + (Number(item.subject.credits) || 0), 0);
+  const totalCredits = subjects.reduce((sum, item) => sum + (Number(item.creditInfo?.credits) || 0), 0);
   const rows = subjects.map((item, index) => {
     const cells = pp6SubjectCells(item), att = item.attendance || { base:0, missed:0 };
-    const credits = Number(item.subject.credits) > 0 ? Number(item.subject.credits).toFixed(1) : "—";
+    const credits = Number(item.creditInfo?.credits) > 0 ? Number(item.creditInfo.credits).toFixed(1) : "—";
     const time = att.base > 0 ? pp6Number(att.base - att.missed) + " / " + pp6Number(att.base) : "—";
     const main = "<tr><td class='c'>" + (index + 1) + "</td><td>" + escapeHtml(item.subject.code || "") + "</td><td>" + escapeHtml(item.subject.name || "") +
       "</td><td class='c'>" + escapeHtml(item.subject.subject_type || "") + "</td><td class='c'>" + credits + "</td><td class='c'>" + time +
@@ -3573,6 +3583,7 @@ function buildPp6Html(d) {
     return main + members;
   }).join("");
   const pendingNames = subjects.filter(item => pp6SubjectCells(item).pending).map(item => item.subject.name || "");
+  const missingCredits = [...new Set(subjects.flatMap(item => item.creditInfo?.missing || []))];
   const gpaText = d.gpa === null || d.gpa === undefined ? "รอผล" : Number(d.gpa).toFixed(2);
   return "<article class='pp6-paper'>" +
     pp6HeadHtml(d, "ภาคเรียนที่ " + escapeHtml(d.term) + " ปีการศึกษา " + escapeHtml(d.year)) +
@@ -3580,7 +3591,10 @@ function buildPp6Html(d) {
       "<thead><tr><th>ที่</th><th>รหัสวิชา</th><th>รายวิชา</th><th>ประเภท</th><th>หน่วยกิต</th><th>เวลาเรียน (คาบ)</th><th>คะแนน (ร้อยละ)</th><th>ระดับผล</th></tr></thead>" +
       "<tbody>" + rows + "</tbody><tfoot><tr><td colspan='4' class='r'>รวมหน่วยกิต</td><td class='c'>" + totalCredits.toFixed(1) +
       "</td><td colspan='2' class='r'>ผลการเรียนเฉลี่ย (GPA)</td><td class='c" + (gpaText === "รอผล" ? " pend" : "") + "'>" + gpaText + "</td></tr></tfoot></table>" +
-      (gpaText === "รอผล" && pendingNames.length ? "<div class='pp6-note'>รอผล = ยังไม่มีระดับผลครบทุกวิชา · ค้าง: " + pendingNames.map(escapeHtml).join(", ") + "</div>" : "") + pp6ZeroNotes(subjects) +
+      (gpaText === "รอผล" && (pendingNames.length || missingCredits.length) ? "<div class='pp6-note'>" +
+        (pendingNames.length ? "รอผล = ยังไม่มีระดับผลครบทุกวิชา · ค้าง: " + pendingNames.map(escapeHtml).join(", ") : "") +
+        (pendingNames.length && missingCredits.length ? " · " : "") +
+        (missingCredits.length ? "ยังไม่ตั้งหน่วยกิต: " + missingCredits.map(escapeHtml).join(" · ") : "") + "</div>" : "") + pp6ZeroNotes(subjects) +
       "<div class='pp6-note'>ระดับผล: 4 = 80–100 · 3.5 = 75–79 · 3 = 70–74 · 2.5 = 65–69 · 2 = 60–64 · 1.5 = 55–59 · 1 = 50–54 · 0 = 0–49 · ร. = รอการตัดสิน · มส. = ไม่มีสิทธิ์สอบ (เวลาเรียนไม่ถึงร้อยละ 80)</div></section>" +
     pp6TailHtml(d, "ความเห็นของครูประจำชั้น") + "</article>";
 }
