@@ -3738,14 +3738,35 @@ async function renderPp6Panel(student) {
   });
 }
 
-async function pp6LoadActivities(studentId, year, term) {
-  let query = sb.from("competency_assessments").select("id,name,term,activity_category")
+// รวมผลของกิจกรรมในแต่ละประเภทตามลำดับหลักสูตร
+function pp6ActivityRows(categories, assessments, memberIds, resultById) {
+  const mine = new Map();
+  for (const row of assessments) {
+    if (!memberIds.has(row.id)) continue;
+    if (!mine.has(row.activity_category)) mine.set(row.activity_category, []);
+    mine.get(row.activity_category).push(row.id);
+  }
+  return categories.slice().sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
+    .filter(category => category.active || mine.has(category.code))
+    .map(category => {
+      const ids = mine.get(category.code) || [];
+      const result = !ids.length ? "—" : ids.some(id => resultById.get(id) === false) ? "ไม่ผ่าน" :
+        ids.some(id => !resultById.has(id)) ? "รอผล" : "ผ่าน";
+      return { name:category.code, result };
+    });
+}
+
+async function pp6LoadActivities(studentId, year, terms) {
+  let query = sb.from("competency_assessments").select("id,term,activity_category")
     .eq("year", year).eq("source_type", "กิจกรรม").not("activity_category", "is", null);
-  if (term) query = query.or("term.eq." + term + ",term.is.null"); // ประถมไม่ส่ง term = ทั้งปี
-  const list = await query;
-  if (list.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + list.error.message);
+  query = query.or("term.in.(" + terms.join(",") + "),term.is.null");
+  const [list, categories] = await Promise.all([
+    query,
+    sb.from("activity_categories").select("code,sort_order,active").order("sort_order")
+  ]);
+  if (list.error || categories.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (list.error || categories.error).message);
   const ids = (list.data || []).map(row => row.id);
-  if (!ids.length) return [];
+  if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map());
   const [members, results] = await Promise.all([
     sb.from("competency_assessment_members").select("assessment_id").eq("student_id", studentId).in("assessment_id", ids),
     sb.from("activity_pass_results").select("assessment_id,passed").eq("student_id", studentId).in("assessment_id", ids)
@@ -3753,9 +3774,7 @@ async function pp6LoadActivities(studentId, year, term) {
   if (members.error || results.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (members.error || results.error).message);
   const mine = new Set((members.data || []).map(row => row.assessment_id));
   const resultById = new Map((results.data || []).map(row => [row.assessment_id, row.passed]));
-  return (list.data || []).filter(row => mine.has(row.id))
-    .sort((a, b) => a.name.localeCompare(b.name, "th"))
-    .map(row => ({ name:row.name, result:!resultById.has(row.id) ? "รอผล" : (resultById.get(row.id) ? "ผ่าน" : "ไม่ผ่าน") }));
+  return pp6ActivityRows(categories.data || [], list.data || [], mine, resultById);
 }
 
 async function pp6LoadCompetencies(student, year, grade, term) {
@@ -3799,7 +3818,7 @@ async function printPp6(student, button) {
     try { const loaded = await pp6LoadCompetencies(student, year, grade, scope.primary ? "" : term); competencies = loaded.rows; levels = loaded.levels; }
     catch (error) { competencyError = "โหลดสมรรถนะไม่สำเร็จ"; }
     let activities = [];
-    try { activities = await pp6LoadActivities(student.id, year, scope.primary ? "" : term); } catch (error) { activities = []; }
+    try { activities = await pp6LoadActivities(student.id, year, scope.primary ? (scope.half === "ปลายปี" ? ["1", "2"] : ["1"]) : [term]); } catch (error) { activities = []; }
     const area = document.getElementById("pp6-print-area");
     const sheet = {
       schoolName:String(school || "").trim(), year, term, half:scope.half,
