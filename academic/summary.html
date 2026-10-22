@@ -3564,10 +3564,17 @@ function pp6TailHtml(d, commentTitle) {
     "<div class='pp6-printed'>พิมพ์จากระบบ CRS MIS" + (d.printedDate ? " · " + escapeHtml(d.printedDate) : "") + "</div>";
 }
 
+// เรียงวิชาใน ปพ.6 ทั้งสองระดับ: พื้นฐาน → สุขศึกษา/พลศึกษา → บูรณาการ
+function pp6SortSubjects(subjects) {
+  const group = item => item.subject.subject_type === "บูรณาการ" ? 2 :
+    String(item.subject.code || "").startsWith("พ") ? 1 : 0;
+  return [...subjects].sort((a, b) => group(a) - group(b) ||
+    String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th", { numeric:true }));
+}
+
 // ฟังก์ชันบริสุทธิ์ — รับข้อมูลที่เตรียมแล้ว คืน HTML ใบ ปพ.6 มัธยม (ทดสอบได้โดยไม่ต่อฐาน)
 function buildPp6Html(d) {
-  const subjects = (d.subjects || []).slice()
-    .sort((a, b) => String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th", { numeric:true }));
+  const subjects = pp6SortSubjects(d.subjects || []);
   const totalCredits = subjects.reduce((sum, item) => sum + (Number(item.creditInfo?.credits) || 0), 0);
   const rows = subjects.map((item, index) => {
     const cells = pp6SubjectCells(item), att = item.attendance || { base:0, missed:0 };
@@ -3604,8 +3611,7 @@ function buildPp6Html(d) {
 // แสดงคะแนนที่ระบบมีตามจริง (ไม่ “รอผล”) ช่วงที่ยังไม่ครบติด * · เฉลี่ยเป็นร้อยละ · ไม่มีหน่วยกิต/GPA/เวลาเรียน
 function buildPp6PrimaryHtml(d) {
   const isEnd = d.half === "ปลายปี";
-  const subjects = (d.subjects || []).slice()
-    .sort((a, b) => String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th", { numeric:true }));
+  const subjects = pp6SortSubjects(d.subjects || []);
   const star = ok => ok ? "" : "<sup>*</sup>";
   const num = (value, ok, now) => "<td class='r" + (now ? " now" : "") + "'>" + (value === null ? "—" : Number(value).toFixed(2)) + star(ok) + "</td>";
   const blank = "<td class='c'>—</td>";
