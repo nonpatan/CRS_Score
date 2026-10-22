@@ -141,6 +141,19 @@
   .cm-menu-wrap { position:relative; }
   .cm-menu { position:absolute; right:0; top:48px; min-width:180px; padding:6px; background:var(--white); border:1px solid var(--line); border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.12); z-index:4; }
   .cm-menu button { width:100%; text-align:left; min-height:44px; }
+  .cm-menu hr { border:0; border-top:1px solid var(--line); margin:6px 0; }
+  #detail-menu:has(#detail-delete[hidden]) hr { display:none; }
+  #detail-copy { display:flex; align-items:center; gap:8px; }
+  #detail-copy svg { width:18px; height:18px; flex:none; fill:currentColor; }
+  .copy-option { display:flex; align-items:flex-start; gap:10px; min-height:44px; padding:8px 0; margin:0; font-weight:400; }
+  .copy-option input { margin-top:5px; flex:none; }
+  .copy-option small { display:block; color:var(--muted); font-size:13px; }
+  .copy-option:has(input:disabled) { cursor:not-allowed; }
+  .copy-option:has(input:disabled) input { opacity:.55; }
+  #copy-options { border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:6px 12px; }
+  #copy-options legend { font-weight:600; }
+  #copy-dup { background:var(--amber-soft); color:var(--amber); border-radius:8px; padding:10px; margin:12px 0; }
+  #copy-overlay .modal { width:100%; max-width:520px; }
   .icon-btn { display:inline-grid; place-items:center; min-width:44px; min-height:44px; font-size:0; padding:8px; }
   .academic-competency-manage button.icon-btn { width:44px; height:44px; min-height:44px; }
   .icon-btn::before { content:""; width:20px; height:20px; display:block; background:currentColor; mask-size:contain; mask-repeat:no-repeat; mask-position:center; }
@@ -168,6 +181,8 @@
     #show-create .cm-create-long { display:none; }
     #create-overlay { align-items:flex-end; padding:0; }
     #create-overlay .modal { max-width:none; border-radius:16px 16px 0 0; max-height:90dvh; padding-bottom:max(20px, env(safe-area-inset-bottom)); }
+    #copy-overlay { align-items:flex-end; padding:0; }
+    #copy-overlay .modal { max-width:none; border-radius:16px 16px 0 0; max-height:90dvh; padding-bottom:max(20px, env(safe-area-inset-bottom)); }
     .cm-actions { gap:8px; }
     .manage-head { top:56px; }
   }
@@ -236,6 +251,26 @@
   </div>
   </div>
 
+  <div class="overlay" id="copy-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="copy-title">
+      <h2 id="copy-title">คัดลอกเป็นรายการใหม่</h2>
+      <p id="copy-source" class="meta"></p>
+      <div class="field"><label for="copy-name">ชื่อรายการใหม่</label><input type="text" id="copy-name"></div>
+      <div class="row2">
+        <div class="field"><label for="copy-year">ปีการศึกษา</label><select id="copy-year"></select></div>
+        <div class="field"><label for="copy-term">ภาคเรียน</label><select id="copy-term"><option value="1">ภาค 1 (ประถม = กลางปี)</option><option value="2">ภาค 2 (ประถม = ปลายปี)</option></select></div>
+      </div>
+      <fieldset id="copy-options"><legend>คัดลอกอะไรไปด้วย</legend>
+        <label class="copy-option"><input type="checkbox" checked disabled><span id="copy-target-count">องค์ประกอบและน้ำหนัก</span></label>
+        <label class="copy-option"><input type="checkbox" id="copy-teachers" checked><span id="copy-teacher-count">ครูผู้ดูแล</span></label>
+        <label class="copy-option"><input type="checkbox" id="copy-members" checked><span id="copy-member-count">ผู้เข้าร่วม</span></label>
+      </fieldset>
+      <p class="hint">ไม่คัดลอก: ครั้งประเมิน · คะแนน · ผลผ่าน/ไม่ผ่าน<br>เจ้าของรายการใหม่: <strong>คุณ</strong></p>
+      <div id="copy-dup" role="status" hidden></div>
+      <div class="modal-actions"><button type="button" class="ghost" id="copy-cancel">ยกเลิก</button><button type="button" class="primary" id="copy-save">คัดลอก</button></div>
+    </div>
+  </div>
+
   <div class="card" id="cm-workflow-card"></div>
   <div class="cm-layout" id="cm-layout">
   <div class="card" id="list-card">
@@ -247,7 +282,7 @@
 
   <div class="cm-nosel" id="cm-nosel">เลือกรายการทางซ้าย เพื่อดูองค์ประกอบ ผู้เข้าร่วม และครูผู้ดูแล</div>
   <div id="detail" style="display:none">
-    <div class="manage-head"><button type="button" class="ghost" id="back-assessments">‹ รายการทั้งหมด</button><h2 id="detail-name"></h2><div id="detail-term" class="meta"></div><div id="detail-category" class="meta"></div><div id="detail-meta" class="meta"></div><div class="cm-actions"><a id="entry-link" class="primary">ไปกรอกคะแนน →</a><button type="button" class="icon-btn edit" id="detail-edit" aria-label="แก้ไขรายการ">แก้ไข</button><div class="cm-menu-wrap"><button type="button" class="icon-btn" id="detail-more" aria-label="ตัวเลือกเพิ่มเติม" aria-haspopup="menu" aria-expanded="false">⋯</button><div class="cm-menu" id="detail-menu" role="menu" hidden><button type="button" class="danger" role="menuitem" id="detail-delete">ลบรายการ…</button></div></div></div><div class="manage-tabs" role="tablist" aria-label="รายละเอียดรายการ"><button id="tab-targets" role="tab" aria-controls="panel-targets" data-panel="0" aria-selected="true"></button><button id="tab-members" role="tab" aria-controls="panel-members" data-panel="1" aria-selected="false"></button><button id="tab-teachers" role="tab" aria-controls="panel-teachers" data-panel="2" aria-selected="false"></button></div></div>
+    <div class="manage-head"><button type="button" class="ghost" id="back-assessments">‹ รายการทั้งหมด</button><h2 id="detail-name"></h2><div id="detail-term" class="meta"></div><div id="detail-category" class="meta"></div><div id="detail-meta" class="meta"></div><div class="cm-actions"><a id="entry-link" class="primary">ไปกรอกคะแนน →</a><button type="button" class="icon-btn edit" id="detail-edit" aria-label="แก้ไขรายการ">แก้ไข</button><div class="cm-menu-wrap"><button type="button" class="icon-btn" id="detail-more" aria-label="ตัวเลือกเพิ่มเติม" aria-haspopup="menu" aria-expanded="false">⋯</button><div class="cm-menu" id="detail-menu" role="menu" hidden><button type="button" role="menuitem" id="detail-copy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h10a2 2 0 0 1 2 2v12h-2V5H8V3Zm-4 4h10a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Zm0 2v11h10V9H4Z"/></svg>คัดลอกเป็นรายการใหม่…</button><hr><button type="button" class="danger" role="menuitem" id="detail-delete">ลบรายการ…</button></div></div></div><div class="manage-tabs" role="tablist" aria-label="รายละเอียดรายการ"><button id="tab-targets" role="tab" aria-controls="panel-targets" data-panel="0" aria-selected="true"></button><button id="tab-members" role="tab" aria-controls="panel-members" data-panel="1" aria-selected="false"></button><button id="tab-teachers" role="tab" aria-controls="panel-teachers" data-panel="2" aria-selected="false"></button></div></div>
     <div class="card" id="panel-targets" role="tabpanel" aria-labelledby="tab-targets">
       <div class="section" role="heading" aria-level="3">องค์ประกอบที่ใช้</div>
       <div id="readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว</div>
@@ -778,7 +813,8 @@ function syncManageDetail() {
   $("entry-link").href="competency-entry.html?assessment="+encodeURIComponent(current.id);
   $("cm-nosel").hidden=true;
   $("detail-edit").hidden=!canManageAssessment(current);
-  $("detail-more").hidden=!canManageAssessment(current);
+  $("detail-more").hidden=false;
+  $("detail-delete").hidden=!canManageAssessment(current);
   const cards=[...$("detail").children].filter(el=>el.classList.contains("card"));
   const counts=[targets.length,members.length,new Set([current.owner_id,...assessmentTeachers.map(t=>t.user_id)]).size];
   const labels=["องค์ประกอบ","ผู้เข้าร่วม","ครูผู้ดูแล"];
@@ -871,6 +907,113 @@ new MutationObserver(()=>{
   creationIds=new Set(assessments.map(a=>a.id));creationObserved=true;syncManageDetail();
 }).observe($("assessment-list"),{childList:true});
 ["target-list","member-list","assessment-teacher-list"].forEach(id=>new MutationObserver(syncManageDetail).observe($(id),{childList:true}));
+
+// คัดลอกเป็นรายการใหม่: ทุกการเขียนอ่านต้นฉบับจากฐานข้อมูลอีกครั้ง
+let copySourceId="", copyBusy=false, copyDupRequest=0;
+function closeCopy(){if(copyBusy)return;$("copy-overlay").classList.remove("show");}
+function syncCopyMembers(){
+  const sameYear=$("copy-year").value===$("copy-year").dataset.sourceYear;
+  $("copy-members").disabled=!sameYear||$("copy-members").dataset.empty==="true";
+  if(!sameYear)$("copy-members").checked=false;
+  else if($( "copy-members").dataset.empty!=="true")$("copy-members").checked=true;
+  const note=$("copy-member-count").querySelector("small");
+  if(note)note.textContent=sameYear?($("copy-members").dataset.empty==="true"?"ไม่มีผู้เข้าร่วม":"ปีเดียวกัน คัดลอกได้"):"ข้ามปีไม่คัดลอก — ชั้น/ห้องเปลี่ยน ใช้ ‘เพิ่มทั้งห้อง’ ในปีใหม่";
+  checkCopyDuplicate();
+}
+async function checkCopyDuplicate(){
+  const request=++copyDupRequest, name=$("copy-name").value.trim(), year=$("copy-year").value, term=$("copy-term").value;
+  const note=$("copy-dup");note.hidden=true;
+  if(!name||!year||!term)return;
+  const {data,error}=await sb.from("competency_assessments").select("name").eq("year",year).eq("term",term);
+  if(request!==copyDupRequest||error)return;
+  if((data||[]).some(row=>row.name.trim()===name)){
+    note.textContent=`มีรายการชื่อนี้ใน ภาค ${term} ปี ${year} อยู่แล้ว — ยังคัดลอกได้ แต่ควรเปลี่ยนชื่อหรือภาค`;
+    note.hidden=false;
+  }
+}
+async function openCopy(){
+  const id=current?.id;if(!id)return;
+  closeDetailMenu(false);$("detail-more").focus();
+  const [sourceResult,targetResult,teacherResult,memberResult]=await Promise.all([
+    sb.from("competency_assessments").select("id,name,year,term,source_type,activity_category").eq("id",id).single(),
+    sb.from("competency_assessment_targets").select("id").eq("assessment_id",id),
+    sb.from("competency_assessment_teachers").select("user_id").eq("assessment_id",id),
+    sb.from("competency_assessment_members").select("student_id").eq("assessment_id",id)
+  ]);
+  const error=sourceResult.error||targetResult.error||teacherResult.error||memberResult.error;
+  if(error){toast("เปิดกล่องคัดลอกไม่สำเร็จ: "+error.message,false);return;}
+  const src=sourceResult.data;copySourceId=src.id;
+  $("copy-source").textContent=`จาก “${src.name}” · ${src.term===null?"ทั้งปี":"ภาค "+src.term} ปี ${src.year}`;
+  $("copy-name").value=src.name;
+  fillSelectableYearSelect($("copy-year"),src.year);
+  $("copy-year").dataset.sourceYear=src.year;
+  $("copy-term").value=String(src.term)==="1"?"2":String(src.term)==="2"?"1":"1";
+  $("copy-target-count").innerHTML=`องค์ประกอบและน้ำหนัก · ${targetResult.data.length} รายการ<small>คัดลอกเสมอ — รวมประเภทตามหลักสูตร (ปพ.)</small>`;
+  const names=teacherResult.data.map(row=>profileLabel(row.user_id));
+  $("copy-teacher-count").innerHTML=`ครูผู้ดูแล · ${names.length} คน${names.length?` (${names.map(esc).join(", ")})`:""}<small>${names.length?"เลือกได้ว่าจะคัดลอก":"ไม่มีครูผู้ดูแล"}</small>`;
+  $("copy-teachers").disabled=!names.length;$("copy-teachers").checked=!!names.length;
+  $("copy-member-count").innerHTML=`ผู้เข้าร่วม · ${memberResult.data.length} คน<small></small>`;
+  $("copy-members").dataset.empty=String(!memberResult.data.length);
+  $("copy-members").checked=!!memberResult.data.length;
+  syncCopyMembers();
+  $("copy-overlay").classList.add("show");
+  setTimeout(()=>$('copy-name').focus(),0);
+}
+async function copyAssessment(){
+  if(copyBusy)return;
+  const name=$("copy-name").value.trim(),year=$("copy-year").value,term=$("copy-term").value;
+  if(!name){toast("กรอกชื่อรายการใหม่ก่อน",false);$("copy-name").focus();return;}
+  if(!year||!term){toast("เลือกปีการศึกษาและภาคเรียนก่อน",false);return;}
+  copyBusy=true;const button=$("copy-save");button.disabled=true;button.textContent="กำลังคัดลอก…";
+  let created=null;
+  try{
+    const {data:src,error:sourceError}=await sb.from("competency_assessments").select("id,name,year,term,source_type,activity_category").eq("id",copySourceId).single();
+    if(sourceError)throw sourceError;
+    const payload={name,year,term,source_type:src.source_type,owner_id:session.user.id,activity_category:src.source_type==="กิจกรรม"?src.activity_category:null};
+    if(!activityCategories.length)delete payload.activity_category;
+    const {data,error}=await sb.from("competency_assessments").insert(payload).select().single();
+    if(error)throw error;created=data;
+    const {data:sourceTargets,error:targetError}=await sb.from("competency_assessment_targets").select("competency_id,element_id,max_score,seq").eq("assessment_id",src.id).order("seq");
+    if(targetError)throw targetError;
+    if(sourceTargets.length){const {error:writeError}=await sb.from("competency_assessment_targets").insert(sourceTargets.map(row=>({assessment_id:created.id,...row})));if(writeError)throw writeError;}
+    if($("copy-teachers").checked){
+      const {data:sourceTeachers,error:teacherError}=await sb.from("competency_assessment_teachers").select("user_id").eq("assessment_id",src.id);
+      if(teacherError)throw teacherError;
+      const rows=sourceTeachers.filter(row=>row.user_id!==session.user.id).map(row=>({assessment_id:created.id,user_id:row.user_id}));
+      if(rows.length){const {error:writeError}=await sb.from("competency_assessment_teachers").insert(rows);if(writeError)throw writeError;}
+    }
+    if($("copy-members").checked&&year===src.year){
+      const {data:sourceMembers,error:memberError}=await sb.from("competency_assessment_members").select("student_id").eq("assessment_id",src.id);
+      if(memberError)throw memberError;
+      if(sourceMembers.length){const {error:writeError}=await sb.from("competency_assessment_members").insert(sourceMembers.map(row=>({assessment_id:created.id,student_id:row.student_id})));if(writeError)throw writeError;}
+    }
+    assessments.unshift(created);
+    if(!assessmentYears.includes(year)){assessmentYears.push(year);assessmentYears.sort((a,b)=>b.localeCompare(a,"th",{numeric:true}));refreshAssessmentYearFilter();}
+    copyBusy=false;closeCopy();
+    await openDetail(created.id);renderAssessments();toast("คัดลอกแล้ว");
+  }catch(error){
+    if(created){
+      const {error:deleteError}=await sb.from("competency_assessments").delete().eq("id",created.id);
+      if(deleteError)toast(`คัดลอกไม่สำเร็จ: ${error.message} · รายการ “${name}” ค้างอยู่ กรุณาลบเอง`,false);
+      else toast("คัดลอกไม่สำเร็จ: "+error.message+" (ยกเลิกรายการที่สร้างค้างแล้ว)",false);
+    }else toast("คัดลอกไม่สำเร็จ: "+error.message,false);
+  }finally{copyBusy=false;button.disabled=false;button.textContent="คัดลอก";}
+}
+$("detail-more").onclick=()=>{const menu=$("detail-menu");menu.hidden=!menu.hidden;$("detail-more").setAttribute("aria-expanded",String(!menu.hidden));if(!menu.hidden)$("detail-copy").focus();};
+$("detail-copy").onclick=openCopy;
+$("detail-menu").addEventListener("keydown",event=>{
+  if(!["ArrowUp","ArrowDown"].includes(event.key))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  const items=[$("detail-copy"),$("detail-delete")].filter(item=>!item.hidden);
+  const index=items.indexOf(document.activeElement);
+  items[(index+(event.key==="ArrowDown"?1:-1)+items.length)%items.length].focus();
+},true);
+$("copy-year").addEventListener("change",syncCopyMembers);
+$("copy-name").addEventListener("input",checkCopyDuplicate);
+$("copy-term").addEventListener("change",checkCopyDuplicate);
+$("copy-cancel").onclick=closeCopy;$("copy-save").onclick=copyAssessment;
+$("copy-overlay").addEventListener("click",event=>{if(event.target===$("copy-overlay"))closeCopy();});
+wireDialog("copy-overlay",closeCopy);
 init().then(applyAssessmentParam);
 }
 </script>

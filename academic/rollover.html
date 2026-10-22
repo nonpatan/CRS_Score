@@ -178,6 +178,11 @@
   #run-summary .attention { color:var(--amber); }
   #readiness-warning { color:var(--amber); font-size:12px; line-height:1.4; margin-top:6px; }
   #rollover-run-bar #btn-run { min-height:44px; margin:0; }
+  #routine-list .row { min-height:44px; cursor:pointer; }
+  #routine-list .row input { flex:none; }
+  #routine-toggle-all { width:auto; min-height:44px; padding:6px 10px; margin:2px 0 8px; }
+  #routine-log { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; color:var(--muted); margin-top:10px; }
+  #btn-routine-copy { min-height:44px; }
   [hidden] { display:none !important; }
   @media (min-width:700px) and (max-width:1199px) { .rollover-run-bar { left:max(26px,calc((100vw - 720px)/2)); right:max(26px,calc((100vw - 720px)/2)); } }
   @media (min-width:1200px) { .rollover-run-bar { left:296px; right:32px; max-width:1056px; margin:auto; } }
@@ -277,6 +282,16 @@
       <div class="step-title"><span class="num">4</span>ยกกิจกรรมไปปีใหม่</div>
       <div id="activity-summary" class="hint">เลือกปีต้นทางก่อน แล้วกิจกรรมจะขึ้นให้เลือก</div>
       <div id="activity-list"></div>
+    </div>
+
+    <div class="card" id="routine-card">
+      <div class="step-title"><span class="num">4b</span>ยกกิจวัตรประจำวันไปปีใหม่</div>
+      <p class="hint">ทำหลังขึ้นปีใหม่เสร็จ หรือทำแยกภายหลังก็ได้ · ยกเฉพาะโครงและองค์ประกอบ · เจ้าของคนเดิม · ไม่ยกผู้เข้าร่วม ครูผู้ดูแล คะแนน</p>
+      <div id="routine-summary" class="summary-box" role="status">เลือกปีต้นทางก่อน แล้วกิจวัตรจะขึ้นให้เลือก</div>
+      <button type="button" class="ghost" id="routine-toggle-all" hidden>เลือก/ไม่เลือกทั้งหมด</button>
+      <div id="routine-list"></div>
+      <button type="button" class="primary" id="btn-routine-copy" disabled>ยกกิจวัตรไปปีใหม่</button>
+      <div id="routine-log" role="status"></div>
     </div>
 
     <!-- ลงมือ -->
@@ -1268,6 +1283,97 @@ new MutationObserver(() => {
 }).observe(elRunLog, {childList:true,subtree:true,characterData:true});
 renderRolloverReadiness();
 
+// การ์ดกิจวัตรแยกจากปุ่มขึ้นปีใหม่ เพื่อคง handler และกิจกรรมเดิมทุกไบต์
+if (typeof sb !== "undefined") {
+  const routineSummary=document.getElementById("routine-summary");
+  const routineList=document.getElementById("routine-list");
+  const routineToggle=document.getElementById("routine-toggle-all");
+  const routineButton=document.getElementById("btn-routine-copy");
+  const routineLog=document.getElementById("routine-log");
+  let sourceRoutines=[],routineBusy=false,routineLoadToken=0;
+  function selectedRoutines(){
+    const ids=new Set([...routineList.querySelectorAll(".routine-cb:checked")].map(node=>node.dataset.id));
+    return sourceRoutines.filter(row=>ids.has(row.id));
+  }
+  function renderRoutineSelection(){
+    const chosen=selectedRoutines().length;
+    routineSummary.textContent=elSourceYear.value
+      ? `กิจวัตรปี ${elSourceYear.value} ทั้งหมด ${sourceRoutines.length} · เลือกยก ${chosen}`
+      : "เลือกปีต้นทางก่อน แล้วกิจวัตรจะขึ้นให้เลือก";
+    routineButton.textContent=elNewYear.value?`ยกกิจวัตรไปปี ${elNewYear.value}`:"ยกกิจวัตรไปปีใหม่";
+    routineButton.disabled=routineBusy||!chosen||!elNewYear.value||elSourceYear.value===elNewYear.value;
+    routineToggle.hidden=!sourceRoutines.length;
+  }
+  async function loadRoutines(){
+    const token=++routineLoadToken,year=elSourceYear.value;
+    sourceRoutines=[];routineList.replaceChildren();routineLog.textContent="";
+    renderRoutineSelection();
+    if(!year)return;
+    const {data,error}=await sb.from("competency_assessments").select("id,name,year,term,owner_id")
+      .eq("year",year).eq("source_type","กิจวัตรประจำวัน").order("name");
+    if(token!==routineLoadToken)return;
+    if(error){routineSummary.textContent="โหลดกิจวัตรไม่สำเร็จ: "+error.message;return;}
+    sourceRoutines=(data||[]).sort((a,b)=>a.name.localeCompare(b.name,"th")||String(a.term??"").localeCompare(String(b.term??""),"th",{numeric:true}));
+    for(const routine of sourceRoutines){
+      const label=document.createElement("label");label.className="row";
+      const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.className="routine-cb";checkbox.dataset.id=routine.id;checkbox.checked=true;
+      const info=document.createElement("span");info.className="info";
+      const name=document.createElement("span");name.className="name";name.textContent=routine.name;
+      const term=document.createElement("span");term.className="meta";term.textContent=routine.term===null?" · ทั้งปี":" · ภาค "+routine.term;
+      info.append(name,term);label.append(checkbox,info);routineList.append(label);
+    }
+    renderRoutineSelection();
+    if(!sourceRoutines.length)routineSummary.textContent=`ปี ${year} ไม่มีกิจวัตรประจำวัน`;
+  }
+  async function cloneRoutine(src,newYear){
+    const payload={source_type:"กิจวัตรประจำวัน",name:src.name,year:newYear,term:src.term,owner_id:src.owner_id};
+    const {data:created,error}=await sb.from("competency_assessments").insert(payload).select().single();
+    if(error)throw new Error("สร้างกิจวัตร "+src.name+" ไม่สำเร็จ: "+error.message);
+    const {data:targets,error:readError}=await sb.from("competency_assessment_targets")
+      .select("competency_id,element_id,max_score,seq").eq("assessment_id",src.id).order("seq");
+    if(readError)throw new Error("อ่านองค์ประกอบของ "+src.name+" ไม่สำเร็จ: "+readError.message);
+    if(targets.length){
+      const rows=targets.map(row=>({assessment_id:created.id,...row}));
+      const {error:writeError}=await sb.from("competency_assessment_targets").insert(rows);
+      if(writeError)throw new Error("ก๊อปองค์ประกอบของ "+src.name+" ไม่สำเร็จ: "+writeError.message);
+    }
+    return created.id;
+  }
+  async function copyRoutines(){
+    if(routineBusy)return;
+    const chosen=selectedRoutines(),newYear=elNewYear.value;
+    if(!chosen.length||!newYear||newYear===elSourceYear.value)return;
+    if(!await window.crsAskConfirm({
+      title:"ยกกิจวัตรไปปีใหม่",message:`จะยกกิจวัตร ${chosen.length} รายการไปปี ${newYear} (เฉพาะโครงและองค์ประกอบ)` ,
+      okLabel:"ยกกิจวัตร",danger:false
+    }))return;
+    routineBusy=true;renderRoutineSelection();
+    let completed=0;
+    try{
+      const {count,error}=await sb.from("competency_assessments").select("id",{count:"exact",head:true})
+        .eq("year",newYear).eq("source_type","กิจวัตรประจำวัน");
+      if(error)throw error;
+      if(count){routineLog.textContent=`ปี ${newYear} มีกิจวัตรอยู่แล้ว ${count} รายการ — ไม่ยกซ้ำ`;showToast("ปีปลายทางมีกิจวัตรอยู่แล้ว ไม่ยกซ้ำ",false);return;}
+      for(const routine of chosen){
+        routineLog.textContent=`กำลังยก ${completed+1}/${chosen.length}: ${routine.name}`;
+        await cloneRoutine(routine,newYear);completed++;
+      }
+      routineLog.textContent=`ยกกิจวัตรแล้ว ${completed} รายการ · ไม่ยกผู้เข้าร่วม ครูผู้ดูแล คะแนน`;
+      showToast("ยกกิจวัตรแล้ว "+completed+" รายการ",true);
+    }catch(error){
+      routineLog.textContent=`หยุดกลางทาง: ${error.message}\nยกสำเร็จแล้ว ${completed} รายการ · ตรวจรายการปี ${newYear} ที่หน้ากำหนดกิจกรรม/กิจวัตร แล้วลบรายการค้างเอง`;
+      showToast("ยกกิจวัตรไม่ครบ — ตรวจบันทึกในการ์ด",false);
+    }finally{routineBusy=false;renderRoutineSelection();}
+  }
+  elSourceYear.addEventListener("change",loadRoutines);
+  elNewYear.addEventListener("change",renderRoutineSelection);
+  new MutationObserver(()=>{if(elSourceYear.value&&sourceRoutines.length===0)loadRoutines();}).observe(elSourceYear,{childList:true});
+  new MutationObserver(renderRoutineSelection).observe(elNewYear,{childList:true});
+  new MutationObserver(renderRoutineSelection).observe(elYearOverlay,{attributes:true,attributeFilter:["class"]});
+  routineList.addEventListener("change",renderRoutineSelection);
+  routineToggle.addEventListener("click",()=>{const all=[...routineList.querySelectorAll(".routine-cb")];const next=!all.every(node=>node.checked);all.forEach(node=>node.checked=next);renderRoutineSelection();});
+  routineButton.addEventListener("click",copyRoutines);
+}
 init();
 }
 </script>
