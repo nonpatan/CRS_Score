@@ -235,7 +235,8 @@ function syncFinanceKpiTones() {
             ["competency-manage.html", "กำหนดกิจกรรม/กิจวัตร"],
             ["competency-core.html", "กำหนดสมรรถนะหลัก"],
             ["students.html", "นักเรียน"],
-            ["rollover.html", "ขึ้นปีใหม่"]
+            ["rollover.html", "ขึ้นปีใหม่"],
+            ["academic-settings.html", "ตั้งค่างานวิชาการ"]
           ]
         },
         {
@@ -311,6 +312,11 @@ function syncFinanceKpiTones() {
           title: "เลือกวิชาที่ต้องการจัดการ",
           description: "ค้นหาวิชาเดิม หรือเริ่มสร้างโครงสร้างรายวิชาใหม่",
           steps: ["เลือกวิชา", "แก้โครงสร้าง", "บันทึก"]
+        },
+        "academic-settings.html": {
+          title: "ตั้งค่างานวิชาการ",
+          description: "ปีการศึกษา วันที่ภาคเรียน และอัตราส่วนคะแนนเก็บ:สอบ ของทั้งโรงเรียน",
+          steps: ["ตรวจปีการศึกษา", "ตั้งอัตราส่วน", "บันทึก"]
         },
         "students.html": {
           title: "จัดการรายชื่อนักเรียน",
