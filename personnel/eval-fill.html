@@ -32,11 +32,11 @@
   .domain { scroll-margin-top:180px; } .item { border-top:1px solid var(--line); padding:16px 0; scroll-margin-top:180px; }
   .item:first-of-type { border-top:0; } .item-title { font-weight:600; margin:0 0 8px; }
   .star { color:var(--amber); } .star-note { color:var(--amber); font-size:13px; display:block; }
-  .score { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; margin:10px 0; }
+  .score { display:grid; grid-template-columns:repeat(var(--cols,5),minmax(0,1fr)); gap:5px; margin:10px 0; }
   .score label { position:relative; min-width:0; } .score input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
   .score span { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:52px; border:1px solid var(--line);
     border-radius:8px; font-weight:600; font-size:18px; line-height:1.2; text-align:center; overflow-wrap:anywhere; }
-  .score small { color:var(--muted); font-size:10px; font-weight:500; }
+  .score small { color:var(--muted); font-size:11px; font-weight:500; line-height:1.35; white-space:normal; overflow-wrap:break-word; word-break:keep-all; text-align:center; }
   .score input:checked + span { background:var(--teal); border-color:var(--teal); color:var(--white); }
   .score input:checked + span small { color:var(--white); }
   .score input:checked + span.low { background:var(--danger); border-color:var(--danger); }
@@ -77,7 +77,7 @@
   #toast { position:fixed; z-index:60; bottom:78px; left:50%; transform:translateX(-50%); max-width:min(90vw,520px);
     padding:10px 16px; background:var(--ink); color:var(--white); border-radius:9px; opacity:0; pointer-events:none; }
   #toast.err { background:var(--danger); } #toast.show { opacity:1; }
-  @media (max-width:420px) { body { padding:12px 12px 100px; } .score { gap:3px; } .score small { font-size:9px; } }
+  @media (max-width:420px) { body { padding:12px 12px 100px; } .score { gap:3px; } .score small { font-size:10px; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -101,7 +101,7 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
   saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
-  thaiShortDateText } from "../supabase-client.js?v=20261021-5";
+  thaiShortDateText } from "../supabase-client.js?v=20261023-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -227,9 +227,11 @@ if (!session) {
         const row = responses.get(item.id) || {};
         const rule = requirement(item);
         const autoMissing = item.auto_rule && !snapshot;
-        const scale = form.rules.scale || [];
+        const scale = form.rules.scale?.length ? form.rules.scale : Array.from({length:5}, (_, index) => ({score:index + 1}));
+        const ascending = [...scale].sort((a, b) => Number(a.score) - Number(b.score));
         const anchors = item.anchors || Object.fromEntries(scale.map(value => [value.score, value.meaning]));
-        const scoreHtml = [1,2,3,4,5].map(score => {
+        const scoreHtml = ascending.map(value => {
+          const score = Number(value.score);
           const label = scale.find(value => Number(value.score) === score)?.label || "";
           return `<label><input type="radio" name="score-${esc(item.id)}" value="${score}" data-score="${esc(item.id)}" ${Number(row.score) === score ? "checked" : ""} ${readonly || autoMissing ? "disabled" : ""}><span class="${score <= Number(form.rules.evidence_required_max) ? "low" : ""}">${score}<small>${esc(label)}</small></span></label>`;
         }).join("");
@@ -237,10 +239,11 @@ if (!session) {
         const system = item.auto_rule ? snapshot ?
           `<div class="sys">ระบบลงเวลา ${esc(thaiShortDateText(snapshot.period_from))} – ${esc(thaiShortDateText(snapshot.period_to))}: สาย ${Number(snapshot.late || 0)} · ไม่ลงเวลา ${Number(snapshot.absent || 0)} · มีใบอนุญาต ${Number(snapshot.permitted || 0)} (ไม่นับ) ⟹ นับ ${Number(snapshot.count || 0)} ครั้ง → แนะนำ ${esc(rule.suggested ?? "–")}${daily}</div>` :
           '<div class="warn">ฝ่ายบุคคลยังไม่ล็อกตัวเลขเวลาเข้างาน — ให้คะแนนข้อนี้ได้หลังฝ่ายบุคคลล็อก</div>' : "";
-        return `<article class="item" id="item-${esc(item.id)}"><p class="item-title">${esc(domain.code)}(${item.no}) ${esc(item.text)} ${item.is_star ? '<span class="star" title="ข้อสำคัญ ได้ ≤ 2 ถือว่าไม่ผ่านด้านนี้">★</span><span class="star-note">ข้อสำคัญ ได้ ≤ 2 ถือว่าไม่ผ่านด้านนี้</span>' : ""}</p>
+        const starHint = `ข้อสำคัญ ได้ ≤ ${form.rules.star_fail_max} ถือว่าไม่ผ่านด้านนี้`;
+        return `<article class="item" id="item-${esc(item.id)}"><p class="item-title">${esc(domain.code)}(${item.no}) ${esc(item.text)} ${item.is_star ? `<span class="star" title="${esc(starHint)}">★</span><span class="star-note">${esc(starHint)}</span>` : ""}</p>
           ${item.note ? `<p class="meta">${esc(item.note)}</p>` : ""}${system}
-          <div class="score" role="radiogroup" aria-label="${esc(item.text)}">${scoreHtml}</div>
-          <div class="anchors">${[5,4,3,2,1].filter(score => anchors[score]).map(score => `<p><b>${score}</b> ${esc(anchors[score])}</p>`).join("")}</div>
+          <div class="score" style="--cols:${ascending.length}" role="radiogroup" aria-label="${esc(item.text)}">${scoreHtml}</div>
+          <div class="anchors">${[...ascending].reverse().map(value => Number(value.score)).filter(score => anchors[score]).map(score => `<p><b>${score}</b> ${esc(anchors[score])}</p>`).join("")}</div>
           <div class="field"><label for="evidence-${esc(item.id)}">${esc(section.evidence_label)}<span data-required class="error">${rule.needsEvidence ? " *" : ""}</span></label>
           <textarea id="evidence-${esc(item.id)}" data-evidence="${esc(item.id)}" aria-invalid="${Boolean(rule.reason)}" ${readonly || autoMissing ? "disabled" : ""}>${esc(row.evidence || "")}</textarea>
           <p class="error" data-error>${esc(rule.reason || "")}</p></div></article>`;

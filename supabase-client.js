@@ -8029,16 +8029,37 @@ export function suggestAttendanceScore(count, autoRule) {
   return null;
 }
 
-export function evalSection4Check(section, variant, entry, rules) {
+export function evalScaleMax(rules) {
+  const scores = rules?.scale?.map(row => Number(row.score)).filter(Number.isFinite) || [];
+  return scores.length ? Math.max(...scores) : 5;
+}
+
+export function evalStarStatus(value, rules, kind, recheck = null) {
+  const score = evalRound2(value);
+  if (score == null) return { fail:false, recheck:null };
+  if (score <= Number(rules.star_fail_max)) return { fail:true, recheck:null };
+  const policy = rules.star_recheck;
+  if (policy && (policy.kinds || []).includes(kind) && score < Number(policy.below)) {
+    if (!recheck) return { fail:false, recheck:{ status:"pending" } };
+    return { fail:recheck.outcome === "fail", recheck:{ status:recheck.outcome,
+      method:recheck.method, checked_on:recheck.checked_on } };
+  }
+  return { fail:false, recheck:null };
+}
+
+export function evalSection4Check(section, variant, entry, rules, rechecks = []) {
   const numeric = value => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
   const avg = numeric(entry?.avg_score);
   const complete = Boolean(variant && entry?.variant_code === variant.code && avg != null &&
     (variant.star_items || []).every(item => numeric(entry.star_values?.[item.code]) != null));
   const avgPass = complete ? section.min_avg == null || avg >= Number(section.min_avg) : false;
-  const starFails = complete ? (variant.star_items || [])
-    .filter(item => numeric(entry.star_values[item.code]) <= Number(rules.star_fail_max))
-    .map(item => item.code) : [];
-  return { complete, pass:complete && avgPass && starFails.length === 0, avgPass, starFails };
+  const statuses = complete ? (variant.star_items || []).map(item => ({ code:item.code,
+    ...evalStarStatus(entry.star_values[item.code], rules, "summary_entry",
+      rechecks.find(row => row.star_code === item.code)) })) : [];
+  const starFails = statuses.filter(row => row.fail).map(row => row.code);
+  const pendingStars = statuses.filter(row => row.recheck?.status === "pending").map(row => row.code);
+  return { complete, pass:complete && avgPass && !starFails.length && !pendingStars.length,
+    avgPass, starFails, ...(rules.star_recheck ? { pendingStars } : {}) };
 }
 
 export function evalAssignmentProblems({ form, round, targets = [], assignments = [] }) {
@@ -8106,9 +8127,9 @@ export function buildEvalAttendanceSnapshot(summary, autoRule, round) {
 }
 
 export function computeEvalResult({ form, target, assignments = [], responses = [], section4 = null,
-                                    roundNo, history = {} }) {
+                                    roundNo, history = {}, rechecks = [] }) {
   const rules = form.rules || {};
-  const sections = [], stars = [], deficiencies = [], missing = [], warnings = [], reasons = [];
+  const sections = [], stars = [], deficiencies = [], missing = [], warnings = [], reasons = [], pendingRechecks = [];
   const scoreNumber = value => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
   const responseByAssignment = new Map();
   for (const row of responses) {
@@ -8126,26 +8147,28 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
     const raterCount = submitted.length;
     const domains = [], items = [];
     let avg = null, weighted = null, pass = null, completeSection = true;
-    let sectionStarFail = false;
+    let sectionStarFail = false, sectionStarPending = false;
     const sectionDeficiency = `ส่วน${sectionCode}`;
     if (minAvg != null) knownCodes.add(sectionDeficiency);
 
     if (section.kind === "summary_entry") {
       const variant = (section.variants || []).find(v => v.code === target?.variant_code);
-      const check = evalSection4Check(section, variant, section4, rules);
+      const check = evalSection4Check(section, variant, section4, rules, rechecks);
       completeSection = check.complete;
       avg = completeSection ? scoreNumber(section4.avg_score) : null;
       if (!completeSection) missing.push(`ส่วนที่ ${sectionCode}: ยังไม่คีย์ผลหรือค่า ★ ไม่ครบ`);
       if (completeSection) {
         for (const star of variant.star_items || []) {
           const value = scoreNumber(section4.star_values[star.code]);
-          const fail = check.starFails.includes(star.code);
-          stars.push({ code:star.code, label:star.label, value, fail });
+          const { fail, recheck } = evalStarStatus(value, rules, section.kind,
+            rechecks.find(row => row.star_code === star.code));
+          stars.push({ code:star.code, label:star.label, value, fail, recheck });
+          if (recheck?.status === "pending") pendingRechecks.push({ code:star.code, label:star.label, value });
           if (fail) deficiencies.push(`★${star.code}`);
         }
         weighted = evalRound2(avg * weight / 100);
-        pass = check.pass;
-        if (!pass && minAvg != null) deficiencies.push(sectionDeficiency);
+        pass = !check.avgPass || check.starFails.length ? false : check.pendingStars?.length ? null : true;
+        if ((!check.avgPass || check.starFails.length) && minAvg != null) deficiencies.push(sectionDeficiency);
       }
       for (const star of variant?.star_items || []) knownCodes.add(`★${star.code}`);
       sections.push({ code:sectionCode, title:section.title, kind:section.kind, weight,
@@ -8195,8 +8218,14 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
       let domainPass = domainAvg == null ? null : domainMin == null || domainAvg >= domainMin;
       if (domainAvg != null && section.kind !== "self") {
         for (const item of domainItems.filter(item => item.isStar)) {
-          const fail = item.value <= Number(rules.star_fail_max);
-          stars.push({ code:item.code, label:item.text, value:item.value, fail });
+          const { fail, recheck } = evalStarStatus(item.value, rules, section.kind,
+            rechecks.find(row => row.star_code === item.code));
+          stars.push({ code:item.code, label:item.text, value:item.value, fail, recheck });
+          if (recheck?.status === "pending") {
+            pendingRechecks.push({ code:item.code, label:item.text, value:item.value });
+            sectionStarPending = true;
+            if (domainPass === true) domainPass = null;
+          }
           if (fail) {
             deficiencies.push(`★${item.code}`);
             if (domainMin != null) domainPass = false;
@@ -8215,8 +8244,9 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
       if (completeSection && domains.every(domain => domain.weighted != null)) {
         avg = evalRound2(domains.reduce((sum, domain) => sum + domain.weighted, 0));
         weighted = evalRound2(avg * weight / 100);
-        pass = (minAvg == null || avg >= minAvg) && domains.every(domain => domain.pass !== false) && !sectionStarFail;
-        if (minAvg != null && !pass) deficiencies.push(sectionDeficiency);
+        const actuallyFails = (minAvg != null && avg < minAvg) || domains.some(domain => domain.pass === false) || sectionStarFail;
+        pass = actuallyFails ? false : sectionStarPending ? null : true;
+        if (minAvg != null && actuallyFails) deficiencies.push(sectionDeficiency);
       } else if (!missing.some(label => label.startsWith(`ส่วนที่ ${sectionCode}:`))) {
         missing.push(`ส่วนที่ ${sectionCode}: คะแนนรายข้อไม่ครบ`);
       }
@@ -8226,6 +8256,8 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
   }
 
   const complete = missing.length === 0;
+  const activeCodes = new Set(stars.filter(row => row.recheck).map(row => row.code));
+  const staleRechecks = rechecks.filter(row => !activeCodes.has(row.star_code)).map(row => row.star_code);
   const total = complete ? evalRound2(sections.filter(section => section.weight > 0)
     .reduce((sum, section) => sum + section.weighted, 0)) : null;
   const level = total == null ? null :
@@ -8251,6 +8283,10 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
     else if (total >= Number(rules.round2.renew_min) && !deficiencies.length) suggested = "renew";
     else suggested = "renew_conditional";
   }
+  if (pendingRechecks.length) {
+    suggested = null;
+    for (const row of pendingRechecks) reasons.push(`★ ${row.code} ค่าเฉลี่ย ${row.value.toFixed(2)} อยู่ช่วงตรวจเพิ่ม — ต้องบันทึกผลตรวจสอบก่อนสรุปผล`);
+  }
   if (suggested === "pass") reasons.push("คะแนนรวมผ่านเกณฑ์และไม่มีข้อบกพร่อง");
   if (suggested === "watch") reasons.push("คะแนนรวมหรือข้อบกพร่องยังไม่ผ่านเกณฑ์รอบ 1");
   if (suggested === "watch_strict") reasons.push("คะแนนรวมต่ำกว่าเกณฑ์เฝ้าระวังเข้มข้น");
@@ -8265,12 +8301,13 @@ export function computeEvalResult({ form, target, assignments = [], responses = 
     if (history.redFlagConfirmed) reasons.push("มี Red Flag ที่ยืนยันแล้ว");
   }
   return { formCode:form.code, roundNo, complete, missing, sections, stars, total, level,
-    deficiencies, suggested, reasons, warnings, self };
+    deficiencies, suggested, reasons, warnings, self, pendingRechecks, staleRechecks };
 }
 
 export function evalDecisionSnapshot(result) {
   const snapshot = JSON.parse(JSON.stringify(result));
   for (const section of snapshot.sections || []) delete section.raterCount;
+  for (const star of snapshot.stars || []) if (star.recheck) delete star.recheck.note;
   delete snapshot.self;
   delete snapshot.suggested;
   delete snapshot.reasons;
@@ -8597,22 +8634,23 @@ export async function loadEvalTargetResult(targetId) {
   if (targetError || !target) throw new Error("ไม่พบครูในรอบประเมินนี้");
   const round = await evalResultAccess(target.round_id);
   const form = await loadEvalForm(round.form_id);
-  const [assignRes, section4Res, decisionRes, ackRes, history] = await Promise.all([
+  const [assignRes, section4Res, decisionRes, ackRes, recheckRes, history] = await Promise.all([
     sb.from("eval_assignments").select("id,target_id,section_code,rater_staff_id,status,texts,submitted_at").eq("target_id", targetId),
     sb.from("eval_section4_entries").select("*").eq("target_id", targetId).maybeSingle(),
     sb.from("eval_decisions").select("*").eq("target_id", targetId).maybeSingle(),
     sb.from("eval_acknowledgements").select("*").eq("target_id", targetId).maybeSingle(),
+    sb.from("eval_star_rechecks").select("*").eq("target_id", targetId),
     evalHistories(round, [target])
   ]);
   for (const [result, label] of [[assignRes,"ผู้ประเมิน"],[section4Res,"ส่วนที่ 4"],
-    [decisionRes,"ผลพิจารณา"],[ackRes,"การรับทราบ"]])
+    [decisionRes,"ผลพิจารณา"],[ackRes,"การรับทราบ"],[recheckRes,"ผลตรวจเพิ่ม"]])
     if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ` + result.error.message);
   const assignments = assignRes.data || [];
   const responseRes = assignments.length ? await sb.from("eval_responses")
     .select("assignment_id,item_id,score,evidence").in("assignment_id", assignments.map(row => row.id)) : { data:[], error:null };
   if (responseRes.error) throw new Error("โหลดคะแนนไม่สำเร็จ: " + responseRes.error.message);
   return { round, target, form, assignments, responses:responseRes.data || [], section4:section4Res.data,
-    decision:decisionRes.data, acknowledgement:ackRes.data, history:history[target.id] };
+    decision:decisionRes.data, acknowledgement:ackRes.data, rechecks:recheckRes.data || [], history:history[target.id] };
 }
 
 export async function loadEvalRoundResults(roundId) {
@@ -8622,15 +8660,16 @@ export async function loadEvalRoundResults(roundId) {
     .select("*").eq("round_id", roundId).order("created_at");
   if (targetError) throw new Error("โหลดครูในรอบไม่สำเร็จ: " + targetError.message);
   const ids = (targets || []).map(row => row.id);
-  if (!ids.length) return { round, form, targets:[], assignments:[], responses:[], section4:[], decisions:[], acknowledgements:[], histories:{} };
-  const [assignRes, section4Res, decisionRes, ackRes] = await Promise.all([
+  if (!ids.length) return { round, form, targets:[], assignments:[], responses:[], section4:[], decisions:[], acknowledgements:[], rechecks:[], histories:{} };
+  const [assignRes, section4Res, decisionRes, ackRes, recheckRes] = await Promise.all([
     sb.from("eval_assignments").select("id,target_id,section_code,rater_staff_id,status,texts,submitted_at").in("target_id", ids),
     sb.from("eval_section4_entries").select("*").in("target_id", ids),
     sb.from("eval_decisions").select("*").in("target_id", ids),
-    sb.from("eval_acknowledgements").select("*").in("target_id", ids)
+    sb.from("eval_acknowledgements").select("*").in("target_id", ids),
+    sb.from("eval_star_rechecks").select("*").in("target_id", ids)
   ]);
   for (const [result, label] of [[assignRes,"ผู้ประเมิน"],[section4Res,"ส่วนที่ 4"],
-    [decisionRes,"ผลพิจารณา"],[ackRes,"การรับทราบ"]])
+    [decisionRes,"ผลพิจารณา"],[ackRes,"การรับทราบ"],[recheckRes,"ผลตรวจเพิ่ม"]])
     if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ` + result.error.message);
   const assignments = assignRes.data || [];
   const responseRes = assignments.length ? await sb.from("eval_responses")
@@ -8638,7 +8677,20 @@ export async function loadEvalRoundResults(roundId) {
   if (responseRes.error) throw new Error("โหลดคะแนนไม่สำเร็จ: " + responseRes.error.message);
   const histories = await evalHistories(round, targets);
   return { round, form, targets, assignments, responses:responseRes.data || [], section4:section4Res.data || [],
-    decisions:decisionRes.data || [], acknowledgements:ackRes.data || [], histories };
+    decisions:decisionRes.data || [], acknowledgements:ackRes.data || [], rechecks:recheckRes.data || [], histories };
+}
+
+export async function saveEvalStarRecheck(row) {
+  const { data, error } = await sb.from("eval_star_rechecks")
+    .upsert(row, { onConflict:"target_id,star_code" }).select().single();
+  if (error) throw new Error("บันทึกผลตรวจเพิ่มไม่สำเร็จ: " + error.message);
+  return data;
+}
+
+export async function deleteEvalStarRecheck(targetId, starCode) {
+  const { error } = await sb.from("eval_star_rechecks").delete()
+    .eq("target_id", targetId).eq("star_code", starCode);
+  if (error) throw new Error("ลบผลตรวจเพิ่มไม่สำเร็จ: " + error.message);
 }
 
 export async function saveEvalDecision(row) {

@@ -33,6 +33,11 @@
   .table-scroll table.wide th:first-child { background:var(--bg); }
   .banner { padding:10px 12px; border-radius:8px; margin:10px 0; } .banner.warn { background:var(--amber-soft); color:var(--amber); } .banner.ok { background:var(--teal-soft); color:var(--teal); } .banner.err { background:var(--danger-soft); color:var(--danger); }
   .pass { color:var(--teal); font-weight:600; } .fail { color:var(--danger); font-weight:600; } .muted { color:var(--muted); }
+  .pending { color:var(--amber); font-weight:600; } .recheck-item { border-top:1px solid var(--line); padding:14px 0; }
+  .recheck-item:first-of-type { border-top:0; } .recheck-item fieldset { border:0; padding:0; margin:10px 0; }
+  .recheck-item legend { font-weight:600; } .recheck-item .choice label { min-height:44px; display:flex; align-items:center; }
+  .recheck-item input[type="date"] { font:inherit; font-size:16px; min-height:44px; padding:9px; border:1px solid var(--line); border-radius:8px; }
+  .recheck-item input:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
   .choice { display:flex; flex-wrap:wrap; gap:8px; } .choice label { flex:1 1 200px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:0; font-weight:400; cursor:pointer; } .choice input { margin-right:8px; }
   details { border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:14px; } summary { cursor:pointer; font-weight:600; min-height:36px; }
   /* รายคน: ตัดสินผลอยู่บนสุดบนมือถือ · จอคอมเป็นคอลัมน์ขวาที่ค้างไว้ตอนเลื่อน (mockup แท็บ 4) */
@@ -64,7 +69,7 @@
 import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, isPersonnelHead,
   listEvalRoundsICanSee, loadEvalRoundResults, getProfile, loadEvalTargetResult, listStaffPicker,
   computeEvalResult, evalDecisionSnapshot, evalDecisionOptions, evalDecisionLabel,
-  saveEvalDecision, thaiShortDateText } from "../supabase-client.js?v=20261021-5";
+  saveEvalDecision, saveEvalStarRecheck, deleteEvalStarRecheck, thaiShortDateText } from "../supabase-client.js?v=20261023-1";
 const session = await requireAuth();
 if (session) {
   const app = document.getElementById("app"), toastBox = document.getElementById("toast");
@@ -78,15 +83,21 @@ if (session) {
   const compute = (data, target) => computeEvalResult({ form:data.form, target,
     assignments:data.assignments.filter(row => row.target_id === target.id),
     responses:data.responses, section4:data.section4.find(row => row.target_id === target.id),
+    rechecks:data.rechecks.filter(row => row.target_id === target.id),
     roundNo:Number(data.round.round_no), history:data.histories[target.id] || {} });
   // headings: "ข้อ" ธรรมดา · "#เฉลี่ย" = คอลัมน์ตัวเลข (ชิดขวา ไม่ตัดบรรทัด) · wide = ตารางหลายคอลัมน์ที่ยอมให้เลื่อนข้าง (คอลัมน์แรกค้าง)
   function table(headings, rows, wide = false) { return '<div class="table-scroll" role="region" aria-label="ตารางผลประเมิน" tabindex="0"><table' + (wide ? ' class="wide"' : '') + '><thead><tr>' + headings.map(h => h.startsWith("#") ? '<th class="num">' + esc(h.slice(1)) + '</th>' : '<th>' + esc(h) + '</th>').join("") + '</tr></thead><tbody>' + rows.join("") + '</tbody></table></div>'; }
   const passCell = pass => '<td class="res">' + (pass == null ? "—" : pass ? '<span class="pass">ผ่าน</span>' : '<span class="fail">ไม่ผ่าน</span>') + '</td>';
+  const starStatusText = row => row.recheck?.status === "pending" ? '<span class="pending">ตรวจเพิ่ม · รอบันทึก</span>' :
+    row.recheck?.status === "pass" ? '<span class="pass">ตรวจเพิ่มแล้ว · ผ่าน</span>' :
+    row.recheck?.status === "fail" ? '<span class="fail">ตรวจเพิ่มแล้ว · ไม่ผ่าน</span>' :
+    row.fail ? '<span class="fail">ไม่ผ่าน</span>' : '<span class="pass">ผ่าน</span>';
   // แปลรหัสข้อบกพร่อง (★1.3(1) · 1.3 · ส่วน4) เป็นภาษาคน — short สำหรับตารางรวม · long สำหรับกล่องตัดสินผล
   function deficitText(code, form, result, long) {
     if (code.startsWith("★")) {
       const star = result.stars.find(row => "★" + row.code === code);
-      return long ? "★ " + code.slice(1) + " " + (star?.label || "") + " ได้ " + number(star?.value) : "★ " + code.slice(1);
+      return (long ? "★ " + code.slice(1) + " " + (star?.label || "") + " ได้ " + number(star?.value) : "★ " + code.slice(1)) +
+        (star?.recheck?.status === "fail" ? " (ตรวจเพิ่มแล้ว)" : "");
     }
     if (code.startsWith("ส่วน")) {
       const part = section(code.slice(4), form);
@@ -105,7 +116,7 @@ if (session) {
       (row.kind === "dept_head" ? 'ค่าเฉลี่ยรายข้อ · จำนวนผู้ประเมิน ' + row.raterCount + ' คน · ' : '') +
       'น้ำหนัก ' + esc(row.weight) + '% · ขั้นต่ำ ' + number(row.minAvg) + '</span></td><td class="num">' + number(row.avg) + '</td><td class="num">' + number(row.weighted) + '</td>' + passCell(row.pass) + '</tr>');
     sectionRows.push('<tr><th>รวม · ' + esc(result.level || "—") + '</th><th></th><th class="num">' + number(result.total) + '</th><th></th></tr>');
-    const starRows = result.stars.map(row => '<tr><td>' + esc(row.code + " " + row.label) + '</td><td class="num">' + number(row.value) + '</td>' + passCell(!row.fail) + '</tr>');
+    const starRows = result.stars.map(row => '<tr><td>' + esc(row.code + " " + row.label) + '</td><td class="num">' + number(row.value) + '</td><td class="res">' + starStatusText(row) + '</td></tr>');
     return '<section class="card"><h2>ตาราง ก · รายด้าน (ส่วนที่ 1)</h2>' + table(["ด้าน","#เฉลี่ย","#ขั้นต่ำ","ผล"], domainRows) + '</section>' +
       '<section class="card"><h2>ตาราง ข · คะแนนรวม</h2>' + table(["ส่วน","#เฉลี่ย","#ถ่วงน้ำหนัก","ผล"], sectionRows) + '</section>' +
       '<section class="card"><h2>ตาราง ค · ข้อสำคัญ ★</h2>' + (starRows.length ? table(["ข้อ","#คะแนน","ผล"], starRows) : '<p class="hint">ไม่มีข้อ ★</p>') + '</section>' +
@@ -134,7 +145,9 @@ if (session) {
     const rows = data.targets.map(target => {
       const result = compute(data, target), decision = data.decisions.find(row => row.target_id === target.id);
       const ack = data.acknowledgements.find(row => row.target_id === target.id);
-      const status = result.complete ? '<span class="suggest ' + suggestTone(result.suggested) + '">' + esc(evalDecisionLabel(result.suggested)) + '</span>' : '<span class="muted">ข้อมูลไม่ครบ · ' + esc(result.missing.join(" · ")) + '</span>';
+      const status = !result.complete ? '<span class="muted">ข้อมูลไม่ครบ · ' + esc(result.missing.join(" · ")) + '</span>' :
+        result.pendingRechecks.length ? '<span class="suggest warn">รอตรวจเพิ่ม</span>' :
+        '<span class="suggest ' + suggestTone(result.suggested) + '">' + esc(evalDecisionLabel(result.suggested)) + '</span>';
       const finalCell = decision ? '<span class="chip done">' + esc(evalDecisionLabel(decision.final)) + '</span>' : '<span class="chip todo">ยังไม่ยืนยัน</span>';
       return '<tr><td><a href="?target=' + encodeURIComponent(target.id) + '" data-open-target="' + esc(target.id) + '">' + esc(name(target.staff_id)) + '</a></td><td class="num">' + number(result.total) + '</td><td>' + esc(result.level || "—") + '</td><td>' + status + '</td><td>' + finalCell + '</td><td>' + esc(result.deficiencies.map(code => deficitText(code, data.form, result, false)).join(" · ") || "—") + '</td>' + (round.status === "published" ? '<td>' + (ack ? 'รับทราบแล้ว ' + esc(date(ack.acknowledged_at)) : "ยังไม่รับทราบ") + '</td>' : "") + '</tr>';
     });
@@ -161,6 +174,45 @@ if (session) {
     const after = list.slice(at + 1).concat(list.slice(0, at));
     return { prev:list[at - 1] || null, next:list[at + 1] || null, nextTodo:after.find(row => !decided.has(row.id)) || null };
   }
+  function recheckCard(data, result) {
+    const active = result.stars.filter(row => row.recheck);
+    if (!active.length && !result.staleRechecks.length) return "";
+    const stored = data.rechecks || [], readonly = data.round.status === "published";
+    const policy = data.form.rules.star_recheck;
+    const decimals = Number(data.form.rules.decimals ?? 2), step = 10 ** -decimals;
+    const range = (Number(data.form.rules.star_fail_max) + step).toFixed(decimals) + "–" +
+      (Number(policy.below) - step).toFixed(decimals);
+    const methods = [["interview","สัมภาษณ์ข้อเท็จจริง"],["observation","สังเกตการสอนเพิ่ม"],["both","ทั้งสองวิธี"]];
+    let html = '<section class="card" id="recheck-card"><h2>ตรวจเพิ่มข้อ ★</h2><p class="banner warn">ข้อ ★ ที่ค่าเฉลี่ย ' +
+      esc(range) + ' ต้องตรวจสอบข้อเท็จจริงเพิ่มก่อนสรุปผล — สัมภาษณ์รอบด้าน หรือสังเกตการสอนเพิ่ม ภายใน ' +
+      esc(policy.days) + ' วัน</p>';
+    for (const [index, row] of active.entries()) {
+      const saved = stored.find(item => item.star_code === row.code);
+      html += '<div class="recheck-item"><h3>★ ' + esc(row.code + " " + row.label) + ' · ค่าเฉลี่ย ' + number(row.value) + '</h3>';
+      if (saved) html += '<p class="hint">ตรวจเพิ่มแล้ว · ' + esc(saved.outcome === "pass" ? "ผ่าน" : "ไม่ผ่าน") +
+        ' · ' + esc(date(saved.checked_on)) + '</p>';
+      if (!readonly) {
+        const fields = '<form data-recheck-form="' + esc(row.code) + '"><fieldset><legend>วิธีตรวจ</legend><div class="choice">' +
+          methods.map(([value,label]) => '<label><input type="radio" name="method" value="' + value + '" required' +
+            (saved?.method === value ? ' checked' : '') + '>' + label + '</label>').join("") + '</div></fieldset>' +
+          '<label for="recheck-date-' + index + '">วันที่ตรวจ *</label><input id="recheck-date-' + index + '" name="checked_on" type="date" required value="' + esc(saved?.checked_on || "") + '">' +
+          '<fieldset><legend>ผลตรวจ *</legend><div class="choice">' + [["pass","ผ่าน"],["fail","ไม่ผ่าน"]].map(([value,label]) =>
+            '<label><input type="radio" name="outcome" value="' + value + '" required' + (saved?.outcome === value ? ' checked' : '') + '>' + label + '</label>').join("") + '</div></fieldset>' +
+          '<label for="recheck-note-' + index + '">หลักฐานการตรวจสอบ *</label><textarea id="recheck-note-' + index + '" name="note" required>' + esc(saved?.note || "") + '</textarea>' +
+          '<div class="actions"><button class="primary" type="submit">บันทึกผลตรวจเพิ่ม</button>' +
+          (saved ? '<button type="button" data-delete-recheck="' + esc(row.code) + '">ลบผลตรวจ</button>' : '') + '</div></form>';
+        html += saved ? '<details><summary>แก้ไขผลตรวจเพิ่ม</summary>' + fields + '</details>' : fields;
+      }
+      html += '</div>';
+    }
+    for (const code of result.staleRechecks) {
+      const row = result.stars.find(item => item.code === code);
+      html += '<div class="recheck-item"><p class="hint">บันทึกตรวจเพิ่มเดิมไม่ใช้แล้ว — ★ ' + esc(code) +
+        ' ค่าเฉลี่ยตอนนี้ ' + number(row?.value) + '</p>' + (readonly ? '' :
+        '<button type="button" data-delete-recheck="' + esc(code) + '">ลบบันทึกที่ไม่ใช้แล้ว</button>') + '</div>';
+    }
+    return html + '</section>';
+  }
   function renderDetail() {
     const data = state.detail, target = data.target, result = state.result;
     app.className = "";
@@ -178,14 +230,15 @@ if (session) {
     const navLink = (row, label) => row ? '<a class="button" href="?target=' + encodeURIComponent(row.id) + '" data-open-target="' + esc(row.id) + '">' + label + '</a>' : '';
     const deficits = result.deficiencies.map(code => '<li>' + esc(deficitText(code, data.form, result, true)) + '</li>').join("");
     const decide = '<section class="card decide"><h2>ผลการพิจารณา</h2>' +
-      (result.complete ? '<span class="suggest ' + suggestTone(result.suggested) + '">ระบบเสนอ: ' + esc(evalDecisionLabel(result.suggested)) + '</span>' +
+      (result.complete ? (result.pendingRechecks.length ? '<span class="suggest warn">รอตรวจเพิ่ม</span>' : '<span class="suggest ' + suggestTone(result.suggested) + '">ระบบเสนอ: ' + esc(evalDecisionLabel(result.suggested)) + '</span>') +
         '<div class="score-big"><b>' + number(result.total) + '</b><span>คะแนนรวม · ' + esc(result.level || "—") + '</span></div>' +
         (deficits ? '<p style="margin:0"><b>ข้อบกพร่อง</b></p><ul class="deficits">' + deficits + '</ul>' : '<p class="hint">ไม่มีข้อบกพร่อง</p>')
         : '<div class="banner warn">ข้อมูลไม่ครบ ยังยืนยันผลไม่ได้ · ' + esc(result.missing.join(" · ")) + '</div>') +
       (result.warnings.length ? '<div class="banner warn">' + esc(result.warnings.join(" · ")) + '</div>' : "") +
+      (result.pendingRechecks.length ? '<div class="banner warn" role="status">บันทึกผลตรวจเพิ่มข้อ ★ ให้ครบก่อน · ' + esc(result.reasons.join(" · ")) + '</div>' : '') +
       (data.round.status === "published" ? '<p><b>ผลที่ยืนยัน: ' + esc(evalDecisionLabel(decided?.final)) + '</b></p>' + (decided?.reason ? '<p>' + esc(decided.reason) + '</p>' : '') :
         data.round.status !== "closed" ? '<div class="banner warn">ปิดรับคะแนนก่อนจึงยืนยันผลได้</div>' :
-        '<fieldset' + (!result.complete ? ' disabled' : '') + '><legend>ยืนยันผลการพิจารณา</legend><div class="choice">' + evalDecisionOptions(data.round.round_no).map(option =>
+        '<fieldset' + (!result.complete || result.pendingRechecks.length ? ' disabled' : '') + '><legend>ยืนยันผลการพิจารณา</legend><div class="choice">' + evalDecisionOptions(data.round.round_no).map(option =>
           '<label><input type="radio" name="final" value="' + option.value + '"' + (option.value === final ? " checked" : "") + '>' + esc(option.label) + '</label>').join("") +
         '</div><label for="decision-reason">เหตุผล (บังคับเมื่อเลือกต่างจากระบบเสนอ)</label><textarea id="decision-reason">' + esc(decided?.reason || "") + '</textarea><p id="reason-error" class="fail" role="alert"></p><button class="primary" id="save-decision" type="button">ยืนยันผล</button></fieldset>' +
         (decided ? '<p class="hint">ยืนยันแล้ว ' + esc(evalDecisionLabel(decided.final)) + ' เมื่อ ' + esc(date(decided.decided_at)) + ' · แก้ได้จนกว่าประกาศผล</p>' : "")) +
@@ -195,13 +248,14 @@ if (session) {
       '<a class="button" href="?round=' + encodeURIComponent(data.round.id) + '" data-open-round="' + esc(data.round.id) + '">← ทั้งรอบ</a>' +
       navLink(nav.prev, "‹ คนก่อน") + navLink(nav.next, "คนถัดไป ›") + '</div></div>' +
       '<p class="hint" style="margin-bottom:0">' + esc(target.workload || "ไม่ระบุภาระงาน") + ' · ' + esc(data.round.academic_year + " ครั้งที่ " + data.round.round_no) + ' · ฉบับ ' + esc(data.form.code) + '</p></section>' +
-      '<div class="detail-grid">' + decide +
+      recheckCard(data, result) + '<div class="detail-grid">' + decide +
       (result.complete ? resultTables(result) : '') +
       '<section class="card"><h2>ข้อความจากผู้ประเมิน</h2>' + (textHtml || '<p class="hint">ยังไม่มีข้อความ</p>') + privateDetails(data) + '</section></div>';
   }
   async function openRound(id) { state.roundData = await loadEvalRoundResults(id); state.detail = null; state.result = null; history.replaceState(null,"","?round=" + encodeURIComponent(id)); renderRound(); window.scrollTo({ top:0 }); }
   async function openTarget(id, reloadRound = false) { state.detail = await loadEvalTargetResult(id); state.result = computeEvalResult({ form:state.detail.form, target:state.detail.target, assignments:state.detail.assignments,
-    responses:state.detail.responses, section4:state.detail.section4, roundNo:Number(state.detail.round.round_no), history:state.detail.history });
+    responses:state.detail.responses, section4:state.detail.section4, rechecks:state.detail.rechecks,
+    roundNo:Number(state.detail.round.round_no), history:state.detail.history });
     if (reloadRound || state.roundData?.round.id !== state.detail.round.id) state.roundData = await loadEvalRoundResults(state.detail.round.id);
     history.replaceState(null,"","?target=" + encodeURIComponent(id)); renderDetail(); window.scrollTo({ top:0 }); }
   document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
@@ -222,11 +276,52 @@ if (session) {
         (head ? '<p><a class="button" href="eval-rounds.html">ไปหน้ารอบประเมิน</a></p>' : '') + (state.admin ? '<p><a class="button" href="red-flags.html">บันทึก Red Flag</a></p>' : '') + '</div>';
       const clearReasonError = () => { const field = app.querySelector("#decision-reason"), error = app.querySelector("#reason-error");
         if (field && error) { error.textContent = ""; field.removeAttribute("aria-invalid"); field.removeAttribute("aria-describedby"); } };
+      const updateRecheck = row => {
+        state.detail.rechecks = state.detail.rechecks.filter(item => item.star_code !== row.star_code);
+        if (!row.deleted) state.detail.rechecks.push(row);
+        if (state.roundData) {
+          state.roundData.rechecks = state.roundData.rechecks.filter(item =>
+            item.target_id !== row.target_id || item.star_code !== row.star_code);
+          if (!row.deleted) state.roundData.rechecks.push(row);
+        }
+        state.result = computeEvalResult({ form:state.detail.form, target:state.detail.target,
+          assignments:state.detail.assignments, responses:state.detail.responses,
+          section4:state.detail.section4, rechecks:state.detail.rechecks,
+          roundNo:Number(state.detail.round.round_no), history:state.detail.history });
+        renderDetail();
+      };
+      app.addEventListener("submit", async event => {
+        const form = event.target.closest("[data-recheck-form]");
+        if (!form) return;
+        event.preventDefault();
+        const code = form.dataset.recheckForm, fields = new FormData(form);
+        const note = String(fields.get("note") || "").trim();
+        if (!note) { form.elements.note.focus(); notify("ระบุหลักฐานการตรวจสอบก่อนบันทึก"); return; }
+        const button = form.querySelector('button[type="submit"]'); button.disabled = true;
+        try {
+          const row = await saveEvalStarRecheck({ target_id:state.detail.target.id, star_code:code,
+            method:fields.get("method"), checked_on:fields.get("checked_on"),
+            outcome:fields.get("outcome"), note });
+          updateRecheck(row); notify("บันทึกผลตรวจเพิ่มแล้ว");
+        } catch (error) { button.disabled = false; notify(error.message); }
+      });
       app.addEventListener("input", event => { if (event.target.id === "decision-reason") clearReasonError(); });
       app.addEventListener("change", async event => { if (event.target.name === "final") { clearReasonError(); return; }
         if (event.target.id !== "round-select") return;
         try { await openRound(event.target.value); } catch (error) { notify(error.message); } });
       app.addEventListener("click", async event => {
+        const remove = event.target.closest("[data-delete-recheck]");
+        if (remove) {
+          const code = remove.dataset.deleteRecheck;
+          if (!await window.crsAskConfirm({ title:"ลบผลตรวจเพิ่มข้อ ★ " + code,
+            message:"หลักฐานและผลตรวจของข้อนี้จะถูกลบ กรุณาบันทึกใหม่ก่อนยืนยันผล",
+            okLabel:"ลบผลตรวจ", danger:true })) return;
+          remove.disabled = true;
+          try { await deleteEvalStarRecheck(state.detail.target.id, code);
+            updateRecheck({ target_id:state.detail.target.id, star_code:code, deleted:true }); notify("ลบผลตรวจเพิ่มแล้ว");
+          } catch (error) { remove.disabled = false; notify(error.message); }
+          return;
+        }
         const link = event.target.closest("[data-open-target], [data-open-round]");
         if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
           event.preventDefault();
@@ -235,6 +330,7 @@ if (session) {
           return;
         }
         if (event.target.id !== "save-decision") return;
+        if (state.result.pendingRechecks.length) { notify("บันทึกผลตรวจเพิ่มข้อ ★ ให้ครบก่อน"); return; }
         const selected = app.querySelector('input[name="final"]:checked')?.value;
         const reason = app.querySelector("#decision-reason").value.trim();
         const reasonField = app.querySelector("#decision-reason"), errorBox = app.querySelector("#reason-error"); clearReasonError();

@@ -172,9 +172,9 @@ import {
   setEvalRoundStatus, upsertEvalTarget, deleteEvalTarget, addEvalAssignment,
   setEvalAssignmentRater, deleteEvalAssignment, reopenEvalAssignment,
   upsertEvalSection4, deleteEvalSection4, upsertEvalAttendanceSnapshots,
-  evalAssignmentProblems, evalDeptHeadsFor, evalSection4Check, buildEvalAttendanceSnapshot,
+  evalAssignmentProblems, evalDeptHeadsFor, evalSection4Check, evalScaleMax, buildEvalAttendanceSnapshot,
   loadWorkContext, summarizeStaff, loadEvalRoundResults, evalDecisionLabel, evalThaiDateStr, publishEvalRound
-} from "../supabase-client.js?v=20261021-5";
+} from "../supabase-client.js?v=20261023-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -299,7 +299,8 @@ if (!session) {
     const peers = mine.filter(row => row.section_code === peerSection?.code).map(row => row.rater_staff_id);
     const variant = variantOf(target.variant_code);
     const entry = targetEntry(target.id);
-    const check = variant ? evalSection4Check(variantSection(), variant, entry, state.form.rules) : null;
+    const check = variant ? evalSection4Check(variantSection(), variant, entry, state.form.rules,
+      (state.resultData?.rechecks || []).filter(row => row.target_id === target.id)) : null;
     const showAssignment = round.status === "setup" || round.status === "open";
     let html = '<article class="teacher-card" id="teacher-' + esc(target.id) + '" data-target="' + esc(target.id) + '">' +
       '';
@@ -334,15 +335,16 @@ if (!session) {
       html += '<div class="mini"><h3>คีย์ผลส่วนที่ 4' + (variant ? " · " + esc(variant.code) : "") + '</h3>';
       if (!variant) html += '<p class="banner warn">เลือกแบบ 4ก/4ข ก่อนคีย์ผล</p>';
       else {
+        const maxScore = evalScaleMax(state.form.rules);
         html += '<div class="row2"><div class="field"><label>' + esc(variant.avg_label) +
-          '</label><input data-s4="avg" type="number" inputmode="decimal" min="1" max="5" step="0.01" value="' +
+          '</label><input data-s4="avg" type="number" inputmode="decimal" min="1" max="' + maxScore + '" step="0.01" value="' +
           esc(entry?.avg_score ?? "") + '"></div><div class="field"><label>' + esc(variant.respondent_label) +
           '</label><input data-s4="respondents" type="number" inputmode="numeric" min="0" step="1" value="' +
           esc(entry?.respondents ?? "") + '"></div></div>' +
           (variant.star_items || []).map(item =>
             '<div class="field"><label>★ ' + esc(item.code + " " + item.label) +
             '</label><input data-s4-star="' + esc(item.code) +
-            '" type="number" inputmode="decimal" min="1" max="5" step="0.01" value="' +
+            '" type="number" inputmode="decimal" min="1" max="' + maxScore + '" step="0.01" value="' +
             esc(entry?.star_values?.[item.code] ?? "") + '"></div>').join("") +
           '<div class="field"><label>หมายเหตุ</label><textarea data-s4="note">' +
           esc(entry?.note || "") + '</textarea></div><div class="field-error" data-problem="section4"></div>' +
@@ -350,8 +352,8 @@ if (!session) {
             'data-target="' + esc(target.id) + '"') +
           (entry ? actionButton("clear-section4", "ล้างค่าส่วนที่ 4", "danger",
             'data-target="' + esc(target.id) + '"') : '') + '</div>';
-        if (entry && check) html += '<p class="banner ' + (check.pass ? "ok" : "err") + '">' +
-          (check.pass ? "ผ่านส่วนที่ 4" : "ไม่ผ่านส่วนที่ 4" +
+        if (entry && check) html += '<p class="banner ' + (check.pendingStars?.length ? "warn" : check.pass ? "ok" : "err") + '">' +
+          (check.pendingStars?.length ? "รอตรวจเพิ่มข้อ ★ " + esc(check.pendingStars.join(", ")) : check.pass ? "ผ่านส่วนที่ 4" : "ไม่ผ่านส่วนที่ 4" +
             (check.starFails.length ? " · ★ " + esc(check.starFails[0]) + " ได้ " +
               Number(entry.star_values[check.starFails[0]]).toFixed(2) +
               " (≤ " + Number(state.form.rules.star_fail_max).toFixed(2) + ")" : " · ค่าเฉลี่ยต่ำกว่าเกณฑ์")) +
@@ -665,11 +667,12 @@ if (!session) {
     const respondents = card.querySelector('[data-s4="respondents"]').value.trim();
     const starValues = {};
     const errors = [];
-    const validScore = value => /^(?:[1-4](?:\.\d{1,2})?|5(?:\.0{1,2})?)$/.test(value);
-    if (!validScore(avg)) errors.push("ค่าเฉลี่ยรวมต้องอยู่ 1.00–5.00 และทศนิยมไม่เกิน 2 ตำแหน่ง");
+    const maxScore = evalScaleMax(state.form.rules);
+    const validScore = value => /^\d+(?:\.\d{1,2})?$/.test(value) && Number(value) >= 1 && Number(value) <= maxScore;
+    if (!validScore(avg)) errors.push("ค่าเฉลี่ยรวมต้องอยู่ 1.00–" + maxScore.toFixed(2) + " และทศนิยมไม่เกิน 2 ตำแหน่ง");
     for (const item of variant.star_items || []) {
       const value = card.querySelector('[data-s4-star="' + item.code + '"]').value.trim();
-      if (!validScore(value)) errors.push("★ " + item.code + " ต้องอยู่ 1.00–5.00 และทศนิยมไม่เกิน 2 ตำแหน่ง");
+      if (!validScore(value)) errors.push("★ " + item.code + " ต้องอยู่ 1.00–" + maxScore.toFixed(2) + " และทศนิยมไม่เกิน 2 ตำแหน่ง");
       else starValues[item.code] = Number(value);
     }
     if (!/^\d+$/.test(respondents)) errors.push(variant.respondent_label + " ต้องเป็นจำนวนเต็มตั้งแต่ 0");

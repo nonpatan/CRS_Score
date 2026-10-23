@@ -30,12 +30,16 @@
 <main class="academic-content"><div class="toolbar no-print"><a class="button" id="back-link" href="eval-result.html">← กลับไปสรุปผล</a><button type="button" id="print-button">พิมพ์</button></div><div id="app" class="card">กำลังโหลดแบบพิมพ์…</div><div id="toast" class="toast no-print" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, loadEvalTargetResult,
-  listStaffPicker, computeEvalResult, evalDecisionOptions, evalDecisionLabel } from "../supabase-client.js?v=20261021-5";
+  listStaffPicker, computeEvalResult, evalScaleMax, evalDecisionOptions, evalDecisionLabel } from "../supabase-client.js?v=20261023-1";
 const session = await requireAuth();
 if (session) {
   const app = document.getElementById("app");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
   const num = value => value == null ? "—" : Number(value).toFixed(2);
+  const thaiDate = value => value ? new Intl.DateTimeFormat("th-TH", {timeZone:"Asia/Bangkok",day:"numeric",month:"short",year:"numeric"}).format(new Date(value)) : "—";
+  const starStatus = row => row.recheck?.status === "pending" ? "ตรวจเพิ่ม · รอบันทึก" :
+    row.recheck?.status === "pass" ? "ตรวจเพิ่มแล้ว · ผ่าน" :
+    row.recheck?.status === "fail" ? "ตรวจเพิ่มแล้ว · ไม่ผ่าน" : row.fail ? "ไม่ผ่าน" : "ผ่าน";
   const targetId = new URLSearchParams(location.search).get("target");
   const table = (heads, rows) => '<div class="table-scroll"><table><thead><tr>' + heads.map(x => '<th>' + esc(x) + '</th>').join("") + '</tr></thead><tbody>' + rows.join("") + '</tbody></table></div>';
   document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
@@ -49,7 +53,7 @@ if (session) {
     const name = id => staff.find(row => row.id === id)?.full_name || "................................";
     const liveResult = computeEvalResult({ form:data.form, target:data.target,
       assignments:data.assignments, responses:data.responses, section4:data.section4,
-      roundNo:Number(data.round.round_no), history:data.history });
+      roundNo:Number(data.round.round_no), history:data.history, rechecks:data.rechecks });
     const result = data.decision?.computed || liveResult;
     const response = new Map(data.responses.map(row => [row.assignment_id + ":" + row.item_id, row]));
     let html = '<article class="card"><div class="doc-head"><h2>โรงเรียนเจริญศึกษา</h2><div>แบบประเมินครู 360° · ฉบับ ' + esc(data.form.code) + '</div><div>ปีการศึกษา ' + esc(data.round.academic_year) + ' · ครั้งที่ ' + esc(data.round.round_no) + '</div></div>' +
@@ -88,8 +92,16 @@ if (session) {
     if (selfPart) html += '<section class="avoid-break"><h2>ส่วนที่ ' + esc(selfPart.code + " " + selfPart.title) + '</h2><p>' + esc(Object.values(selfAssignment?.texts || {}).filter(Boolean).join(" · ") || "—") + '</p></section>';
     const domains = result.sections.find(row => row.kind === "committee")?.domains || [];
     html += '<section class="avoid-break"><h2>ตาราง ก · รายด้าน</h2>' + table(["ด้าน","เฉลี่ย","เกณฑ์ขั้นต่ำ","ผล"], domains.map(row => '<tr><td>' + esc(row.code + " " + row.title) + '</td><td>' + num(row.avg) + '</td><td>' + num(row.minAvg) + '</td><td>' + (row.pass ? "ผ่าน" : "ไม่ผ่าน") + '</td></tr>')) + '</section>';
-    html += '<section class="avoid-break"><h2>ตาราง ข · ผลรวม</h2>' + table(["ส่วน","เฉลี่ย","น้ำหนัก","คะแนนถ่วงน้ำหนัก"], result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '</td><td>' + num(row.avg) + '</td><td>' + esc(row.weight) + '%</td><td>' + num(row.weighted) + '</td></tr>').concat('<tr><th>รวม · ' + esc(result.level || "—") + '</th><th colspan="2"></th><th>' + num(result.total) + '</th></tr>')) + '</section>';
-    html += '<section class="avoid-break"><h2>ตาราง ค · ข้อ ★</h2>' + table(["ข้อ","คะแนน","ผล"], result.stars.map(row => '<tr><td>' + esc(row.code) + '</td><td>' + num(row.value) + '</td><td>' + (row.fail ? "ไม่ผ่าน" : "ผ่าน") + '</td></tr>')) + '</section>';
+    html += '<section class="avoid-break"><h2>ตาราง ข · ผลรวม</h2>' + table(["ส่วน","เฉลี่ย","น้ำหนัก","คะแนนถ่วงน้ำหนัก"], result.sections.filter(row => row.weight > 0).map(row => '<tr><td>' + esc(row.title) + '</td><td>' + num(row.avg) + '</td><td>' + esc(row.weight) + '%</td><td>' + num(row.weighted) + '</td></tr>').concat('<tr><th>คะแนนรวม (เต็ม ' + num(evalScaleMax(data.form.rules)) + ') · ' + esc(result.level || "—") + '</th><th colspan="2"></th><th>' + num(result.total) + '</th></tr>')) + '</section>';
+    html += '<section class="avoid-break"><h2>ตาราง ค · ข้อ ★</h2>' + table(["ข้อ","คะแนน","ผล"], result.stars.map(row => '<tr><td>' + esc(row.code) + '</td><td>' + num(row.value) + '</td><td>' + esc(starStatus(row)) + '</td></tr>')) + '</section>';
+    const methods = { interview:"สัมภาษณ์ข้อเท็จจริง", observation:"สังเกตการสอนเพิ่ม", both:"ทั้งสองวิธี" };
+    const usedRechecks = result.stars.filter(row => row.recheck?.status !== "pending" && row.recheck);
+    if (usedRechecks.length) html += '<section class="avoid-break"><h2>ผลตรวจเพิ่มข้อ ★</h2>' + usedRechecks.map(row => {
+      const saved = data.rechecks.find(item => item.star_code === row.code);
+      return '<p class="note">ตรวจเพิ่ม ★ ' + esc(row.code) + ': ' + esc(methods[saved?.method] || "—") +
+        ' · ' + esc(thaiDate(saved?.checked_on)) + ' · ' + esc(saved?.outcome === "pass" ? "ผ่าน" : "ไม่ผ่าน") +
+        ' · ' + esc(saved?.note || "—") + '</p>';
+    }).join("") + '</section>';
     html += '<section class="avoid-break"><h2>ผลการพิจารณา</h2>' + evalDecisionOptions(data.round.round_no).map(option => '<p class="choice-line">' + (data.decision?.final === option.value ? "☑" : "☐") + ' ' + esc(option.label) + '</p>').join("") +
       '<p><b>เหตุผล:</b> ' + esc(data.decision?.reason || liveResult.reasons?.join(" · ") || "—") + '</p></section>' +
       '<section class="avoid-break"><h2>ความเห็นของผู้รับการประเมิน</h2><p class="note">' + esc(data.acknowledgement?.comment || "........................................................................................") + '</p></section>' +
