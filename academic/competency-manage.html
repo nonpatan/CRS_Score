@@ -258,7 +258,7 @@
       <div class="field"><label for="copy-name">ชื่อรายการใหม่</label><input type="text" id="copy-name"></div>
       <div class="row2">
         <div class="field"><label for="copy-year">ปีการศึกษา</label><select id="copy-year"></select></div>
-        <div class="field"><label for="copy-term">ภาคเรียน</label><select id="copy-term"><option value="1">ภาค 1 (ประถม = กลางปี)</option><option value="2">ภาค 2 (ประถม = ปลายปี)</option></select></div>
+        <div class="field"><label for="copy-term">ภาคเรียน</label><select id="copy-term" aria-describedby="copy-term-note"><option value="1">ภาค 1 (ประถม = กลางปี)</option><option value="2">ภาค 2 (ประถม = ปลายปี)</option></select><div class="field-note" id="copy-term-note"></div></div>
       </div>
       <fieldset id="copy-options"><legend>คัดลอกอะไรไปด้วย</legend>
         <label class="copy-option"><input type="checkbox" checked disabled><span id="copy-target-count">องค์ประกอบและน้ำหนัก</span></label>
@@ -360,7 +360,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, academicTermOf } from "../supabase-client.js?v=20261021-5";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears } from "../supabase-client.js?v=20261021-5";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -872,12 +872,20 @@ function showList({fromHistory=false}={}){
   requestAnimationFrame(()=>{scrollTo(0,cmListScroll);const row=current&&[...$("assessment-list").querySelectorAll(".cm-item")].find(el=>el.dataset.assessmentId===current.id);row?.focus();});
 }
 $("back-assessments").onclick=()=>showList();
+function copyDefaultTerm(targetYear,today,years){
+  const row=years.find(year=>String(year.year)===String(targetYear));
+  if(!row?.start_date)return {term:"1",reason:"ยังไม่ได้ตั้งวันเปิดภาคของปีนี้ — ตรวจภาคเรียนเอง"};
+  if(today<row.start_date)return {term:"1",reason:`ปี ${targetYear} ยังไม่เปิดภาคเรียน — ตั้งเป็นภาค 1`};
+  if(row.term1_end_date&&today>row.term1_end_date)return {term:"2",reason:"ภาค 1 จบแล้ว — ตั้งเป็นภาค 2"};
+  if(row.term2_start_date&&today>=row.term2_start_date)return {term:"2",reason:"กำลังเรียนภาค 2"};
+  return {term:"1",reason:"กำลังเรียนภาค 1"};
+}
 async function applyAssessmentParam(){
   const saved=(()=>{try{return sessionStorage.getItem("crs.cm.term");}catch{return null;}})();
-  const year=$("filter-assessment-year").value;
+  const year=$("filter-assessment-year").value||(!assessmentYears.length?getActiveYear():"");
   const years=await getAcademicYears();
   const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Asia/Bangkok"});
-  cmSelectTerm(saved==="1"||saved==="2"?saved:(year&&year===getActiveYear()?academicTermOf(today,years)||"1":"1"));
+  cmSelectTerm(saved==="1"||saved==="2"?saved:(year&&year===getActiveYear()?copyDefaultTerm(year,today,years).term:"1"));
   const id=new URL(location.href).searchParams.get("assessment");if(id)await openDetail(id,{fromHistory:true});
 }
 addEventListener("popstate",()=>{const id=new URL(location.href).searchParams.get("assessment");if(id)openDetail(id,{fromHistory:true});else showList({fromHistory:true});});
@@ -909,8 +917,15 @@ new MutationObserver(()=>{
 ["target-list","member-list","assessment-teacher-list"].forEach(id=>new MutationObserver(syncManageDetail).observe($(id),{childList:true}));
 
 // คัดลอกเป็นรายการใหม่: ทุกการเขียนอ่านต้นฉบับจากฐานข้อมูลอีกครั้ง
-let copySourceId="", copyBusy=false, copyDupRequest=0;
+let copySourceId="", copyBusy=false, copyDupRequest=0, copyTermTouched=false;
 function closeCopy(){if(copyBusy)return;$("copy-overlay").classList.remove("show");}
+function syncCopyTerm(){
+  if(copyTermTouched)return;
+  const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Asia/Bangkok"});
+  const {term,reason}=copyDefaultTerm($("copy-year").value,today,selectableAssessmentYears);
+  $("copy-term").value=term;
+  $("copy-term-note").textContent=reason;
+}
 function syncCopyMembers(){
   const sameYear=$("copy-year").value===$("copy-year").dataset.sourceYear;
   $("copy-members").disabled=!sameYear||$("copy-members").dataset.empty==="true";
@@ -947,7 +962,8 @@ async function openCopy(){
   $("copy-name").value=src.name;
   fillSelectableYearSelect($("copy-year"),src.year);
   $("copy-year").dataset.sourceYear=src.year;
-  $("copy-term").value=String(src.term)==="1"?"2":String(src.term)==="2"?"1":"1";
+  copyTermTouched=false;
+  syncCopyTerm();
   $("copy-target-count").innerHTML=`องค์ประกอบและน้ำหนัก · ${targetResult.data.length} รายการ<small>คัดลอกเสมอ — รวมประเภทตามหลักสูตร (ปพ.)</small>`;
   const names=teacherResult.data.map(row=>profileLabel(row.user_id));
   $("copy-teacher-count").innerHTML=`ครูผู้ดูแล · ${names.length} คน${names.length?` (${names.map(esc).join(", ")})`:""}<small>${names.length?"เลือกได้ว่าจะคัดลอก":"ไม่มีครูผู้ดูแล"}</small>`;
@@ -1008,9 +1024,9 @@ $("detail-menu").addEventListener("keydown",event=>{
   const index=items.indexOf(document.activeElement);
   items[(index+(event.key==="ArrowDown"?1:-1)+items.length)%items.length].focus();
 },true);
-$("copy-year").addEventListener("change",syncCopyMembers);
+$("copy-year").addEventListener("change",()=>{syncCopyTerm();syncCopyMembers();});
 $("copy-name").addEventListener("input",checkCopyDuplicate);
-$("copy-term").addEventListener("change",checkCopyDuplicate);
+$("copy-term").addEventListener("change",()=>{copyTermTouched=true;$("copy-term-note").textContent="เลือกเอง";checkCopyDuplicate();});
 $("copy-cancel").onclick=closeCopy;$("copy-save").onclick=copyAssessment;
 $("copy-overlay").addEventListener("click",event=>{if(event.target===$("copy-overlay"))closeCopy();});
 wireDialog("copy-overlay",closeCopy);
