@@ -8784,7 +8784,7 @@ export async function evalRedFlagConfirmed(staffId, from, to) {
 // ============================================================
 // 🎨 ส่งผลงานตามธีม — หน่วยส่ง, การตรวจฟอร์ม และคำสั่งฐานข้อมูล
 // ============================================================
-export function buildThemeWorkUnits({ subjects = [], members = [], works = [], parts = [], term }) {
+export function buildThemeWorkUnits({ subjects = [], members = [], works = [], parts = [], exemptions = [], term }) {
   const allowed = subject => !subject.term || String(subject.term) === String(term);
   const subjectsById = new Map(subjects.map(subject => [subject.id, subject]));
   const memberIds = new Set(members.map(member => member.member_subject_id));
@@ -8792,6 +8792,8 @@ export function buildThemeWorkUnits({ subjects = [], members = [], works = [], p
     .map(work => [work.subject_id, work]));
   const partsBySubject = new Map(parts.filter(part => String(part.term) === String(term))
     .map(part => [part.subject_id, part]));
+  const exemptionsBySubject = new Map(exemptions.filter(row => String(row.term) === String(term))
+    .map(row => [row.subject_id, row]));
   const byCode = (a, b) => String(a.code || "").localeCompare(String(b.code || ""), "th");
   return subjects.filter(subject => allowed(subject) && !memberIds.has(subject.id)
       && (subject.subject_type === "พื้นฐาน" || subject.subject_type === "บูรณาการ"))
@@ -8803,9 +8805,11 @@ export function buildThemeWorkUnits({ subjects = [], members = [], works = [], p
       const kind = children.length ? "integrated" : "single";
       return {
         kind, subject, work: worksBySubject.get(subject.id) || null,
-        parts: (children.length ? children : [subject]).map(item => ({
-          subject: item, ownerId: item.owner_id, part: partsBySubject.get(item.id) || null
-        }))
+        parts: (children.length ? children : [subject]).map(item => {
+          const part = partsBySubject.get(item.id) || null;
+          return { subject:item, ownerId:item.owner_id, part,
+            exemption:part ? null : exemptionsBySubject.get(item.id) || null };
+        })
       };
     });
 }
@@ -8825,19 +8829,21 @@ export function groupThemeWorkByOwner(units) {
     for (const item of unit.parts || []) {
       const ownerId = item.ownerId || null;
       if (!byOwner.has(ownerId)) byOwner.set(ownerId, []);
-      byOwner.get(ownerId).push({ subject:item.subject, part:item.part });
+      byOwner.get(ownerId).push({ subject:item.subject, part:item.part, exemption:item.exemption || null });
     }
     for (const [ownerId, items] of byOwner) {
-      const submitted = items.filter(item => item.part);
+      const activeItems = items.filter(item => !item.exemption);
+      const exemptItems = items.filter(item => item.exemption);
+      const submitted = activeItems.filter(item => item.part);
       const statuses = new Set(submitted.map(item => item.part.status));
-      const reviewedCount = items.filter(item => item.part?.reviewed_at).length;
-      const returnStates = items.map(item => themeWorkReturnState(item.part));
+      const reviewedCount = activeItems.filter(item => item.part?.reviewed_at).length;
+      const returnStates = activeItems.map(item => themeWorkReturnState(item.part));
       const dates = submitted.map(item => item.part.submitted_at).filter(Boolean).sort();
-      groups.push({ key:`${unit.subject.id}:${ownerId || "unknown"}`, unit, ownerId, items,
-        status:submitted.length === 0 ? "missing"
-          : submitted.length !== items.length || statuses.size !== 1 ? "mixed" : submitted[0].part.status,
+      groups.push({ key:`${unit.subject.id}:${ownerId || "unknown"}`, unit, ownerId, items, exemptItems,
+        status:activeItems.length === 0 ? "exempt" : submitted.length === 0 ? "missing"
+          : submitted.length !== activeItems.length || statuses.size !== 1 ? "mixed" : submitted[0].part.status,
         submittedAt:dates[0] || null,
-        reviewed:reviewedCount === items.length ? "all" : reviewedCount ? "some" : "none",
+        reviewed:activeItems.length && reviewedCount === activeItems.length ? "all" : reviewedCount ? "some" : "none",
         returned:returnStates.includes("pending") ? "pending" : returnStates.includes("fixed") ? "fixed" : null });
     }
   }
@@ -8899,9 +8905,9 @@ export function pickThemeWorkReminder({ windows = [], units = [], userId, today,
   const pending = eligible.map(({ window, days }) => {
     const items = (units || []).filter(unit => String(unit.term ?? unit.subject?.term
       ?? (eligible.length === 1 ? window.term : "")) === String(window.term))
-      .filter(unit => (unit.parts || []).some(item => item.ownerId === userId && !item.part))
+      .filter(unit => (unit.parts || []).some(item => item.ownerId === userId && !item.part && !item.exemption))
       .map(unit => ({ unitSubject:unit.subject,
-        subject:(unit.parts || []).find(item => item.ownerId === userId && !item.part)?.subject }));
+        subject:(unit.parts || []).find(item => item.ownerId === userId && !item.part && !item.exemption)?.subject }));
     return { window, days, items };
   }).filter(row => row.items.length);
   if (!pending.length) return null;
@@ -8990,13 +8996,18 @@ async function loadThemeWorkDueReminder({ year, userId, today } = {}) {
     heads = data;
   }
   const activeTerms = [...new Set(eligible.map(window => String(window.term)))];
-  const { data:parts, error:partError } = await sb.from("theme_work_parts")
-    .select("subject_id,term,status,submitted_at,reviewed_at")
-    .in("subject_id", ownedIds).in("term", activeTerms);
-  if (partError) throw new Error("โหลดผลงานของฉันไม่สำเร็จ: " + partError.message);
+  const [partRes, exemptionRes] = await Promise.all([
+    sb.from("theme_work_parts").select("subject_id,term,status,submitted_at,reviewed_at")
+      .in("subject_id", ownedIds).in("term", activeTerms),
+    sb.from("theme_work_exemptions").select("subject_id,term,reason")
+      .in("subject_id", ownedIds).in("term", activeTerms)
+  ]);
+  if (partRes.error) throw new Error("โหลดผลงานของฉันไม่สำเร็จ: " + partRes.error.message);
+  if (exemptionRes.error) throw new Error("โหลดรายการไม่ต้องส่งไม่สำเร็จ: " + exemptionRes.error.message);
   await requireMySession();
   const subjects = [...(owned || []), ...heads];
-  const units = activeTerms.flatMap(term => buildThemeWorkUnits({ subjects, members, parts:parts || [], term })
+  const units = activeTerms.flatMap(term => buildThemeWorkUnits({ subjects, members,
+    parts:partRes.data || [], exemptions:exemptionRes.data || [], term })
     .filter(unit => unit.parts.some(item => item.ownerId === userId))
     .filter(unit => !headLinks.some(link => link.integrated_subject_id === unit.subject.id)
       || unit.kind === "integrated")
@@ -9005,10 +9016,11 @@ async function loadThemeWorkDueReminder({ year, userId, today } = {}) {
 }
 
 export function summarizeThemeWorks(units) {
-  const result = { total: 0, missing: 0, match: 0, adjust: 0, none: 0,
+  const result = { total: 0, missing: 0, exempt: 0, match: 0, adjust: 0, none: 0,
     unreviewed: 0, reviewed: 0, late: 0, returned: 0, missingTeachers: 0 };
   const teachers = new Set();
   for (const unit of units || []) for (const item of unit.parts || []) {
+    if (item.exemption && !item.part) { result.exempt++; continue; }
     result.total++;
     const part = item.part;
     if (!part) {
@@ -9047,6 +9059,8 @@ export async function loadThemeWorkData({ year, term }) {
       .select("integrated_subject_id,member_subject_id"), ["integrated_subject_id", "member_subject_id"])],
     ["works", fetchAllRows(() => sb.from("theme_works").select("*").eq("term", term))],
     ["parts", fetchAllRows(() => sb.from("theme_work_parts").select("*").eq("term", term))],
+    ["exemptions", fetchAllRows(() => sb.from("theme_work_exemptions").select("*").eq("term", term))],
+    ["departed", sb.rpc("theme_work_departed_owners")],
     ["profiles", fetchAllRows(() => sb.from("profiles").select("id,name"))],
     ["windows", fetchAllRows(() => sb.from("theme_work_windows").select("*")
       .eq("year", year).eq("term", term), ["year", "term"])]
@@ -9056,13 +9070,36 @@ export async function loadThemeWorkData({ year, term }) {
     if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);
     return result.data || [];
   }));
-  const [subjects, allMembers, allWorks, allParts, profiles, windows] = values;
+  const [subjects, allMembers, allWorks, allParts, allExemptions, departed, profiles, windows] = values;
   const subjectIds = new Set(subjects.map(subject => subject.id));
   const members = allMembers.filter(member => subjectIds.has(member.integrated_subject_id)
     && subjectIds.has(member.member_subject_id));
   const works = allWorks.filter(work => subjectIds.has(work.subject_id));
   const parts = allParts.filter(part => subjectIds.has(part.subject_id));
-  return { subjects, members, works, parts, profiles, window: windows[0] || null };
+  const exemptions = allExemptions.filter(row => subjectIds.has(row.subject_id));
+  return { subjects, members, works, parts, exemptions,
+    departedOwnerIds:new Set(departed.map(row => row.user_id)), profiles, window: windows[0] || null };
+}
+
+export async function exemptThemeWorkParts(subjectIds, term, reason) {
+  const note = String(reason || "").trim();
+  if (!note) throw new Error("ระบุเหตุผล");
+  const ids = [...new Set(subjectIds || [])];
+  if (!ids.length) throw new Error("เลือกวิชาที่ไม่ต้องส่ง");
+  const { data, error } = await sb.from("theme_work_exemptions")
+    .insert(ids.map(subject_id => ({ subject_id, term, reason:note }))).select("*");
+  if (error) throw new Error(error.message);
+  if ((data || []).length !== ids.length) throw new Error("บันทึกไม่ครบทุกวิชา กรุณาโหลดใหม่แล้วตรวจรายการ");
+  return data;
+}
+
+export async function unexemptThemeWork(ids) {
+  const values = [...new Set(ids || [])];
+  if (!values.length) throw new Error("ยกเลิกไม่สำเร็จ (ไม่มีสิทธิ์หรือถูกยกเลิกไปแล้ว)");
+  const { data, error } = await sb.from("theme_work_exemptions").delete().in("id", values).select("id");
+  if (error) throw new Error(error.message);
+  if ((data || []).length !== values.length) throw new Error("ยกเลิกไม่สำเร็จ (ไม่มีสิทธิ์หรือถูกยกเลิกไปแล้ว)");
+  return data;
 }
 
 export async function submitThemeWorkPart({ unit, ownSubjectIds, term, form }) {

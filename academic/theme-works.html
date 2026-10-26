@@ -69,6 +69,9 @@ button:disabled { opacity:.55; cursor:default; }
 .pill.mixed { background:var(--amber-soft); color:var(--amber); border-color:var(--amber-soft); }
 .pill.returned { background:var(--danger-soft); color:var(--danger); border-color:var(--danger-soft); }
 .pill.fixed { background:var(--bg); color:var(--muted); }
+.pill.exempt,.departed-badge { background:var(--bg); color:var(--muted); border-color:var(--line); }
+.departed-badge { border:1px solid var(--line); border-radius:99px; padding:2px 8px; font-size:13px; white-space:nowrap; }
+.exempt-notice { background:var(--note); border-left:4px solid var(--muted); border-radius:8px; padding:9px 12px; overflow-wrap:anywhere; }
 .feedback { margin:10px 0; padding:10px 12px; border-left:4px solid var(--line); border-radius:8px; background:var(--bg); overflow-wrap:anywhere; }
 .feedback strong { display:flex; align-items:center; gap:4px; }
 .feedback p { margin:4px 0 0; white-space:pre-wrap; }
@@ -187,6 +190,11 @@ button:disabled { opacity:.55; cursor:default; }
 .review-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .review-chip { font-size:14px; border-radius:8px; background:var(--amber-soft); color:var(--ink); padding:2px 10px; white-space:nowrap; }
 .review-chip span { color:var(--muted); }
+.review-exempt { background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:12px 16px; }
+.review-exempt .review-chip { background:var(--white); border:1px solid var(--line); white-space:normal; overflow-wrap:anywhere; }
+.exempt-choice { display:flex; align-items:flex-start; gap:9px; min-height:44px; padding:7px 0; }
+.exempt-choice input { width:20px; height:20px; accent-color:var(--teal); flex:none; }
+.review-exempt .review-chip button { min-height:44px; }
 .toast { position:sticky; z-index:80; bottom:14px; max-width:680px; margin:12px auto 0; padding:11px 16px; border-radius:10px; background:var(--ink); color:var(--white); font-weight:600; opacity:0; pointer-events:none; }
 .toast.show { opacity:1; }
 .toast.err { background:var(--danger); }
@@ -276,8 +284,9 @@ import {
   bangkokNow, toDateStr, thaiShortDateText, bindDatePickOnly, DATE_PICK_ONLY_NOTE, GRADE_ORDER,
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
   validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed,
-  themeWorkReturnState, returnThemeWork, setThemeWorkReviewNote, confirmThemeWorkReview, THEME_WORK_SCORE_LABELS
-} from "../supabase-client.js?v=20261023-1";
+  themeWorkReturnState, returnThemeWork, setThemeWorkReviewNote, confirmThemeWorkReview, THEME_WORK_SCORE_LABELS,
+  exemptThemeWorkParts, unexemptThemeWork
+} from "../supabase-client.js?v=20261026-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -293,7 +302,7 @@ if (!session) {
   const dateTime = value => value ? new Date(value).toLocaleString("th-TH", {
     dateStyle:"medium", timeStyle:"short", timeZone:"Asia/Bangkok"
   }) : "—";
-  const statusText = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ",
+  const statusText = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ", exempt:"ไม่ต้องส่ง",
     returned:"ส่งกลับให้แก้", fixed:"แก้แล้ว · รอตรวจ" };
   const statusIcon = status => {
     const paths = {
@@ -321,7 +330,7 @@ if (!session) {
   let year, term, years, data, units = [], workGroups = [], ownGroups = [], selectedKey = "", activeView = "mine", filter = "all";
   let isViewer = false, isReviewer = false, busy = false;
   let teacherOpenState = null;
-  let composing = null; // { key, kind:"return" | "advice" } กล่องเขียนความเห็นที่กางอยู่ในแถว
+  let composing = null; // { key, kind:"return" | "advice" | "exempt" } กล่องเขียนความเห็นที่กางอยู่ในแถว
   const profiles = new Map();
   const toast = (message, ok = true) => {
     const box = el("toast"); box.textContent = message; box.className = "toast show" + (ok ? " ok" : " err");
@@ -359,17 +368,19 @@ if (!session) {
   const setBusy = value => { busy = value; document.querySelectorAll("[data-action]").forEach(button => button.disabled = value); };
 
   function renderProgress() {
-    const sent = ownGroups.filter(group => !["missing", "mixed"].includes(group.status)).length;
-    const counts = { match:0, adjust:0, none:0, missing:0, mixed:0 };
+    const active = ownGroups.filter(group => group.status !== "exempt");
+    const sent = active.filter(group => !["missing", "mixed"].includes(group.status)).length;
+    const counts = { match:0, adjust:0, none:0, missing:0, mixed:0, exempt:0 };
     ownGroups.forEach(group => counts[group.status]++);
     const returnedCount = ownGroups.filter(group => group.returned === "pending").length;
     const countdown = themeWorkCountdown(today(), data.window);
-    el("progress").innerHTML = '<div class="row"><strong>ส่งแล้ว ' + sent + ' จาก ' + ownGroups.length + ' รายการ</strong><span>' +
+    el("progress").innerHTML = '<div class="row"><strong>ส่งแล้ว ' + sent + ' จาก ' + active.length + ' รายการ</strong><span>' +
       (countdown ? esc(countdown) : "ฝ่ายวิชาการยังไม่ได้ตั้งวันปิดรับ · ยังส่งได้") +
       '</span></div><div class="progress-line" aria-hidden="true"><span style="width:' +
-      (ownGroups.length ? Math.round(sent / ownGroups.length * 100) : 0) + '%"></span></div>' +
+      (active.length ? Math.round(sent / active.length * 100) : 0) + '%"></span></div>' +
       '<div class="meta">ตรงธีม ' + counts.match + ' · ปรับจากธีม ' + counts.adjust +
       ' · ยังไม่ได้ทำ ' + counts.none + ' · ส่งไม่ครบ ' + counts.mixed + ' · ยังไม่ส่ง ' + counts.missing +
+      (counts.exempt ? ' · ไม่ต้องส่ง ' + counts.exempt : '') +
       (returnedCount ? ' · <strong style="color:var(--danger)">ส่งกลับให้แก้ ' + returnedCount + '</strong>' : '') + '</div>';
   }
 
@@ -423,6 +434,8 @@ if (!session) {
       (group.returned ? pill(group.returned === "pending" ? "returned" : "fixed") : '') + '</span></div><div class="meta subject-meta">' +
       esc(unit.subject.grade_level || "") + (unit.kind === "integrated" ? " · บูรณาการ" : " · พื้นฐาน") + '</div>' + childChips(group);
     if (otherCount(group)) html += '<p class="hint">วิชาย่อยของครูคนอื่นอีก ' + otherCount(group) + ' วิชา · ส่งแยกเอง</p>';
+    if (group.exemptItems?.length) html += '<p class="exempt-notice">ฝ่ายวิชาการตั้งว่าไม่ต้องส่ง: ' +
+      group.exemptItems.map(item => esc(item.exemption.reason)).join(' · ') + '</p>';
     if (part) {
       html += '<div class="meta">ส่งเมื่อ ' + esc(dateTime(group.submittedAt)) + (late ? ' · <span class="pill late">ส่งช้า ' + late + ' วัน</span>' : "") + '</div>';
       html += feedbackBoxes(group);
@@ -445,6 +458,8 @@ if (!session) {
         '" type="button" data-action="edit" data-group="' +
         esc(group.key) + '">แก้ผลงาน</button>' : "") + '</div>';
     }
+    if (!part && group.status === "exempt" && !group.editing)
+      html += '<button class="line-btn" type="button" data-action="edit" data-group="' + esc(group.key) + '">ส่งผลงานวิชานี้</button>';
     if (editOpen) html += renderForm(group, variant);
     return html + '</article>';
   }
@@ -513,7 +528,7 @@ if (!session) {
   };
   function reviewAction(group) {
     const reviewedParts = group.items.map(item => item.part).filter(part => part?.reviewed_at);
-    const reviewedCount = reviewedParts.length, total = group.items.length;
+    const reviewedCount = reviewedParts.length, total = group.items.filter(item => !item.exemption).length;
     const reviewer = reviewedParts[0];
     const reviewedBy = reviewer?.reviewed_by_name || profiles.get(reviewer?.reviewed_by) || "ไม่พบชื่อผู้ตรวจ";
     const done = group.reviewed === "all" ? '<div class="review-done">' + statusIcon("match") + 'ตรวจแล้ว' +
@@ -592,24 +607,56 @@ if (!session) {
       (missingWorkUrl(group) ? '<span class="review-no-link">ไม่มีลิงก์ผลงาน</span>' : '') +
       '<hr>' + reviewAction(group) + '</div>' + renderCompose(group) + '</article>';
   }
-  function renderMissingReviewRows(rows) {
+  function renderMissingReviewRows(rows, ownerId) {
     if (!rows.length) return "";
-    return '<div class="review-missing"><span class="review-missing-label">ยังไม่ส่ง ' + rows.length + ' วิชา</span>' +
-      '<div class="review-chips">' + rows.map(group => '<span class="review-chip">' +
-        esc(group.unit.subject.code || "") + ' <span>' + esc(group.unit.subject.grade_level || "") +
-        '</span></span>').join("") + '</div></div>';
+    const items = rows.flatMap(group => group.items.filter(item => !item.part && !item.exemption)
+      .map(item => ({ group, item })));
+    if (!items.length) return "";
+    const key = 'exempt:' + ownerId, open = composing?.key === key && composing.kind === "exempt";
+    const departed = data.departedOwnerIds.has(ownerId);
+    const boxId = 'exempt-' + String(ownerId).replace(/[^a-zA-Z0-9_-]/g, '-');
+    return '<div class="review-missing"><span class="review-missing-label">ยังไม่ส่ง ' + items.length + ' วิชา</span>' +
+      '<div class="review-chips">' + items.map(({ item }) => '<span class="review-chip">' +
+        esc(item.subject.code || "") + ' <span>' + esc(item.subject.grade_level || "") +
+        '</span></span>').join("") + '</div>' +
+      (isReviewer ? '<button class="text-btn" type="button" data-action="compose" data-kind="exempt" data-group="' +
+        esc(key) + '" aria-expanded="' + open + '">ไม่ต้องส่ง…</button>' : '') +
+      (open ? '<div class="review-compose" data-compose="' + esc(key) + '"><fieldset class="field"><legend>เลือกวิชาที่ไม่ต้องส่ง</legend>' +
+        items.map(({ group, item }) => '<label class="exempt-choice"><input type="checkbox" name="exempt-subject" value="' +
+          esc(item.subject.id) + '"' + (departed ? ' checked' : '') + '><span>' + subjectTitle(item.subject) +
+          (group.unit.kind === "integrated" ? ' <small class="meta">ส่วนหนึ่งของ ' + groupTitle(group) + '</small>' : '') +
+          '</span></label>').join('') + '</fieldset><div class="field"><label for="' + boxId + '-reason">เหตุผล *</label>' +
+        '<textarea id="' + boxId + '-reason" rows="3" aria-describedby="' + boxId + '-hint ' + boxId + '-error">' +
+        (departed ? 'ครูออกแล้ว' : '') + '</textarea><p class="hint" id="' + boxId + '-hint">ไม่นับเป็นงานค้าง และไม่เตือนครูอีก · ถ้าวิชานี้ยังสอนต่อ ให้โอนวิชาให้ครูใหม่ที่หน้าส่งมอบงานแทน</p>' +
+        '<div class="field-error" id="' + boxId + '-error" role="alert"></div></div><div class="actions">' +
+        '<button class="line-btn" type="button" data-action="compose-cancel" data-group="' + esc(key) + '">ยกเลิก</button>' +
+        '<button class="primary" type="button" data-action="compose-save" data-group="' + esc(key) + '"' +
+        (departed ? '' : ' disabled') + '>ไม่ต้องส่ง ' +
+        (departed ? items.length : 0) + ' วิชา</button></div></div>' : '') + '</div>';
+  }
+  function renderExemptReviewRows(rows) {
+    const items = rows.flatMap(group => group.exemptItems.map(item => ({ group, item })));
+    if (!items.length) return "";
+    return '<div class="review-exempt"><strong>ไม่ต้องส่ง ' + items.length + ' วิชา</strong><div class="review-chips">' +
+      items.map(({ item }) => '<span class="review-chip">' + esc(item.subject.code || "") +
+        ' · <span>' + esc(item.exemption.reason) + ' · ' + esc(item.exemption.created_by_name || "ฝ่ายวิชาการ") +
+        ' · ' + esc(dateTime(item.exemption.created_at)) + '</span>' +
+        (isReviewer ? ' <button class="text-btn" type="button" data-action="unexempt" data-id="' +
+          esc(item.exemption.id) + '" data-code="' + esc(item.subject.code || "") + '">ยกเลิก</button>' : '') +
+        '</span>').join('') + '</div></div>';
   }
   function selectThemeWorkReviewGroups(entries, selectedFilter, nameFor) {
     const matching = entries.filter(group => selectedFilter === "all" || (selectedFilter === "returned" ? !!group.returned
       : group.items.some(item => selectedFilter === "unreviewed"
-        ? item.part && !item.part.reviewed_at : (item.part?.status || "missing") === selectedFilter)));
+        ? item.part && !item.part.reviewed_at : (item.exemption ? "exempt" : item.part?.status || "missing") === selectedFilter)));
     const groups = new Map(), teacherTotals = new Map();
     for (const group of entries) {
       const id = group.ownerId || "unknown";
       const value = teacherTotals.get(id) || { total:0, missing:0, sent:0, reviewed:0, returned:0 };
+      if (group.status === "exempt") { teacherTotals.set(id, value); continue; }
       if (group.returned === "pending") value.returned++;
       value.total++; if (["missing", "mixed"].includes(group.status)) value.missing++;
-      if (group.items.every(item => item.part)) value.sent++;
+      if (group.items.every(item => item.part || item.exemption)) value.sent++;
       if (group.reviewed === "all") value.reviewed++;
       teacherTotals.set(id, value);
     }
@@ -624,8 +671,8 @@ if (!session) {
     return { matching, groups, teacherTotals, teacherIds };
   }
   function buildThemeWorkPrintHtml({ review, summary, selectedFilter, term, year, dueDate, printedAt, printedBy, nameFor }) {
-    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ", returned:"ส่งกลับ" };
-    const statuses = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ" };
+    const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", exempt:"ไม่ต้องส่ง", unreviewed:"ยังไม่ตรวจ", returned:"ส่งกลับ" };
+    const statuses = { match:"ตรงธีม", adjust:"ปรับจากธีม", none:"ยังไม่ได้ทำ", missing:"ยังไม่ส่ง", mixed:"ส่งไม่ครบ", exempt:"ไม่ต้องส่ง" };
     const printDate = value => {
       if (!value) return "—";
       const date = new Date(value);
@@ -640,7 +687,7 @@ if (!session) {
       ' · พิมพ์เมื่อ ' + esc(printedAt) + ' โดย ' + esc(printedBy) + '</p>' +
       '<p>ทั้งหมด ' + summary.total + ' รายการ · ตรงธีม ' + summary.match + ' · ปรับจากธีม ' + summary.adjust +
       ' · ยังไม่ได้ทำ ' + summary.none + ' · ยังไม่ส่ง ' + summary.missing + ' · ส่งช้า ' + summary.late +
-      ' · ตรวจแล้ว ' + summary.reviewed + ' · นับรายวิชาย่อย</p>';
+      ' · ตรวจแล้ว ' + summary.reviewed + (summary.exempt ? ' · ไม่ต้องส่ง ' + summary.exempt : '') + ' · นับรายวิชาย่อย</p>';
     if (!review.teacherIds.length) return html + '<p>ไม่มีรายการในตัวกรองนี้</p>';
     for (const id of review.teacherIds) {
       const total = review.teacherTotals.get(id);
@@ -656,11 +703,14 @@ if (!session) {
         const scoreOf = row => row.items.map(item => item.part).find(p => p?.reviewed_at && p.review_score)?.review_score || null;
         const feedback = group.items.map(item => item.part).find(row => row?.return_note && group.returned)?.return_note ||
           group.items.map(item => item.part).find(row => String(row?.review_note || "").trim())?.review_note || "";
+        const exemptionNotes = (group.exemptItems || []).map(item => 'ไม่ต้องส่ง · ' + subjectTitle(item.subject) +
+          ' · ' + esc(item.exemption.reason)).join('<br>');
         const notes = (part?.note ? esc(part.note) : "") + (part?.next_plan ? '<br>แผนต่อ: ' + esc(part.next_plan) : "") +
           (feedback ? '<br>ฝ่ายวิชาการ: ' + esc(feedback) : "");
         const late = themeWorkLateDays(group.submittedAt, dueDate);
         const status = '<strong class="print-status-label">' + (group.returned === "pending" ? "ส่งกลับให้แก้"
           : group.returned === "fixed" ? "แก้แล้ว รอตรวจ" : statuses[group.status]) + '</strong>' +
+          (exemptionNotes ? '<br>' + exemptionNotes : '') +
           (part ? '<br>ส่ง ' + esc(printDate(group.submittedAt)) + (late ? '<br>ส่งช้า ' + late + ' วัน' : "") +
             '<br>' + (group.reviewed === "all" ? "ตรวจแล้ว" + (scoreOf(group) ? " · " + scoreOf(group) + "/4 ดาว" : "")
               : group.reviewed === "some" ? "ตรวจแล้วบางวิชา" : "ยังไม่ตรวจ") : "");
@@ -676,9 +726,10 @@ if (!session) {
     const tiles = ["missing","match","adjust","none"];
     el("summary-tiles").innerHTML = tiles.map(key => '<div class="tile ' + key +
       '"><strong>' + sum[key] + '</strong><span>' + statusIcon(key) + statusText[key] + '</span></div>').join("") +
-      '<p class="meta" style="grid-column:1/-1;margin:0">นับรายวิชาย่อย · วิชาบูรณาการ 1 วิชา = หลายรายการ</p>';
+      '<p class="meta" style="grid-column:1/-1;margin:0">นับรายวิชาย่อย · วิชาบูรณาการ 1 วิชา = หลายรายการ' +
+      (sum.exempt ? ' · ไม่ต้องส่ง ' + sum.exempt : '') + '</p>';
     const integrated = units.filter(unit => unit.kind === "integrated");
-    const complete = integrated.filter(unit => unit.parts.every(item => item.part)).length;
+    const complete = integrated.filter(unit => unit.parts.every(item => item.part || item.exemption)).length;
     el("integrated-card").innerHTML = '<h3 style="margin:0">วิชาบูรณาการ — แยกตามวิชาย่อย</h3><p class="meta">ส่งครบ ' +
       complete + ' · ค้างบางส่วน ' + (integrated.length - complete) + '</p>' +
       (integrated.length ? '<div class="integrated-list">' + integrated.map(unit =>
@@ -686,15 +737,17 @@ if (!session) {
         unit.parts.map(item => '<div class="integrated-part"><span>' + esc(item.subject.code || "") + ' ' +
           esc(item.subject.name || "") + ' · ครู' + esc(nameOf(item.ownerId)) +
           (item.part?.note ? '<br><span class="meta">หมายเหตุ: ' + esc(item.part.note) + '</span>' : "") +
-          '</span>' + pill(item.part?.status) + '</div>').join("") + '</div>').join("") + '</div>' :
+          '</span>' + pill(item.exemption ? "exempt" : item.part?.status) + '</div>').join("") + '</div>').join("") + '</div>' :
         '<p class="empty">ไม่มีวิชาบูรณาการในภาคนี้</p>');
     const entries = workGroups, counts = {
-      all: sum.total, missing:sum.missing, match:sum.match, adjust:sum.adjust, none:sum.none, unreviewed:sum.unreviewed,
+      all: sum.total, missing:sum.missing, match:sum.match, adjust:sum.adjust, none:sum.none, exempt:sum.exempt, unreviewed:sum.unreviewed,
       returned: units.reduce((total, unit) => total + unit.parts.filter(item => themeWorkReturnState(item.part)).length, 0)
     };
     const labels = { all:"ทั้งหมด", missing:"ยังไม่ส่ง", match:"ตรงธีม", adjust:"ปรับ", none:"ยังไม่ได้ทำ", unreviewed:"ยังไม่ตรวจ", returned:"ส่งกลับ" };
+    if (sum.exempt) labels.exempt = "ไม่ต้องส่ง";
     let html = '<div class="review-head"><h3>รายการตามครู</h3><span class="meta">ครูที่ค้าง ' + sum.missingTeachers +
-      ' คน · ตรวจแล้ว ' + sum.reviewed + ' · ส่งช้า ' + sum.late + (sum.returned ? ' · รอครูแก้ ' + sum.returned : '') + '</span></div><div class="filters" role="group" aria-label="กรองสถานะ">';
+      ' คน · ตรวจแล้ว ' + sum.reviewed + ' · ส่งช้า ' + sum.late + (sum.returned ? ' · รอครูแก้ ' + sum.returned : '') +
+      (sum.exempt ? ' · ไม่ต้องส่ง ' + sum.exempt : '') + '</span></div><div class="filters" role="group" aria-label="กรองสถานะ">';
     for (const key of Object.keys(labels)) html += '<button type="button" data-action="filter" data-filter="' + key +
       '" aria-pressed="' + (filter === key) + '">' + labels[key] + ' <span class="filter-count">' + counts[key] + '</span></button>';
     const review = selectThemeWorkReviewGroups(entries, filter, nameOf);
@@ -703,7 +756,8 @@ if (!session) {
     const { groups, teacherTotals, teacherIds } = review;
     if (teacherOpenState === null) teacherOpenState = new Set(teacherIds.filter(id => {
       const t = teacherTotals.get(id);
-      return t.missing > 0 || t.sent !== t.total || t.reviewed !== t.sent || t.returned > 0;
+      if (data.departedOwnerIds.has(id) && t.missing === 0) return false;
+      return t.total > 0 && (t.missing > 0 || t.sent !== t.total || t.reviewed !== t.sent || t.returned > 0);
     }));
     if (!teacherIds.length) html += '<p class="empty">ไม่มีรายการในตัวกรองนี้</p>';
     let noteIndex = 0;
@@ -713,11 +767,15 @@ if (!session) {
       const waitingPct = t.total ? (t.sent - t.reviewed) / t.total * 100 : 0;
       html += '<details class="teacher" data-teacher="' + esc(id) + '"' + (teacherOpenState.has(id) ? ' open' : '') +
         '><summary><span class="teacher-name"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>ครู' +
-        esc(nameOf(id)) + '</span><span class="teacher-stat">' + teacherProgressText(t) +
+        esc(nameOf(id)) + (data.departedOwnerIds.has(id) ? '<span class="departed-badge">ครูออกแล้ว</span>' : '') +
+        '</span><span class="teacher-stat">' + teacherProgressText(t) +
         '</span><span class="teacher-bar" aria-hidden="true"><i class="ok" style="width:' +
         reviewedPct + '%"></i><i class="wait" style="width:' + waitingPct + '%"></i></span></summary><div class="review-rows">';
-      for (const group of rows) if (group.status !== "missing") html += renderReviewRow(group, 'review-note-' + noteIndex++);
-      html += renderMissingReviewRows(rows.filter(group => group.status === "missing")) + '</div></details>';
+      for (const group of rows) if (filter !== "exempt" && group.status !== "missing" && group.status !== "exempt")
+        html += renderReviewRow(group, 'review-note-' + noteIndex++);
+      if (filter === "all" || filter === "missing") html += renderMissingReviewRows(rows, id);
+      if (filter === "all" || filter === "exempt") html += renderExemptReviewRows(rows);
+      html += '</div></details>';
     }
     el("all-list").innerHTML = html;
     scheduleReviewNotes();
@@ -807,6 +865,13 @@ if (!session) {
   document.addEventListener("change", event => {
     const form = event.target.closest(".work-form");
     if (form && event.target.name === "status") showConditional(form);
+    if (event.target.name === "exempt-subject") {
+      const box = event.target.closest('.review-compose');
+      const count = box.querySelectorAll('[name="exempt-subject"]:checked').length;
+      const save = box.querySelector('[data-action="compose-save"]');
+      save.textContent = 'ไม่ต้องส่ง ' + count + ' วิชา';
+      save.disabled = count === 0;
+    }
   });
   document.addEventListener("focusout", event => {
     const form = event.target.closest(".work-form");
@@ -844,6 +909,18 @@ if (!session) {
         printedBy:profiles.get(session.user.id) || "ไม่พบชื่อ", nameFor:nameOf });
       window.print(); return;
     }
+    if (button.dataset.action === "unexempt") {
+      if (!isReviewer) return;
+      const approved = await window.crsAskConfirm({ title:"กลับมานับว่าต้องส่ง",
+        message:button.dataset.code + " จะกลับไปอยู่ในรายการยังไม่ส่ง และครูจะได้รับการเตือนอีก",
+        okLabel:"กลับมานับ", danger:false });
+      if (!approved) return;
+      setBusy(true);
+      try { await unexemptThemeWork([button.dataset.id]); toast("กลับมานับว่าต้องส่งแล้ว"); await load(true); }
+      catch (error) { toast(error.message, false); }
+      finally { setBusy(false); }
+      return;
+    }
     if (button.dataset.action === "edit") {
       const group = ownGroups.find(row => row.key === button.dataset.group);
       if (group && group.reviewed === "none") { group.editing = true; renderMine(); }
@@ -871,6 +948,21 @@ if (!session) {
     if (button.dataset.action === "compose-save") {
       if (!isReviewer || !composing) return;
       const box = button.closest(".review-compose"), textarea = box?.querySelector("textarea"), error = box?.querySelector(".field-error");
+      if (composing.kind === "exempt") {
+        if (!box || !textarea) return;
+        const ids = [...box.querySelectorAll('[name="exempt-subject"]:checked')].map(input => input.value);
+        if (!ids.length) return;
+        const reason = textarea.value.trim();
+        if (!reason) { error.textContent = "ระบุเหตุผล"; textarea.setAttribute("aria-invalid", "true"); textarea.focus(); return; }
+        const oldLabel = button.textContent;
+        button.textContent = "กำลังบันทึก…";
+        setBusy(true);
+        try { await exemptThemeWorkParts(ids, term, reason); composing = null;
+          toast("ตั้งไม่ต้องส่งแล้ว " + ids.length + " วิชา"); await load(true);
+        } catch (cause) { toast(cause.message, false); }
+        finally { button.textContent = oldLabel; setBusy(false); }
+        return;
+      }
       const group = workGroups.find(row => row.key === button.dataset.group);
       if (!group || !textarea) return;
       const kind = composing.kind, text = textarea.value.trim();
