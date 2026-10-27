@@ -227,7 +227,11 @@
   #competency-report .comp-nav-name { min-width:0; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; padding:7px 12px; text-align:left; }
   #competency-report .comp-nav-name strong { overflow-wrap:anywhere; line-height:1.35; }
   #competency-report .comp-nav-name span { color:var(--muted); font-size:14px; line-height:1.4; }
-  #competency-report .comp-summary-main { display:grid; grid-template-columns:auto minmax(0,1fr); gap:16px; align-items:center; }
+  #competency-report .comp-summary-main { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:16px; align-items:center; }
+  #competency-report .comp-print-outline { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; padding:8px 14px; border:1px solid var(--teal); border-radius:9px; background:var(--white); color:var(--teal); font:inherit; font-weight:600; white-space:nowrap; cursor:pointer; align-self:start; }
+  #competency-report .comp-print-outline svg { width:18px; height:18px; flex:none; }
+  #competency-report .comp-print-outline:hover { background:var(--teal-soft); }
+  #competency-report .comp-print-outline[aria-busy=true] { cursor:progress; opacity:.7; }
   #competency-report .comp-summary-number { font-size:38px; font-weight:600; line-height:1; color:var(--amber); white-space:nowrap; }
   #competency-report .comp-summary-number.comp-complete { color:var(--teal); }
   #competency-report .comp-summary-number small { font-size:16px; color:var(--muted); font-weight:500; }
@@ -281,7 +285,8 @@
     #competency-report .comp-nav-step { padding:6px 10px; }
     #competency-report .comp-nav-step span:not(.comp-arrow) { display:none; }
     #competency-report .comp-nav-name { padding:6px 8px; }
-    #competency-report .comp-summary-main { gap:10px; }
+    #competency-report .comp-summary-main { gap:10px; grid-template-columns:auto minmax(0,1fr); }
+    #competency-report .comp-print-outline { grid-column:1 / -1; justify-self:start; }
     #competency-report .comp-summary-number { font-size:32px; }
     #competency-report .comp-todo-row { grid-template-columns:auto minmax(0,1fr); }
     #competency-report .comp-todo-count { grid-column:2; text-align:left; }
@@ -3261,12 +3266,13 @@ function renderCompetencyResult(student, rows, year, grade, term, subjectNameByI
     .map(level => ({ label:level.label, count:rows.filter(row => row.combined.level === level.label).length })).filter(level => level.count);
   let html = "<section class='card comp-summary'><div class='comp-summary-main'><div class='comp-summary-number" + (complete === rows.length ? " comp-complete" : "") + "'>" + complete + "<small> /" + rows.length + " ด้าน</small></div>" +
     "<div class='comp-summary-copy'><h2 class='comp-title'>" + summaryTitle + "</h2><div class='comp-levels'>" +
-    (levels.length ? levels.map(level => compChip({ kind:"ok", label:level.label + " " + level.count })).join("") : compChip({ kind:"none", label:"ยังไม่มีระดับผล" })) + "</div></div></div>" +
+    (levels.length ? levels.map(level => compChip({ kind:"ok", label:level.label + " " + level.count })).join("") : compChip({ kind:"none", label:"ยังไม่มีระดับผล" })) + "</div></div>" +
+    "<button type='button' class='comp-print-outline no-print' id='comp-student-print' aria-label='พิมพ์ใบตามงานของ " + escapeHtml(student.name) + "'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M6 9V3h12v6'/><rect x='6' y='14' width='12' height='7'/><path d='M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7a1 1 0 0 1-1 1h-2'/></svg>พิมพ์ใบรายคน</button></div>" +
     "<p class='comp-summary-meta'>ปี " + escapeHtml(year) + " · " + escapeHtml(grade) + " · ห้อง " + escapeHtml(student.classroom) +
     (term ? " · ภาคเรียน " + escapeHtml(term) : " · ทั้งปี") + "</p>";
   if (blocker) html += "<div class='comp-blocker'>รายการที่ทำให้สรุปไม่ได้มากที่สุด: <strong>" + escapeHtml(blocker.name) + "</strong> (" + blocker.sourceLabel + " · " +
     (blocker.missingStructure ? "ยังไม่สร้างสมรรถนะหลัก" : blocker.expected ? "กรอกแล้ว " + blocker.scored + "/" + blocker.expected : "ยังไม่สร้างครั้งประเมิน") + ") — ค้างอยู่ " + blocker.blocked.size + " ด้าน</div>";
-  html += "<button type='button' class='comp-room-button no-print' id='comp-student-print'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M6 9V3h12v6'/><rect x='6' y='14' width='12' height='7'/><path d='M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7a1 1 0 0 1-1 1h-2'/></svg>พิมพ์ใบของนักเรียนคนนี้</button></section>" +
+  html += "</section>" +
     (blockedLoadError ? "<div class='card comp-print-error' role='alert'>ตรวจ ร./มส. ไม่สำเร็จ: " + escapeHtml(blockedLoadError) + " — รายการค้างอาจรวมนักเรียนที่ติด ร./มส.</div>" : "") +
     "<section class='card'><h2 class='comp-title'>ผล " + rows.length + " ด้าน</h2><div class='hint'>แถบเล็ก 3 ช่อง = รายวิชา · กิจกรรม · กิจวัตร</div><div class='comp-grid'>";
   rows.forEach((row,index) => {
