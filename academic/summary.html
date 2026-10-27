@@ -3689,7 +3689,7 @@ async function populateGradeSelects() {
 }
 
 // ============================================================
-//  ใบ ปพ.6 + ความเห็นครูประจำชั้น (แท็บผลการเรียนรายคน · มัธยม · brief docs/brief-pp6.md)
+//  ใบ ปพ.6 + ความเห็นครูประจำชั้น/ผู้ปกครอง (แท็บผลการเรียนรายคน · brief docs/brief-pp6-parent-comment.md)
 //  แยกจากส่วนแท็บ GPA โดยตั้งใจ: คำสั่งเขียนฐานข้อมูลของหน้านี้อยู่ที่นี่ที่เดียว
 // ============================================================
 const PP6_COMMENT_MAX = 250;
@@ -3703,7 +3703,7 @@ function pp6Scope() {
   }
   return { primary:false, half:"", term:elGpaTerm.value, label:"ภาคเรียน " + elGpaTerm.value };
 }
-const pp6Drafts = new Map(); // studentId|year|term -> ข้อความที่พิมพ์ค้าง (กันหายตอนการ์ดวาดใหม่)
+const pp6Drafts = new Map(); // studentId|year|term|t หรือ |p -> ข้อความที่พิมพ์ค้างแยกช่อง
 
 function pp6Key(studentId, year, term) { return studentId + "|" + year + "|" + term; }
 
@@ -3738,8 +3738,8 @@ function pp6HeadHtml(d, subtitle) {
       "<div><b>ชั้น</b> " + escapeHtml(d.student.room) + "</div><div><b>ครูประจำชั้น</b> " + (d.homeroomNames || []).map(escapeHtml).join(", ") + "</div></div>";
 }
 
-// หัวข้อ 2–4 (สมรรถนะ · กิจกรรม · ความเห็นครู) + ลายเซ็น (ใช้ร่วมมัธยม/ประถม)
-function pp6TailHtml(d, commentTitle) {
+// หัวข้อ 2–5 (สมรรถนะ · กิจกรรม · ความเห็นครู/ผู้ปกครอง) + ลายเซ็น (ใช้ร่วมมัธยม/ประถม)
+function pp6TailHtml(d, commentTitle, parentTitle) {
   const comps = d.competencyError
     ? "<tr><td colspan='3'>" + escapeHtml(d.competencyError) + "</td></tr>"
     : (d.competencies || []).map(c => "<tr><td>" + escapeHtml(c.name) + "</td><td class='r'>" + (c.score === null ? "—" : Number(c.score).toFixed(1)) +
@@ -3751,11 +3751,14 @@ function pp6TailHtml(d, commentTitle) {
       (a.result === "รอผล" ? " pend" : "") + "'>" + escapeHtml(a.result) + "</td></tr>").join("")
     : "<tr class='blank'><td></td><td></td><td></td></tr><tr class='blank'><td></td><td></td><td></td></tr>";
   const comment = String(d.comment || "").trim();
+  const parentComment = String(d.parentComment || "").trim();
   return "<section class='pp6-sec'><h2>2. สมรรถนะหลัก</h2><table class='pp6-table'><thead><tr><th>ด้าน</th><th>คะแนน (เต็ม 100)</th><th>ระดับ</th></tr></thead><tbody>" + comps + "</tbody></table>" +
       (levelText ? "<div class='pp6-note'>ระดับ: " + levelText + " · ประเมินจากรายวิชา กิจกรรม และกิจวัตรประจำวัน</div>" : "") + "</section>" +
     "<section class='pp6-sec'><h2>3. กิจกรรมพัฒนาผู้เรียน</h2><table class='pp6-table'><thead><tr><th>ที่</th><th>กิจกรรม</th><th>ผลการประเมิน</th></tr></thead><tbody>" + acts + "</tbody></table></section>" +
     "<section class='pp6-sec'><h2>4. " + commentTitle + "</h2>" +
       (comment ? "<p class='pp6-comment'>" + escapeHtml(comment) + "</p>" : "<div class='pp6-line'></div><div class='pp6-line'></div>") + "</section>" +
+    "<section class='pp6-sec'><h2>5. " + parentTitle + "</h2>" +
+      (parentComment ? "<p class='pp6-comment'>" + escapeHtml(parentComment) + "</p>" : "<div class='pp6-line'></div><div class='pp6-line'></div><div class='pp6-line'></div>") + "</section>" +
     "<div class='pp6-sign'><div><div class='pp6-sign-line'>(" + escapeHtml(d.signHomeroom || "........................................") + ")</div><div>ครูประจำชั้น</div></div>" +
       "<div><div class='pp6-sign-line'>(" + escapeHtml(d.director || "........................................") + ")</div><div>ผู้อำนวยการโรงเรียน</div></div>" +
       "<div><div class='pp6-sign-line'>(........................................)</div><div>ผู้ปกครอง</div></div></div>" +
@@ -3802,7 +3805,7 @@ function buildPp6Html(d) {
         (pendingNames.length && missingCredits.length ? " · " : "") +
         (missingCredits.length ? "ยังไม่ตั้งหน่วยกิต: " + missingCredits.map(escapeHtml).join(" · ") : "") + "</div>" : "") + pp6ZeroNotes(subjects) +
       "<div class='pp6-note'>ระดับผล: 4 = 80–100 · 3.5 = 75–79 · 3 = 70–74 · 2.5 = 65–69 · 2 = 60–64 · 1.5 = 55–59 · 1 = 50–54 · 0 = 0–49 · ร. = รอการตัดสิน · มส. = ไม่มีสิทธิ์สอบ (เวลาเรียนไม่ถึงร้อยละ 80)</div></section>" +
-    pp6TailHtml(d, "ความเห็นของครูประจำชั้น") + "</article>";
+    pp6TailHtml(d, "ความเห็นของครูประจำชั้น", "ความเห็นของผู้ปกครอง") + "</article>";
 }
 
 // ใบ ปพ.6 ประถม (มติผู้ใช้ 2026-10-20 · brief docs/brief-pp6-primary.md): ออกกลางปี/ปลายปี ใบเดียวกัน ·
@@ -3858,7 +3861,7 @@ function buildPp6PrimaryHtml(d) {
       (missingPeriods.length ? "<div class='pp6-note'>ยังไม่ตั้งคาบเรียน: " + missingPeriods.map(escapeHtml).join(" · ") + " — คะแนนเฉลี่ยยังสรุปไม่ได้</div>" : "") +
       "<div class='pp6-note'>" + (allOk ? "" : "<b>*</b> กรอกยังไม่ครบ ช่องว่างนับ 0 · ") +
       "เฉลี่ยถ่วงด้วยชั่วโมงเรียน · ช่วงละเต็ม 100 · ทั้งปี = (กลางปี + ปลายปี) ÷ 2 · ระดับผล 4 = 80+ · 3.5 = 75+ · 3 = 70+ · 2.5 = 65+ · 2 = 60+ · 1.5 = 55+ · 1 = 50+ · 0 = ไม่ผ่าน</div></section>" +
-    pp6TailHtml(d, "ความเห็นของครูประจำชั้น (" + (isEnd ? "ปลายปี" : "กลางปี") + ")") + "</article>";
+    pp6TailHtml(d, "ความเห็นของครูประจำชั้น (" + (isEnd ? "ปลายปี" : "กลางปี") + ")", "ความเห็นของผู้ปกครอง (" + (isEnd ? "ปลายปี" : "กลางปี") + ")") + "</article>";
 }
 
 // ช่องเซ็น: คนพิมพ์เป็นครูประจำชั้นห้องนี้ ⟹ ชื่อคนพิมพ์ · ไม่ใช่ ⟹ ชื่อแรกจาก get_letter_signers
@@ -3893,7 +3896,7 @@ async function renderPp6Panel(student) {
   const allowed = await pp6CanAccess(student.id, year);
   if (token !== pp6Seq) return;
   if (!allowed) { slot.remove(); return; }
-  const current = await sb.from("student_term_comments").select("comment,updated_at")
+  const current = await sb.from("student_term_comments").select("comment,parent_comment,updated_at")
     .eq("student_id", student.id).eq("year", year).eq("term", term).maybeSingle();
   if (token !== pp6Seq) return;
   slot.removeAttribute("aria-busy");
@@ -3901,38 +3904,53 @@ async function renderPp6Panel(student) {
     slot.innerHTML = "<div class='warn-note' role='alert'>โหลดความเห็นไม่สำเร็จ: " + escapeHtml(current.error.message) + "</div>";
     return;
   }
-  const saved = current.data ? current.data.comment : "";
+  let savedTeacher = current.data?.comment || "", savedParent = current.data?.parent_comment || "";
   let hasSaved = Boolean(current.data); // อัปเดตทุกครั้งที่บันทึก/ลบสำเร็จ — ล้างแล้วบันทึกต่อทันทีต้องลบได้
-  const text = pp6Drafts.has(key) ? pp6Drafts.get(key) : saved;
+  const teacherKey = key + "|t", parentKey = key + "|p";
+  const teacherText = pp6Drafts.has(teacherKey) ? pp6Drafts.get(teacherKey) : savedTeacher;
+  const parentText = pp6Drafts.has(parentKey) ? pp6Drafts.get(parentKey) : savedParent;
   const id = "pp6-comment-" + token;
   slot.innerHTML = "<div class='pp6-comment-card'><label for='" + id + "'>ความเห็นของครูประจำชั้น · " + escapeHtml(scope.label) + "</label>" +
     "<textarea id='" + id + "' maxlength='" + PP6_COMMENT_MAX + "' rows='3' aria-describedby='" + id + "-help " + id + "-msg'></textarea>" +
     "<div class='hint' id='" + id + "-help'><span class='pp6-count'></span> · ขึ้นบนใบ ปพ.6 · ล้างข้อความแล้วบันทึก = ลบความเห็น</div>" +
+    "<label for='" + id + "-parent'>ความเห็นของผู้ปกครอง · " + escapeHtml(scope.label) + "</label>" +
+    "<textarea id='" + id + "-parent' maxlength='" + PP6_COMMENT_MAX + "' rows='3' aria-describedby='" + id + "-parent-help " + id + "-msg'></textarea>" +
+    "<div class='hint' id='" + id + "-parent-help'><span class='pp6-parent-count'></span> · กรอกตามที่ผู้ปกครองเขียนมาในใบ ปพ.6</div>" +
     "<div class='pp6-comment-row'><button type='button' class='primary pp6-save'>บันทึกความเห็น</button>" +
     "<span class='pp6-msg' id='" + id + "-msg' role='status'>" + (current.data ? "บันทึกล่าสุด " + escapeHtml(new Date(current.data.updated_at).toLocaleString("th-TH", { dateStyle:"medium", timeStyle:"short" })) : "") + "</span></div></div>";
-  const area = slot.querySelector("textarea"), count = slot.querySelector(".pp6-count"), msg = slot.querySelector(".pp6-msg"), save = slot.querySelector(".pp6-save");
-  area.value = text;
-  const updateCount = () => { count.textContent = area.value.length + "/" + PP6_COMMENT_MAX + " ตัวอักษร"; };
+  const area = slot.querySelector("#" + id), parentArea = slot.querySelector("#" + id + "-parent");
+  const count = slot.querySelector(".pp6-count"), parentCount = slot.querySelector(".pp6-parent-count");
+  const msg = slot.querySelector(".pp6-msg"), save = slot.querySelector(".pp6-save");
+  area.value = teacherText; parentArea.value = parentText;
+  const updateCount = () => {
+    count.textContent = area.value.length + "/" + PP6_COMMENT_MAX + " ตัวอักษร";
+    parentCount.textContent = parentArea.value.length + "/" + PP6_COMMENT_MAX + " ตัวอักษร";
+  };
   updateCount();
-  area.addEventListener("input", () => { pp6Drafts.set(key, area.value); updateCount(); });
+  area.addEventListener("input", () => { pp6Drafts.set(teacherKey, area.value); updateCount(); });
+  parentArea.addEventListener("input", () => { pp6Drafts.set(parentKey, parentArea.value); updateCount(); });
   save.addEventListener("click", async () => {
-    const value = area.value.trim();
-    if (!value) {
+    const t = area.value.trim(), p = parentArea.value.trim();
+    if (!t && !p) {
       if (!hasSaved) { msg.textContent = "ยังไม่มีความเห็นให้บันทึก"; return; }
-      if (!await window.crsAskConfirm({ title:"ลบความเห็นครูประจำชั้น", message:"ลบความเห็น" + scope.label + " ของ " + student.name + " — กู้คืนไม่ได้",
+      if (!await window.crsAskConfirm({ title:"ลบความเห็นทั้งสองช่อง", message:"ลบความเห็น" + scope.label + " ของ " + student.name + " ทั้งสองช่อง — กู้คืนไม่ได้",
+        okLabel:"ลบความเห็น", danger:true })) return;
+    } else if ((savedTeacher && !t) || (savedParent && !p)) {
+      const title = savedTeacher && !t ? "ลบความเห็นครูประจำชั้น" : "ลบความเห็นผู้ปกครอง";
+      if (!await window.crsAskConfirm({ title, message:title + " · " + scope.label + " ของ " + student.name + " — กู้คืนไม่ได้",
         okLabel:"ลบความเห็น", danger:true })) return;
     }
     save.disabled = true; save.textContent = "กำลังบันทึก…"; msg.textContent = "";
-    const request = value
-      ? sb.from("student_term_comments").upsert({ student_id:student.id, year, term, comment:value }, { onConflict:"student_id,year,term" })
+    const request = t || p
+      ? sb.from("student_term_comments").upsert({ student_id:student.id, year, term, comment:t || null, parent_comment:p || null }, { onConflict:"student_id,year,term" })
       : sb.from("student_term_comments").delete().eq("student_id", student.id).eq("year", year).eq("term", term);
     const { error } = await request;
     save.disabled = false; save.textContent = "บันทึกความเห็น";
     if (error) { msg.textContent = "บันทึกไม่สำเร็จ: " + error.message + " — ข้อความยังอยู่ กดบันทึกอีกครั้งได้"; return; }
-    pp6Drafts.delete(key);
-    hasSaved = Boolean(value);
+    pp6Drafts.delete(teacherKey); pp6Drafts.delete(parentKey);
+    savedTeacher = t; savedParent = p; hasSaved = Boolean(t || p);
     const time = new Date().toLocaleTimeString("th-TH", { hour:"2-digit", minute:"2-digit" });
-    msg.textContent = value ? "บันทึกแล้ว · " + time : "ลบความเห็นแล้ว · " + time;
+    msg.textContent = t || p ? "บันทึกแล้ว · " + time : "ลบความเห็นแล้ว · " + time;
   });
 }
 
@@ -4006,11 +4024,11 @@ async function printPp6(student, button) {
       sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
       pp6CanAccess(student.id, year)
     ]);
-    let comment = "";
+    let comment = "", parentComment = "";
     if (allowed) {
-      const row = await sb.from("student_term_comments").select("comment")
+      const row = await sb.from("student_term_comments").select("comment,parent_comment")
         .eq("student_id", student.id).eq("year", year).eq("term", term).maybeSingle();
-      if (!row.error && row.data) comment = row.data.comment;
+      if (!row.error && row.data) { comment = row.data.comment || ""; parentComment = row.data.parent_comment || ""; }
     }
     let competencies = [], levels = [], competencyError = "";
     try { const loaded = await pp6LoadCompetencies(student, year, grade, scope.primary ? "" : term); competencies = loaded.rows; levels = loaded.levels; }
@@ -4022,7 +4040,7 @@ async function printPp6(student, button) {
       schoolName:String(school || "").trim(), year, term, half:scope.half,
       student:{ name:student.name, no:student.student_no, room:grade + "/" + classroom },
       homeroomNames:homerooms.map(row => row.fullName), subjects, gpa:computeGpa(subjects).gpa,
-      competencies, levels, competencyError, activities, comment,
+      competencies, levels, competencyError, activities, comment, parentComment,
       signHomeroom:pp6PickHomeroomSigner(homerooms, me.data && me.data.id, signers.homeroomName),
       director:signers.directorName || "", printedDate:thaiLetterDateText(toDateStr(bangkokNow()))
     };
