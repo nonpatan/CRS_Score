@@ -29,7 +29,7 @@
   .sticky-head .card { margin:0; } .sticky-head h2 { margin:0; }
   .progress { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
   .progress span { display:block; height:100%; background:var(--teal); }
-  .domain { scroll-margin-top:180px; } .item { border-top:1px solid var(--line); padding:16px 0; scroll-margin-top:180px; }
+  .domain { scroll-margin-top:232px; } .item { border-top:1px solid var(--line); padding:16px 0; scroll-margin-top:232px; }
   .item:first-of-type { border-top:0; } .item-title { font-weight:600; margin:0 0 8px; }
   .star { color:var(--amber); } .star-note { color:var(--amber); font-size:13px; display:block; }
   .score { display:grid; grid-template-columns:repeat(var(--cols,5),minmax(0,1fr)); gap:5px; margin:10px 0; }
@@ -74,6 +74,9 @@
   .footbar-inner > * { flex:1; }
   .submit-hint { margin:0 0 8px; font-size:14px; color:var(--amber); }
   .success { background:var(--teal-soft); padding:16px; border-radius:10px; }
+  .back-link { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); text-decoration:none; font-size:14px; font-weight:600; }
+  .facts .section { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin:10px 12px 2px; }
+  .facts .kind-group { border-left:3px solid var(--line); padding-left:8px; }
   .facts-intro { border-left:3px solid var(--teal); background:var(--teal-soft); border-radius:0 9px 9px 0; padding:10px 12px; font-size:14px; margin:0 0 12px; }
   .facts-intro p { margin:0 0 4px; } .facts-intro p:last-child { margin:0; }
   .facts { border:1px solid var(--line); border-radius:9px; margin:4px 0 10px; font-size:14px; background:var(--white); }
@@ -86,7 +89,7 @@
   .fact.na .fact-val { color:var(--muted); font-weight:500; }
   .fact-dept { display:block; color:var(--muted); font-size:12px; }
   .fact details { grid-column:1 / -1; margin:0; }
-  .fact summary { min-height:44px; display:flex; align-items:center; color:var(--teal); font-size:13px; font-weight:600; scroll-margin-top:180px; scroll-margin-bottom:110px; }
+  .fact summary { min-height:44px; display:flex; align-items:center; color:var(--teal); font-size:13px; font-weight:600; scroll-margin-top:232px; scroll-margin-bottom:110px; }
   .fact ul { margin:0 0 4px; padding-left:20px; color:var(--muted); font-size:13px; }
   .facts-state { padding:12px; color:var(--muted); font-size:14px; }
   .skeleton { height:14px; border-radius:6px; background:var(--line); margin:6px 0; }
@@ -120,7 +123,7 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
   saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
-  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts } from "../supabase-client.js?v=20261027-1";
+  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts } from "../supabase-client.js?v=20261027-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -162,7 +165,6 @@ if (!session) {
       let domainIndex = 0, lastSaved = "", textSaving = Promise.resolve(), submitting = false;
       const showWorkFacts = section.kind === "dept_head";
       let workFacts = null, workFactsState = showWorkFacts ? "loading" : "none";
-      const workFactTitles = { 1:"ความครบของงาน", 2:"ความตรงเวลา", 3:"การช่วยงานคนอื่น", 4:"งานที่รับผิดชอบเอง" };
       const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date()).map(part => [part.type, part.value]));
       const todayBangkok = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
       const factPeriod = () => workFacts ? `${thaiShortDateText(workFacts.period.from)} – ${thaiShortDateText(workFacts.period.to)}` :
@@ -178,19 +180,19 @@ if (!session) {
           ${depts.length ? `<p>${active.length ? `แสดงเฉพาะงานของ${esc(active.join(" · "))}ที่คุณเป็นหัวหน้าฝ่าย` : "ฝ่ายที่คุณเป็นหัวหน้าฝ่ายยังไม่มีข้อมูลในระบบ"}${unavailable.length ? ` · ${esc(unavailable.join(" · "))}` : ""}</p><p>ใช้ประกอบการพิจารณาเท่านั้น <b>ไม่ใช่คะแนน</b> และระบบไม่เสนอคะแนนให้ · งานที่ทำนอกระบบ (เช่น งานเอกสาร งานประชุม) ไม่อยู่ในตัวเลขนี้</p>` :
             "<p>คุณไม่ได้ถือตำแหน่งหัวหน้าฝ่ายที่ตั้งไว้ในระบบ จึงไม่มีข้อมูลประกอบ</p>"}</div>`;
       };
-      const factBoxHtml = no => {
-        if (!showWorkFacts || !workFactTitles[no] || workFactsState !== "ready" || !workFacts.departments.length) return "";
-        const lines = workFacts.items[no] || [];
-        const showDept = workFacts.departments.filter(dept => dept.hasSource).length >= 2;
-        const labels = Object.fromEntries(workFacts.departments.map(dept => [dept.code, dept.label]));
-        return `<div class="facts" aria-label="ข้อมูลจากระบบ ข้อ ${no}"><div class="facts-head"><span><b>ข้อมูลจากระบบ</b> · ${workFactTitles[no]}</span><span>${esc(factPeriod())}</span></div>
-          ${lines.map(line => `<div class="fact${line.na ? " na" : ""}"><span class="fact-label">${showDept && labels[line.dept] ? `<span class="fact-dept">${esc(labels[line.dept])}</span>` : ""}${esc(line.label)}</span><span class="fact-val">${esc(line.value)}</span>
-            ${line.context ? `<span class="fact-ctx">${esc(line.context)}</span>` : ""}${line.details?.rows?.length ? `<details><summary>${esc(line.details.summary)}</summary><ul>${line.details.rows.map(row => `<li>${esc(row)}</li>`).join("")}</ul></details>` : ""}</div>`).join("")}</div>`;
+      const factBoxHtml = () => {
+        if (!showWorkFacts || workFactsState !== "ready" || !workFacts.groups.length) return "";
+        const showDept = workFacts.groups.length >= 2;
+        return `<div class="facts" aria-label="ข้อมูลการทำงานของครูจากระบบ"><div class="facts-head"><span><b>ข้อมูลการทำงานของครู</b></span><span>${esc(factPeriod())}</span></div>
+          ${workFacts.groups.map(group => `${showDept ? `<div class="section kind-group">${esc(group.label)}</div>` : ""}${group.lines.map(line =>
+            `<div class="fact${line.na ? " na" : ""}"><span class="fact-label">${esc(line.label)}</span><span class="fact-val">${esc(line.value)}</span>
+            ${line.context ? `<span class="fact-ctx">${esc(line.context)}</span>` : ""}${line.details?.rows?.length ? `<details><summary>${esc(line.details.summary)}</summary><ul>${line.details.rows.map(row => `<li>${esc(row)}</li>`).join("")}</ul></details>` : ""}</div>`).join("")}`).join("")}</div>`;
       };
       const paintWorkFacts = () => {
         const intro = app.querySelector("[data-facts-intro]");
         if (intro) intro.outerHTML = factIntroHtml();
-        app.querySelectorAll("[data-facts-item]").forEach(box => { box.innerHTML = factBoxHtml(Number(box.dataset.factsItem)); });
+        const box = app.querySelector("[data-facts-box]");
+        if (box) box.innerHTML = factBoxHtml();
       };
       const fetchWorkFacts = async () => {
         if (!showWorkFacts) return;
@@ -300,7 +302,6 @@ if (!session) {
         const starHint = `ข้อสำคัญ ได้ ≤ ${form.rules.star_fail_max} ถือว่าไม่ผ่านด้านนี้`;
         return `<article class="item" id="item-${esc(item.id)}"><p class="item-title">${esc(domain.code)}(${item.no}) ${esc(item.text)} ${item.is_star ? `<span class="star" title="${esc(starHint)}">★</span><span class="star-note">${esc(starHint)}</span>` : ""}</p>
           ${item.note ? `<p class="meta">${esc(item.note)}</p>` : ""}${system}
-          ${showWorkFacts && workFactTitles[item.no] ? `<div data-facts-item="${Number(item.no)}">${factBoxHtml(Number(item.no))}</div>` : ""}
           <div class="score" style="--cols:${ascending.length}" role="radiogroup" aria-label="${esc(item.text)}">${scoreHtml}</div>
           <div class="anchors">${[...ascending].reverse().map(value => Number(value.score)).filter(score => anchors[score]).map(score => `<p><b>${score}</b> ${esc(anchors[score])}</p>`).join("")}</div>
           <div class="field"><label for="evidence-${esc(item.id)}">${esc(section.evidence_label)}<span data-required class="error">${rule.needsEvidence ? " *" : ""}</span></label>
@@ -320,14 +321,14 @@ if (!session) {
         const progress = getProgress();
         const selected = readonly ? domains : [domains[domainIndex]];
         app.className = "";
-        app.innerHTML = `<div class="sticky-head"><div class="card"><h2>${self ? "ประเมินตนเอง" : esc(name)}</h2>
+        app.innerHTML = `<div class="sticky-head"><div class="card"><a class="back-link" href="eval-my.html#a-${esc(assignment.id)}">← เลือกครูคนอื่น</a><h2>${self ? "ประเมินตนเอง" : esc(name)}</h2>
           <div class="meta">ส่วนที่ ${esc(section.code)} · ${esc(section.title)}</div>
           <div class="meta">${readonly ? "อ่านอย่างเดียว" : domains.length === 1 ? `ด้าน ${esc(domains[domainIndex].code)}` : `ด้าน ${esc(domains[domainIndex].code)} จาก ${domains.length}`} · <span id="progress-count">${progress.answered}/${progress.total} ข้อ</span></div>
           <div class="progress"><span id="progress-bar" style="width:${progress.total ? progress.answered / progress.total * 100 : 0}%"></span></div>
           <div class="meta" id="save-status" aria-live="polite">${esc(statusText())}</div></div></div>
           ${readonly ? `<div class="card ${assignment.status === "submitted" ? "success" : "warn"}">${assignment.status === "submitted" ? "ส่งแล้ว " + esc(submittedText(assignment.submitted_at)) : "ปิดรับคะแนนแล้ว"}</div>` : ""}
           ${selected.map((domain, index) => `<section class="card domain" id="domain-${esc(domain.code)}"><h3>ด้าน ${esc(domain.code)} · ${esc(domain.title)}</h3>
-            ${showWorkFacts && index === 0 ? factIntroHtml() : ""}
+            ${showWorkFacts && index === 0 ? factIntroHtml() + `<div data-facts-box>${factBoxHtml()}</div>` : ""}
             ${domain.items.map(item => renderItem(item, domain)).join("")}
             ${domain === domains[domains.length - 1] ? renderTexts() : ""}</section>`).join("")}
           <div class="footbar"><div class="footbar-inner">${readonly ? '<a class="button-link ghost" href="eval-my.html">กลับงานประเมินของฉัน</a>' :

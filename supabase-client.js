@@ -8430,11 +8430,11 @@ export function buildEvalWorkFacts(loaded) {
   const departments = (raw.departments || []).filter(code => names[code]).map(code => ({
     code, label:names[code], hasSource:code !== "finance"
   }));
-  const items = { 1:[], 2:[], 3:[], 4:[] };
-  if (!departments.length) return { period:{ from, to }, departments, items };
+  const groups = ["academic", "general", "personnel"].filter(code => departments.some(dept => dept.code === code))
+    .map(code => ({ dept:code, label:names[code], lines:[] }));
   const active = new Set(departments.map(dept => dept.code));
   const rows = value => Array.isArray(value) ? value : [];
-  const add = (no, dept, line) => { if (active.has(dept)) items[no].push({ dept, ...line }); };
+  const add = (dept, line) => { const group = groups.find(group => group.dept === dept); if (group) group.lines.push({ dept, ...line }); };
   const median = key => {
     const value = Number(raw.medians?.[key]);
     return Number(raw.medians?.peer_count) >= 3 && raw.medians?.[key] != null && Number.isFinite(value)
@@ -8445,7 +8445,6 @@ export function buildEvalWorkFacts(loaded) {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? new Date(parsed + 7 * 3600000).toISOString().slice(0, 10) : "";
   };
-  const dayGap = (a, b) => Math.round((Date.parse(a + "T00:00:00Z") - Date.parse(b + "T00:00:00Z")) / 86400000);
   const detail = (summary, list) => list.length ? { summary, rows:list } : undefined;
 
   if (active.has("academic")) {
@@ -8453,32 +8452,68 @@ export function buildEvalWorkFacts(loaded) {
       ["1", raw.academic_year?.term1_end_date], ["2", raw.academic_year?.term2_end_date]
     ].filter(([, end]) => end && from <= end && end <= to).map(([term]) => term);
     const subjects = rows(raw.subjects);
-    if (!dueTerms.length) add(1, "academic", { label:"ปิดคะแนนวิชา", value:"ยังไม่ถึงกำหนดปิดคะแนนในช่วงรอบ", na:true });
+    const theme = raw.theme;
+    const themeItems = new Map(dueTerms.map(term => {
+      if (!theme) return [term, []];
+      const units = buildThemeWorkUnits({ subjects:rows(theme.subjects), members:rows(theme.members), works:[],
+        parts:rows(theme.parts), exemptions:rows(theme.exemptions), term });
+      const own = groupThemeWorkByOwner(units).filter(group => group.ownerId === theme.owner_id);
+      return [term, own.flatMap(group => group.items.filter(item => !item.exemption))];
+    }));
     for (const term of dueTerms) {
-      const relevant = subjects.filter(subject => String(subject.term ?? "2") === term);
+      const workItems = themeItems.get(term);
+      const hasReview = item => item.part?.review_score != null && item.part?.reviewed_at;
+      const reviewed = workItems.filter(hasReview);
+      const score = reviewed.length ? evalRound2(reviewed.reduce((sum, item) => sum + Number(item.part.review_score), 0) / reviewed.length) : null;
+      const sorted = [...workItems].sort((a, b) => {
+        const rank = item => !item.part ? 0 : !hasReview(item) ? 1 : 2;
+        return rank(a) - rank(b) || Number(a.part?.review_score || 0) - Number(b.part?.review_score || 0) ||
+          String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th");
+      });
+      add("academic", { label:`คะแนนตรวจผลงานธีม ภาค ${term}`,
+        value:!theme || !workItems.length ? "ไม่มีวิชาที่ต้องส่งผลงานธีม" :
+          !reviewed.length ? "ฝ่ายวิชาการยังไม่ได้ตรวจ" : `เฉลี่ย ${score.toFixed(2)} / 4`,
+        context:workItems.length ? `ตรวจแล้ว ${reviewed.length} / ${workItems.length} วิชา` : "",
+        details:detail("ดูรายวิชา", sorted.map(item =>
+          `${item.subject.code || ""} ${item.subject.name || ""} — ${hasReview(item) ? item.part.review_score : item.part ? "ยังไม่ตรวจ" : "ยังไม่ส่ง"}`)),
+        ...(!theme || !workItems.length || !reviewed.length ? { na:true } : {}) });
+    }
+    if (!dueTerms.length) add("academic", { label:"ปิดคะแนนวิชา", value:"ยังไม่ถึงกำหนดปิดคะแนนในช่วงรอบ", na:true });
+    for (const term of dueTerms) {
+      const relevant = subjects.filter(subject => subject.term == null || String(subject.term) === term);
       const noSubjects = !raw.has_account || relevant.length === 0;
-      const annualOnly = term === "1" && subjects.length > 0 && subjects.every(subject => subject.term == null);
       const sorted = [...relevant].sort((a, b) => Number(Boolean(a.exam_closed_at)) - Number(Boolean(b.exam_closed_at)) ||
         String(a.code || "").localeCompare(String(b.code || ""), "th"));
-      add(1, "academic", { label:`ปิดคะแนนวิชา ภาค ${term}`,
+      add("academic", { label:`ปิดคะแนนวิชา ภาค ${term}`,
         value:noSubjects ? !raw.has_account || !subjects.length ? "ไม่มีวิชาในระบบ" :
-          annualOnly ? "วิชาของครูเป็นรายปี ยังไม่ถึงกำหนดปิดคะแนนในช่วงรอบ" :
           "ยังไม่มีวิชาที่ถึงกำหนดปิดคะแนนในช่วงรอบ" :
           `ปิดแล้ว ${relevant.filter(subject => subject.exam_closed_at).length} / ${relevant.length} วิชา`,
         ...(noSubjects ? { na:true } : { details:detail("ดูรายวิชา", sorted.map(subject =>
           `${subject.code || ""} ${subject.name || ""} — ${subject.exam_closed_at ? "ปิดแล้ว" : "ยังไม่ปิด"}`)) }) });
     }
-    const works = rows(raw.theme_works);
-    const late = works.map(work => ({ work, days:work.due_date ? dayGap(bangkokDate(work.created_at), work.due_date) : 0 }))
-      .filter(entry => entry.days > 0);
-    add(2, "academic", { label:"ส่งผลงานตามธีม", value:works.length ? `${works.length} ชิ้น · ช้า ${late.length}` : "ไม่มีผลงานที่ส่งในช่วงรอบ",
-      ...(works.length ? { details:detail("ดูชิ้นที่ส่งช้า", late.map(({ work, days }) =>
-        `${work.subject_code || ""} ${work.subject_name || ""} — ส่งช้า ${days} วัน`)) } : { na:true }) });
+    for (const term of dueTerms) {
+      const workItems = themeItems.get(term);
+      const window = rows(theme?.windows).find(window => String(window.term) === term);
+      const dueDate = window?.due_date;
+      const submitted = workItems.filter(item => item.part);
+      const missing = workItems.filter(item => !item.part);
+      const late = submitted.map(item => ({ item, days:themeWorkLateDays(item.part.submitted_at, dueDate) }))
+        .filter(entry => entry.days > 0);
+      const today = bangkokDate(new Date().toISOString());
+      add("academic", { label:`ส่งผลงานตามธีม ภาค ${term}`,
+        value:!theme || !workItems.length ? "ไม่มีวิชาที่ต้องส่งผลงานธีม" :
+          `ส่งแล้ว ${submitted.length} / ${workItems.length} วิชา · ช้า ${late.length}`,
+        context:dueDate && dueDate >= today && submitted.length < workItems.length ? `กำหนดส่ง ${date(dueDate)}` : "",
+        details:detail("ดูรายวิชา", [
+          ...missing.map(item => `${item.subject.code || ""} ${item.subject.name || ""} — ยังไม่ส่ง`),
+          ...late.map(({ item, days }) => `${item.subject.code || ""} ${item.subject.name || ""} — ส่งช้า ${days} วัน`)
+        ]), ...(!theme || !workItems.length ? { na:true } : {}) });
+    }
     const projects = rows(raw.projects).filter(project => project.status !== "ยกเลิก");
     const statusCounts = new Map();
     for (const project of projects) statusCounts.set(project.status || "ไม่ระบุสถานะ", (statusCounts.get(project.status || "ไม่ระบุสถานะ") || 0) + 1);
     const resultCount = projects.filter(project => project.has_result).length;
-    add(4, "academic", { label:"เป็นผู้รับผิดชอบโครงการ / กิจกรรม", value:`${projects.length} รายการ`,
+    add("academic", { label:"เป็นผู้รับผิดชอบโครงการ / กิจกรรม", value:`${projects.length} รายการ`,
       context:[...statusCounts].map(([status, count]) => `${status} ${count}`).concat(resultCount ? `บันทึกผลแล้ว ${resultCount}` : "ยังไม่มีรายการที่บันทึกผลแล้ว", median("projects")).filter(Boolean).join(" · "),
       details:detail("ดูชื่อโครงการ", projects.map(project => `${project.name || ""} — ${project.status || "ไม่ระบุสถานะ"}`)) });
   }
@@ -8510,7 +8545,7 @@ export function buildEvalWorkFacts(loaded) {
     const noRoom = !rooms.length;
     const noSchedule = !noRoom && !audit?.scheduleConfigured;
     const due = staff?.due || 0;
-    add(1, "general", { label:`เช็คชื่อประจำชั้น${roomLabels ? " " + roomLabels : ""}`,
+    add("general", { label:`เช็คชื่อประจำชั้น${roomLabels ? " " + roomLabels : ""}`,
       value:noRoom ? "ไม่ได้เป็นครูประจำชั้น" : noSchedule ? "ยังไม่ได้ตั้งวันทำงาน" :
         !due ? "ไม่มีวันเรียนที่ต้องเช็คในช่วงนี้" : `${due - staff.missed} / ${due} วันเรียน`,
       ...((noRoom || noSchedule || !due) ? { na:true } : {
@@ -8522,7 +8557,7 @@ export function buildEvalWorkFacts(loaded) {
     const timingDue = staff?.timingDue || 0;
     const timingContext = [commonContext, cutoff?.start ? `นับตั้งแต่เริ่มใช้เวลาตัด ${date(cutoff.start)}` : ""].filter(Boolean).join(" · ");
     const timingMisses = [...rows(staff?.lateDates), ...rows(staff?.backdatedDates)].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-    add(2, "general", { label:`เช็คชื่อประจำชั้น${roomLabels ? " " + roomLabels : ""} ${timeLabel}`,
+    add("general", { label:`เช็คชื่อประจำชั้น${roomLabels ? " " + roomLabels : ""} ${timeLabel}`,
       value:noRoom ? "ไม่ได้เป็นครูประจำชั้น" : noSchedule ? "ยังไม่ได้ตั้งวันทำงาน" :
         !audit?.cutoffEnabled || !timingDue ? "ยังไม่ได้ใช้เวลาตัดในช่วงนี้" : `${staff.ontime} / ${timingDue} วัน`,
       ...((noRoom || noSchedule || !audit?.cutoffEnabled || !timingDue) ? { na:true } : {
@@ -8536,7 +8571,7 @@ export function buildEvalWorkFacts(loaded) {
     const kinds = new Map([["วิชา", 0], ["ประจำชั้น", 0], ["เวร", 0]]);
     const kindLabel = kind => kind === "ครูประจำชั้น" ? "ประจำชั้น" : kind === "วิชา" || kind === "เวร" ? kind : kind || "ไม่ระบุ";
     for (const row of coverage) kinds.set(kindLabel(row.kind), (kinds.get(kindLabel(row.kind)) || 0) + 1);
-    add(3, "personnel", { label:"รับสอนแทน / ดูแลแทน", value:`${coverage.length} ครั้ง`,
+    add("personnel", { label:"รับสอนแทน / ดูแลแทน", value:`${coverage.length} ครั้ง`,
       context:[...[...kinds].filter(([, count]) => count).map(([kind, count]) => `${kind} ${count}`), median("coverage")].filter(Boolean).join(" · "),
       details:detail(`ดูรายการ ${coverage.length} ครั้ง`, coverage.map(row => `${date(row.cover_date)} · ${kindLabel(row.kind)}${row.periods == null ? "" : ` · ${Number(row.periods)} คาบ`}`)) });
     const swaps = rows(raw.swaps);
@@ -8544,17 +8579,15 @@ export function buildEvalWorkFacts(loaded) {
     const received = accepted.filter(row => row.role === "to").length;
     const requested = accepted.filter(row => row.role === "from").length;
     const declined = swaps.filter(row => row.role === "to" && row.status === "ปฏิเสธ").length;
-    add(3, "personnel", { label:"แลกเวรกับเพื่อนครู", value:swaps.length ? `รับแทน ${received} · ขอแลก ${requested}` : "ไม่มีการแลกเวร",
+    add("personnel", { label:"แลกเวรกับเพื่อนครู", value:swaps.length ? `รับแทน ${received} · ขอแลก ${requested}` : "ไม่มีการแลกเวร",
       context:[`ปฏิเสธคำขอ ${declined} ครั้ง`, median("swaps_received").replace("รอบนี้ ", "รอบนี้ รับแทน ")].filter(Boolean).join(" · ") });
     const trainings = rows(raw.trainings);
-    add(4, "personnel", { label:"ไปอบรม / ศึกษาดูงาน", value:`${trainings.length} ครั้ง`,
+    add("personnel", { label:"ไปอบรม / ศึกษาดูงาน", value:`${trainings.length} ครั้ง`,
       context:[median("trainings"), "ไม่นับไปปฏิบัติหน้าที่นอกสถานที่"].filter(Boolean).join(" · "),
       details:detail(`ดูรายการ ${trainings.length} ครั้ง`, trainings.map(row => `${date(row.start_date)} · ${row.kind || ""} · ${row.title || ""}`)) });
   }
 
-  for (const no of [1, 2, 3, 4]) if (!items[no].length) items[no].push({ dept:departments.map(dept => dept.code).join("+"), label:"ข้อมูลจากระบบ",
-    value:`ไม่มีข้อมูลของ${departments.map(dept => dept.label).join(" · ")}สำหรับข้อนี้`, na:true });
-  return { period:{ from, to }, departments, items };
+  return { period:{ from, to }, departments, groups };
 }
 // ---------- /ประเมินครู 360° (ข้อมูลประกอบส่วนหัวหน้าฝ่าย) ----------
 

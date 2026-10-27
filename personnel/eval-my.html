@@ -34,7 +34,9 @@
   .hint { font-size:14px; margin:4px 0 10px; } .empty { color:var(--muted); padding:22px 10px; text-align:center; }
   .group { border-top:1px solid var(--line); padding-top:12px; margin-top:12px; }
   .group:first-of-type { border-top:0; padding-top:0; }
-  .task { display:flex; align-items:center; gap:12px; border-top:1px solid var(--line); padding:12px 0; }
+  .task { display:flex; align-items:center; gap:12px; border-top:1px solid var(--line); padding:12px 0; scroll-margin-top:96px; transition:background-color .4s ease; }
+  .task.return-target { background:var(--teal-soft); }
+  @media (prefers-reduced-motion: reduce) { .task { transition:none; } }
   .task:first-of-type { border-top:0; } .task-main { flex:1; min-width:0; }
   .task-main b { display:block; overflow-wrap:anywhere; } .task-main small { display:block; color:var(--muted); font-size:13px; }
   .pill { display:inline-block; border-radius:99px; padding:2px 9px; background:var(--teal-soft); color:var(--teal); font-size:13px; }
@@ -93,7 +95,7 @@ import { requireAuth, signOut, myStaffId, listMyEvalAssignments, countMyEvalResp
   listStaffPicker, loadEvalForm, evalSelfDueDate, thaiShortDateText, isPersonnelHead, getProfile,
   bangkokNow, toDateStr, listEvalRoundsICanSee, loadMyEvalResults, evalDecisionLabel,
   evalThaiDateStr, addWorkingDays, addDaysStr, loadEvalAppealHolidays, acknowledgeEvalResult
-} from "../supabase-client.js?v=20261027-1";
+} from "../supabase-client.js?v=20261027-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -196,7 +198,7 @@ if (!session) {
               closed ? "ปิดรับแล้ว — ติดต่อฝ่ายบุคคล" :
               answered ? "ร่าง " + answered + "/" + total : total + " ข้อ";
             const label = submitted || closed ? "ดู" : answered ? "ทำต่อ" : "เริ่ม";
-            html += '<div class="task"><div class="task-main"><b>' +
+            html += '<div class="task" id="a-' + esc(row.id) + '"><div class="task-main"><b>' +
               esc(section.kind === "self" ? "ของฉัน" : names.get(target.staff_id) || "ไม่พบชื่อ") + '</b>' +
               '<small>' + esc(status) + (selfDue ? ' · ส่งภายใน ' + esc(thaiShortDateText(selfDue)) : "") + '</small>' +
               (overdue && !closed ? '<span class="pill warn">เลยกำหนด</span>' : "") +
@@ -224,6 +226,14 @@ if (!session) {
       app.innerHTML = '<div class="eval-main">' + html + '<section class="card tasks-card">' + tasksHead +
         (tasksHtml || tasksEmpty) + '</section></div>' +
         (side ? '<aside class="eval-side" aria-label="ทางลัดสำหรับผู้บริหาร">' + side + '</aside>' : "");
+      if (location.hash.startsWith("#a-")) {
+        const targetRow = document.getElementById(location.hash.slice(1));
+        if (targetRow) {
+          targetRow.scrollIntoView({ block:"center" });
+          targetRow.classList.add("return-target");
+          setTimeout(() => targetRow.classList.remove("return-target"), 2000);
+        }
+      }
       app.addEventListener("click", async event => {
         const button = event.target.closest("[data-ack]"); if (!button) return;
         const card = button.closest(".result-card"); button.disabled = true;
