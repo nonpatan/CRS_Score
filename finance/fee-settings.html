@@ -98,6 +98,8 @@
   .save-bar { position:sticky; bottom:12px; z-index:10; background:var(--white); padding:10px; border:1px solid var(--line); border-radius:10px; }
   .card:has(.save-bar) { overflow:visible; }
   .tab-count { margin-left:8px; padding:2px 7px; border-radius:99px; background:rgba(31,42,46,.08); font-size:12px; }
+  .remit-table { min-width:0; }
+  .remit-error { min-height:22px; color:var(--danger); font-size:14px; }
 
   [data-kpi-tone="muted"] { --kpi-color:var(--muted); --kpi-bg:var(--bg); }
   [data-kpi-tone="teal"] { --kpi-color:var(--teal); --kpi-bg:var(--teal-soft); }
@@ -194,6 +196,20 @@
           <div class="actions"><button id="cancel-promotion" class="ghost" type="button">ยกเลิก</button><button class="primary" type="submit">บันทึกโปรโมชั่น</button></div>
         </form>
       </section>
+      <section class="card" id="remit-rules-card">
+        <div class="section-head"><div><h2>วันส่งเงินประจำสัปดาห์</h2><p>ครูประจำชั้นส่งเงินออมทรัพย์และค่ารถภายในวันนี้ของสัปดาห์ที่รับเงิน · ถ้าตรงวันหยุดเลื่อนเป็นวันทำงานก่อนหน้า</p></div></div>
+        <p id="remit-current"><b>ตอนนี้: วันศุกร์</b></p>
+        <div id="remit-rules-list" class="hint">กำลังโหลด…</div>
+        <p class="hint">ใช้กับสัปดาห์ที่เริ่มใช้เป็นต้นไป สัปดาห์ก่อนหน้ายังนับตามกติกาเดิม</p>
+        <div id="remit-readonly" class="hint" hidden>ถ้าจะเปลี่ยนวันส่ง แจ้งผู้ดูแลระบบ</div>
+        <form id="remit-rules-form" hidden>
+          <div class="row2">
+            <div class="field"><label for="remit-weekday">วันส่งเงิน</label><select id="remit-weekday" required><option value="1">จันทร์</option><option value="2">อังคาร</option><option value="3">พุธ</option><option value="4">พฤหัส</option><option value="5" selected>ศุกร์</option></select></div>
+            <div class="field"><label for="remit-from">วันที่เริ่มใช้ (วันจันทร์)</label><input id="remit-from" type="date" required aria-describedby="remit-date-error"><div id="remit-date-error" class="remit-error" role="status"></div></div>
+          </div>
+          <button id="remit-save" class="primary" type="submit">บันทึกวันส่งเงิน</button>
+        </form>
+      </section>
     </div>
     <div id="toast" class="toast"></div>
   </main>
@@ -202,8 +218,9 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
-  getAcademicYears, academicYearOf, bangkokNow, toDateStr, getSetting, GRADE_ORDER, formatMoney
-} from "../supabase-client.js?v=20261027-2";
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, addDaysStr, isoWeekday,
+  getSetting, GRADE_ORDER, formatMoney, parseRemitWeekdayRules, remitWeekdayFor, remitWeekdayLabel
+} from "../supabase-client.js?v=20261027-4";
 
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({
@@ -275,6 +292,81 @@ let grades = [...GRADE_ORDER];
 let editingItemId = null;
 let editingPromotionId = null;
 let toastTimer = null;
+let remitRules = [];
+let remitBusy = false;
+const remitKey = "finance_remit_weekday_rules";
+const remitMonday = addDaysStr(today, 1 - isoWeekday(today));
+const remitShortDate = date => new Intl.DateTimeFormat("th-TH", {day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok"}).format(new Date(date+"T00:00:00+07:00"));
+
+function renderRemitRules() {
+  el("remit-current").innerHTML = "<b>ตอนนี้: วัน"+remitWeekdayLabel(remitWeekdayFor(today,remitRules))+"</b>";
+  el("remit-readonly").hidden = canAdmin;
+  el("remit-rules-form").hidden = !canAdmin;
+  el("remit-save").disabled = remitBusy;
+  el("remit-rules-list").innerHTML = remitRules.length
+    ? '<div class="table-wrap"><table class="remit-table"><thead><tr><th>เริ่มใช้</th><th>วันส่งเงิน</th>'+(canAdmin ? '<th>จัดการ</th>' : '')+'</tr></thead><tbody>'+remitRules.map(rule => '<tr><td>'+esc(remitShortDate(rule.from))+'</td><td>วัน'+remitWeekdayLabel(rule.weekday)+'</td>'+(canAdmin ? '<td>'+(rule.from > today ? '<button class="danger" type="button" data-delete-remit="'+rule.from+'"'+(remitBusy ? ' disabled' : '')+'>ลบกฎ</button>' : 'เริ่มใช้แล้ว')+'</td>' : '')+'</tr>').join('')+'</tbody></table></div>'
+    : '<div class="empty">ใช้วันศุกร์ (ค่าเริ่มต้น)</div>';
+}
+
+async function readRemitRules() {
+  const { data, error } = await sb.from("app_settings").select("value").eq("key",remitKey).maybeSingle();
+  if (error) throw new Error("โหลดวันส่งเงินไม่สำเร็จ: "+error.message);
+  return parseRemitWeekdayRules(data?.value);
+}
+
+function remitDateError() {
+  const from = el("remit-from").value;
+  const error = !from ? "เลือกวันที่เริ่มใช้" : isoWeekday(from) !== 1 ? "วันที่เริ่มใช้ต้องเป็นวันจันทร์" : from <= remitMonday ? "เลือกวันจันทร์หลังสัปดาห์นี้" : "";
+  el("remit-date-error").textContent = error;
+  el("remit-from").setAttribute("aria-invalid", error ? "true" : "false");
+  return error;
+}
+
+async function saveRemitRules(event) {
+  event.preventDefault();
+  if (!canAdmin || remitBusy || remitDateError()) return;
+  const from = el("remit-from").value, weekday = Number(el("remit-weekday").value);
+  remitBusy = true; renderRemitRules();
+  try {
+    if (!await window.crsAskConfirm({title:"เปลี่ยนวันส่งเงิน",message:"ตั้งแต่ "+remitShortDate(from)+" ครูต้องส่งเงินทุกวัน"+remitWeekdayLabel(weekday),okLabel:"บันทึก",danger:false})) return;
+    const now = toDateStr(bangkokNow());
+    if (from <= addDaysStr(now, 1 - isoWeekday(now))) throw new Error("วันที่เริ่มใช้ต้องอยู่หลังสัปดาห์นี้");
+    const latest = await readRemitRules();
+    const next = parseRemitWeekdayRules([...latest.filter(rule => rule.from !== from),{from,weekday}].map(rule => rule.from+"="+rule.weekday).join("|"));
+    const { error } = await sb.from("app_settings").upsert({key:remitKey,value:next.map(rule => rule.from+"="+rule.weekday).join("|")},{onConflict:"key"});
+    if (error) throw error;
+    remitRules = next;
+    el("remit-weekday").value = String(remitWeekdayFor(today,remitRules));
+    el("remit-from").value = "";
+    el("remit-date-error").textContent = "";
+    toast("บันทึกวันส่งเงินแล้ว");
+  } catch (error) { toast(friendlyError(error),true); }
+  finally { remitBusy = false; renderRemitRules(); }
+}
+
+async function deleteRemitRule(from) {
+  if (!canAdmin || remitBusy || from <= today) return;
+  remitBusy = true; renderRemitRules();
+  try {
+    if (!await window.crsAskConfirm({title:"ลบกฎวันส่งเงิน",message:"ลบกฎที่เริ่มใช้ "+remitShortDate(from)+"?",okLabel:"ลบกฎ",danger:true})) return;
+    const latest = await readRemitRules();
+    if (from <= toDateStr(bangkokNow())) throw new Error("กฎนี้เริ่มใช้แล้ว ลบไม่ได้");
+    const next = latest.filter(rule => rule.from !== from);
+    const { error } = await sb.from("app_settings").upsert({key:remitKey,value:next.map(rule => rule.from+"="+rule.weekday).join("|")},{onConflict:"key"});
+    if (error) throw error;
+    remitRules = next;
+    el("remit-weekday").value = String(remitWeekdayFor(today,remitRules));
+    toast("ลบกฎวันส่งเงินแล้ว");
+  } catch (error) { toast(friendlyError(error),true); }
+  finally { remitBusy = false; renderRemitRules(); }
+}
+
+el("remit-from").addEventListener("change", remitDateError);
+el("remit-rules-form").addEventListener("submit", saveRemitRules);
+el("remit-rules-list").addEventListener("click", event => {
+  const button = event.target.closest("[data-delete-remit]");
+  if (button) deleteRemitRule(button.dataset.deleteRemit);
+});
 
 function toast(message, isError = false) {
   el("toast").textContent = message;
@@ -684,8 +776,11 @@ if (session) {
       el("year-select").value = currentYear;
       el("year-select").disabled = false;
       el("settings-app").hidden = false;
+      el("remit-from").min = addDaysStr(remitMonday,7);
       await loadItems();
       await loadYearData();
+      try { remitRules = await readRemitRules(); el("remit-weekday").value = String(remitWeekdayFor(today,remitRules)); renderRemitRules(); }
+      catch (error) { el("remit-rules-list").textContent = friendlyError(error); }
     }
   } catch (error) {
     el("access-card").hidden = false;

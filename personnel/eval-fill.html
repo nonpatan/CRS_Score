@@ -25,7 +25,9 @@
   .nav #btn-signout { margin-left:auto; color:var(--danger); }
   .card { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; min-width:0; }
   .hint { font-size:14px; margin:4px 0 10px; } .meta { color:var(--muted); font-size:13px; }
-  .sticky-head { position:sticky; top:0; z-index:5; background:var(--bg); padding:10px 0; }
+  .sticky-sentinel { height:1px; margin-bottom:-1px; }
+  .sticky-head { position:sticky; top:0; z-index:5; background:transparent; padding:10px 0; }
+  .sticky-head.is-stuck { background:var(--bg); }
   .sticky-head .card { margin:0; } .sticky-head h2 { margin:0; }
   .progress { height:8px; background:var(--line); border-radius:99px; overflow:hidden; margin:10px 0 4px; }
   .progress span { display:block; height:100%; background:var(--teal); }
@@ -123,7 +125,7 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
   saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
-  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts } from "../supabase-client.js?v=20261027-2";
+  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts } from "../supabase-client.js?v=20261027-4";
 
 const session = await requireAuth();
 if (!session) {
@@ -163,6 +165,7 @@ if (!session) {
       const texts = { ...(assignment.texts || {}) };
       const pending = new Set(), timers = new Map(), revision = new Map(), inFlight = new Set();
       let domainIndex = 0, lastSaved = "", textSaving = Promise.resolve(), submitting = false;
+      let stickyObserver = null;
       const showWorkFacts = section.kind === "dept_head";
       let workFacts = null, workFactsState = showWorkFacts ? "loading" : "none";
       const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date()).map(part => [part.type, part.value]));
@@ -320,8 +323,10 @@ if (!session) {
       const render = () => {
         const progress = getProgress();
         const selected = readonly ? domains : [domains[domainIndex]];
+        stickyObserver?.disconnect();
+        stickyObserver = null;
         app.className = "";
-        app.innerHTML = `<div class="sticky-head"><div class="card"><a class="back-link" href="eval-my.html#a-${esc(assignment.id)}">← เลือกครูคนอื่น</a><h2>${self ? "ประเมินตนเอง" : esc(name)}</h2>
+        app.innerHTML = `<div class="sticky-sentinel" aria-hidden="true"></div><div class="sticky-head"><div class="card"><a class="back-link" href="eval-my.html#a-${esc(assignment.id)}">← เลือกครูคนอื่น</a><h2>${self ? "ประเมินตนเอง" : esc(name)}</h2>
           <div class="meta">ส่วนที่ ${esc(section.code)} · ${esc(section.title)}</div>
           <div class="meta">${readonly ? "อ่านอย่างเดียว" : domains.length === 1 ? `ด้าน ${esc(domains[domainIndex].code)}` : `ด้าน ${esc(domains[domainIndex].code)} จาก ${domains.length}`} · <span id="progress-count">${progress.answered}/${progress.total} ข้อ</span></div>
           <div class="progress"><span id="progress-bar" style="width:${progress.total ? progress.answered / progress.total * 100 : 0}%"></span></div>
@@ -336,6 +341,13 @@ if (!session) {
             ${domainIndex < domains.length - 1 ? '<button class="primary" id="next-domain">ด้านถัดไป →</button>' :
               '<button class="primary" id="submit-button" disabled>ส่งแบบประเมิน</button>'}`}</div>
             ${!readonly && domainIndex === domains.length - 1 ? '<p class="submit-hint" id="submit-hint"></p>' : ""}</div>`;
+        const stickyHead = app.querySelector(".sticky-head");
+        const sentinel = app.querySelector(".sticky-sentinel");
+        if (typeof IntersectionObserver === "function") {
+          stickyHead.classList.toggle("is-stuck", sentinel.getBoundingClientRect().bottom <= 0);
+          stickyObserver = new IntersectionObserver(([entry]) => stickyHead.classList.toggle("is-stuck", !entry.isIntersecting));
+          stickyObserver.observe(sentinel);
+        } else stickyHead.classList.add("is-stuck");
         updateStatus();
       };
       app.addEventListener("change", event => {

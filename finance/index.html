@@ -215,9 +215,10 @@ import {
   sb, requireAuth, signOut, fetchAllRows, getAcademicYears, academicYearOf, academicYearRange,
   getStudentPlacements, activePlacements, roomsFromPlacements, bangkokNow, toDateStr, addDaysStr, isoWeekday,
   pickSchoolDays, pickNextSchoolDay, remitDeadlineFor, summarizeUnremittedRooms, pickFinanceAlerts,
+  parseRemitWeekdayRules, remitWeekdayFor, remitWeekdayLabel,
   summarizeFinanceDay, summarizeFinanceWeek, loadRoomTransportDebtors, summarizeSavingsByStudent,
   computeFeeOutstanding, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs
-} from "../supabase-client.js?v=20261027-2";
+} from "../supabase-client.js?v=20261027-4";
 const el = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 // จำนวนเต็มไม่ต่อ .00; ยอดติดลบใช้เครื่องหมายเดียวกับรายงานค่าใช้จ่าย
@@ -271,16 +272,20 @@ function renderRevenue(day, rooms, savingsRows, year) {
     unit:"ห้อง",segments:[{label:"เก็บแล้ววันนี้",value:done,color:"var(--teal)"},
       {label:"ยังไม่เก็บวันนี้",value:Math.max(0,rooms.length-done),color:"var(--amber)"}],empty:rooms.length === 0});
 }
-function renderUnremitted(rooms, holiday, year) {
+// ไม่มีกฎตั้งค่า: ครูต้องส่งเงินทุกวันศุกร์
+function renderUnremitted(rooms, holiday, year, today, rules) {
   const target = el("unremitted-content");
   if (!rooms.length) { target.innerHTML = '<div class="action-empty">ไม่มีเงินค้างส่ง</div>'; return; }
   const label = row => roomName(row,year);
   if (!holiday) {
     const totalSavings = rooms.reduce((sum,row) => sum+row.savings,0);
     const totalTransport = rooms.reduce((sum,row) => sum+row.transport,0);
+    const nextRule = rules.find(rule => rule.from > today);
+    const remitText = 'ครูต้องส่งเงินทุกวัน'+remitWeekdayLabel(remitWeekdayFor(today,rules))+
+      (nextRule ? ' · ตั้งแต่ '+shortDate(nextRule.from)+' เปลี่ยนเป็นวัน'+remitWeekdayLabel(nextRule.weekday) : '');
     target.innerHTML = '<div class="table-wrap"><table><thead><tr><th>ห้อง</th><th class="money">ออมทรัพย์</th><th class="money">ค่ารถ</th><th>สถานะ</th></tr></thead><tbody>'+
       rooms.map(row => '<tr><td class="'+(row.status === "overdue" ? "overdue-name" : "")+'">'+esc(label(row))+'<small>ตั้งแต่ '+esc(shortDate(row.oldestDate))+'</small></td><td class="money">'+baht(row.savings)+'</td><td class="money">'+baht(row.transport)+'</td><td><span class="status '+row.status+'">'+({overdue:"เลยกำหนด","due-today":"ส่งวันนี้",pending:"ยังไม่ถึงกำหนด"}[row.status])+'</span></td></tr>').join("")+
-      '</tbody><tfoot><tr><td>รวม '+rooms.length+' ห้อง</td><td class="money">'+baht(totalSavings)+'</td><td class="money">'+baht(totalTransport)+'</td><td></td></tr></tfoot></table></div><div class="field-note">เรียงจากค้างนานสุด · ครูต้องส่งเงินทุกวันศุกร์</div>';
+      '</tbody><tfoot><tr><td>รวม '+rooms.length+' ห้อง</td><td class="money">'+baht(totalSavings)+'</td><td class="money">'+baht(totalTransport)+'</td><td></td></tr></tfoot></table></div><div class="field-note">เรียงจากค้างนานสุด · '+remitText+'</div>';
     return;
   }
   const max = Math.max(...rooms.map(row => row.total),1);
@@ -314,7 +319,7 @@ function renderFees(charges, payments, year) {
     el("fee-term-"+term).textContent = baht(computeFeeOutstanding(rows,mine.filter(row => termIds.has(row.charge_id))).outstanding)+" บาท";
   }
 }
-async function loadFinance(today, year, workdays, holidays, holiday) {
+async function loadFinance(today, year, workdays, holidays, holiday, rules) {
   const dates = pickSchoolDays({holidays,workdays,endDate:today,days:5});
   const start = dates[0] || today;
   const [placementRes,savingsRes,transportRes,daySavingsRes,dayTransportRes,withdrawRes,departedRes,chargeRes,feeRes,waitingRes,arrivedRes] = await Promise.all([
@@ -340,7 +345,7 @@ async function loadFinance(today, year, workdays, holidays, holiday) {
   });
   const active = activePlacements(placements), activeIds = new Set(active.map(row => row.student_id));
   const schoolRooms = roomsFromPlacements(active,year);
-  const rooms = summarizeUnremittedRooms({savingsRows:pendingSavings,transportRows:pendingTransport,today,workdays,holidays,currentYear:year});
+  const rooms = summarizeUnremittedRooms({savingsRows:pendingSavings,transportRows:pendingTransport,today,workdays,holidays,rules,currentYear:year});
   let departed = 0;
   const departedIds = departedStudents.map(row => row.id);
   if (departedIds.length) {
@@ -350,7 +355,7 @@ async function loadFinance(today, year, workdays, holidays, holiday) {
   }
   if(waitingRes.error||arrivedRes.error)throw waitingRes.error||arrivedRes.error;
   renderAlerts(rooms,withdrawals,departed,year,{waiting:waitingRes.count,arrived:arrivedRes.count});
-  renderUnremitted(rooms,holiday,year);
+  renderUnremitted(rooms,holiday,year,today,rules);
   // fee-report ช่วง "ทั้งปี" ใช้เฉพาะ active placement ปัจจุบัน และตัดใบเสร็จที่ยกเลิก
   renderFees(charges.filter(row => activeIds.has(row.student_id)),feeRows,year);
   const financeWeek = summarizeFinanceWeek({savingsRows:daySavings,transportRows:dayTransport,feeRows,dates});
@@ -365,13 +370,13 @@ async function loadFinance(today, year, workdays, holidays, holiday) {
 function teacherRow(label,value,note,link,warning) {
   return '<div class="mrow'+(warning ? " warn" : "")+'"><div class="mrow-copy"><b>'+esc(label)+'</b><small>'+esc(note)+'</small></div><div class="mrow-value money">'+esc(value)+(link ? '<a href="'+link[0]+'">'+link[1]+'</a>' : "")+"</div></div>";
 }
-function remitNote(room,today,workdays,holidays) {
+function remitNote(room,today,workdays,holidays,rules) {
   if (!room || !room.total) return "ส่งครบแล้ว";
   if (room.status === "overdue") return "เก็บตั้งแต่ "+shortDate(room.oldestDate)+" · เลยกำหนดส่ง"+shortDate(room.firstMissedDeadline);
   if (room.status === "due-today") return "ส่งภายในวันนี้";
-  return "กำหนดส่ง "+shortDate(remitDeadlineFor(room.oldestDate,{workdays,holidays}));
+  return "กำหนดส่ง "+shortDate(remitDeadlineFor(room.oldestDate,{workdays,holidays,rules}));
 }
-async function loadTeacher(today,year,years,workdays,holidays,holiday,userId) {
+async function loadTeacher(today,year,years,workdays,holidays,holiday,userId,rules) {
   const [staffRes,homeroomRes] = await Promise.all([
     sb.from("staff").select("id").eq("user_id",userId).maybeSingle(),
     fetchAllRows(() => sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year",year),["grade_level","classroom","staff_id"])
@@ -397,19 +402,19 @@ async function loadTeacher(today,year,years,workdays,holidays,holiday,userId) {
   ]);
   const pendingSavings = ensure("เงินออมค้างส่ง",savingsRes), pendingTransport = ensure("ค่ารถค้างส่ง",transportRes);
   const todayRows = ensure("เงินออมวันนี้",todayRes), withdrawals = ensure("คำขอเบิก",withdrawRes);
-  const rooms = summarizeUnremittedRooms({savingsRows:pendingSavings,transportRows:pendingTransport,today,workdays,holidays,currentYear:year});
+  const rooms = summarizeUnremittedRooms({savingsRows:pendingSavings,transportRows:pendingTransport,today,workdays,holidays,rules,currentYear:year});
   el("teacher-view").innerHTML = mine.map((home,index) => {
     const room = rooms.find(row => row.year === year && row.grade_level === home.grade_level && row.classroom === home.classroom);
-    const savingsRoom = summarizeUnremittedRooms({savingsRows:pendingSavings.filter(row => row.grade_level === home.grade_level && row.classroom === home.classroom),today,workdays,holidays,currentYear:year})[0];
-    const transportRoom = summarizeUnremittedRooms({transportRows:pendingTransport.filter(row => row.grade_level === home.grade_level && row.classroom === home.classroom),today,workdays,holidays,currentYear:year})[0];
+    const savingsRoom = summarizeUnremittedRooms({savingsRows:pendingSavings.filter(row => row.grade_level === home.grade_level && row.classroom === home.classroom),today,workdays,holidays,rules,currentYear:year})[0];
+    const transportRoom = summarizeUnremittedRooms({transportRows:pendingTransport.filter(row => row.grade_level === home.grade_level && row.classroom === home.classroom),today,workdays,holidays,rules,currentYear:year})[0];
     const todayMine = todayRows.filter(row => row.grade_level === home.grade_level && row.classroom === home.classroom);
     const pending = withdrawals.filter(row => row.grade_level === home.grade_level && row.classroom === home.classroom).length;
     const saved = todayMine.reduce((sum,row) => sum+Number(row.amount || 0),0);
     const badge = holiday ? "" : '<span class="count-chip'+(todayMine.length ? " ok" : "")+'">'+(todayMine.length ? "เก็บออมแล้ววันนี้" : "ยังไม่เก็บออมวันนี้")+"</span>";
     return '<section class="card panel"><div class="panel-head"><h2 class="panel-title"><span class="symbol">◆</span>ห้อง '+esc(home.grade_level)+"/"+esc(home.classroom)+' ของคุณ</h2>'+badge+'</div><div class="panel-body">'+
-      teacherRow("ออมทรัพย์ยังไม่ส่งการเงิน",baht(room?.savings || 0),remitNote(savingsRoom,today,workdays,holidays),null,savingsRoom?.status === "overdue")+
+      teacherRow("ออมทรัพย์ยังไม่ส่งการเงิน",baht(room?.savings || 0),remitNote(savingsRoom,today,workdays,holidays,rules),null,savingsRoom?.status === "overdue")+
       '<div class="field-note">ไปส่งเงินที่ฝ่ายการเงิน</div>'+
-      teacherRow("ค่ารถยังไม่ส่งการเงิน",baht(room?.transport || 0),remitNote(transportRoom,today,workdays,holidays),null,transportRoom?.status === "overdue")+
+      teacherRow("ค่ารถยังไม่ส่งการเงิน",baht(room?.transport || 0),remitNote(transportRoom,today,workdays,holidays,rules),null,transportRoom?.status === "overdue")+
       teacherRow("ฝากออมทรัพย์วันนี้",holiday ? "—" : baht(saved),holiday ? "วันนี้วันหยุด" : new Set(todayMine.map(row => row.student_id)).size+" คน",["savings-entry.html","รับฝาก →"],false)+
       teacherRow("ค่ารถค้างชำระในห้อง","กำลังคำนวณ…","นักเรียนที่ยังจ่ายค่ารถไม่ครบ",["transport-entry.html","รับเงินค่ารถ →"],false).replace('class="mrow','data-transport-row="'+index+'" class="mrow')+
       teacherRow("คำขอเบิกที่ส่งไป",pending+" ราย","รอฝ่ายการเงินจ่าย",["savings-withdraw.html","แจ้งเบิก →"],false)+
@@ -437,21 +442,23 @@ if (session) {
     setFreshness(today);
     const canFinance = await checkDepartment("การเงิน");
     applyRestrictedMenuAccess(canFinance, await financeMenuKeepHrefs(canFinance, session.user.id));
-    const [scheduleRes,holidayRes] = await Promise.all([
+    const [scheduleRes,holidayRes,remitRulesRes] = await Promise.all([
       sb.from("work_schedule").select("weekday,is_working_day"),
-      fetchAllRows(() => sb.from("work_holidays").select("holiday_date").lte("holiday_date",addDaysStr(today,30)),"holiday_date")
+      fetchAllRows(() => sb.from("work_holidays").select("holiday_date").lte("holiday_date",addDaysStr(today,30)),"holiday_date"),
+      sb.from("app_settings").select("value").eq("key","finance_remit_weekday_rules").maybeSingle()
     ]);
     const schedule = ensure("ตารางวันทำงาน",scheduleRes), holidayRows = ensure("วันหยุด",holidayRes);
     const workdays = new Map(schedule.map(row => [row.weekday,row.is_working_day]));
     const holidays = new Set(holidayRows.map(row => row.holiday_date));
+    const rules = parseRemitWeekdayRules(remitRulesRes.error ? null : remitRulesRes.data?.value);
     const holiday = workdays.get(isoWeekday(today)) !== true || holidays.has(today);
     if (holiday) {
       el("holiday-banner").hidden = false;
       const next = pickNextSchoolDay({holidays,workdays,afterDate:today});
       el("holiday-note").textContent = "ไม่มีการรับเงินจากห้องเรียน · ทำงานอีกครั้ง "+(next ? shortDate(next) : "เมื่อเปิดเรียน");
     }
-    if (canFinance) await loadFinance(today,year,workdays,holidays,holiday);
-    else await loadTeacher(today,year,years,workdays,holidays,holiday,session.user.id);
+    if (canFinance) await loadFinance(today,year,workdays,holidays,holiday,rules);
+    else await loadTeacher(today,year,years,workdays,holidays,holiday,session.user.id,rules);
   } catch (error) { toast(error); }
 }
 </script>

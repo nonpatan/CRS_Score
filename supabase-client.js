@@ -7793,18 +7793,47 @@ export async function getCoverageByRange(from, to) {
 }
 
 // ---------- ภาพรวมการเงิน ----------
-// วันส่งเงินของสัปดาห์: วันทำงานสุดท้ายไม่เกินวันศุกร์ (อ้างอิงปฏิทินงานเดียวกับ dashboard)
-export function remitDeadlineFor(dateStr, { workdays, holidays } = {}) {
+// วันส่งเงินของสัปดาห์: วันทำงานสุดท้ายไม่เกินวันตามกฎ (อ้างอิงปฏิทินงานเดียวกับ dashboard)
+export function remitDeadlineFor(dateStr, { workdays, holidays, rules = [] } = {}) {
   if (!dateStr) return dateStr;
   const monday = addDaysStr(dateStr, 1 - isoWeekday(dateStr));
-  for (let offset = 4; offset >= 0; offset--) {
+  for (let offset = remitWeekdayFor(dateStr, rules) - 1; offset >= 0; offset--) {
     const date = addDaysStr(monday, offset);
     if (workdays?.get(isoWeekday(date)) === true && !holidays?.has(date)) return date;
   }
   return dateStr;
 }
 
-export function summarizeUnremittedRooms({ savingsRows = [], transportRows = [], today, workdays, holidays, currentYear } = {}) {
+// กฎวันส่งเงินมีวันเริ่มใช้ เพื่อไม่เปลี่ยนผลของสัปดาห์ย้อนหลัง
+export function parseRemitWeekdayRules(value) {
+  const byDate = new Map();
+  for (const part of String(value ?? "").split("|")) {
+    const match = /^(\d{4}-\d{2}-\d{2})=([1-5])$/.exec(part.trim());
+    if (!match) continue;
+    const from = match[1];
+    const date = new Date(from + "T00:00:00Z");
+    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== from) continue;
+    byDate.set(from, Number(match[2]));
+  }
+  return [...byDate].sort(([a], [b]) => a.localeCompare(b)).map(([from, weekday]) => ({ from, weekday }));
+}
+
+export function remitWeekdayFor(dateStr, rules = []) {
+  if (!dateStr) return 5;
+  const monday = addDaysStr(dateStr, 1 - isoWeekday(dateStr));
+  let latest = "", weekday = 5;
+  for (const rule of rules) if (rule.from <= monday && rule.from >= latest) {
+    latest = rule.from;
+    weekday = rule.weekday;
+  }
+  return weekday;
+}
+
+export function remitWeekdayLabel(weekday) {
+  return ["จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์"][weekday - 1] || "ศุกร์";
+}
+
+export function summarizeUnremittedRooms({ savingsRows = [], transportRows = [], today, workdays, holidays, rules = [], currentYear } = {}) {
   const groups = new Map();
   const add = (row, kind, dateField) => {
     const amount = kind === "savings" ? computeUnremitted([row]) : computeTransportUnremitted([row]);
@@ -7817,7 +7846,7 @@ export function summarizeUnremittedRooms({ savingsRows = [], transportRows = [],
     group[kind] += amount;
     group.total += amount;
     if (date && (!group.oldestDate || date < group.oldestDate)) group.oldestDate = date;
-    const deadline = remitDeadlineFor(date, { workdays, holidays });
+    const deadline = remitDeadlineFor(date, { workdays, holidays, rules });
     if (today && deadline < today) {
       group.overdueAmount += amount;
       if (!group.firstMissedDeadline || deadline < group.firstMissedDeadline) group.firstMissedDeadline = deadline;
@@ -8428,9 +8457,9 @@ export function buildEvalWorkFacts(loaded) {
   const to = raw.round?.period_to || "";
   const names = { academic:"ฝ่ายวิชาการ", general:"ฝ่ายบริหารทั่วไป", personnel:"ฝ่ายบุคคล", finance:"ฝ่ายการเงิน" };
   const departments = (raw.departments || []).filter(code => names[code]).map(code => ({
-    code, label:names[code], hasSource:code !== "finance"
+    code, label:names[code], hasSource:true
   }));
-  const groups = ["academic", "general", "personnel"].filter(code => departments.some(dept => dept.code === code))
+  const groups = ["academic", "general", "finance", "personnel"].filter(code => departments.some(dept => dept.code === code))
     .map(code => ({ dept:code, label:names[code], lines:[] }));
   const active = new Set(departments.map(dept => dept.code));
   const rows = value => Array.isArray(value) ? value : [];
@@ -8509,13 +8538,53 @@ export function buildEvalWorkFacts(loaded) {
           ...late.map(({ item, days }) => `${item.subject.code || ""} ${item.subject.name || ""} — ส่งช้า ${days} วัน`)
         ]), ...(!theme || !workItems.length ? { na:true } : {}) });
     }
-    const projects = rows(raw.projects).filter(project => project.status !== "ยกเลิก");
+    const plan = rows(raw.plan);
+    const entered = plan.filter(item => item.project && item.project.status !== "ยกเลิก");
+    const today = bangkokDate(new Date().toISOString());
+    const projectTime = project => {
+      if (!project || project.status === "ยกเลิก") return "";
+      if (!project.start_date) return "ยังไม่ระบุวันจัด";
+      if (today < project.start_date) return "ยังไม่ถึง";
+      if (today <= (project.end_date || project.start_date)) return "กำลังจัด";
+      return project.has_result ? "ผ่านแล้ว · สรุปแล้ว" : "ผ่านแล้ว · ยังไม่สรุป";
+    };
+    const timeCounts = { upcoming:0, ongoing:0, pastDone:0, pastPending:0 };
     const statusCounts = new Map();
-    for (const project of projects) statusCounts.set(project.status || "ไม่ระบุสถานะ", (statusCounts.get(project.status || "ไม่ระบุสถานะ") || 0) + 1);
-    const resultCount = projects.filter(project => project.has_result).length;
-    add("academic", { label:"เป็นผู้รับผิดชอบโครงการ / กิจกรรม", value:`${projects.length} รายการ`,
-      context:[...statusCounts].map(([status, count]) => `${status} ${count}`).concat(resultCount ? `บันทึกผลแล้ว ${resultCount}` : "ยังไม่มีรายการที่บันทึกผลแล้ว", median("projects")).filter(Boolean).join(" · "),
-      details:detail("ดูชื่อโครงการ", projects.map(project => `${project.name || ""} — ${project.status || "ไม่ระบุสถานะ"}`)) });
+    for (const item of entered) {
+      const project = item.project;
+      const timing = projectTime(project);
+      if (timing === "ยังไม่ถึง") timeCounts.upcoming++;
+      else if (timing === "กำลังจัด") timeCounts.ongoing++;
+      else if (timing === "ผ่านแล้ว · สรุปแล้ว") timeCounts.pastDone++;
+      else if (timing === "ผ่านแล้ว · ยังไม่สรุป") timeCounts.pastPending++;
+      const status = project.status || "ไม่ระบุสถานะ";
+      statusCounts.set(status, (statusCounts.get(status) || 0) + 1);
+    }
+    const past = timeCounts.pastDone + timeCounts.pastPending;
+    const otherOwner = entered.filter(item => item.project.own === false).length;
+    const context = [
+      timeCounts.upcoming ? `ยังไม่ถึง ${timeCounts.upcoming}` : "",
+      timeCounts.ongoing ? `กำลังจัด ${timeCounts.ongoing}` : "",
+      past ? `ผ่านแล้ว ${past} (${[
+        timeCounts.pastDone ? `สรุปแล้ว ${timeCounts.pastDone}` : "",
+        timeCounts.pastPending ? `ยังไม่สรุป ${timeCounts.pastPending}` : ""
+      ].filter(Boolean).join(" · ")})` : "",
+      ...[...statusCounts].map(([status, count]) => `${status} ${count}`),
+      otherOwner ? `ลงในชื่อคนอื่น ${otherOwner} รายการ` : ""
+    ].filter(Boolean).join(" · ");
+    const sortedPlan = plan.map((item, index) => ({ item, index })).sort((a, b) => {
+      const rank = item => item.project && projectTime(item.project) === "ผ่านแล้ว · ยังไม่สรุป" ? 0 : !item.project ? 1 : 2;
+      return rank(a.item) - rank(b.item) || a.index - b.index;
+    });
+    add("academic", { label:`โครงการ / กิจกรรม ตามแผน OKR ปีการศึกษา ${raw.round?.academic_year || ""}`,
+      value:plan.length ? `ลงข้อมูลแล้ว ${entered.length} / ${plan.length} รายการ` : "ไม่ได้รับมอบหมายในแผน OKR",
+      ...(plan.length ? { context, details:detail("ดูรายการ", sortedPlan.map(({ item }) => {
+        const name = `${item.kind || ""} ${item.name || ""}${item.parent_name ? ` (ใน ${item.parent_name})` : ""}`.trim();
+        const project = item.project;
+        if (!project) return `${name} — ยังไม่ลงข้อมูล`;
+        const dateText = project.start_date ? `${date(project.start_date)}${project.end_date && project.end_date !== project.start_date ? "–" + date(project.end_date) : ""}` : "ไม่ระบุวันจัด";
+        return `${name} — ${project.status || "ไม่ระบุสถานะ"} · ${dateText}${projectTime(project) ? " · " + projectTime(project) : ""}${project.own === false ? ` · ลงโดย ${project.responsible_name || "ครูคนอื่น"}` : ""}`;
+      })) } : { na:true }) });
   }
 
   if (active.has("general")) {
@@ -8564,6 +8633,56 @@ export function buildEvalWorkFacts(loaded) {
         context:timingContext,
         details:detail("ดูวันที่เช็คหลังเวลา", timingMisses.map(entry =>
           `${date(entry.date)}${entry.room ? " · " + entry.room : ""} · ${entry.time || "ไม่ระบุเวลา"}`)) }) });
+  }
+
+  if (active.has("finance")) {
+    const finance = raw.finance || {};
+    const rooms = rows(finance.rooms).map(room => `${room.grade_level}/${room.classroom}`).join(", ");
+    if (!rooms) add("finance", {label:"ส่งเงินประจำชั้น", value:"ไม่ได้เป็นครูประจำชั้น", na:true});
+    else {
+      const calendar = finance.calendar || {};
+      const workdays = new Map(rows(calendar.schedule).map(day => [Number(day.weekday), day.is_working_day]));
+      const holidays = new Set(rows(calendar.holidays).map(day => day.holiday_date));
+      const rules = parseRemitWeekdayRules(calendar.remit_rules);
+      const today = bangkokDate(new Date().toISOString());
+      const dayGap = (a, b) => Math.round((Date.parse(b+"T00:00:00Z") - Date.parse(a+"T00:00:00Z")) / 86400000);
+      for (const kind of ["ออมทรัพย์", "ค่ารถ"]) {
+        const start = finance.starts?.[kind];
+        const eligible = rows(finance.days).filter(row => row.kind === kind).map(row => ({
+          ...row, deadline:remitDeadlineFor(row.date, {workdays, holidays, rules})
+        })).filter(row => start && row.deadline >= start);
+        const weeks = new Map();
+        const delays = [];
+        let pending = 0;
+        for (const row of eligible) {
+          const n = Number(row.n) || 0;
+          if (row.sent) delays.push({days:dayGap(row.date,row.sent), n});
+          else pending += n;
+          if (row.deadline >= today) continue;
+          if (!weeks.has(row.deadline)) weeks.set(row.deadline, {deadline:row.deadline, n:0, pending:0, onTime:true, maxSent:null});
+          const week = weeks.get(row.deadline);
+          week.n += n;
+          if (!row.sent) week.pending += n;
+          if (!row.sent || row.sent > row.deadline) week.onTime = false;
+          if (row.sent && (!week.maxSent || row.sent > week.maxSent)) week.maxSent = row.sent;
+        }
+        const due = weeks.size;
+        const ok = [...weeks.values()].filter(week => week.onTime).length;
+        const total = delays.reduce((sum, item) => sum + item.n, 0);
+        const sorted = delays.sort((a,b) => a.days - b.days);
+        const at = rank => { let seen = 0; for (const item of sorted) { seen += item.n; if (seen >= rank) return item.days; } return 0; };
+        const medianDays = total ? (at(Math.floor((total+1)/2)) + at(Math.floor((total+2)/2))) / 2 : 0;
+        const maxDays = sorted.length ? sorted.at(-1).days : 0;
+        const context = [total ? `เงินค้างกับครูโดยทั่วไป ${Number(medianDays.toFixed(1))} วัน · นานสุด ${maxDays} วัน` : "",
+          pending ? `ยังไม่ส่ง ${pending} รายการ` : "", start ? `นับจากวันที่ฝ่ายการเงินยืนยัน · ตั้งแต่ ${date(start)}` : ""].filter(Boolean).join(" · ");
+        const late = [...weeks.values()].filter(week => !week.onTime).sort((a,b) => a.deadline.localeCompare(b.deadline));
+        add("finance", {label:`ส่งเงิน${kind} ห้อง ${rooms}`,
+          value:!eligible.length ? "ไม่มีการรับเงินในช่วงรอบ" : !due ? "ยังไม่มีสัปดาห์ที่ถึงกำหนดส่ง" : `ส่งทันกำหนด ${ok} / ${due} สัปดาห์`,
+          ...(!eligible.length || !due ? {na:true} : {}), context,
+          details:detail("ดูสัปดาห์ที่ส่งช้า", late.map(week =>
+            `กำหนด ${date(week.deadline)} — รับ ${week.n} รายการ · ${week.pending ? `ยังไม่ส่ง ${week.pending} รายการ` : `ยืนยัน ${date(week.maxSent)} (ช้า ${dayGap(week.deadline,week.maxSent)} วัน)`}`)) });
+      }
+    }
   }
 
   if (active.has("personnel")) {
