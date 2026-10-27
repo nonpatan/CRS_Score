@@ -74,6 +74,25 @@
   .footbar-inner > * { flex:1; }
   .submit-hint { margin:0 0 8px; font-size:14px; color:var(--amber); }
   .success { background:var(--teal-soft); padding:16px; border-radius:10px; }
+  .facts-intro { border-left:3px solid var(--teal); background:var(--teal-soft); border-radius:0 9px 9px 0; padding:10px 12px; font-size:14px; margin:0 0 12px; }
+  .facts-intro p { margin:0 0 4px; } .facts-intro p:last-child { margin:0; }
+  .facts { border:1px solid var(--line); border-radius:9px; margin:4px 0 10px; font-size:14px; background:var(--white); }
+  .facts-head { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--bg); border-radius:9px 9px 0 0; color:var(--muted); font-size:13px; }
+  .facts-head b { color:var(--ink); font-weight:600; }
+  .fact { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:2px 12px; padding:8px 12px; border-top:1px solid var(--line); }
+  .fact:first-of-type { border-top:0; }
+  .fact-label { min-width:0; } .fact-val { font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
+  .fact-ctx { grid-column:1 / -1; color:var(--muted); font-size:13px; }
+  .fact.na .fact-val { color:var(--muted); font-weight:500; }
+  .fact-dept { display:block; color:var(--muted); font-size:12px; }
+  .fact details { grid-column:1 / -1; margin:0; }
+  .fact summary { min-height:44px; display:flex; align-items:center; color:var(--teal); font-size:13px; font-weight:600; scroll-margin-top:180px; scroll-margin-bottom:110px; }
+  .fact ul { margin:0 0 4px; padding-left:20px; color:var(--muted); font-size:13px; }
+  .facts-state { padding:12px; color:var(--muted); font-size:14px; }
+  .skeleton { height:14px; border-radius:6px; background:var(--line); margin:6px 0; }
+  .facts-err { background:var(--amber-soft); color:var(--amber); padding:10px 12px; border-radius:9px; font-size:14px; display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+  .facts-err button { min-height:44px; border:0; border-radius:8px; padding:8px 14px; background:var(--white); color:var(--amber); font:inherit; font-weight:600; cursor:pointer; }
+  @media (max-width:520px) { .fact { grid-template-columns:1fr; } .fact-val { text-align:left; } }
   #toast { position:fixed; z-index:60; bottom:78px; left:50%; transform:translateX(-50%); max-width:min(90vw,520px);
     padding:10px 16px; background:var(--ink); color:var(--white); border-radius:9px; opacity:0; pointer-events:none; }
   #toast.err { background:var(--danger); } #toast.show { opacity:1; }
@@ -101,7 +120,7 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
   saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
-  thaiShortDateText } from "../supabase-client.js?v=20261026-1";
+  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts } from "../supabase-client.js?v=20261027-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -141,6 +160,45 @@ if (!session) {
       const texts = { ...(assignment.texts || {}) };
       const pending = new Set(), timers = new Map(), revision = new Map(), inFlight = new Set();
       let domainIndex = 0, lastSaved = "", textSaving = Promise.resolve(), submitting = false;
+      const showWorkFacts = section.kind === "dept_head";
+      let workFacts = null, workFactsState = showWorkFacts ? "loading" : "none";
+      const workFactTitles = { 1:"ความครบของงาน", 2:"ความตรงเวลา", 3:"การช่วยงานคนอื่น", 4:"งานที่รับผิดชอบเอง" };
+      const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date()).map(part => [part.type, part.value]));
+      const todayBangkok = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
+      const factPeriod = () => workFacts ? `${thaiShortDateText(workFacts.period.from)} – ${thaiShortDateText(workFacts.period.to)}` :
+        `${thaiShortDateText(round.period_from)} – ${thaiShortDateText(round.period_to)}`;
+      const factIntroHtml = () => {
+        if (!showWorkFacts) return "";
+        if (workFactsState === "loading") return `<div class="facts-intro" role="note" data-facts-intro aria-busy="true"><p><b>ข้อมูลประกอบจากระบบ</b> — ช่วงรอบ ${esc(factPeriod())}</p><div class="facts-state" role="status">กำลังโหลดข้อมูลจากระบบ…<div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:55%"></div></div></div>`;
+        if (workFactsState === "error") return `<div class="facts-intro" role="note" data-facts-intro><p><b>ข้อมูลประกอบจากระบบ</b> — ช่วงรอบ ${esc(factPeriod())}</p><div class="facts-err" role="alert"><span>โหลดข้อมูลประกอบไม่สำเร็จ · ให้คะแนนต่อได้ตามปกติ</span><button type="button" data-retry-facts>ลองใหม่</button></div></div>`;
+        const depts = workFacts.departments;
+        const active = depts.filter(dept => dept.hasSource).map(dept => dept.label);
+        const unavailable = depts.filter(dept => !dept.hasSource).map(dept => `${dept.label}: ยังไม่มีข้อมูลในระบบ`);
+        return `<div class="facts-intro" role="note" data-facts-intro><p><b>ข้อมูลประกอบจากระบบ</b> — ช่วงรอบ ${esc(factPeriod())}${readonly ? ` · ข้อมูล ณ วันที่เปิดดู ${esc(thaiShortDateText(todayBangkok))}` : ""}</p>
+          ${depts.length ? `<p>${active.length ? `แสดงเฉพาะงานของ${esc(active.join(" · "))}ที่คุณเป็นหัวหน้าฝ่าย` : "ฝ่ายที่คุณเป็นหัวหน้าฝ่ายยังไม่มีข้อมูลในระบบ"}${unavailable.length ? ` · ${esc(unavailable.join(" · "))}` : ""}</p><p>ใช้ประกอบการพิจารณาเท่านั้น <b>ไม่ใช่คะแนน</b> และระบบไม่เสนอคะแนนให้ · งานที่ทำนอกระบบ (เช่น งานเอกสาร งานประชุม) ไม่อยู่ในตัวเลขนี้</p>` :
+            "<p>คุณไม่ได้ถือตำแหน่งหัวหน้าฝ่ายที่ตั้งไว้ในระบบ จึงไม่มีข้อมูลประกอบ</p>"}</div>`;
+      };
+      const factBoxHtml = no => {
+        if (!showWorkFacts || !workFactTitles[no] || workFactsState !== "ready" || !workFacts.departments.length) return "";
+        const lines = workFacts.items[no] || [];
+        const showDept = workFacts.departments.filter(dept => dept.hasSource).length >= 2;
+        const labels = Object.fromEntries(workFacts.departments.map(dept => [dept.code, dept.label]));
+        return `<div class="facts" aria-label="ข้อมูลจากระบบ ข้อ ${no}"><div class="facts-head"><span><b>ข้อมูลจากระบบ</b> · ${workFactTitles[no]}</span><span>${esc(factPeriod())}</span></div>
+          ${lines.map(line => `<div class="fact${line.na ? " na" : ""}"><span class="fact-label">${showDept && labels[line.dept] ? `<span class="fact-dept">${esc(labels[line.dept])}</span>` : ""}${esc(line.label)}</span><span class="fact-val">${esc(line.value)}</span>
+            ${line.context ? `<span class="fact-ctx">${esc(line.context)}</span>` : ""}${line.details?.rows?.length ? `<details><summary>${esc(line.details.summary)}</summary><ul>${line.details.rows.map(row => `<li>${esc(row)}</li>`).join("")}</ul></details>` : ""}</div>`).join("")}</div>`;
+      };
+      const paintWorkFacts = () => {
+        const intro = app.querySelector("[data-facts-intro]");
+        if (intro) intro.outerHTML = factIntroHtml();
+        app.querySelectorAll("[data-facts-item]").forEach(box => { box.innerHTML = factBoxHtml(Number(box.dataset.factsItem)); });
+      };
+      const fetchWorkFacts = async () => {
+        if (!showWorkFacts) return;
+        workFactsState = "loading"; paintWorkFacts();
+        try { workFacts = buildEvalWorkFacts(await loadEvalWorkFacts(assignment.id)); workFactsState = "ready"; }
+        catch (error) { workFactsState = "error"; }
+        paintWorkFacts();
+      };
       const getProgress = () => evalFillProgress({ section, responses:[...responses.values()], rules:form.rules, snapshot });
       const statusText = () => readonly ? assignment.status === "submitted" ? "ส่งแล้ว" : "อ่านอย่างเดียว" :
         inFlight.size ? "กำลังบันทึก…" : pending.size ?
@@ -242,6 +300,7 @@ if (!session) {
         const starHint = `ข้อสำคัญ ได้ ≤ ${form.rules.star_fail_max} ถือว่าไม่ผ่านด้านนี้`;
         return `<article class="item" id="item-${esc(item.id)}"><p class="item-title">${esc(domain.code)}(${item.no}) ${esc(item.text)} ${item.is_star ? `<span class="star" title="${esc(starHint)}">★</span><span class="star-note">${esc(starHint)}</span>` : ""}</p>
           ${item.note ? `<p class="meta">${esc(item.note)}</p>` : ""}${system}
+          ${showWorkFacts && workFactTitles[item.no] ? `<div data-facts-item="${Number(item.no)}">${factBoxHtml(Number(item.no))}</div>` : ""}
           <div class="score" style="--cols:${ascending.length}" role="radiogroup" aria-label="${esc(item.text)}">${scoreHtml}</div>
           <div class="anchors">${[...ascending].reverse().map(value => Number(value.score)).filter(score => anchors[score]).map(score => `<p><b>${score}</b> ${esc(anchors[score])}</p>`).join("")}</div>
           <div class="field"><label for="evidence-${esc(item.id)}">${esc(section.evidence_label)}<span data-required class="error">${rule.needsEvidence ? " *" : ""}</span></label>
@@ -267,7 +326,8 @@ if (!session) {
           <div class="progress"><span id="progress-bar" style="width:${progress.total ? progress.answered / progress.total * 100 : 0}%"></span></div>
           <div class="meta" id="save-status" aria-live="polite">${esc(statusText())}</div></div></div>
           ${readonly ? `<div class="card ${assignment.status === "submitted" ? "success" : "warn"}">${assignment.status === "submitted" ? "ส่งแล้ว " + esc(submittedText(assignment.submitted_at)) : "ปิดรับคะแนนแล้ว"}</div>` : ""}
-          ${selected.map(domain => `<section class="card domain" id="domain-${esc(domain.code)}"><h3>ด้าน ${esc(domain.code)} · ${esc(domain.title)}</h3>
+          ${selected.map((domain, index) => `<section class="card domain" id="domain-${esc(domain.code)}"><h3>ด้าน ${esc(domain.code)} · ${esc(domain.title)}</h3>
+            ${showWorkFacts && index === 0 ? factIntroHtml() : ""}
             ${domain.items.map(item => renderItem(item, domain)).join("")}
             ${domain === domains[domains.length - 1] ? renderTexts() : ""}</section>`).join("")}
           <div class="footbar"><div class="footbar-inner">${readonly ? '<a class="button-link ghost" href="eval-my.html">กลับงานประเมินของฉัน</a>' :
@@ -305,6 +365,7 @@ if (!session) {
         if (key && pending.has("text:" + key)) saveText(key);
       });
       app.addEventListener("click", async event => {
+        if (event.target.closest("[data-retry-facts]")) { fetchWorkFacts(); return; }
         const jump = event.target.closest("[data-jump]");
         if (jump) {
           event.preventDefault();
@@ -331,6 +392,7 @@ if (!session) {
         if (pending.size || inFlight.size) { event.preventDefault(); event.returnValue = ""; }
       });
       render();
+      if (showWorkFacts) fetchWorkFacts();
     }
   } catch (error) {
     app.textContent = error.message;

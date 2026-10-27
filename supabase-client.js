@@ -933,6 +933,10 @@ export async function getDailyAttendanceCutoff() {
     getSetting("daily_attendance_cutoff_start"),
     getSetting("daily_attendance_cutoff_time_by_level")
   ]);
+  return parseDailyAttendanceCutoff(time, start, byLevelRaw);
+}
+
+export function parseDailyAttendanceCutoff(time, start, byLevelRaw) {
   const normalizedTime = String(time || "").trim();
   const normalizedStart = String(start || "").trim();
   const validTime = CUTOFF_TIME_PATTERN.test(normalizedTime);
@@ -8410,6 +8414,149 @@ export function redFlagDeadlines(flag, holidays = new Set(), today = null, days 
   return { committeeDue, statementDue, investigationDue, next };
 }
 // ---------- /ประเมินครู 360° ----------
+
+// ---------- ประเมินครู 360° (ข้อมูลประกอบส่วนหัวหน้าฝ่าย) ----------
+export async function loadEvalWorkFacts(assignmentId) {
+  const { data, error } = await sb.rpc("eval_work_facts", { p_assignment_id: assignmentId });
+  if (error) throw error;
+  return data;
+}
+
+export function buildEvalWorkFacts(loaded) {
+  const raw = loaded || {};
+  const from = raw.round?.period_from || "";
+  const to = raw.round?.period_to || "";
+  const names = { academic:"ฝ่ายวิชาการ", general:"ฝ่ายบริหารทั่วไป", personnel:"ฝ่ายบุคคล", finance:"ฝ่ายการเงิน" };
+  const departments = (raw.departments || []).filter(code => names[code]).map(code => ({
+    code, label:names[code], hasSource:code !== "finance"
+  }));
+  const items = { 1:[], 2:[], 3:[], 4:[] };
+  if (!departments.length) return { period:{ from, to }, departments, items };
+  const active = new Set(departments.map(dept => dept.code));
+  const rows = value => Array.isArray(value) ? value : [];
+  const add = (no, dept, line) => { if (active.has(dept)) items[no].push({ dept, ...line }); };
+  const median = key => {
+    const value = Number(raw.medians?.[key]);
+    return Number(raw.medians?.peer_count) >= 3 && raw.medians?.[key] != null && Number.isFinite(value)
+      ? `ค่ากลางครูที่ถูกประเมินรอบนี้ ${Number(value.toFixed(1))} ครั้ง` : "";
+  };
+  const date = value => thaiShortDateText(value);
+  const bangkokDate = value => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed + 7 * 3600000).toISOString().slice(0, 10) : "";
+  };
+  const dayGap = (a, b) => Math.round((Date.parse(a + "T00:00:00Z") - Date.parse(b + "T00:00:00Z")) / 86400000);
+  const detail = (summary, list) => list.length ? { summary, rows:list } : undefined;
+
+  if (active.has("academic")) {
+    const dueTerms = [
+      ["1", raw.academic_year?.term1_end_date], ["2", raw.academic_year?.term2_end_date]
+    ].filter(([, end]) => end && from <= end && end <= to).map(([term]) => term);
+    const subjects = rows(raw.subjects);
+    if (!dueTerms.length) add(1, "academic", { label:"ปิดคะแนนวิชา", value:"ยังไม่ถึงกำหนดปิดคะแนนในช่วงรอบ", na:true });
+    for (const term of dueTerms) {
+      const relevant = subjects.filter(subject => String(subject.term ?? "2") === term);
+      const noSubjects = !raw.has_account || relevant.length === 0;
+      const annualOnly = term === "1" && subjects.length > 0 && subjects.every(subject => subject.term == null);
+      const sorted = [...relevant].sort((a, b) => Number(Boolean(a.exam_closed_at)) - Number(Boolean(b.exam_closed_at)) ||
+        String(a.code || "").localeCompare(String(b.code || ""), "th"));
+      add(1, "academic", { label:`ปิดคะแนนวิชา ภาค ${term}`,
+        value:noSubjects ? !raw.has_account || !subjects.length ? "ไม่มีวิชาในระบบ" :
+          annualOnly ? "วิชาของครูเป็นรายปี ยังไม่ถึงกำหนดปิดคะแนนในช่วงรอบ" :
+          "ยังไม่มีวิชาที่ถึงกำหนดปิดคะแนนในช่วงรอบ" :
+          `ปิดแล้ว ${relevant.filter(subject => subject.exam_closed_at).length} / ${relevant.length} วิชา`,
+        ...(noSubjects ? { na:true } : { details:detail("ดูรายวิชา", sorted.map(subject =>
+          `${subject.code || ""} ${subject.name || ""} — ${subject.exam_closed_at ? "ปิดแล้ว" : "ยังไม่ปิด"}`)) }) });
+    }
+    const works = rows(raw.theme_works);
+    const late = works.map(work => ({ work, days:work.due_date ? dayGap(bangkokDate(work.created_at), work.due_date) : 0 }))
+      .filter(entry => entry.days > 0);
+    add(2, "academic", { label:"ส่งผลงานตามธีม", value:works.length ? `${works.length} ชิ้น · ช้า ${late.length}` : "ไม่มีผลงานที่ส่งในช่วงรอบ",
+      ...(works.length ? { details:detail("ดูชิ้นที่ส่งช้า", late.map(({ work, days }) =>
+        `${work.subject_code || ""} ${work.subject_name || ""} — ส่งช้า ${days} วัน`)) } : { na:true }) });
+    const projects = rows(raw.projects).filter(project => project.status !== "ยกเลิก");
+    const statusCounts = new Map();
+    for (const project of projects) statusCounts.set(project.status || "ไม่ระบุสถานะ", (statusCounts.get(project.status || "ไม่ระบุสถานะ") || 0) + 1);
+    const resultCount = projects.filter(project => project.has_result).length;
+    add(4, "academic", { label:"เป็นผู้รับผิดชอบโครงการ / กิจกรรม", value:`${projects.length} รายการ`,
+      context:[...statusCounts].map(([status, count]) => `${status} ${count}`).concat(resultCount ? `บันทึกผลแล้ว ${resultCount}` : "ยังไม่มีรายการที่บันทึกผลแล้ว", median("projects")).filter(Boolean).join(" · "),
+      details:detail("ดูชื่อโครงการ", projects.map(project => `${project.name || ""} — ${project.status || "ไม่ระบุสถานะ"}`)) });
+  }
+
+  if (active.has("general")) {
+    const homeroom = raw.homeroom || {};
+    const rooms = rows(homeroom.rooms);
+    const coverRooms = rows(homeroom.cover_rooms);
+    let audit = null, staff = null, cutoff = null;
+    if (rooms.length && homeroom.calendar) {
+      const calendar = homeroom.calendar;
+      const settings = calendar.settings || {};
+      cutoff = parseDailyAttendanceCutoff(settings.daily_attendance_cutoff_time,
+        settings.daily_attendance_cutoff_start, settings.daily_attendance_cutoff_time_by_level);
+      const auditStart = settings.daily_attendance_audit_start;
+      const startDate = auditStart && auditStart > from ? auditStart : from;
+      audit = buildHomeroomAudit({ year:raw.round?.academic_year, from, to,
+        teachers:rows(homeroom.teachers), coverage:rows(homeroom.coverage),
+        attendance:collapseHomeroomAuditAttendance(rows(homeroom.attendance)),
+        placements:[], homerooms:[...rooms, ...coverRooms], lateReasons:[], profiles:[],
+        holidays:[...rows(calendar.holidays), ...[...schoolBreakDates(rows(calendar.years), from, to)].map(holiday_date => ({ holiday_date }))],
+        schedule:rows(calendar.schedule), absences:rows(homeroom.absences)
+      }, { startDate, cutoff });
+      staff = audit.staff.find(entry => entry.staff.id === raw.target_staff_id) || null;
+    }
+    const roomLabels = rooms.map(room => `${room.grade_level}/${room.classroom}`).join(", ");
+    const coverContext = coverRooms.length ? `รวมวันที่ดูแลห้องอื่นแทน (${coverRooms.map(room => `${room.grade_level}/${room.classroom}`).join(", ")})` : "";
+    const commonContext = [audit?.startDate > from ? `นับตั้งแต่ ${date(audit.startDate)}` : "", coverContext].filter(Boolean).join(" · ");
+    const noRoom = !rooms.length;
+    const noSchedule = !noRoom && !audit?.scheduleConfigured;
+    const due = staff?.due || 0;
+    add(1, "general", { label:`เช็คชื่อประจำชั้น${roomLabels ? " " + roomLabels : ""}`,
+      value:noRoom ? "ไม่ได้เป็นครูประจำชั้น" : noSchedule ? "ยังไม่ได้ตั้งวันทำงาน" :
+        !due ? "ไม่มีวันเรียนที่ต้องเช็คในช่วงนี้" : `${due - staff.missed} / ${due} วันเรียน`,
+      ...((noRoom || noSchedule || !due) ? { na:true } : {
+        context:commonContext,
+        details:detail(`ดู ${staff.missed} วันที่ไม่ได้เช็ค`, rows(staff.missedDates).map(entry =>
+          `${date(entry.date)}${entry.room ? " · " + entry.room : ""}`)) }) });
+    const roomTimes = rooms.map(room => cutoffForGrade(cutoff, room.grade_level)?.time).filter(Boolean);
+    const timeLabel = roomTimes.length && roomTimes.every(time => time === roomTimes[0]) ? `ก่อน ${roomTimes[0]}` : "ก่อนเวลาตัด";
+    const timingDue = staff?.timingDue || 0;
+    const timingContext = [commonContext, cutoff?.start ? `นับตั้งแต่เริ่มใช้เวลาตัด ${date(cutoff.start)}` : ""].filter(Boolean).join(" · ");
+    const timingMisses = [...rows(staff?.lateDates), ...rows(staff?.backdatedDates)].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    add(2, "general", { label:`เช็คชื่อประจำชั้น${roomLabels ? " " + roomLabels : ""} ${timeLabel}`,
+      value:noRoom ? "ไม่ได้เป็นครูประจำชั้น" : noSchedule ? "ยังไม่ได้ตั้งวันทำงาน" :
+        !audit?.cutoffEnabled || !timingDue ? "ยังไม่ได้ใช้เวลาตัดในช่วงนี้" : `${staff.ontime} / ${timingDue} วัน`,
+      ...((noRoom || noSchedule || !audit?.cutoffEnabled || !timingDue) ? { na:true } : {
+        context:timingContext,
+        details:detail("ดูวันที่เช็คหลังเวลา", timingMisses.map(entry =>
+          `${date(entry.date)}${entry.room ? " · " + entry.room : ""} · ${entry.time || "ไม่ระบุเวลา"}`)) }) });
+  }
+
+  if (active.has("personnel")) {
+    const coverage = rows(raw.coverage);
+    const kinds = new Map([["วิชา", 0], ["ประจำชั้น", 0], ["เวร", 0]]);
+    const kindLabel = kind => kind === "ครูประจำชั้น" ? "ประจำชั้น" : kind === "วิชา" || kind === "เวร" ? kind : kind || "ไม่ระบุ";
+    for (const row of coverage) kinds.set(kindLabel(row.kind), (kinds.get(kindLabel(row.kind)) || 0) + 1);
+    add(3, "personnel", { label:"รับสอนแทน / ดูแลแทน", value:`${coverage.length} ครั้ง`,
+      context:[...[...kinds].filter(([, count]) => count).map(([kind, count]) => `${kind} ${count}`), median("coverage")].filter(Boolean).join(" · "),
+      details:detail(`ดูรายการ ${coverage.length} ครั้ง`, coverage.map(row => `${date(row.cover_date)} · ${kindLabel(row.kind)}${row.periods == null ? "" : ` · ${Number(row.periods)} คาบ`}`)) });
+    const swaps = rows(raw.swaps);
+    const accepted = swaps.filter(row => row.status === "ตอบรับแล้ว");
+    const received = accepted.filter(row => row.role === "to").length;
+    const requested = accepted.filter(row => row.role === "from").length;
+    const declined = swaps.filter(row => row.role === "to" && row.status === "ปฏิเสธ").length;
+    add(3, "personnel", { label:"แลกเวรกับเพื่อนครู", value:swaps.length ? `รับแทน ${received} · ขอแลก ${requested}` : "ไม่มีการแลกเวร",
+      context:[`ปฏิเสธคำขอ ${declined} ครั้ง`, median("swaps_received").replace("รอบนี้ ", "รอบนี้ รับแทน ")].filter(Boolean).join(" · ") });
+    const trainings = rows(raw.trainings);
+    add(4, "personnel", { label:"ไปอบรม / ศึกษาดูงาน", value:`${trainings.length} ครั้ง`,
+      context:[median("trainings"), "ไม่นับไปปฏิบัติหน้าที่นอกสถานที่"].filter(Boolean).join(" · "),
+      details:detail(`ดูรายการ ${trainings.length} ครั้ง`, trainings.map(row => `${date(row.start_date)} · ${row.kind || ""} · ${row.title || ""}`)) });
+  }
+
+  for (const no of [1, 2, 3, 4]) if (!items[no].length) items[no].push({ dept:departments.map(dept => dept.code).join("+"), label:"ข้อมูลจากระบบ",
+    value:`ไม่มีข้อมูลของ${departments.map(dept => dept.label).join(" · ")}สำหรับข้อนี้`, na:true });
+  return { period:{ from, to }, departments, items };
+}
+// ---------- /ประเมินครู 360° (ข้อมูลประกอบส่วนหัวหน้าฝ่าย) ----------
 
 // ---------- ประเมินครู 360° (ข้อมูลรอบและฉบับ) ----------
 export async function listEvalForms() {
