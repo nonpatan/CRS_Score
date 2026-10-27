@@ -2660,7 +2660,7 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
     const weight = weights.find(w => w.competency_id === competency.id);
     const previousSources = applyMissingCompetencySubjects(baseSources,
       missingCompetencySubjects.filter(item => item.reason === "no-structure"));
-    const previousComplete = computeCombinedCompetencyResult(weight, previousSources, levels).complete;
+    const previousComplete = computeCombinedCompetencyResult(compEffectiveWeight(weight, previousSources, competency.id, plannedByCompetency).weight, previousSources, levels).complete;
     const subjectStats = new Map();
     const scoreIds = new Set(subjectScoreRows.map(score => score.collection_id));
     for (const unit of activeUnits.filter(unit => unit.core_competency_id === competency.id)) {
@@ -2675,7 +2675,9 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
       }
     }
     const sources = applyBlockedSubjects(applyMissingCompetencySubjects(baseSources, missingCompetencySubjects), blockedSubjects, subjectStats);
-    return { competency, sources, weight, previousComplete, combined: computeCombinedCompetencyResult(weight, sources, levels) };
+    const effective = compEffectiveWeight(weight, sources, competency.id, plannedByCompetency);
+    return { competency, sources, weight, effectiveWeight:effective.weight, skippedSources:effective.skipped, noSource:effective.noSource,
+      previousComplete, combined: computeCombinedCompetencyResult(effective.weight, sources, levels) };
   });
   return { ok:true, results, subjectNameById, plannedByCompetency, subjectOwnerById, assessmentOwnerByName, missingCompetencySubjects, blockedSubjects };
 }
@@ -2684,6 +2686,36 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
 function applyMissingCompetencySubjects(sources, missingSubjects) {
   if (!missingSubjects.length) return sources;
   return { ...sources, subject:{ ...sources.subject, complete:false, percent:null, missingSubjects:[...missingSubjects] } };
+}
+
+// แหล่งที่ไม่ได้วัดนักเรียนคนนี้ (none = ไม่มีรายการใดวัด · not-member = มีแต่เด็กไม่อยู่ในรายชื่อ) ไม่นำมาคิด
+// แล้วเกลี่ยน้ำหนักที่เหลือให้รวม 100 (ผู้ใช้เคาะ 2026-10-27) · กรอกค้าง/ยังไม่สร้างครั้ง/ร.มส. ยังบล็อกเหมือนเดิม
+// row.weight ยังเก็บน้ำหนักที่ตั้งไว้จริง เพื่อให้สถานะแหล่งบนจอไม่กลายเป็น "ไม่ใช้คำนวณ"
+function compEffectiveWeight(weight, sources, competencyId, plannedByCompetency) {
+  if (!weight) return { weight, skipped:new Set(), rescaled:false, noSource:false };
+  const skipped = new Set(), kept = [];
+  for (const definition of compSources) {
+    const planned = definition.key === "subject" ? null
+      : plannedNames(plannedByCompetency, competencyId, definition.key === "activity" ? "กิจกรรม" : "กิจวัตรประจำวัน");
+    const value = Number(weight[definition.weight]);
+    const kind = competencySourceStatus(sources[definition.key], value, planned).kind;
+    if (kind === "none" || kind === "not-member") skipped.add(definition.key);
+    else if (value > 0) kept.push({ definition, value });
+  }
+  if (!skipped.size) return { weight, skipped, rescaled:false, noSource:false };
+  const keptSum = kept.reduce((sum, item) => sum + item.value, 0);
+  // ไม่เหลือแหล่งให้คิด: คืนน้ำหนักเดิมให้สูตรกลางตอบ "ยังสรุปไม่ได้" เอง และยังขึ้นใน "ยังไม่มีรายการวัด"
+  if (!(keptSum > 0)) return { weight, skipped:new Set(), rescaled:false, noSource:true };
+  const effective = { ...weight };
+  for (const definition of compSources) effective[definition.weight] = 0;
+  let assigned = 0;
+  kept.forEach((item, index) => {
+    // แหล่งสุดท้ายรับส่วนที่เหลือ กันผลรวมคลาดทศนิยมจนสูตรกลางมองว่าไม่เท่ากับ 100%
+    const share = index === kept.length - 1 ? 100 - assigned : item.value * 100 / keptSum;
+    effective[item.definition.weight] = share;
+    assigned += share;
+  });
+  return { weight:effective, skipped, rescaled:true, noSource:false };
 }
 
 async function loadCompetencyScopeShared(year, grade, term) {
@@ -2857,7 +2889,14 @@ async function startCompStudentPrint(student, rows, todo, subjectNameById, plann
   button.setAttribute("aria-busy", "true");
   const ownerIds = [...new Set(todo.flatMap(item => item.kind === "item" ? [item.sourceKey === "subject"
     ? subjectOwnerById.get(item.subjectId) : assessmentOwnerByName.get(item.sourceLabel + "|" + item.name)]
-    : item.kind === "not-member" ? [...(item.othersByComp || new Map()).values()].flat().map(other => other.ownerId) : []).filter(Boolean))];
+    : item.kind === "not-member" ? [...(item.othersByComp || new Map()).values()].flat().map(other => other.ownerId) : [])
+    // ช่องแหล่ง not-member ในตารางผลยังบอกชื่อครู แม้ด้านนั้นถูกตัดออกจากรายการต้องตามแล้ว
+    .concat(rows.flatMap(row => compSources.filter(definition => definition.key !== "subject").flatMap(definition => {
+      const planned = compPlanned(row, definition.key, plannedByCompetency);
+      return competencySourceStatus(row.sources[definition.key], (row.weight || {})[definition.weight], planned).kind === "not-member"
+        ? planned.others.map(other => other.ownerId) : [];
+    })))
+    .filter(Boolean))];
   let ownerNameById = new Map(), ownerWarning = "";
   if (ownerIds.length) try {
     const profiles = await sb.from("profiles").select("id,name,email").in("id", ownerIds);
@@ -3116,7 +3155,7 @@ function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, miss
         target.blocked.add(row.competency.name);
         (item.kind === "wait" ? target.wait : target.newItems).add(row.competency.name);
       }
-    } else if (status.kind === "none" || status.kind === "not-member") {
+    } else if ((status.kind === "none" || status.kind === "not-member") && !row.skippedSources?.has(definition.key)) {
       const key = definition.key + "|" + status.kind;
       if (!missing.has(key)) missing.set(key, { kind:status.kind, sourceKey:definition.key, sourceLabel:definition.label,
         blocked:new Set(), othersByComp:new Map() });
@@ -3219,12 +3258,22 @@ function compDetailHtml(row, plannedByCompetency, subjectNameById) {
     const weight = (row.weight || {})[definition.weight];
     const status = competencySourceStatus(source, weight, compPlanned(row, definition.key, plannedByCompetency));
     const detail = compSourceDetail(row, definition, plannedByCompetency, subjectNameById);
-    html += "<div class='comp-source-row'><span class='comp-source-name'>" + definition.label + " · น้ำหนัก " + escapeHtml(Number(weight).toFixed(0)) + "%</span>" +
+    html += "<div class='comp-source-row'><span class='comp-source-name'>" + definition.label + " · น้ำหนัก " + escapeHtml(Number(weight).toFixed(0)) + "%" +
+      escapeHtml(compWeightNote(row, definition)) + "</span>" +
       compChip(status) + (detail ? "<div class='comp-source-detail'>" + escapeHtml(detail) + "</div>" : "") + "</div>";
   }
   if ((!result.complete && result.reason !== "ข้อมูลยังไม่ครบ — ไม่สามารถสรุปคะแนนได้") || (result.complete && !result.level))
     html += "<div class='comp-reason'>" + escapeHtml(result.reason) + "</div>";
   return html;
+}
+
+// ป้ายต่อท้ายน้ำหนักในแผงรายละเอียด: แหล่งที่ถูกตัด = ไม่นำมาคิด · แหล่งที่เหลือเมื่อเกลี่ยใหม่ = น้ำหนักคิดจริง
+function compWeightNote(row, definition) {
+  if (row.skippedSources?.has(definition.key)) return " · ไม่นำมาคิด";
+  if (!row.skippedSources?.size || !row.effectiveWeight) return "";
+  const actual = Number(row.effectiveWeight[definition.weight]);
+  if (!(actual > 0)) return "";
+  return " (คิดจริง " + (Number.isInteger(Math.round(actual * 10) / 10) ? actual.toFixed(0) : actual.toFixed(1)) + "%)";
 }
 
 function compTodoHtml(todo) {
@@ -3277,7 +3326,7 @@ function renderCompetencyResult(student, rows, year, grade, term, subjectNameByI
     "<section class='card'><h2 class='comp-title'>ผล " + rows.length + " ด้าน</h2><div class='hint'>แถบเล็ก 3 ช่อง = รายวิชา · กิจกรรม · กิจวัตร</div><div class='comp-grid'>";
   rows.forEach((row,index) => {
     const result = row.combined;
-    const weighted = compSources.filter(definition => Number((row.weight || {})[definition.weight]) > 0);
+    const weighted = compSources.filter(definition => Number((row.effectiveWeight || row.weight || {})[definition.weight]) > 0);
     const completedSources = weighted.filter(definition => row.sources[definition.key].complete).length;
     const bars = compSources.map(definition => {
       const status = competencySourceStatus(row.sources[definition.key], (row.weight || {})[definition.weight], compPlanned(row, definition.key, plannedByCompetency));
