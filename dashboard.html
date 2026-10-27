@@ -1054,8 +1054,10 @@
     // ต่อเมื่อมีแถว staff หรือเป็นผู้อนุมัติเท่านั้น คนอื่นไม่มีแถวในการ์ดที่ต้องอัปเดต
     if (me || isApprover || makeupApprover) {
       // ดึงใหม่เฉพาะส่วนที่ event นั้นเปลี่ยน (ลด request) — ส่วนที่ไม่ได้ดึงใช้ผลล่าสุดตอน render
-      // กลับมาที่แท็บ = ดึงครบทุกส่วนเหมือนเดิม (ผู้ใช้เคาะ 2026-10-27)
+      // กลับมาที่แท็บ = ดึงครบทุกส่วน แต่ไม่เกิน 1 ครั้งต่อ 5 นาที (ผู้ใช้เคาะ 2026-10-27)
       const ALL_PARTS = ["projects", "alerts", "duty", "makeups"];
+      const TAB_RETURN_MIN_MS = 5 * 60 * 1000;
+      let lastFullSyncAt = Date.now();
       let lastAlertsResult = me ? myAlertsResult : { value:{} };
       let lastDutyMonths = dutyMonths;
       let syncPending = false;
@@ -1135,8 +1137,13 @@
 
       // 🛟 กันเหนียวเมื่อ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket)
       //    หรือเครื่องหลับแล้วตื่น — กลับมาที่แท็บเมื่อไหร่ก็ได้ของล่าสุดอยู่ดี
+      //    สลับแอปถี่ ๆ (เช่นไป LINE แล้วกลับ) ไม่ดึงซ้ำถ้าดึงครบไปไม่ถึง 5 นาที
+      //    — ส่วนที่มี Realtime ยังขึ้นทันที · ส่วนที่ไม่มี (เวรประจำเดือน/งานตีกลับ) ช้าได้ไม่เกิน 5 นาที
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") scheduleSync(ALL_PARTS);
+        if (document.visibilityState !== "visible") return;
+        if (Date.now() - lastFullSyncAt < TAB_RETURN_MIN_MS) return;
+        lastFullSyncAt = Date.now();
+        scheduleSync(ALL_PARTS);
       });
       window.addEventListener("pagehide", () => { sb.removeChannel(alertsChannel); });
     }
