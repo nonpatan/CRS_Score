@@ -79,6 +79,12 @@
   .back-link { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); text-decoration:none; font-size:14px; font-weight:600; }
   .facts .section { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin:10px 12px 2px; }
   .facts .kind-group { border-left:3px solid var(--line); padding-left:8px; }
+  .fact-group { margin:0; border-top:1px solid var(--line); }
+  .fact-group > summary { display:flex; align-items:center; gap:8px; min-height:44px; padding:8px 12px; list-style:none; scroll-margin-top:232px; scroll-margin-bottom:110px; }
+  .fact-group > summary::-webkit-details-marker { display:none; }
+  .fact-group > summary::before { content:"▸"; color:var(--teal); }
+  .fact-group[open] > summary::before { content:"▾"; }
+  .fact-group-count { color:var(--muted); font-size:13px; font-weight:400; }
   .facts-intro { border-left:3px solid var(--teal); background:var(--teal-soft); border-radius:0 9px 9px 0; padding:10px 12px; font-size:14px; margin:0 0 12px; }
   .facts-intro p { margin:0 0 4px; } .facts-intro p:last-child { margin:0; }
   .facts { border:1px solid var(--line); border-radius:9px; margin:4px 0 10px; font-size:14px; background:var(--white); }
@@ -166,7 +172,8 @@ if (!session) {
       const pending = new Set(), timers = new Map(), revision = new Map(), inFlight = new Set();
       let domainIndex = 0, lastSaved = "", textSaving = Promise.resolve(), submitting = false;
       let stickyObserver = null;
-      const showWorkFacts = section.kind === "dept_head";
+      const directorView = section.kind === "committee" && assignment.rater_staff_id === round.director_staff_id;
+      const showWorkFacts = section.kind === "dept_head" || directorView;
       let workFacts = null, workFactsState = showWorkFacts ? "loading" : "none";
       const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date()).map(part => [part.type, part.value]));
       const todayBangkok = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
@@ -176,6 +183,7 @@ if (!session) {
         if (!showWorkFacts) return "";
         if (workFactsState === "loading") return `<div class="facts-intro" role="note" data-facts-intro aria-busy="true"><p><b>ข้อมูลประกอบจากระบบ</b> — ช่วงรอบ ${esc(factPeriod())}</p><div class="facts-state" role="status">กำลังโหลดข้อมูลจากระบบ…<div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:55%"></div></div></div>`;
         if (workFactsState === "error") return `<div class="facts-intro" role="note" data-facts-intro><p><b>ข้อมูลประกอบจากระบบ</b> — ช่วงรอบ ${esc(factPeriod())}</p><div class="facts-err" role="alert"><span>โหลดข้อมูลประกอบไม่สำเร็จ · ให้คะแนนต่อได้ตามปกติ</span><button type="button" data-retry-facts>ลองใหม่</button></div></div>`;
+        if (directorView) return `<div class="facts-intro" role="note" data-facts-intro><p><b>ข้อมูลประกอบจากระบบ</b> — ช่วงรอบ ${esc(factPeriod())}${readonly ? ` · ข้อมูล ณ วันที่เปิดดู ${esc(thaiShortDateText(todayBangkok))}` : ""}</p><p>ข้อมูลการทำงานจากทุกฝ่าย สำหรับ ผอ. · กดหัวข้อฝ่ายเพื่อดู</p><p>ใช้ประกอบการพิจารณาเท่านั้น <b>ไม่ใช่คะแนน</b> และระบบไม่เสนอคะแนนให้ · งานที่ทำนอกระบบ (เช่น งานเอกสาร งานประชุม) ไม่อยู่ในตัวเลขนี้</p></div>`;
         const depts = workFacts.departments;
         const active = depts.filter(dept => dept.hasSource).map(dept => dept.label);
         const unavailable = depts.filter(dept => !dept.hasSource).map(dept => `${dept.label}: ยังไม่มีข้อมูลในระบบ`);
@@ -186,10 +194,13 @@ if (!session) {
       const factBoxHtml = () => {
         if (!showWorkFacts || workFactsState !== "ready" || !workFacts.groups.length) return "";
         const showDept = workFacts.groups.length >= 2;
+        const factLinesHtml = group => group.lines.map(line =>
+          `<div class="fact${line.na ? " na" : ""}"><span class="fact-label">${esc(line.label)}</span><span class="fact-val">${esc(line.value)}</span>
+          ${line.context ? `<span class="fact-ctx">${esc(line.context)}</span>` : ""}${line.details?.rows?.length ? `<details><summary>${esc(line.details.summary)}</summary><ul>${line.details.rows.map(row => `<li>${esc(row)}</li>`).join("")}</ul></details>` : ""}</div>`).join("");
         return `<div class="facts" aria-label="ข้อมูลการทำงานของครูจากระบบ"><div class="facts-head"><span><b>ข้อมูลการทำงานของครู</b></span><span>${esc(factPeriod())}</span></div>
-          ${workFacts.groups.map(group => `${showDept ? `<div class="section kind-group">${esc(group.label)}</div>` : ""}${group.lines.map(line =>
-            `<div class="fact${line.na ? " na" : ""}"><span class="fact-label">${esc(line.label)}</span><span class="fact-val">${esc(line.value)}</span>
-            ${line.context ? `<span class="fact-ctx">${esc(line.context)}</span>` : ""}${line.details?.rows?.length ? `<details><summary>${esc(line.details.summary)}</summary><ul>${line.details.rows.map(row => `<li>${esc(row)}</li>`).join("")}</ul></details>` : ""}</div>`).join("")}`).join("")}</div>`;
+          ${workFacts.groups.map(group => directorView
+            ? `<details class="fact-group"><summary>${esc(group.label)} <span class="fact-group-count">(${group.lines.length} รายการ)</span></summary>${factLinesHtml(group)}</details>`
+            : `${showDept ? `<div class="section kind-group">${esc(group.label)}</div>` : ""}${factLinesHtml(group)}`).join("")}</div>`;
       };
       const paintWorkFacts = () => {
         const intro = app.querySelector("[data-facts-intro]");
