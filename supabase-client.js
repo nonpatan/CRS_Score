@@ -5133,7 +5133,9 @@ export async function appendProjectLinks(projectId, links, startSortOrder = 0) {
   if (error) throw new Error("แนบเอกสารเพิ่มไม่สำเร็จ: " + error.message);
 }
 
-export async function loadAcademicProjects(year) {
+export async function loadAcademicProjects(year, { details = true } = {}) {
+  // details:false = ยิงแค่ projects + staff (หน้าแรกใช้แค่ชื่อ/วันที่/งบ/ผู้รับผิดชอบ)
+  // ข้าม links / okrs / school_okrs / approvals แต่คงคีย์เป็น [] ให้รูปผลเหมือนเดิม
   if (!year) return [];
   const { data: projects, error: projectError } = await sb.from("academic_projects")
     .select("*")
@@ -5145,22 +5147,23 @@ export async function loadAcademicProjects(year) {
 
   const projectIds = projects.map(p => p.id);
   const staffIds = [...new Set(projects.map(p => p.responsible_staff_id).filter(Boolean))];
+  const skipped = Promise.resolve({ data: [], error: null });
   const [linksRes, okrLinksRes, okrsRes, staffRes, historyRes] = await Promise.all([
-    sb.from("academic_project_links")
+    !details ? skipped : sb.from("academic_project_links")
       .select("*")
       .in("project_id", projectIds)
       .order("sort_order"),
-    sb.from("academic_project_okrs")
+    !details ? skipped : sb.from("academic_project_okrs")
       .select("project_id,okr_id")
       .in("project_id", projectIds),
-    sb.from("school_okrs")
+    !details ? skipped : sb.from("school_okrs")
       .select("*")
       .eq("year", year)
       .order("sort_order"),
     staffIds.length
       ? sb.from("staff").select("id,full_name").in("id", staffIds)
       : Promise.resolve({ data: [], error: null }),
-    sb.from("academic_project_approvals")
+    !details ? skipped : sb.from("academic_project_approvals")
       .select("project_id,action,note,acted_by_name,created_at")
       .in("project_id", projectIds)
       .order("created_at", { ascending: false })

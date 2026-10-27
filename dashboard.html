@@ -448,7 +448,7 @@
     loadMyDashboardAlerts, pickMyDashboardAlerts, loadDutyMonthReminders,
     isProjectApprover, isMakeupApprover, listPendingMakeupRequests,
     bangkokNow, toDateStr, formatMoney
-  } from "./supabase-client.js?v=20261027-4";
+  } from "./supabase-client.js?v=20261027-5";
 
   document.querySelectorAll("[data-dashboard-signout]").forEach(button => {
     button.addEventListener("click", event => {
@@ -966,7 +966,7 @@
         loadAcademicCalendar(year),
         getSetting("academic_calendar_lead_days").catch(() => null)
       ])),
-      capture(loadAcademicProjects(year)),
+      capture(loadAcademicProjects(year, { details:false })),
       capture(isProjectApprover()),
       capture(isMakeupApprover()),
       me ? capture(loadMyDashboardAlerts({ staffId:me.id, userId:session.user.id, year, today })) : Promise.resolve({ value:null }),
@@ -1053,20 +1053,27 @@
     // ⛔ ไม่ subscribe daily_attendance — ตารางใหญ่และมี event พร้อมกันหลายร้อยแถว
     // ต่อเมื่อมีแถว staff หรือเป็นผู้อนุมัติเท่านั้น คนอื่นไม่มีแถวในการ์ดที่ต้องอัปเดต
     if (me || isApprover || makeupApprover) {
+      // ดึงใหม่เฉพาะส่วนที่ event นั้นเปลี่ยน (ลด request) — ส่วนที่ไม่ได้ดึงใช้ผลล่าสุดตอน render
+      // กลับมาที่แท็บ = ดึงครบทุกส่วนเหมือนเดิม (ผู้ใช้เคาะ 2026-10-27)
+      const ALL_PARTS = ["projects", "alerts", "duty", "makeups"];
+      let lastAlertsResult = me ? myAlertsResult : { value:{} };
+      let lastDutyMonths = dutyMonths;
       let syncPending = false;
-      async function syncDashboardAlerts() {
+      async function syncDashboardAlerts(parts) {
         if (syncPending) return;
         syncPending = true;
         try {
           const [freshProjectsResult, freshAlertsResult, freshDutyMonths] = await Promise.all([
-            isApprover ? capture(loadAcademicProjects(year)) : Promise.resolve(null),
-            me
+            isApprover && parts.has("projects") ? capture(loadAcademicProjects(year, { details:false })) : Promise.resolve(null),
+            me && parts.has("alerts")
               ? capture(loadMyDashboardAlerts({ staffId:me.id, userId:session.user.id, year, today }))
-              : Promise.resolve({ value:{} }),
-            loadDutyMonthReminders(today).catch(() => [])
+              : Promise.resolve(null),
+            parts.has("duty") ? loadDutyMonthReminders(today).catch(() => []) : Promise.resolve(null)
           ]);
-          // คิวสอนชดนับใหม่ทุกครั้งที่มีสัญญาณ — ครูส่งคำขอเพิ่มหรือถูกตัดสินไปแล้วก็ได้
-          if (makeupApprover) pendingMakeups = (await listPendingMakeupRequests()).length;
+          if (freshAlertsResult) lastAlertsResult = freshAlertsResult;
+          if (freshDutyMonths) lastDutyMonths = freshDutyMonths;
+          // คิวสอนชดนับใหม่เมื่อมีสัญญาณ — ครูส่งคำขอเพิ่มหรือถูกตัดสินไปแล้วก็ได้
+          if (makeupApprover && parts.has("makeups")) pendingMakeups = (await listPendingMakeupRequests()).length;
           if (freshProjectsResult) {
             try {
               const allProjects = resultValue(freshProjectsResult);
@@ -1078,10 +1085,10 @@
             }
           }
           renderMyAlerts(
-            freshAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-            pendingMakeups, makeupApprover, freshDutyMonths
+            lastAlertsResult, dailyResult, today, pendingApprovals, isApprover,
+            pendingMakeups, makeupApprover, lastDutyMonths
           );
-          if ((!freshProjectsResult || !freshProjectsResult.error) && !freshAlertsResult.error) {
+          if ((!freshProjectsResult || !freshProjectsResult.error) && (!freshAlertsResult || !freshAlertsResult.error)) {
             updateFreshTime();
           }
         } finally {
@@ -1090,37 +1097,46 @@
       }
 
       let syncTimer = null;
-      const scheduleSync = () => {
-        // การแก้ต่อเนื่องอาจยิงหลาย event จึงรวบเป็นครั้งเดียว
+      let queuedParts = new Set();
+      const scheduleSync = parts => {
+        // การแก้ต่อเนื่องอาจยิงหลาย event จึงรวบเป็นครั้งเดียว (รวมส่วนที่ต้องดึงของทุก event)
+        parts.forEach(part => queuedParts.add(part));
         clearTimeout(syncTimer);
-        syncTimer = setTimeout(syncDashboardAlerts, 400);
+        syncTimer = setTimeout(() => {
+          const parts = queuedParts;
+          queuedParts = new Set();
+          syncDashboardAlerts(parts);
+        }, 400);
       };
 
       const alertsChannel = sb.channel("dashboard-alerts");
-      alertsChannel.on("postgres_changes", {
-        event: "*", schema: "public", table: "academic_projects"
-      }, scheduleSync);
+      // คนที่ไม่ใช่ผู้อนุมัติไม่ได้ดึงโครงการใหม่ตอน sync — event นี้จึงไม่มีอะไรให้อัปเดต
+      if (isApprover) {
+        alertsChannel.on("postgres_changes", {
+          event: "*", schema: "public", table: "academic_projects"
+        }, () => scheduleSync(["projects"]));
+      }
       if (me) {
         alertsChannel.on("postgres_changes", {
           event: "*", schema: "public", table: "duty_swaps"
-        }, scheduleSync);
+        }, () => scheduleSync(["alerts"]));
         alertsChannel.on("postgres_changes", {
           event: "*", schema: "public", table: "coverage_assignments"
-        }, scheduleSync);
+        }, () => scheduleSync(["alerts"]));
       }
       // 🔑 ผู้อนุมัติต้องได้ event ของ teacher_makeups แม้ไม่มีแถว staff ของตัวเอง
       //    (ของเดิมอยู่ใน if (me) จึงไม่ครอบคนที่เข้ามาในฐานะผู้อนุมัติอย่างเดียว)
       if (me || makeupApprover) {
         alertsChannel.on("postgres_changes", {
           event: "*", schema: "public", table: "teacher_makeups"
-        }, scheduleSync);
+        }, () => scheduleSync(["makeups", "alerts"]));
       }
       alertsChannel.subscribe();
 
       // 🛟 กันเหนียวเมื่อ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket)
       //    หรือเครื่องหลับแล้วตื่น — กลับมาที่แท็บเมื่อไหร่ก็ได้ของล่าสุดอยู่ดี
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") scheduleSync();
+        if (document.visibilityState === "visible") scheduleSync(ALL_PARTS);
       });
       window.addEventListener("pagehide", () => { sb.removeChannel(alertsChannel); });
     }
