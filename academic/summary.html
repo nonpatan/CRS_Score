@@ -827,6 +827,39 @@ function compSubjectLabel(id, subjectNameById = new Map()) {
   return parent ? name + " · " + parent.split(" (")[0] : name;
 }
 
+function ensureTabInit(mode) {
+  if (!tabInit[mode]) return;
+  if (tabInitPromise.has(mode)) return tabInitPromise.get(mode);
+
+  const report = { attendance: elAttendanceReport, competency: elCompetencyReport, gpa: elGpaReport }[mode];
+  const result = { attendance: elAttResult, competency: elCompResult, gpa: elGpaResult }[mode];
+  if (!tabInitialResult.has(mode)) tabInitialResult.set(mode, result.innerHTML);
+  const selects = [...report.querySelectorAll(".card select")];
+  const disabledBefore = selects.map(select => select.disabled);
+  selects.forEach(select => { select.disabled = true; });
+  result.innerHTML = "<div class='card hint' role='status'>กำลังโหลดตัวเลือกของแท็บนี้…</div>";
+  const loadingHtml = result.innerHTML;
+
+  const promise = (async () => {
+    try {
+      await pageReady;
+      await tabInit[mode]();
+      if (result.innerHTML === loadingHtml) result.innerHTML = tabInitialResult.get(mode);
+    } catch (error) {
+      tabInitPromise.delete(mode);
+      result.innerHTML = "<div class='card incomplete' role='alert'>โหลดแท็บนี้ไม่สำเร็จ: " +
+        escapeHtml(error?.message || String(error)) + " — กดแท็บอีกครั้งเพื่อลองใหม่</div>";
+    } finally {
+      selects.forEach((select, index) => {
+        // initAttendanceReport ตั้งสถานะช่องวิชาตามปีที่เลือกเอง
+        if (mode !== "attendance" || select !== elAttSubject) select.disabled = disabledBefore[index];
+      });
+    }
+  })();
+  tabInitPromise.set(mode, promise);
+  return promise;
+}
+
 function setReportMode(mode) {
   elSubjectReport.style.display = mode === "subject" ? "block" : "none";
   elAttendanceReport.style.display = mode === "attendance" ? "block" : "none";
@@ -836,6 +869,7 @@ function setReportMode(mode) {
   document.getElementById("tab-attendance").classList.toggle("active", mode === "attendance");
   document.getElementById("tab-gpa").classList.toggle("active", mode === "gpa");
   document.getElementById("tab-competency").classList.toggle("active", mode === "competency");
+  ensureTabInit(mode);
 }
 document.getElementById("tab-subject").addEventListener("click", () => setReportMode("subject"));
 document.getElementById("tab-attendance").addEventListener("click", () => setReportMode("attendance"));
@@ -2034,11 +2068,11 @@ async function loadAttendanceSubjectContext() {
     fetchAllRows(() => sb.from("enrollments")
       .select("id,subject_id,student:student_id(*)")
       .in("subject_id", subjectIds), "id"),
-    sb.from("attendance_sessions")
+    fetchAllRows(() => sb.from("attendance_sessions")
       .select("id,subject_id,session_date,periods_covered,created_at,attendance_records(student_id,status)")
       .in("subject_id", subjectIds)
       .order("session_date")
-      .order("created_at"),
+      .order("created_at"), "id"),
     sb.from("makeup_hours")
       .select("subject_id,student_id,periods")
       .in("subject_id", subjectIds)
@@ -4102,11 +4136,15 @@ window.addEventListener("afterprint", () => {
 });
 
 // เริ่มทำงาน
-await populateGradeSelects();
-await loadSubjects();
-await initAttendanceReport();
-await initCompetencyReport();
-await initGpaReport();
+const tabInit = { attendance: initAttendanceReport, competency: initCompetencyReport, gpa: initGpaReport };
+const tabInitPromise = new Map();
+const tabInitialResult = new Map();
+let pageReady;
+pageReady = (async () => {
+  await populateGradeSelects();
+  await loadSubjects();
+})();
+await pageReady;
 }
 </script>
 </body>
