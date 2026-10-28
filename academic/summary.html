@@ -158,13 +158,14 @@
   .student-button:hover,.student-button.selected { border-color:var(--teal); background:var(--teal-soft); }
   .student-button .student-name { font-weight:600; }
   .student-button .student-meta { color:var(--muted); font-size:13px; }
-  .student-button.attendance-risk { border-color:#d8a43c; background:var(--amber-soft); }
-  .student-button.attendance-risk .student-name { color:var(--amber); }
-  .student-button.attendance-risk.selected { border-color:var(--amber); background:var(--amber-soft); box-shadow:0 0 0 2px rgba(138,90,0,0.16); }
-  .student-button.attendance-critical { border-color:var(--danger); background:var(--danger-soft); }
-  .student-button.attendance-critical .student-name, .student-button.attendance-critical .attendance-risk-label { color:var(--danger); }
-  .student-button.attendance-critical.selected { border-color:var(--danger); background:var(--danger-soft); box-shadow:0 0 0 2px rgba(163,45,45,0.16); }
+  #attendance-report .student-button.attendance-risk { border-color:#d8a43c !important; background:var(--amber-soft) !important; }
+  #attendance-report .student-button.attendance-risk .student-name { color:var(--amber); }
+  #attendance-report .student-button.attendance-risk.selected { border-color:var(--amber) !important; background:var(--amber-soft) !important; box-shadow:0 0 0 2px rgba(138,90,0,0.16); }
+  #attendance-report .student-button.attendance-critical { border-color:var(--danger) !important; background:var(--danger-soft) !important; }
+  #attendance-report .student-button.attendance-critical .student-name, #attendance-report .student-button.attendance-critical .attendance-risk-label { color:var(--danger); }
+  #attendance-report .student-button.attendance-critical.selected { border-color:var(--danger) !important; background:var(--danger-soft) !important; box-shadow:0 0 0 2px rgba(163,45,45,0.16); }
   .attendance-risk-label { display:block; color:var(--amber); font-weight:600; margin-top:2px; }
+  #att-result { scroll-margin-top:12px; }
   #competency-report { max-width:1040px; margin:0 auto; }
   /* app-shell.css วางรายงานเดิมสองคอลัมน์ จึงเจาะเฉพาะแท็บนี้ให้การ์ด B เรียงเต็มแถว */
   main.academic-content #competency-report[style*="display: block"] { display:block !important; }
@@ -1955,6 +1956,7 @@ function renderAttendanceStudentList() {
     const risk = computeAttendanceRisk(student.id, riskDataList, { warnPercent: attendanceWarnPercent(), primary });
     const button = document.createElement("button");
     button.type = "button";
+    button.setAttribute("aria-pressed", "false");
     button.className = "student-button" + (!primary && risk.critical ? " attendance-critical" : risk.risky ? " attendance-risk" : "");
     button.dataset.student = student.id;
     button.innerHTML = "<span class='student-name'>" + escapeHtml(student.name) + "</span>" +
@@ -1969,10 +1971,16 @@ function renderAttendanceStudentList() {
       "</span>";
     button.addEventListener("click", () => {
       selectedAttendanceStudentId = student.id;
-      elAttStudentList.querySelectorAll(".student-button").forEach(item =>
-        item.classList.toggle("selected", item.dataset.student === student.id)
-      );
+      elAttStudentList.querySelectorAll(".student-button").forEach(item => {
+        const active = item.dataset.student === student.id;
+        item.classList.toggle("selected", active);
+        item.setAttribute("aria-pressed", String(active));
+      });
       renderAttendanceStudent();
+      elAttResult.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start"
+      });
     });
     elAttStudentList.appendChild(button);
   }
@@ -2022,8 +2030,10 @@ async function loadAttendanceSubjectContext() {
   }
 
   const subjectIds = attendanceMembers.map(s => s.id);
-  const [rosters, sessionResult, makeupResult] = await Promise.all([
-    Promise.all(subjectIds.map(id => getRosterForSubject(id))),
+  const [rosterResult, sessionResult, makeupResult] = await Promise.all([
+    fetchAllRows(() => sb.from("enrollments")
+      .select("id,subject_id,student:student_id(*)")
+      .in("subject_id", subjectIds), "id"),
     sb.from("attendance_sessions")
       .select("id,subject_id,session_date,periods_covered,created_at,attendance_records(student_id,status)")
       .in("subject_id", subjectIds)
@@ -2034,6 +2044,10 @@ async function loadAttendanceSubjectContext() {
       .in("subject_id", subjectIds)
   ]);
   if (token !== attendanceLoadToken) return;
+  if (rosterResult.error) {
+    elAttResult.innerHTML = "<div class='card incomplete'>โหลดรายชื่อนักเรียนไม่สำเร็จ: " + escapeHtml(rosterResult.error.message) + "</div>";
+    return;
+  }
   if (sessionResult.error || makeupResult.error) {
     const loadError = sessionResult.error || makeupResult.error;
     elAttResult.innerHTML = "<div class='card incomplete'>โหลดข้อมูลการเข้าเรียนไม่สำเร็จ: " + escapeHtml(loadError.message) + "</div>";
@@ -2041,11 +2055,16 @@ async function loadAttendanceSubjectContext() {
   }
 
   const union = new Map();
-  subjectIds.forEach((id, index) => {
-    attendanceRosterBySubject.set(id, new Set(rosters[index].map(student => student.id)));
-    for (const student of rosters[index]) union.set(student.id, student);
-  });
-  const placementResult = await applyPlacementsToReportStudents([...union.values()], attendanceSubject.year);
+  subjectIds.forEach(id => attendanceRosterBySubject.set(id, new Set()));
+  for (const row of rosterResult.data || []) {
+    if (!row.student) continue;
+    attendanceRosterBySubject.get(row.subject_id)?.add(row.student.id);
+    union.set(row.student.id, row.student);
+  }
+  const placementResult = !attendancePlacementError && attendanceSubject.year === elAttYear.value
+    ? applyAttendancePlacementsLocal([...union.values()], attendancePlacements)
+    : await applyPlacementsToReportStudents([...union.values()], attendanceSubject.year);
+  if (token !== attendanceLoadToken) return;
   if (placementResult.error) {
     elAttResult.innerHTML = "<div class='card incomplete'>โหลดประวัติชั้น/ห้องไม่สำเร็จ: " + escapeHtml(placementResult.error.message) + "</div>";
     return;
@@ -2062,6 +2081,20 @@ async function loadAttendanceSubjectContext() {
   }
 }
 
+function applyAttendancePlacementsLocal(roster, placements) {
+  const byStudentId = new Map(placements.map(placement => [placement.id, placement]));
+  let missing = 0;
+  const rows = roster.map(student => {
+    const placement = byStudentId.get(student.id);
+    if (!placement) {
+      missing++;
+      return { ...student, grade_level: "", classroom: "", placementMissing: true };
+    }
+    return { ...student, grade_level: placement.grade_level, classroom: placement.classroom };
+  });
+  return { rows, missing, error: null };
+}
+
 function attendanceRoundMap(sessionsForSubject) {
   const byDate = new Map();
   for (const session of sessionsForSubject) {
@@ -2075,7 +2108,7 @@ function attendanceRoundMap(sessionsForSubject) {
       const created = String(a.created_at || "").localeCompare(String(b.created_at || ""));
       return created || String(a.id || "").localeCompare(String(b.id || ""));
     });
-    rows.forEach((session, index) => rounds.set(session.id, index + 1));
+    rows.forEach((session, index) => rounds.set(session.id, { number: index + 1, total: rows.length }));
   }
   return rounds;
 }
@@ -2123,7 +2156,9 @@ function renderAttendanceMember(student, subject, { integratedMember = false } =
   const historyHtml = history.map(item =>
     "<div class='attendance-row'>" +
       "<div><div class='attendance-date'>" + escapeHtml(formatAttendanceDate(item.session.session_date)) + "</div>" +
-        "<div class='attendance-round'>ครั้งที่ " + (rounds.get(item.session.id) || 1) + " ของวัน</div></div>" +
+        (rounds.get(item.session.id)?.total > 1
+          ? "<div class='attendance-round'>ครั้งที่ " + rounds.get(item.session.id).number + " ของวัน</div>"
+          : "") + "</div>" +
       "<span class='status-badge " + attendanceStatusClass(item.status) + "'>" + escapeHtml(item.status) + "</span>" +
       "<span class='attendance-periods'>" + escapeHtml(item.session.periods_covered) + " คาบ</span>" +
     "</div>"
@@ -2137,9 +2172,14 @@ function renderAttendanceMember(student, subject, { integratedMember = false } =
     absenceOverview +
     "<div class='attendance-summary'>" + statHtml + "</div>" +
     "<div class='hint'>คาบขาดสะสมคิด ขาด = เต็มคาบ, ลาป่วย/ลากิจ = ครึ่งคาบ, มา/มาสาย = ไม่ขาด</div>" +
-    "<div class='attendance-history'>" +
-      (historyHtml || "<div class='hint'>ยังไม่มีประวัติเช็คชื่อในวิชานี้</div>") +
-    "</div>" +
+    (historyHtml
+      ? "<details class='member-detail attendance-history-details'" + (integratedMember ? "" : " open") + ">" +
+          "<summary><span>ประวัติเช็คชื่อรายวัน · " + recordedTimes + " ครั้ง" +
+            (counts["ขาด"].times ? " · ขาด " + counts["ขาด"].times : "") +
+            (counts["ลาป่วย"].times + counts["ลากิจ"].times ? " · ลา " + (counts["ลาป่วย"].times + counts["ลากิจ"].times) : "") +
+            (counts["มาสาย"].times ? " · สาย " + counts["มาสาย"].times : "") +
+          "</span></summary><div class='attendance-history'>" + historyHtml + "</div></details>"
+      : "<div class='attendance-history'><div class='hint'>ยังไม่มีประวัติเช็คชื่อในวิชานี้</div></div>") +
   "</div>";
 }
 
