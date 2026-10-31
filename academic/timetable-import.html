@@ -141,7 +141,17 @@ function overlapName(row) { return timetables.find(other=>other.id!==row.id && o
 async function activate(row) {
   if (!await window.crsAskConfirm({title:'เปิดใช้งานตารางสอน',message:`ครูทุกคนจะเห็นตาราง ${row.name} ใช้ตั้งแต่ ${dateThai(row.start_date)} ถึง ${dateThai(row.end_date)}`,okLabel:'เปิดใช้งาน'})) return;
   const result=await sb.from('timetables').update({status:'ใช้งาน'}).eq('id',row.id);
-  if(result.error) { toast(result.error.code==='23P01'?`ช่วงวันที่ทับกับตาราง ${overlapName(row)} ที่ใช้งานอยู่ — แก้ช่วงวันที่หรือเปลี่ยนตารางนั้นเป็นร่างก่อน`:result.error.message,false); return; }
+  if(result.error) {
+    // ตรวจคาบชนมีที่เดียวคือ trigger ตอนเปิดใช้ (ผู้ใช้เคาะ 2026-10-31: FET ตรวจมาแล้ว ไม่ตรวจซ้ำหลังนำเข้า)
+    // จึงดึงรายละเอียดจุดชนเฉพาะตอนที่เปิดใช้ไม่ผ่านเพราะชนเท่านั้น
+    if(/ช่องชนกัน/.test(result.error.message||'')) {
+      const detail=await sb.rpc('timetable_conflicts',{p_timetable_id:row.id});
+      const rows=detail.error?[]:(detail.data||[]);
+      toast(rows.length?`เปิดใช้ไม่ได้ · คาบชน ${rows.length} จุด เช่น ${rows.slice(0,3).map(item=>`${item.kind} ${item.target} วัน${weekdayName[item.weekday]} ช่อง ${item.column_seq}`).join(' · ')} — แก้ใน FET แล้วนำเข้าทับ`:result.error.message,false);
+      return;
+    }
+    toast(result.error.code==='23P01'?`ช่วงวันที่ทับกับตาราง ${overlapName(row)} ที่ใช้งานอยู่ — แก้ช่วงวันที่หรือเปลี่ยนตารางนั้นเป็นร่างก่อน`:result.error.message,false); return;
+  }
   toast('เปิดใช้งานตารางสอนแล้ว'); await loadList();
 }
 $('timetable-list').addEventListener('click',async event=>{
@@ -343,12 +353,10 @@ $('import-button').addEventListener('click',async()=>{
     const result=await sb.rpc('import_timetable',{p:payload});
     if(result.error) throw result.error;
     importedId=result.data; importCompleted=true; replaceId=null;
-    const conflictResult=await sb.rpc('timetable_conflicts',{p_timetable_id:importedId});
-    const conflicts=fail(conflictResult,'ตรวจคาบชน');
+    // ไม่ตรวจคาบชนตรงนี้ — FET ตรวจมาแล้ว และ DB ตรวจซ้ำให้ตอนกดเปิดใช้ (trigger) อยู่แล้ว
     await loadList();
-    if(conflicts.length) { $('import-result').hidden=false; $('import-result').innerHTML=`ตารางยังเป็นร่าง · พบคาบชน ${conflicts.length} จุด แก้ใน FET แล้วนำเข้าทับ: <ul>${conflicts.map(row=>`<li>${esc(row.kind)} ${esc(row.target)} ชนกันวัน${weekdayName[row.weekday]} ช่อง ${row.column_seq}</li>`).join('')}</ul>`; }
-    else { toast('นำเข้าตารางสอนเป็นร่างแล้ว · ไม่พบคาบชน'); $('activate-imported').hidden=false; }
-  } catch(error) { $('import-error').textContent=importCompleted?`นำเข้าเป็นร่างแล้ว แต่ตรวจคาบชนไม่สำเร็จ: ${error.message} · เปิดรายการตารางด้านบนเพื่อตรวจอีกครั้ง`:error.code==='23505'?`มีตารางชื่อนี้ในปี ${payload.timetable.year} แล้ว — เปลี่ยนชื่อ หรือใช้ปุ่มนำเข้าทับ`: `${error.message} · ไม่มีอะไรถูกบันทึก ลองใหม่ได้`; }
+    toast('นำเข้าตารางสอนเป็นร่างแล้ว · ระบบจะตรวจคาบชนตอนกดเปิดใช้งาน'); $('activate-imported').hidden=false;
+  } catch(error) { $('import-error').textContent=importCompleted?`นำเข้าเป็นร่างแล้ว แต่โหลดรายการตารางไม่สำเร็จ: ${error.message} · รีเฟรชหน้าเพื่อดูตาราง`:error.code==='23505'?`มีตารางชื่อนี้ในปี ${payload.timetable.year} แล้ว — เปลี่ยนชื่อ หรือใช้ปุ่มนำเข้าทับ`: `${error.message} · ไม่มีอะไรถูกบันทึก ลองใหม่ได้`; }
   finally { button.disabled=false; button.textContent='นำเข้าเป็นร่าง'; }
 });
 $('activate-imported').addEventListener('click',async()=>{ const row=timetables.find(item=>item.id===importedId); if(row) await activate(row); });
