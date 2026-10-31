@@ -243,7 +243,8 @@ async function loadMatches() {
   try {
     const year=$('import-year').value, term=$('import-term').value;
     const [staffRows,subjectResult,facilityResult,mapResult,integrationResult,placementResult]=await Promise.all([
-      listStaffPicker(), (term ? sb.from('subjects').select('id,code,name,grade_level,subject_type').eq('year',year).eq('term',term) : sb.from('subjects').select('id,code,name,grade_level,subject_type').eq('year',year).is('term',null)).limit(1000),
+      listStaffPicker(), // วิชาประถมเป็นรายปี (term = null) ส่วนมัธยมแยกภาค ⟹ เลือกภาคแล้วต้องได้ทั้งวิชาภาคนั้นและวิชารายปี
+      (term ? sb.from('subjects').select('id,code,name,grade_level,subject_type').eq('year',year).or(`term.eq.${term},term.is.null`) : sb.from('subjects').select('id,code,name,grade_level,subject_type').eq('year',year).is('term',null)).limit(1000),
       sb.from('facilities').select('id,name').eq('is_active',true).order('sort_order'),
       sb.from('timetable_import_maps').select('*').limit(1000),
       sb.from('integration_members').select('integrated_subject_id,member_subject_id').limit(1000),
