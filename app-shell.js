@@ -236,7 +236,8 @@ function syncFinanceKpiTones() {
             ["competency-core.html", "กำหนดสมรรถนะหลัก"],
             ["students.html", "นักเรียน"],
             ["rollover.html", "ขึ้นปีใหม่"],
-            ["academic-settings.html", "ตั้งค่างานวิชาการ"]
+            ["academic-settings.html", "ตั้งค่างานวิชาการ"],
+            ["timetable-import.html", "นำเข้าตารางสอน"]
           ]
         },
         {
@@ -312,6 +313,10 @@ function syncFinanceKpiTones() {
           title: "เลือกวิชาที่ต้องการจัดการ",
           description: "ค้นหาวิชาเดิม หรือเริ่มสร้างโครงสร้างรายวิชาใหม่",
           steps: ["เลือกวิชา", "แก้โครงสร้าง", "บันทึก"]
+        },
+        "timetable-import.html": {
+          title: "นำเข้าตารางสอน",
+          steps: ["เลือกไฟล์ FET", "จับคู่ครู/วิชา/ห้อง", "ตรวจและนำเข้า"]
         },
         "academic-settings.html": {
           title: "ตั้งค่างานวิชาการ",
