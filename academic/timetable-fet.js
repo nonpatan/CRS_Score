@@ -141,7 +141,9 @@ export function buildImportPayload({ header, columns, lessons, maps, replaceId =
 export function buildGrid({ columns, teachingDays, lessons, filter }) {
   const matches = lesson => {
     if (filter.kind === 'ห้อง') return lesson.rooms.some(room => room.grade_level === filter.grade_level && room.classroom === filter.classroom);
-    if (filter.kind === 'ครู') return lesson.teachers.some(teacher => (typeof teacher === 'string' ? teacher : teacher.display_name) === filter.name);
+    if (filter.kind === 'ครู') return lesson.teachers.some(teacher => filter.staffId
+      ? typeof teacher === 'object' && teacher.staff_id === filter.staffId
+      : (typeof teacher === 'string' ? teacher : teacher.display_name) === filter.name);
     return lesson.facility === filter.facility || lesson.facility_id === filter.facility;
   };
   return teachingDays.map(weekday => {
@@ -169,4 +171,59 @@ export function buildGrid({ columns, teachingDays, lessons, filter }) {
     }
     return { weekday, cells };
   });
+}
+
+// เลือกตารางที่ใช้วันนี้ก่อน แล้วจึงอนาคตที่ใกล้สุด หรืออดีตล่าสุด
+export function chooseTimetable(rows, today) {
+  const ordered = [...rows].sort((a,b) => a.start_date.localeCompare(b.start_date));
+  return ordered.find(row => row.start_date <= today && today <= row.end_date)
+    || ordered.find(row => row.start_date > today)
+    || [...rows].sort((a,b) => b.end_date.localeCompare(a.end_date))[0]
+    || null;
+}
+
+const cacheKey = id => `crs_tt_v1_${id}`;
+function validTimetableData(data, id, updatedAt) {
+  const has = (row, key) => Object.prototype.hasOwnProperty.call(row, key);
+  return data && data.id === id && data.updated_at === updatedAt
+    && Array.isArray(data.teaching_days) && Array.isArray(data.timetable_columns)
+    && Array.isArray(data.timetable_lessons)
+    && data.timetable_columns.every(row => Number.isInteger(row.seq) && row.start_time && row.end_time && row.kind)
+    && data.timetable_lessons.every(row => row.id && typeof row.title === 'string'
+      && has(row, 'subject_id') && has(row, 'facility_id')
+      && Array.isArray(row.timetable_lesson_rooms)
+      && Array.isArray(row.timetable_lesson_teachers)
+      && Array.isArray(row.timetable_placements)
+      && row.timetable_lesson_rooms.every(room => room.grade_level && room.classroom)
+      && row.timetable_lesson_teachers.every(teacher => has(teacher, 'staff_id') && teacher.display_name)
+      && row.timetable_placements.every(placement => Number.isInteger(placement.weekday)
+        && Number.isInteger(placement.column_seq) && Number.isInteger(placement.span)));
+}
+
+export function readTimetableCache(storage, id, updatedAt) {
+  try {
+    const data = JSON.parse(storage.getItem(cacheKey(id)) || 'null');
+    return validTimetableData(data, id, updatedAt) ? data : null;
+  } catch { return null; }
+}
+
+export function writeTimetableCache(storage, data) {
+  try {
+    if (!validTimetableData(data, data?.id, data?.updated_at)) return false;
+    storage.setItem(cacheKey(data.id), JSON.stringify(data));
+    return true;
+  } catch { return false; }
+}
+
+export function pruneTimetableCache(storage, activeIds) {
+  try {
+    const allowed = new Set(activeIds.map(cacheKey));
+    const stale = [];
+    for (let i=0; i<storage.length; i++) {
+      const key = storage.key(i);
+      if (key?.startsWith('crs_tt_v1_') && !allowed.has(key)) stale.push(key);
+    }
+    stale.forEach(key => storage.removeItem(key));
+    return true;
+  } catch { return false; }
 }

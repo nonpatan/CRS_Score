@@ -243,6 +243,7 @@ function syncFinanceKpiTones() {
         {
           label: "รายงาน",
           items: [
+            ["timetable.html", "ตารางสอน"],
             ["summary.html", "สรุปผลการเรียน"],
             ["warning.html", "เฝ้าระวัง มส."],
             ["remark-report.html", "นักเรียนติด ร."],
@@ -313,6 +314,10 @@ function syncFinanceKpiTones() {
           title: "เลือกวิชาที่ต้องการจัดการ",
           description: "ค้นหาวิชาเดิม หรือเริ่มสร้างโครงสร้างรายวิชาใหม่",
           steps: ["เลือกวิชา", "แก้โครงสร้าง", "บันทึก"]
+        },
+        "timetable.html": {
+          title: "ตารางสอน",
+          steps: ["เลือกมุม", "เลือกครู/ห้อง", "ดูหรือพิมพ์"]
         },
         "timetable-import.html": {
           title: "นำเข้าตารางสอน",
