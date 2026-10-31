@@ -115,12 +115,10 @@ button:disabled { opacity:.45; cursor:default; }
 </div>
 <script type="module">
 import { sb, requireAuth, signOut, fetchAllRows } from '../supabase-client.js?v=20261027-5';
-import { buildGrid, chooseTimetable, readTimetableCache, writeTimetableCache, pruneTimetableCache } from './timetable-fet.js?v=20261031-2';
+import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache } from './timetable-fet.js?v=20261101-1';
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const weekdays=['','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์'];
-const DETAIL_SELECT='id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(weekday,column_seq,span))';
-const LESSON_SELECT='id,title,subject_id,facility_id,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(weekday,column_seq,span)';
 const params=new URLSearchParams(location.search);
 const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const timeNow=()=>new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
@@ -140,29 +138,6 @@ async function getMyStaffId(uid) {
   const id=fail(result,'โหลดข้อมูลครูของฉัน')??null;
   try { localStorage.setItem(`crs_my_staff_${uid}`,JSON.stringify(id)); } catch {}
   return id;
-}
-async function fetchDetails(row) {
-  if(row.status!=='ร่าง') { const cached=readTimetableCache(safeStorage(),row.id,row.updated_at); if(cached) return cached; }
-  const data=fail(await sb.from('timetables').select(DETAIL_SELECT).eq('id',row.id).maybeSingle(),'โหลดรายละเอียดตารางสอน');
-  if(!data) throw new Error('ไม่พบตารางนี้ หรือคุณไม่มีสิทธิ์ดู · ตรวจลิงก์แล้วรีเฟรชหน้า');
-  if(data.updated_at!==row.updated_at) throw new Error('ตารางสอนเปลี่ยนระหว่างโหลด · รีเฟรชหน้าเพื่อตรวจเวอร์ชันล่าสุด');
-  if(!Array.isArray(data.teaching_days)||!Array.isArray(data.timetable_columns)||!Array.isArray(data.timetable_lessons)) throw new Error('รายละเอียดตารางสอนไม่ครบ');
-  if(data.timetable_lessons?.length===1000) {
-    const rows=fail(await fetchAllRows(()=>sb.from('timetable_lessons').select(LESSON_SELECT).eq('timetable_id',row.id),'id'),'โหลดรายการคาบทั้งหมด');
-    data.timetable_lessons=rows;
-  }
-  if(row.status!=='ร่าง') writeTimetableCache(safeStorage(),data);
-  return data;
-}
-function normalizeDetails(data) {
-  const columns=[...(data.timetable_columns||[])].sort((a,b)=>a.seq-b.seq);
-  const lessons=(data.timetable_lessons||[]).map(row=>({
-    id:row.id,title:row.title,subject_id:row.subject_id,facility_id:row.facility_id,
-    facility:row.facilities?.name||null,note:row.note,
-    rooms:row.timetable_lesson_rooms||[],teachers:row.timetable_lesson_teachers||[],
-    placements:row.timetable_placements||[]
-  }));
-  return {columns,lessons};
 }
 function teacherChoices() {
   const map=new Map();
@@ -259,7 +234,7 @@ function renderView() {
 async function selectSet(row,initial=false) {
   $('load-error').textContent=''; $('load-state').textContent='กำลังโหลดตารางสอน…'; $('controls').hidden=true; $('schedule-card').hidden=true;
   try {
-    const data=await fetchDetails(row);
+    const data=await loadTimetableDetails({sb,fetchAllRows,storage:safeStorage(),timetable:row});
     const normalized=normalizeDetails(data);
     selected=row; details={...data,columns:normalized.columns}; lessons=normalized.lessons;
     const mine=myAvailable();

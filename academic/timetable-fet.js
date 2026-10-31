@@ -227,3 +227,102 @@ export function pruneTimetableCache(storage, activeIds) {
     return true;
   } catch { return false; }
 }
+
+const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(weekday,column_seq,span))';
+const LESSON_SELECT = 'id,title,subject_id,facility_id,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(weekday,column_seq,span)';
+const queryData = (result, label) => {
+  if (result.error) throw new Error(`${label}: ${result.error.message}`);
+  return result.data;
+};
+
+export async function loadTimetableDetails({ sb, fetchAllRows, storage, timetable }) {
+  const row = timetable;
+  if (row.status !== 'ร่าง') {
+    const cached = readTimetableCache(storage, row.id, row.updated_at);
+    if (cached) return cached;
+  }
+  const data = queryData(await sb.from('timetables').select(DETAIL_SELECT).eq('id', row.id).maybeSingle(), 'โหลดรายละเอียดตารางสอน');
+  if (!data) throw new Error('ไม่พบตารางนี้ หรือคุณไม่มีสิทธิ์ดู · ตรวจลิงก์แล้วรีเฟรชหน้า');
+  if (data.updated_at !== row.updated_at) throw new Error('ตารางสอนเปลี่ยนระหว่างโหลด · รีเฟรชหน้าเพื่อตรวจเวอร์ชันล่าสุด');
+  if (!Array.isArray(data.teaching_days) || !Array.isArray(data.timetable_columns) || !Array.isArray(data.timetable_lessons)) throw new Error('รายละเอียดตารางสอนไม่ครบ');
+  if (data.timetable_lessons.length === 1000) {
+    data.timetable_lessons = queryData(await fetchAllRows(() => sb.from('timetable_lessons').select(LESSON_SELECT).eq('timetable_id', row.id), 'id'), 'โหลดรายการคาบทั้งหมด');
+  }
+  if (row.status !== 'ร่าง') writeTimetableCache(storage, data);
+  return data;
+}
+
+export async function loadTimetableForDate({ sb, fetchAllRows, storage, dateStr }) {
+  const timetable = queryData(await sb.from('timetables')
+    .select('id,year,term,name,start_date,end_date,updated_at')
+    .eq('status', 'ใช้งาน').lte('start_date', dateStr).gte('end_date', dateStr).maybeSingle(), 'โหลดตารางสอนของวัน');
+  if (!timetable) return { timetable: null };
+  const details = await loadTimetableDetails({ sb, fetchAllRows, storage, timetable });
+  return { timetable, details };
+}
+
+export function normalizeDetails(data) {
+  const columns = [...(data.timetable_columns || [])].sort((a, b) => a.seq - b.seq);
+  const lessons = (data.timetable_lessons || []).map(row => ({
+    id: row.id, title: row.title, subject_id: row.subject_id, facility_id: row.facility_id,
+    facility: row.facilities?.name || null, note: row.note,
+    rooms: row.timetable_lesson_rooms || [], teachers: row.timetable_lesson_teachers || [],
+    placements: row.timetable_placements || []
+  }));
+  return { columns, lessons };
+}
+
+const clock = value => String(value || '').slice(0, 5);
+const roomLabels = rooms => [...new Set(rooms.map(room => `${room.grade_level}/${room.classroom}`))];
+
+export function staffDaySchedule(details, weekday, staffId, { portion = 'full' } = {}) {
+  const { columns, lessons } = normalizeDetails(details);
+  const bySeq = new Map(columns.map(column => [column.seq, column]));
+  const result = [];
+  for (const lesson of lessons) {
+    if (!lesson.teachers.some(teacher => teacher.staff_id === staffId)) continue;
+    for (const placement of lesson.placements) {
+      if (placement.weekday !== weekday) continue;
+      const first = bySeq.get(placement.column_seq);
+      if (!first) continue;
+      const startTime = clock(first.start_time);
+      if (portion === 'morning' && startTime >= '12:00') continue;
+      if (portion === 'afternoon' && startTime < '12:00') continue;
+      const span = Array.from({ length: placement.span }, (_, index) => bySeq.get(placement.column_seq + index)).filter(Boolean);
+      const periods = span.filter(column => column.kind === 'คาบเรียน').length;
+      const rooms = roomLabels(lesson.rooms);
+      if (!periods && !rooms.length) continue;
+      result.push({ lessonId: lesson.id, subjectId: lesson.subject_id, title: lesson.title,
+        rooms, startSeq: placement.column_seq, endSeq: placement.column_seq + placement.span - 1,
+        startTime, endTime: clock(span.at(-1)?.end_time), periods, isTeaching: periods > 0 });
+    }
+  }
+  return result.sort((a, b) => a.startSeq - b.startSeq || a.title.localeCompare(b.title, 'th'));
+}
+
+export function subjectPeriodsFromSchedule(schedule) {
+  const result = new Map();
+  for (const slot of schedule) {
+    if (!slot.subjectId || !slot.isTeaching) continue;
+    if (!result.has(slot.subjectId)) result.set(slot.subjectId, { periods: 0, slots: [] });
+    const subject = result.get(slot.subjectId);
+    subject.periods += slot.periods;
+    subject.slots.push({ startTime: slot.startTime, endTime: slot.endTime, rooms: slot.rooms,
+      startSeq: slot.startSeq, endSeq: slot.endSeq });
+  }
+  return result;
+}
+
+export function busyStaffIds(details, weekday, seqRanges) {
+  const { columns, lessons } = normalizeDetails(details);
+  const bySeq = new Map(columns.map(column => [column.seq, column]));
+  const busy = new Map();
+  for (const lesson of lessons) for (const placement of lesson.placements) {
+    if (placement.weekday !== weekday || !seqRanges.some(range =>
+      placement.column_seq <= range.endSeq && placement.column_seq + placement.span - 1 >= range.startSeq)) continue;
+    const room = roomLabels(lesson.rooms)[0];
+    const reason = `${room ? `สอน ${room}` : lesson.title} ${clock(bySeq.get(placement.column_seq)?.start_time)}`.trim();
+    for (const teacher of lesson.teachers) if (teacher.staff_id && !busy.has(teacher.staff_id)) busy.set(teacher.staff_id, reason);
+  }
+  return busy;
+}

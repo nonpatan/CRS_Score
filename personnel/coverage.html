@@ -85,6 +85,9 @@
   .coverage-row .row-tools .delete-subject { margin-left:0; min-height:44px; }
   .coverage-row .field-note { margin-top:8px; }
   .add-subject { margin-top:8px; min-height:44px; }
+  .off-schedule { margin-top:10px; border-top:1px solid var(--line); }
+  .unlinked-lessons { margin:10px 0; padding:12px; background:var(--amber-soft); border-radius:8px; }
+  .unlinked-lessons ul { margin:6px 0; padding-left:22px; }
 
   /* บล็อกของ "คน" ต้องหนักกว่าบล็อกของ "งาน" อย่างเห็นได้ชัด */
   .person { padding:18px 0 6px; border-top:2px solid var(--line); }
@@ -202,6 +205,7 @@
         <span id="day-note-text">—</span>
         <button id="btn-reload" class="ghost small">โหลดใหม่</button>
       </div>
+      <div id="timetable-note" class="field-note" role="status"></div>
       <details class="coverage-details" style="margin-top:12px">
         <summary>ⓘ สิทธิ์เช็คชื่อของคนแทน</summary>
       <div class="banner info" style="margin-top:12px">
@@ -255,11 +259,12 @@
 
 <script type="module">
 import {
-  requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, personnelAccessDeniedHtml,
+  sb, fetchAllRows, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, personnelAccessDeniedHtml,
   loadCoverageDay, summarizeCoverageItem, buildCoverageRow, createCoverageAssignment, updateCoverageAssignment,
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
 } from "../supabase-client.js?v=20261027-5";
+import { loadTimetableForDate, staffDaySchedule, subjectPeriodsFromSchedule, busyStaffIds } from "../academic/timetable-fet.js?v=20261101-1";
 
 const session = await requireAuth();
 if (session) {
@@ -285,6 +290,9 @@ if (session) {
     el("content").style.display = "";
 
     let day = null;          // ผลจาก loadCoverageDay()
+    let timetableDetails = null;
+    let timetableWeekday = null;
+    let timetableDayCache = null; // ผลของวันที่โหลดสำเร็จ รวมกรณีไม่มีตาราง
     let busy = false;
     const draftRows = new Set();
     // คนที่ฝ่ายบุคคลเพิ่มเองแบบเหตุสุดวิสัยแต่ยังไม่ได้เลือกคนแทน — ยังไม่มีแถวใน DB
@@ -334,12 +342,50 @@ if (session) {
     // ---------- ตัวเลือกคนแทน ----------
     // ⚠ "ใครเป็นคนแทนก็ได้" เป็นมติของผู้ใช้ — ห้ามกรองเหลือเฉพาะเจ้าของวิชา
     //   กรองแค่ 2 อย่าง: ต้องยังทำงานอยู่ และต้องไม่ใช่คนที่ไม่มาเอง
-    const substituteOptions = (absentStaffId, selectedId, excludedIds = new Set()) => {
+    const substituteOptions = (absentStaffId, selectedId, excludedIds = new Set(), seqRanges = []) => {
+      const busyStaff = timetableDetails && seqRanges.length
+        ? busyStaffIds(timetableDetails, timetableWeekday, seqRanges) : new Map();
+      const absent = timetableDetails && seqRanges.length
+        ? new Map(day.absentees.map(entry => [entry.staff.id, entry.source])) : new Map();
       const rows = day.staff.filter(s =>
         s.id !== absentStaffId && !excludedIds.has(s.id) && (s.is_active || s.id === selectedId));
+      if (seqRanges.length && timetableDetails) rows.sort((a, b) =>
+        (absent.has(a.id) ? 2 : busyStaff.has(a.id) ? 1 : 0) -
+        (absent.has(b.id) ? 2 : busyStaff.has(b.id) ? 1 : 0) ||
+        a.full_name.localeCompare(b.full_name, 'th'));
       return ["<option value=''>— ยังไม่มีคนแทน —</option>"].concat(rows.map(s =>
         "<option value='" + esc(s.id) + "'" + (s.id === selectedId ? " selected" : "") + ">" +
-        esc(s.full_name) + (s.is_active ? "" : " (ออกแล้ว)") + "</option>")).join("");
+        esc(s.full_name) + (s.is_active ? "" : " (ออกแล้ว)") +
+        (absent.has(s.id) ? " — ไม่มา (" + esc(absent.get(s.id)) + ")" :
+          busyStaff.has(s.id) ? " — " + esc(busyStaff.get(s.id).startsWith('สอน ') ?
+            'ติด' + busyStaff.get(s.id) : 'ติด ' + busyStaff.get(s.id)) : "") + "</option>")).join("");
+    };
+
+    // เพิ่มข้อเสนอจากตารางให้ข้อมูลวันที่โหลดมาแล้วเท่านั้น ไม่แตะข้อมูลที่บันทึกในฐาน
+    const applyTimetable = (dateStr, details) => {
+      const weekday = (new Date(dateStr + 'T12:00:00Z').getUTCDay() + 6) % 7 + 1;
+      const proposals = day.absentees.map(entry => {
+        const portion = entry.leave?.day_portion || 'full';
+        const schedule = staffDaySchedule(details, weekday, entry.staff.id, { portion });
+        return { entry, schedule, bySubject:subjectPeriodsFromSchedule(schedule) };
+      });
+      timetableDetails = details;
+      timetableWeekday = weekday;
+      for (const { entry, schedule, bySubject } of proposals) {
+        entry.unlinkedLessons = schedule.filter(slot => slot.isTeaching && !slot.subjectId);
+        for (const [subjectId, info] of bySubject) {
+          let item = entry.items.find(row => row.kind === 'วิชา' && row.refId === subjectId);
+          if (!item) {
+            const slot = schedule.find(row => row.subjectId === subjectId);
+            item = { kind:'วิชา', key:'วิชา:' + subjectId, refId:subjectId,
+              label:slot.title, sub:'ตามตาราง (ไม่ใช่วิชาของครูคนนี้ในระบบ)' };
+            entry.items.push(item);
+          }
+          item.suggestedPeriods = info.periods;
+          item.scheduleSlots = info.slots;
+          if (item.orphan) { item.label = schedule.find(row => row.subjectId === subjectId).title; item.orphan = false; }
+        }
+      }
     };
 
     // พับเฉพาะคนที่ครบตอนโหลดวันนั้น ไม่แย่งมือเมื่อเพิ่งจัดครบระหว่างใช้งาน
@@ -429,6 +475,12 @@ if (session) {
       }
 
       box.innerHTML = people.map(entry => {
+        const unlinked = entry.unlinkedLessons?.length
+          ? "<div class='unlinked-lessons'><strong>คาบอื่นวันนี้ที่ไม่มีครู</strong><ul>" +
+            entry.unlinkedLessons.map(slot => "<li>" + esc(slot.title) + " · " +
+              esc(slot.startTime) + "–" + esc(slot.endTime) + " · " +
+              esc(slot.rooms.join(', ')) + "</li>").join('') + "</ul>" +
+            "<div class='field-note'>วิชาเหล่านี้ยังไม่อยู่ในทะเบียนรายวิชา จึงบันทึกคนแทนในระบบไม่ได้ · จัดคนเข้าห้องตามปกติ</div></div>" : "";
         const chip = SOURCE_CHIP[entry.source] || "kind";
         const coveredCount = entry.items.reduce((count, item) =>
           count + (summarizeCoverageItem(item, day.byKey.get(item.key) || []).complete ? 1 : 0), 0);
@@ -451,8 +503,11 @@ if (session) {
         if (!entry.items.length) {
           return "<div class='person' data-person='" + esc(entry.staff.id) + "'>" + head +
             "<div class='person-body' id='" + esc(bodyId) + "'" + (isCollapsed ? " hidden" : "") + ">" +
+            (timetableDetails && !entry.unlinkedLessons?.length
+              ? "<div class='field-note'>วันนี้ไม่มีคาบสอนตามตาราง</div>" : "") + unlinked +
             "<div class='field-note'>ไม่พบวิชา งานครูประจำชั้น หรือเวรของคนนี้ในวันนี้ " +
-            "— ไม่มีอะไรต้องหาคนแทน</div></div></div>";
+            (timetableDetails ? "— ไม่มีอะไรที่บันทึกคนแทนในระบบได้" : "— ไม่มีอะไรต้องหาคนแทน") +
+            "</div></div></div>";
         }
 
         const groups = new Map();
@@ -466,7 +521,7 @@ if (session) {
         ];
         const items = kinds.map(kind => {
           const groupedItems = kind === "เวร" ? [...groups.get(kind)].sort((a, b) => dutyTime(a) - dutyTime(b)) : groups.get(kind);
-          const rows = groupedItems.map(item => {
+          const renderGroupItems = list => list.map(item => {
             const savedRows = day.byKey.get(item.key) || [];
             const summary = summarizeCoverageItem(item, savedRows);
             if (item.kind === "วิชา") {
@@ -498,7 +553,7 @@ if (session) {
                   "<select class='subject-select" + (saved?.substitute_staff_id ? "" : " is-empty") + "' data-key='" + esc(item.key) +
                     "' data-staff='" + esc(entry.staff.id) + "'>" +
                     substituteOptions(entry.staff.id, saved?.substitute_staff_id || "",
-                      new Set([...excluded].filter(id => id !== saved?.substitute_staff_id))) + "</select>" +
+                      new Set([...excluded].filter(id => id !== saved?.substitute_staff_id)), item.scheduleSlots || []) + "</select>" +
                   (arrangement === "สอนแทน"
                     ? "<details class='worksheet-more'" + (saved?.worksheet_note ? " open" : "") + "><summary>+ ใบงานที่ฝากไว้</summary>" +
                       "<input type='text' class='worksheet' data-id='" + esc(rowId) +
@@ -516,8 +571,11 @@ if (session) {
                   (summary.complete ? " ✓" : "");
               return "<div class='item" + (summary.complete ? " covered" : "") + "' data-item-key='" + esc(item.key) + "'>" +
                 "<div class='item-head'><span class='item-label'>" + esc(item.label) + "</span>" +
-                (item.suggestedPeriods == null ? "" : "<span class='item-sub'>ปกติสอนวันละ " +
-                  esc(item.suggestedPeriods) + " คาบ</span>") +
+                (item.scheduleSlots?.length
+                  ? "<span class='item-sub'>ตามตาราง: " + esc(item.suggestedPeriods) + " คาบ · " +
+                    esc(item.scheduleSlots.map(slot => slot.startTime + '–' + slot.endTime + ' · ' + slot.rooms.join(', ')).join('; ')) + "</span>"
+                  : item.suggestedPeriods == null ? "" : "<span class='item-sub'>ปกติสอนวันละ " +
+                    esc(item.suggestedPeriods) + " คาบ</span>") +
                 "<span class='chip " + status + "'>" + esc(statusText) + "</span>" +
                 (item.sub && item.kind !== "เวร" ? "<span class='item-sub'>" + esc(item.sub) + "</span>" : "") +
                 (item.integratedParent ? "<span class='item-sub'>ในบูรณาการ · " +
@@ -555,12 +613,19 @@ if (session) {
                 : "") +
               "</div>";
           }).join("");
+          const scheduled = kind === 'วิชา' && timetableDetails
+            ? groupedItems.filter(item => item.scheduleSlots?.length) : groupedItems;
+          const unscheduled = kind === 'วิชา' && timetableDetails
+            ? groupedItems.filter(item => !item.scheduleSlots?.length) : [];
+          const rows = renderGroupItems(scheduled) + (unscheduled.length
+            ? "<details class='off-schedule'><summary>ไม่มีคาบวันนี้ตามตาราง (" + unscheduled.length + " วิชา)</summary>" +
+              renderGroupItems(unscheduled) + "</details>" : "");
           return "<div class='kind-group'><div class='section'>" + esc(kind) +
             " <span class='n'>· " + groups.get(kind).length + " งาน</span></div>" + rows + "</div>";
         }).join("");
 
         return "<div class='person' data-person='" + esc(entry.staff.id) + "'>" + head +
-          "<div class='person-body' id='" + esc(bodyId) + "'" + (isCollapsed ? " hidden" : "") + ">" + items + "</div></div>";
+          "<div class='person-body' id='" + esc(bodyId) + "'" + (isCollapsed ? " hidden" : "") + ">" + unlinked + items + "</div></div>";
       }).join("");
 
       box.querySelectorAll("select[data-key]:not(.subject-select)").forEach(sel =>
@@ -844,6 +909,26 @@ if (session) {
           term: termForLoad()
         });
         applySuggestedTerm(day.term);
+        timetableDetails = null;
+        timetableWeekday = null;
+        try {
+          if (timetableDayCache?.date !== date) {
+            const result = await loadTimetableForDate({ sb, fetchAllRows,
+              storage:(() => { try { return localStorage; } catch { return null; } })(), dateStr:date });
+            timetableDayCache = { date, result };
+          }
+          const result = timetableDayCache.result;
+          if (result.timetable) {
+            applyTimetable(date, result.details);
+            el('timetable-note').textContent = 'เสนอวิชาและคาบตามตารางสอน · ครึ่งเช้า = คาบที่เริ่มก่อน 12:00 · คนจัดยังต้องกดบันทึกเอง';
+          } else el('timetable-note').textContent = 'ไม่มีตารางสอนที่ใช้วันนี้ · แสดงทุกวิชาของครู';
+        } catch (error) {
+          timetableDayCache = null;
+          timetableDetails = null;
+          timetableWeekday = null;
+          console.warn('โหลดตารางสอนสำหรับเสนอคนแทนไม่สำเร็จ:', error);
+          el('timetable-note').textContent = 'โหลดตารางสอนไม่สำเร็จ · แสดงทุกวิชาของครู';
+        }
       } catch (e) {
         el("list").innerHTML = "<div class='muted-empty'>โหลดข้อมูลไม่สำเร็จ</div>";
         toast(e.message || String(e), true);
@@ -873,7 +958,7 @@ if (session) {
       pendingUrgent.clear();
       reload();
     });
-    el("btn-reload").addEventListener("click", () => reload());
+    el("btn-reload").addEventListener("click", () => { timetableDayCache = null; return reload(); });
 
     // ---------- เปิดหน้าด้วยวันที่จากลิงก์ ----------
     // การ์ด "ต้องตรวจสอบ" และ "วันลาที่ยังไม่มีบันทึกคนแทน" ในหน้าคาบที่ครูไม่ได้สอน
