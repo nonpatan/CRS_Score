@@ -74,7 +74,10 @@ button:disabled { opacity:.45; cursor:default; }
 .time-grid .tile.sub .cell-detail { font-size:13px; font-weight:500; color:var(--d); }
 .time-grid .tile.act { background:var(--tt-act); color:var(--muted); }
 .time-grid .tile.act .cell-title { font-size:13px; font-weight:400; }
-.time-grid .tile.brk { padding:0; border-radius:6px; background:repeating-linear-gradient(135deg,var(--bg) 0 4px,var(--line) 4px 8px); }
+.time-grid .tile.brk { display:flex; padding:0; border-radius:6px; background:repeating-linear-gradient(135deg,var(--bg) 0 4px,var(--line) 4px 8px); }
+.time-grid td[rowspan] > .tile { position:absolute; inset:0; min-height:0; height:auto; }  /* height:100% ไม่ยืดตาม rowspan */
+.time-grid .tile.merged { display:flex; align-items:center; justify-content:center; text-align:center; }
+.time-grid .tile.merged .cell-title { font-size:14px; font-weight:500; }
 .time-grid .tile.brk .break-label { display:block; writing-mode:vertical-rl; font-size:12px; letter-spacing:2px; color:var(--muted); margin:auto; }
 .time-grid .tile.now { outline:2px solid var(--teal); outline-offset:1px; }
 .time-grid .tile.collision { background:var(--amber-soft); border:1px solid var(--amber); }
@@ -134,6 +137,8 @@ button:disabled { opacity:.45; cursor:default; }
   .sheet table.p td.sub .de { font-size:8pt; font-weight:600; color:var(--d); line-height:1.25; margin-top:.8mm; }
   .sheet table.p td.act { background:var(--tt-act); }
   .sheet table.p td.act .ti { font-size:8pt; color:var(--muted); line-height:1.2; }
+  .sheet table.p td.merged { vertical-align:middle; text-align:center; }
+  .sheet table.p td.merged .ti { font-size:9pt; font-weight:600; }
   .sheet table.p td.empty { background:var(--white); }
   .sheet .foot { display:flex; gap:3mm 5mm; flex-wrap:wrap; align-items:center; margin-top:2.5mm; font-size:8.5pt; }
   .sheet .foot .chip { display:inline-flex; align-items:center; gap:1.5mm; }
@@ -280,9 +285,25 @@ function subjectLegend(rows) {
     if(isSubject(lesson)) seen.set(subjectKey(lesson.title),colors.get(subjectKey(lesson.title))||1);
   return seen;
 }
+// กิจกรรมเดียวกันในคอลัมน์เดียวกันของวันติดกัน → ผสานแนวตั้ง (เฉพาะกิจกรรม ไม่รวมวิชาและช่องชนกัน)
+function verticalRuns(rows) {
+  const rowspan=new Map(), skip=new Set();
+  const sig=cell=>cell&&!cell.break&&cell.items.length===1&&!isSubject(cell.items[0].lesson)?`${cell.items[0].lesson.title}|${cell.span||1}`:null;
+  (rows[0]?.cells||[]).forEach((_,col)=>{
+    let start=0;
+    for(let r=1;r<=rows.length;r++) {
+      const current=r<rows.length?sig(rows[r].cells[col]):null;
+      if(current&&current===sig(rows[start].cells[col])) { skip.add(`${r}:${col}`); continue; }
+      if(r-start>1) rowspan.set(`${start}:${col}`,r-start);
+      start=r;
+    }
+  });
+  return {rowspan,skip};
+}
 function buildTable(item,kind,printing=false) {
   const filter=gridFilterFor(item,kind);
   const rows=buildGrid({columns:details.columns,teachingDays:details.teaching_days,lessons,filter});
+  const runs=verticalRuns(rows);
   const day=weekdayNow(), now=timeNow(), isToday=selected.start_date<=today()&&today()<=selected.end_date;
   let period=0;
   const header=`<thead><tr><th scope="col">วัน</th>${details.columns.map(column=>{
@@ -293,10 +314,12 @@ function buildTable(item,kind,printing=false) {
   }).join('')}</tr></thead>`;
   const body=rows.map((row,rowIndex)=>`<tr class="${!printing&&isToday&&row.weekday===day?'is-today':''}"><th scope="row" class="${!printing&&isToday&&row.weekday===day?'today':''}">${weekdays[row.weekday]}${!printing&&isToday&&row.weekday===day?'<span class="badge">วันนี้</span>':''}</th>${row.cells.map((cell,index)=>{
     if(cell.covered&&!cell.items.length) return '';
-    if(cell.break) return `<td class="break"><div class="tile brk">${rowIndex===0?'<span class="break-label">พัก</span>':'<span class="sr-only">พัก</span>'}</div></td>`;
+    if(cell.break) return rowIndex===0?`<td class="break" rowspan="${rows.length}"><div class="tile brk"><span class="break-label">พัก</span></div></td>`:'';
+    if(runs.skip.has(`${rowIndex}:${index}`)) return '';
     if(!cell.items.length) return '<td class="empty"><div class="tile"><span class="sr-only">ว่าง</span></div></td>';
+    const rowspan=runs.rowspan.get(`${rowIndex}:${index}`)||1, days=rows.slice(rowIndex,rowIndex+rowspan).map(r=>r.weekday);
     const end=details.columns[Math.min(index+(cell.span||1)-1,details.columns.length-1)]?.end_time?.slice(0,5);
-    const current=!printing&&isToday&&row.weekday===day&&details.columns[index].start_time.slice(0,5)<=now&&now<end;
+    const current=!printing&&isToday&&days.includes(day)&&details.columns[index].start_time.slice(0,5)<=now&&now<end;
     const content=cell.items.map(({lesson,placement})=>{
       const extra=itemDetail(lesson,kind);
       const affected=(selected.timetable_swaps||[]).some(s=>s.status==='อนุมัติ'&&
@@ -306,7 +329,8 @@ function buildTable(item,kind,printing=false) {
     }).join('');
     const full=cell.items.map(({lesson})=>`${lesson.title}${itemDetail(lesson,kind)?` · ${itemDetail(lesson,kind)}`:''}`).join(' | ');
     const first=cell.items[0].lesson, style=isSubject(first)?` style="${colorStyle(first)}"`:'';
-    return `<td colspan="${cell.span||1}" title="${esc(full)}" aria-label="${esc(full)}"><div class="tile ${isSubject(first)?'sub':'act'} ${cell.items.length>1?'collision':''} ${current?'now':''}"${style}>${current?'<span class="badge">ตอนนี้</span>':''}${content}${cell.items.length>1?'<span>ชนกัน</span>':''}</div></td>`;
+    const when=rowspan>1?` · ${weekdays[days[0]]}–${weekdays[days[days.length-1]]}`:'';
+    return `<td colspan="${cell.span||1}"${rowspan>1?` rowspan="${rowspan}"`:''} title="${esc(full+when)}" aria-label="${esc(full+when)}"><div class="tile ${isSubject(first)?'sub':'act'}${rowspan>1?' merged':''} ${cell.items.length>1?'collision':''} ${current?'now':''}"${style}>${current?'<span class="badge">ตอนนี้</span>':''}${content}${cell.items.length>1?'<span>ชนกัน</span>':''}</div></td>`;
   }).join('')}</tr>`).join('');
   const legend=[...subjectLegend(rows)].map(([key,color])=>`<span class="legend-chip" style="--c:var(--s${color});--d:var(--s${color}d)"><i aria-hidden="true"></i>${esc(key)}</span>`).join('');
   const colgroup=`<colgroup><col class="day">${details.columns.map(column=>`<col class="${column.kind==='พัก'?'brk':column.kind==='คาบเรียน'?'teach':'act'}">`).join('')}</colgroup>`;
@@ -489,7 +513,7 @@ async function selectSet(row,initial=false) {
 }
 function printSheet(item,kind) {
   const rows=buildGrid({columns:details.columns,teachingDays:details.teaching_days,lessons,filter:gridFilterFor(item,kind)});
-  const legend=subjectLegend(rows);
+  const legend=subjectLegend(rows), runs=verticalRuns(rows);
   let period=0, teach=0;
   const colgroup=`<colgroup><col style="width:20mm">${details.columns.map(column=>`<col style="width:${column.kind==='พัก'?'6mm':column.kind==='กิจกรรม'?'16mm':'auto'}">`).join('')}</colgroup>`;
   const head=`<thead><tr><th scope="col">วัน</th>${details.columns.map(column=>{
@@ -500,12 +524,14 @@ function printSheet(item,kind) {
   const body=rows.map((row,rowIndex)=>`<tr><th scope="row">${weekdays[row.weekday]}</th>${row.cells.map((cell,index)=>{
     if(cell.break)return rowIndex===0?`<td class="brk" rowspan="${rows.length}"><span>พัก</span></td>`:'';
     if(cell.covered&&!cell.items.length)return '';
+    if(runs.skip.has(`${rowIndex}:${index}`))return '';
     if(!cell.items.length)return '<td class="empty"></td>';
+    const rowspan=runs.rowspan.get(`${rowIndex}:${index}`)||1;
     const subjects=cell.items.filter(({lesson})=>isSubject(lesson));
     teach+=subjects.reduce((sum)=>sum+details.columns.slice(index,index+(cell.span||1)).filter(column=>column.kind==='คาบเรียน').length,0);
     const first=cell.items[0].lesson, isSub=isSubject(first);
     const contents=cell.items.map(({lesson})=>`<div class="ti">${esc(lesson.title)}</div>${isSubject(lesson)&&itemDetail(lesson,kind)?`<div class="de">${esc(itemDetail(lesson,kind))}</div>`:''}`).join('');
-    return `<td class="${isSub?'sub':'act'}" colspan="${cell.span||1}"${isSub?` style="${colorStyle(first)}"`:''}>${contents}${cell.items.length>1?'<div>ชนกัน</div>':''}</td>`;
+    return `<td class="${isSub?'sub':'act'}${rowspan>1?' merged':''}" colspan="${cell.span||1}"${rowspan>1?` rowspan="${rowspan}"`:''}${isSub?` style="${colorStyle(first)}"`:''}>${contents}${cell.items.length>1?'<div>ชนกัน</div>':''}</td>`;
   }).join('')}</tr>`).join('');
   const chips=[...legend].map(([key,color])=>`<span class="chip" style="--c:var(--s${color});--d:var(--s${color}d)"><i></i>${esc(key)}</span>`).join('');
   const title=kind==='mine'?'ตารางสอนของฉัน':kind==='room'?`ตารางเรียนห้อง ${item.name}`:kind==='facility'?`ตารางห้องปฏิบัติการ ${item.name}`:`ตารางสอนครู ${item.name}`;
