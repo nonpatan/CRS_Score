@@ -99,6 +99,9 @@
   .score-box.pending { background:var(--amber-soft);color:var(--amber); }
   .completion { display:inline-block;background:var(--amber-soft);border-radius:999px;padding:3px 10px;margin:8px 0; }
   .completion.complete { background:var(--teal-soft); }
+  .late-members { background:var(--amber-soft);color:var(--amber);border:1px dashed var(--amber);border-radius:8px;padding:10px 12px;margin:0 0 10px;font-size:14px; }
+  .late-members p { margin:0 0 8px; }
+  .late-members button { min-height:44px;width:100%; }
   @media(max-width:480px) { .assessment-cards { grid-template-columns:1fr; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
@@ -159,7 +162,7 @@
     <div id="activity-pass-list"></div>
     <div class="activity-save-bar"><div id="activity-save-counts" class="activity-save-counts" aria-live="polite"></div><button type="button" class="primary" id="btn-save-activity-pass" style="margin-top:12px">บันทึกผลกิจกรรม</button></div>
   </div>
-  <div class="card" id="scores-card" style="display:none"><div id="score-heading" class="score-heading"></div><div id="score-subheading" class="meta" style="margin-bottom:10px"></div><div id="score-progress" class="completion" aria-live="polite"></div><div id="readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว</div><div id="score-list"></div></div>
+  <div class="card" id="scores-card" style="display:none"><div id="score-heading" class="score-heading"></div><div id="score-subheading" class="meta" style="margin-bottom:10px"></div><div id="score-progress" class="completion" aria-live="polite"></div><div id="late-members" class="late-members" hidden></div><div id="readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว</div><div id="score-list"></div></div>
   <div class="overlay" id="score-overlay"><div class="modal"><h3>บันทึกคะแนน</h3><div class="meta" id="score-modal-detail"></div><div class="field" style="margin-top:12px"><label id="score-modal-label" for="score-modal-value">คะแนน</label><input id="score-modal-value" type="number" min="0" step="0.01"></div><div class="modal-actions"><button class="ghost" id="score-modal-cancel">ยกเลิก</button><button class="primary" id="score-modal-save">บันทึก</button></div></div></div>
   <!-- กล่องยืนยันของหน้าเว็บเอง ไม่ใช้ confirm()/prompt() ของเบราว์เซอร์
        — webview บางตัว (แผงพรีวิว, แอปมือถือบางแบบ) คืน false เงียบ ๆ หรือโยน error
@@ -758,6 +761,7 @@ async function loadSession(id) {
   $("readonly").style.display = canEdit() ? "none" : "block";
   renderTargets();
   renderScores();
+  renderLateMembers();
 }
 
 function renderScores() {
@@ -796,6 +800,66 @@ function renderScores() {
     row.querySelector(".score-control").appendChild(box);
     el.appendChild(row);
   }
+}
+// สมาชิกที่เข้าร่วมหลังสร้างครั้งนี้ — snapshot ไม่มีชื่อ จึงกรอกคะแนนไม่ได้และใบตามงานขึ้นว่าค้าง
+// ปุ่มเพิ่มชื่อเข้า "ทุกครั้งของช่วงชั้นนี้" ทีเดียว (ไม่ใช่ทีละครั้ง) · ไม่แตะคะแนนเดิม · ครั้งที่สร้างใหม่ดึงสมาชิกครบอยู่แล้ว
+function lateMembersForSession() {
+  const stage = currentTarget && currentTarget.element && currentTarget.element.stage;
+  if (!currentSession || !stage) return [];
+  const inSession = new Set(sessionStudents.map(student => student.id));
+  return assessmentMembers.map(member => member.student).filter(student =>
+    student && competencyStageForGrade(student.grade_level) === stage && !inSession.has(student.id));
+}
+function renderLateMembers() {
+  const el = $("late-members"), late = lateMembersForSession();
+  el.hidden = !late.length;
+  el.innerHTML = "";
+  if (!late.length) return;
+  const text = document.createElement("p");
+  text.textContent = "มีผู้เข้าร่วม " + late.length + " คนที่ยังไม่อยู่ในครั้งนี้ (เพิ่มเข้ารายการหลังสร้างครั้งประเมิน): " +
+    late.map(student => student.name + (student.grade_level ? " " + student.grade_level + "/" + student.classroom : "")).join(", ");
+  el.appendChild(text);
+  if (!canEdit()) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ghost";
+  button.textContent = "เพิ่ม " + late.length + " คนเข้าทุกครั้งของช่วงชั้นนี้";
+  button.onclick = () => addLateMembers(late, button);
+  el.appendChild(button);
+}
+async function addLateMembers(late, button) {
+  const stage = currentTarget.element.stage, sessionId = currentSession.id;
+  const stageSessionIds = sessions.filter(sess => {
+    const target = targets.find(item => item.id === sess.target_id);
+    return target && target.element && target.element.stage === stage;
+  }).map(sess => sess.id);
+  if (!await window.crsAskConfirm({
+    title: "เพิ่มชื่อเข้าครั้งประเมินเดิม",
+    message: "เพิ่ม " + late.map(student => student.name).join(", ") + " เข้าครั้งประเมินทั้ง " + stageSessionIds.length +
+      " ครั้งของ" + stage + "\nคะแนนที่กรอกไว้แล้วไม่เปลี่ยน · หลังเพิ่มต้องกรอกคะแนนของคนที่เพิ่มให้ครบทุกครั้ง",
+    okLabel: "เพิ่มชื่อ",
+    danger: false
+  })) return;
+  button.disabled = true;
+  button.textContent = "กำลังเพิ่ม…";
+  const existing = await sb.from("competency_assessment_session_students").select("session_id,student_id")
+    .in("session_id", stageSessionIds).in("student_id", late.map(student => student.id));
+  if (existing.error) {
+    toast("ตรวจรายชื่อเดิมไม่สำเร็จ: " + existing.error.message, false);
+    renderLateMembers();
+    return;
+  }
+  const have = new Set((existing.data || []).map(row => row.session_id + ":" + row.student_id));
+  const rows = stageSessionIds.flatMap(id => late.filter(student => !have.has(id + ":" + student.id))
+    .map(student => ({ session_id:id, student_id:student.id })));
+  const { error } = rows.length ? await sb.from("competency_assessment_session_students").insert(rows) : { error:null };
+  if (error) {
+    toast("เพิ่มชื่อไม่สำเร็จ: " + error.message, false);
+    renderLateMembers();
+    return;
+  }
+  toast("เพิ่ม " + late.length + " คนเข้า " + stageSessionIds.length + " ครั้งแล้ว — กรอกคะแนนของคนที่เพิ่มได้เลย");
+  await loadSession(sessionId);
 }
 let editingScore=null;
 function openScoreModal(student,target,value){editingScore={student,target};$("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");const cap=sessionMax(currentSession,target);$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+cap+")";$("score-modal-value").value=value;$("score-modal-value").max=cap;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}

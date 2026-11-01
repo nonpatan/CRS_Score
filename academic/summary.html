@@ -715,7 +715,7 @@ import {
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting,
   loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
-  listHomeroomTeachers, loadLetterSigners, thaiLetterDateText
+  listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade
 } from "../supabase-client.js?v=20261027-5";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -2669,10 +2669,14 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
       const assessment = assessmentById.get(row.assessment_id);
       if (!assessment) continue;
       const key = row.competency_id + "|" + assessment.source_type;
-      if (!plannedByCompetency.has(key)) plannedByCompetency.set(key, { mine: new Set(), any: false, others:new Map() });
+      if (!plannedByCompetency.has(key)) plannedByCompetency.set(key, { mine: new Set(), late: new Set(), any: false, others:new Map() });
       const bucket = plannedByCompetency.get(key);
       bucket.any = true;
-      if (myAssessmentIds.has(row.assessment_id)) bucket.mine.add(assessment.name || "ไม่ระบุชื่อรายการ");
+      if (myAssessmentIds.has(row.assessment_id)) {
+        bucket.mine.add(assessment.name || "ไม่ระบุชื่อรายการ");
+        // เป็นสมาชิก + องค์ประกอบนี้มีครั้งแล้ว แต่ถ้าสถานะยังเป็น "new" แปลว่า snapshot ไม่มีชื่อ = เข้าร่วมทีหลัง
+        if (shared.sessionTargetIds?.has(row.id)) bucket.late.add(assessment.name || "ไม่ระบุชื่อรายการ");
+      }
       else bucket.others.set(assessment.name || "ไม่ระบุชื่อรายการ", assessment.owner_id);
     }
   }
@@ -2814,17 +2818,34 @@ async function loadCompetencyScopeShared(year, grade, term) {
     for (let start = 0; start < assessmentIds.length; start += 150) {
       const chunk = assessmentIds.slice(start, start + 150);
       const result = await fetchAllRows(() => sb.from("competency_assessment_targets")
-        .select("id,assessment_id,competency_id,element_id,max_score").in("assessment_id", chunk), "id");
+        .select("id,assessment_id,competency_id,element_id,max_score,element:element_id(stage)").in("assessment_id", chunk), "id");
       if (result.error) return result;
       rows.push(...(result.data || []));
     }
     return { data:rows, error:null };
   };
-  const [unitResult, plannedResult] = await Promise.all([unitPromise, targetPromise()]);
+  // องค์ประกอบที่มีครั้งประเมินแล้ว — แยก "ยังไม่สร้างครั้ง" ออกจาก "เข้าร่วมหลังสร้างครั้ง" (snapshot ไม่มีชื่อ)
+  const sessionPromise = async () => {
+    const rows = [];
+    for (let start = 0; start < assessmentIds.length; start += 100) {
+      const chunk = assessmentIds.slice(start, start + 100);
+      const result = await fetchAllRows(() => sb.from("competency_assessment_sessions")
+        .select("id,target_id").in("assessment_id", chunk), "id");
+      if (result.error) return result;
+      rows.push(...(result.data || []));
+    }
+    return { data:rows, error:null };
+  };
+  const [unitResult, plannedResult, sessionResult] = await Promise.all([unitPromise, targetPromise(), sessionPromise()]);
   if (unitResult.error) return { ok:false, message:"โหลดโครงสร้างสมรรถนะรายวิชาไม่สำเร็จ: " + unitResult.error.message };
   if (plannedResult.error) return { ok:false, message:"โหลดองค์ประกอบกิจกรรม/กิจวัตรไม่สำเร็จ: " + plannedResult.error.message };
+  if (sessionResult.error) return { ok:false, message:"โหลดครั้งประเมินไม่สำเร็จ: " + sessionResult.error.message };
   const plannedRows = plannedResult.data || [];
-  return { ok:true, subjectRows, units:unitResult.data || [], assessments, plannedRows,
+  // นับเฉพาะองค์ประกอบช่วงชั้นเดียวกับชั้นที่ดู — ครั้งของช่วงชั้นอื่นไม่ใช่ครั้งที่นักเรียนชั้นนี้ควรอยู่
+  const stage = competencyStageForGrade(grade);
+  const stageTargetIds = new Set(plannedRows.filter(row => !stage || !row.element?.stage || row.element.stage === stage).map(row => row.id));
+  const sessionTargetIds = new Set((sessionResult.data || []).map(row => row.target_id).filter(id => stageTargetIds.has(id)));
+  return { ok:true, subjectRows, units:unitResult.data || [], assessments, plannedRows, sessionTargetIds,
     targetById:new Map(plannedRows.map(row => [row.id, row])) };
 }
 
@@ -2953,14 +2974,17 @@ function showCompRoomResults(focusStudentId = "") {
 
 function compRoomPendingText(item) {
   const parts = [];
+  const late = item.late || new Set();
+  const mixed = [item.wait.size, item.newItems.size, late.size].filter(Boolean).length > 1;
   if (item.wait.size) {
-    parts.push(item.newItems.size
+    parts.push(mixed
       ? "กรอกแล้ว " + item.scored + " จาก " + item.expected + " ครั้ง (ด้าน " + [...item.wait].join(" · ") + ")"
       : "กรอกแล้ว " + item.scored + " จาก " + item.expected + " ครั้ง (รวม " + item.waitStudents + " คน)");
   }
   if (item.missingStructure) return "ยังไม่สร้างสมรรถนะหลักในวิชานี้";
   if (item.missingSession) return "ยังไม่สร้างครั้งที่ประเมิน (มีโครงสร้าง " + item.structuredCount + " ด้านแล้ว)";
-  if (item.newItems.size) parts.push("ยังไม่สร้างครั้งประเมิน" + (item.wait.size ? " (" + [...item.newItems].join(" · ") + ")" : ""));
+  if (item.newItems.size) parts.push("ยังไม่สร้างครั้งประเมิน" + (mixed ? " (" + [...item.newItems].join(" · ") + ")" : ""));
+  if (late.size) parts.push("นักเรียนเข้าร่วมหลังสร้างครั้งประเมิน — กดเพิ่มชื่อในหน้ากรอกคะแนน" + (mixed ? " (" + [...late].join(" · ") + ")" : ""));
   return parts.join(" · ");
 }
 
@@ -3215,9 +3239,9 @@ elCompRoomCancel.addEventListener("click", () => { cancelCompRoomRun(); elCompRo
 // ชื่อกิจกรรม/กิจวัตรที่กำหนดองค์ประกอบของด้านนี้ไว้แล้ว (ยังไม่ต้องมีครั้งประเมิน)
 function plannedNames(plannedByCompetency, competencyId, sourceType) {
   const bucket = plannedByCompetency && plannedByCompetency.get(competencyId + "|" + sourceType);
-  return bucket ? { mine: [...bucket.mine], any: bucket.any,
+  return bucket ? { mine: [...bucket.mine], late: [...(bucket.late || [])], any: bucket.any,
     others:[...(bucket.others || new Map())].map(([name,ownerId]) => ({ name, ownerId })).sort((a,b) => a.name.localeCompare(b.name, "th")) }
-    : { mine: [], any: false, others:[] };
+    : { mine: [], late: [], any: false, others:[] };
 }
 
 // ลำดับเงื่อนไขสำคัญ: น้ำหนักศูนย์ต้องเป็น off แม้แหล่งนั้นจะกรอกครบแล้ว
@@ -3232,7 +3256,8 @@ function competencySourceStatus(source, weight, planned) {
   if (source.blockedSubjects?.length) return { kind:"student-blocked", label:"รอนักเรียนแก้ ร./มส." };
   if (source.complete) return { kind:"ok", label:Number(source.percent).toFixed(1) };
   if (source.expectedCount > 0) return { kind:"wait", label:"กรอกค้าง " + source.scoredCount + "/" + source.expectedCount };
-  if (planned && planned.mine && planned.mine.length) return { kind:"new", label:"ยังไม่สร้างครั้งประเมิน" };
+  if (planned && planned.mine && planned.mine.length) return planned.mine.every(name => planned.late?.includes(name))
+    ? { kind:"new", late:true, label:"เข้าร่วมหลังสร้างครั้งประเมิน" } : { kind:"new", label:"ยังไม่สร้างครั้งประเมิน" };
   if (planned && planned.any) return { kind:"not-member", label:"ไม่ได้อยู่ในรายการ" };
   return { kind:"none", label:"ไม่มีรายการวัด" };
 }
@@ -3298,7 +3323,12 @@ function compSourceDetail(row, definition, plannedByCompetency, subjectNameById,
       : item => item.label || "รายการที่ไม่ทราบชื่อ";
     detail = "ค้าง: " + compPendingText(source, nameOf);
   }
-  if (status.kind === "new") detail = "มีรายการที่วัดด้านนี้แล้ว แต่ยังไม่สร้างครั้งประเมิน: " + planned.mine.join(", ");
+  if (status.kind === "new") {
+    const late = planned.mine.filter(name => planned.late?.includes(name)), fresh = planned.mine.filter(name => !late.includes(name));
+    detail = [fresh.length ? "มีรายการที่วัดด้านนี้แล้ว แต่ยังไม่สร้างครั้งประเมิน: " + fresh.join(", ") : "",
+      late.length ? "เข้าร่วมหลังครูสร้างครั้งประเมิน จึงยังไม่มีชื่อในครั้งที่มี: " + late.join(", ") + " — ครูกดเพิ่มชื่อได้ที่หน้ากรอกคะแนน" : ""]
+      .filter(Boolean).join(" · ");
+  }
   if (status.kind === "not-member") detail = "ด้าน" + row.competency.name + " วัดใน: " + compOtherNames(planned.others, ownerNameById) + " — นักเรียนไม่ได้อยู่ในรายชื่อ";
   if (status.kind === "none") detail = definition.key === "subject"
     ? "ยังไม่มีรายวิชาใดมีครั้งประเมินด้านนี้"
@@ -3324,7 +3354,7 @@ function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, miss
     const blocked = new Set(results.filter(row => Number((row.weight || {}).subject_weight) > 0).map(row => row.competency.name));
     if (!blocked.size) continue;
     items.set("subject|" + subjectId, { kind:"item", sourceKey:"subject", sourceLabel:"รายวิชา", name, subjectId,
-      scored:0, expected:0, blocked, wait:new Set(), newItems:new Set(), missingStructure:reason === "no-structure",
+      scored:0, expected:0, blocked, wait:new Set(), newItems:new Set(), late:new Set(), missingStructure:reason === "no-structure",
       missingSession:reason === "no-session", structuredCount });
   }
   for (const row of results) for (const definition of compSources) {
@@ -3335,17 +3365,17 @@ function buildCompetencyTodo(results, subjectNameById, plannedByCompetency, miss
       const pending = status.kind === "wait" ? (source.pending || []).map(item => ({
         name:definition.key === "subject" ? compSubjectLabel(item.subjectId, subjectNameById) : item.label || "รายการที่ไม่ทราบชื่อ",
         subjectId:item.subjectId || null, scored:item.scored || 0, expected:item.expected || 0, kind:"wait"
-      })) : planned.mine.map(name => ({ name, scored:0, expected:0, kind:"new" }));
+      })) : planned.mine.map(name => ({ name, scored:0, expected:0, kind:planned.late?.includes(name) ? "late" : "new" }));
       for (const item of pending) {
         const key = definition.key + "|" + (definition.key === "subject" ? item.subjectId : item.name);
         if (!items.has(key)) items.set(key, { kind:"item", sourceKey:definition.key, sourceLabel:definition.label,
-          name:item.name, subjectId:item.subjectId || null, scored:0, expected:0, blocked:new Set(), wait:new Set(), newItems:new Set() });
+          name:item.name, subjectId:item.subjectId || null, scored:0, expected:0, blocked:new Set(), wait:new Set(), newItems:new Set(), late:new Set() });
         const target = items.get(key);
         if (!target.subjectId && item.subjectId) target.subjectId = item.subjectId;
         target.scored += item.scored;
         target.expected += item.expected;
         target.blocked.add(row.competency.name);
-        (item.kind === "wait" ? target.wait : target.newItems).add(row.competency.name);
+        (item.kind === "wait" ? target.wait : item.kind === "late" ? target.late : target.newItems).add(row.competency.name);
       }
     } else if ((status.kind === "none" || status.kind === "not-member") && !row.skippedSources?.has(definition.key)) {
       const key = definition.key + "|" + status.kind;
@@ -3388,7 +3418,7 @@ function buildRoomFollowUp(perStudent, ownerNameById) {
           : assessmentOwnerByName.get(row.sourceLabel + "|" + row.name) || null;
         if (!items.has(key)) items.set(key, { sourceKey:row.sourceKey, sourceLabel:row.sourceLabel,
           name:row.name, ownerId, students:new Set(), studentNumbers:new Set(), comps:new Set(), scored:0, expected:0,
-          wait:new Set(), newItems:new Set(), waitStudents:new Set(), missingStructure:false, missingSession:false, structuredCount:0 });
+          wait:new Set(), newItems:new Set(), late:new Set(), waitStudents:new Set(), missingStructure:false, missingSession:false, structuredCount:0 });
         const target = items.get(key);
         if (!target.ownerId && ownerId) target.ownerId = ownerId;
         target.students.add(student.id);
@@ -3396,6 +3426,7 @@ function buildRoomFollowUp(perStudent, ownerNameById) {
         row.blocked.forEach(name => target.comps.add(name));
         row.wait.forEach(name => target.wait.add(name));
         row.newItems.forEach(name => target.newItems.add(name));
+        (row.late || []).forEach(name => target.late.add(name));
         target.missingStructure ||= !!row.missingStructure;
         target.missingSession ||= !!row.missingSession;
         target.structuredCount = Math.max(target.structuredCount, row.structuredCount || 0);
@@ -3483,10 +3514,11 @@ function compTodoHtml(todo) {
       : studentBlocked ? item.sourceLabel + (item.reason ? " · " + item.reason : "") + " · ด้านที่ยังสรุปไม่ได้: " + blocked.join(" · ")
       : item.missingStructure ? item.sourceLabel + " · ยังไม่สร้างสมรรถนะหลัก · ด้านที่ยังสรุปไม่ได้: " + blocked.join(" · ")
       : item.missingSession ? item.sourceLabel + " · ยังไม่สร้างครั้งที่ประเมิน (มีโครงสร้าง " + item.structuredCount + " ด้านแล้ว) · ด้านที่ยังสรุปไม่ได้: " + blocked.join(" · ")
-      : item.sourceLabel + " · " + [item.wait.size ? (item.newItems.size ? "กรอกค้าง " + item.scored + "/" + item.expected + " (" + [...item.wait].join(" · ") + ")" : "กรอกแล้ว " + item.scored + "/" + item.expected + " ครั้ง") : "",
-        item.newItems.size ? "ยังไม่สร้างครั้งประเมิน" + (item.wait.size ? " (" + [...item.newItems].join(" · ") + ")" : "") : ""]
+      : item.sourceLabel + " · " + [item.wait.size ? (item.newItems.size || item.late?.size ? "กรอกค้าง " + item.scored + "/" + item.expected + " (" + [...item.wait].join(" · ") + ")" : "กรอกแล้ว " + item.scored + "/" + item.expected + " ครั้ง") : "",
+        item.newItems.size ? "ยังไม่สร้างครั้งประเมิน" + (item.wait.size || item.late?.size ? " (" + [...item.newItems].join(" · ") + ")" : "") : "",
+        item.late?.size ? "เข้าร่วมหลังครูสร้างครั้งประเมิน ยังไม่มีชื่อในครั้งที่มี" + (item.wait.size || item.newItems.size ? " (" + [...item.late].join(" · ") + ")" : "") : ""]
         .filter(Boolean).join(" · ") + " · ด้านที่ยังสรุปไม่ได้: " + blocked.join(" · ");
-    const number = isMissing ? blocked.length + " ด้าน" : studentBlocked ? item.code : (item.missingStructure || item.missingSession) ? "ยังไม่สร้าง" : (item.expected ? item.scored + "/" + item.expected : "0 ครั้ง");
+    const number = isMissing ? blocked.length + " ด้าน" : studentBlocked ? item.code : (item.missingStructure || item.missingSession) ? "ยังไม่สร้าง" : (item.expected ? item.scored + "/" + item.expected : item.late?.size && !item.newItems.size ? "ไม่มีชื่อ" : "0 ครั้ง");
     return "<li class='comp-todo-row'><span class='comp-todo-icon" + (isMissing || studentBlocked ? " comp-todo-muted" : "") + "'>" + compIcon(isMissing ? "none" : studentBlocked ? "student-blocked" : item.sourceKey) + "</span>" +
       "<div class='comp-todo-main'><strong>" + escapeHtml(title) + "</strong><span>" + escapeHtml(description) + "</span></div>" +
       "<div class='comp-todo-count'>" + escapeHtml(number) + (isMissing ? "" : "<small>" + blocked.length + " ด้าน</small>") + "</div></li>";
