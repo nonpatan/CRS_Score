@@ -47,6 +47,22 @@ button:disabled { opacity:.45; cursor:default; }
 .time-grid .cell-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:anywhere; font-weight:600; line-height:1.25; }
 .time-grid .cell-detail { color:var(--muted); font-size:12px; overflow-wrap:anywhere; line-height:1.25; }
 .time-grid .badge { display:block; color:var(--teal); font-weight:600; font-size:11px; }
+.time-grid .swap-dot { display:inline-block; margin-left:4px; color:var(--amber); font-weight:700; }
+.slot-button { display:block; width:100%; min-height:44px; padding:2px; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+.slot-button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+.swap-card { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px; }
+.swap-card.highlight { outline:3px solid var(--amber); }
+.swap-card h3 { margin:0 0 8px; font-size:17px; }
+.swap-card p { margin:6px 0; }
+.swap-card .field { margin-top:12px; }
+.swap-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.swap-actions button { min-height:44px; }
+.swap-card select,.swap-card textarea { width:100%; min-height:44px; padding:10px; font:inherit; border:1px solid var(--line); border-radius:8px; }
+.swap-card textarea { min-height:78px; }
+.swap-card :focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+.swap-warning { color:var(--danger); }
+.toast.ok { background:var(--teal-soft);color:var(--teal); }
+.toast.err { background:var(--danger-soft);color:var(--danger); }
 .print-only { display:none; }
 .toast { position:sticky; bottom:12px; text-align:center; font-size:14px; padding:10px; border-radius:8px; margin-top:12px; display:none; }
 @media(max-width:600px) { .view-buttons button { flex:1 1 calc(50% - 8px); } .actions button { flex:1 1 calc(50% - 8px); } }
@@ -108,6 +124,13 @@ button:disabled { opacity:.45; cursor:default; }
 <h2 id="schedule-title">ตารางสอน</h2>
 <div id="grid" class="table-scroll"></div>
 <p id="weekly-total" class="meta"></p>
+<div id="upcoming-swaps" class="no-print" hidden></div>
+</section>
+<section class="card no-print" id="swap-panel" hidden aria-labelledby="swap-panel-title">
+<h2 id="swap-panel-title">ขอสลับคาบ</h2><div id="swap-panel-content" role="status"></div>
+</section>
+<section class="card no-print" id="swap-requests" hidden aria-labelledby="swap-requests-title">
+<h2 id="swap-requests-title">คำขอสลับคาบ</h2><div id="swap-requests-list"></div>
 </section>
 <div id="print-area" class="print-only" aria-hidden="true"></div>
 <div id="toast" class="toast" aria-live="polite"></div>
@@ -115,7 +138,7 @@ button:disabled { opacity:.45; cursor:default; }
 </div>
 <script type="module">
 import { sb, requireAuth, signOut, fetchAllRows } from '../supabase-client.js?v=20261027-5';
-import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache } from './timetable-fet.js?v=20261101-1';
+import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache, swapCandidates, isoWeekday } from './timetable-fet.js?v=20261102-1';
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const weekdays=['','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์'];
@@ -126,17 +149,19 @@ const weekdayNow=()=>{const date=new Date(),parts=new Intl.DateTimeFormat('en-US
 const dateThai=value=>new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric'}).format(new Date(`${value}T12:00:00`));
 const rangeText=row=>`${dateThai(row.start_date)}–${dateThai(row.end_date)}`;
 const roomName=room=>`${room.grade_level}/${room.classroom}`;
+const SWAP_SET_SELECT='id,year,term,name,start_date,end_date,updated_at,timetable_swaps(id,status,a_placement_id,a_date,b_placement_id,b_date,from_staff_id,to_staff_id,grade_level,classroom,reason,respond_note,decide_note,requested_at)';
 // cache รายชุดใช้คีย์ crs_tt_v1_<id>; อ่านได้เฉพาะเมื่อ updated_at จากเซิร์ฟเวอร์ตรงกัน
 const safeStorage=()=>{try{return localStorage;}catch{return null;}};
 let sets=[], selected=null, details=null, lessons=[], myStaffId=null, view='', target='';
+let swapChoice=null, swapCandidatesForDay=[], holidays=new Map(), swapBusy=false;
 function fail(result,label) { if(result.error) throw new Error(`${label}: ${result.error.message}`); return result.data; }
 function showError(message) { $('load-state').textContent=''; $('load-error').textContent=message; $('controls').hidden=true; $('schedule-card').hidden=true; }
-function readStaffCache(uid) { try {const raw=localStorage.getItem(`crs_my_staff_${uid}`);if(raw!==null){const value=JSON.parse(raw);if(value===null||typeof value==='string')return {hit:true,value};}}catch{}return {hit:false,value:null}; }
+function readStaffCache(uid) { try {const raw=localStorage.getItem(`crs_my_staff_${uid}`);if(raw!==null){const value=JSON.parse(raw);if(typeof value==='string')return {hit:true,value};}if(sessionStorage.getItem(`crs_my_staff_${uid}`)==='null')return {hit:true,value:null};}catch{}return {hit:false,value:null}; }
 async function getMyStaffId(uid) {
   const cached=readStaffCache(uid); if(cached.hit) return cached.value;
   const result=await sb.rpc('my_staff_id');
   const id=fail(result,'โหลดข้อมูลครูของฉัน')??null;
-  try { localStorage.setItem(`crs_my_staff_${uid}`,JSON.stringify(id)); } catch {}
+  try { if(id) localStorage.setItem(`crs_my_staff_${uid}`,JSON.stringify(id)); else {localStorage.removeItem(`crs_my_staff_${uid}`);sessionStorage.setItem(`crs_my_staff_${uid}`,'null');} } catch {}
   return id;
 }
 function teacherChoices() {
@@ -186,7 +211,13 @@ function buildTable(item,kind,printing=false) {
     if(!cell.items.length) return '<td>—</td>';
     const end=details.columns[Math.min(index+(cell.span||1)-1,details.columns.length-1)]?.end_time?.slice(0,5);
     const current=!printing&&isToday&&row.weekday===day&&details.columns[index].start_time.slice(0,5)<=now&&now<end;
-    const content=cell.items.map(({lesson})=>{const extra=itemDetail(lesson,kind);return `<div><div class="cell-title">${esc(lesson.title)}</div>${extra?`<div class="cell-detail">${esc(extra)}</div>`:''}</div>`;}).join('');
+    const content=cell.items.map(({lesson,placement})=>{
+      const extra=itemDetail(lesson,kind);
+      const affected=(selected.timetable_swaps||[]).some(s=>s.status==='อนุมัติ'&&
+        ((s.a_placement_id===placement.id&&s.a_date>today())||(s.b_placement_id===placement.id&&s.b_date>today())));
+      const inner=`<div class="cell-title">${esc(lesson.title)}${affected?'<span class="swap-dot" aria-label="มีการสลับคาบที่จะถึง">●</span>':''}</div>${extra?`<div class="cell-detail">${esc(extra)}</div>`:''}`;
+      return kind==='mine'&&!printing?`<button type="button" class="slot-button" data-placement="${esc(placement.id||'')}" aria-label="ขอสลับคาบ ${esc(lesson.title)} ${weekdays[row.weekday]}">${inner}</button>`:`<div>${inner}</div>`;
+    }).join('');
     const full=cell.items.map(({lesson})=>`${lesson.title}${itemDetail(lesson,kind)?` · ${itemDetail(lesson,kind)}`:''}`).join(' | ');
     return `<td colspan="${cell.span||1}" class="${cell.items.length>1?'collision':''} ${current?'now':''}" title="${esc(full)}" aria-label="${esc(full)}">${current?'<span class="badge">ตอนนี้</span>':''}${content}${cell.items.length>1?'<span>ชนกัน</span>':''}</td>`;
   }).join('')}</tr>`).join('');
@@ -202,6 +233,116 @@ function weeklyPeriods(item,kind) {
   const grid=buildGrid({columns:details.columns,teachingDays:details.teaching_days,lessons,filter:gridFilterFor(item,kind)});
   return grid.reduce((sum,row)=>sum+row.cells.reduce((n,cell)=>n+cell.items.reduce((count,{lesson,placement})=>count+(lesson.subject_id?Array.from({length:placement.span},(_,offset)=>details.columns[placement.column_seq-1+offset]).filter(column=>column?.kind==='คาบเรียน').length:0),0),0),0);
 }
+function showToast(message,error=false) {
+  const box=$('toast'); box.textContent=message; box.style.display='block';
+  box.className=`toast ${error?'err':'ok'}`;
+  clearTimeout(showToast.timer); showToast.timer=setTimeout(()=>box.style.display='none',4500);
+}
+const swapsForSet=()=>selected?.timetable_swaps||[];
+const expired=swap=>['รอตอบรับ','รออนุมัติ'].includes(swap.status)&&
+  (swap.a_date<=today()||swap.b_date<=today());
+const teacherName=id=>lessons.flatMap(lesson=>lesson.teachers).find(row=>row.staff_id===id)?.display_name||'ครูในตาราง';
+const placementInfo=id=>{
+  for(const lesson of lessons) { const placement=lesson.placements.find(row=>row.id===id); if(placement)return {lesson,placement}; }
+  return null;
+};
+const slotTime=placement=>{
+  const first=details.columns.find(column=>column.seq===placement?.column_seq);
+  const last=details.columns.find(column=>column.seq===placement?.column_seq+placement?.span-1);
+  return `${first?.start_time?.slice(0,5)||'—'}–${last?.end_time?.slice(0,5)||'—'}`;
+};
+function renderUpcomingSwaps(item) {
+  const mine=view==='mine', filtered=swapsForSet().filter(swap=>swap.status==='อนุมัติ'&&
+    (swap.a_date>today()||swap.b_date>today())&&
+    (mine?(swap.from_staff_id===myStaffId||swap.to_staff_id===myStaffId):
+      view==='room'?`${swap.grade_level}/${swap.classroom}`===item.key:
+      view==='teacher'?(swap.from_staff_id===item.staffId||swap.to_staff_id===item.staffId):
+      [swap.a_placement_id,swap.b_placement_id].some(id=>placementInfo(id)?.lesson.facility_id===item.key)));
+  const box=$('upcoming-swaps'); box.hidden=!filtered.length;
+  box.innerHTML=filtered.length?`<h3>การสลับคาบที่จะถึง</h3>${filtered.map(swap=>{
+    const a=placementInfo(swap.a_placement_id),b=placementInfo(swap.b_placement_id);
+    return `<p>${esc(`${swap.grade_level}/${swap.classroom}`)} · ${esc(dateThai(swap.a_date))} ${esc(slotTime(a?.placement))}: ${esc(a?.lesson.title||'คาบเดิม')} ⇄ ${esc(b?.lesson.title||'คาบที่มาแทน')}<br>
+      ${esc(dateThai(swap.b_date))} ${esc(slotTime(b?.placement))}: ${esc(b?.lesson.title||'คาบเดิม')} ⇄ ${esc(a?.lesson.title||'คาบที่มาแทน')}</p>`;
+  }).join('')}`:'';
+}
+function renderSwapRequests() {
+  const box=$('swap-requests'), list=$('swap-requests-list');
+  const rows=view==='mine'?swapsForSet().filter(s=>s.from_staff_id===myStaffId||s.to_staff_id===myStaffId):[];
+  box.hidden=!rows.length;
+  list.innerHTML=rows.map(s=>{
+    const isA=s.from_staff_id===myStaffId, gone=expired(s), status=gone?'หมดเวลา':s.status;
+    const a=placementInfo(s.a_placement_id),b=placementInfo(s.b_placement_id);
+    const actions=gone?'':isA&&['รอตอบรับ','รออนุมัติ'].includes(s.status)
+      ? `<button class="danger" data-swap-action="cancel" data-id="${esc(s.id)}">ยกเลิกคำขอ</button>`
+      : !isA&&s.status==='รอตอบรับ'
+      ? `<button class="primary" data-swap-action="accept" data-id="${esc(s.id)}">ตอบรับ</button><button class="danger" data-swap-action="reject" data-id="${esc(s.id)}">ปฏิเสธ</button>`:'';
+    return `<article class="swap-card ${params.get('swap')===s.id?'highlight':''}" id="swap-${esc(s.id)}"><h3>${esc(status)} · ${esc(teacherName(isA?s.to_staff_id:s.from_staff_id))}</h3>
+      <p>${esc(dateThai(s.a_date))} ${esc(slotTime(a?.placement))} ${esc(a?.lesson.title||'คาบเดิม')} ⇄ ${esc(dateThai(s.b_date))} ${esc(slotTime(b?.placement))} ${esc(b?.lesson.title||'คาบที่สลับ')}</p>
+      ${s.reason?`<p>เหตุผล: ${esc(s.reason)}</p>`:''}${s.respond_note?`<p>ข้อความผู้รับ: ${esc(s.respond_note)}</p>`:''}${s.decide_note?`<p>ข้อความผู้อนุมัติ: ${esc(s.decide_note)}</p>`:''}
+      ${actions?`<div class="field"><label for="note-${esc(s.id)}">ข้อความตอบกลับ (ไม่บังคับ)</label><textarea id="note-${esc(s.id)}"></textarea></div><div class="swap-actions">${actions}</div>`:''}</article>`;
+  }).join('');
+  const deep=params.get('swap'); if(deep) requestAnimationFrame(()=>$(`swap-${deep}`)?.scrollIntoView({block:'center'}));
+}
+async function loadHolidays() {
+  if(holidays.has(selected.id))return holidays.get(selected.id);
+  const dates=fail(await sb.from('work_holidays').select('holiday_date').gte('holiday_date',selected.start_date)
+    .lte('holiday_date',selected.end_date),'โหลดวันหยุด');
+  const list=dates||[];holidays.set(selected.id,list);return list;
+}
+const futureDates=weekday=>{
+  const dates=[], end=selected.end_date;
+  for(let stamp=Date.parse(`${today()}T12:00:00Z`)+86400000;stamp<=Date.parse(`${end}T12:00:00Z`)&&dates.length<8;stamp+=86400000){
+    const date=new Date(stamp).toISOString().slice(0,10);
+    if(date>=selected.start_date&&isoWeekday(date)===weekday&&!holidays.get(selected.id)?.some(h=>h.holiday_date===date))dates.push(date);
+  }
+  return dates;
+};
+async function openSwapPanel(placementId) {
+  const info=placementInfo(placementId), box=$('swap-panel'), content=$('swap-panel-content');
+  if(!info)return showToast('ระบุคาบนี้ไม่ได้ · โหลดหน้าใหม่แล้วลองอีกครั้ง',true);
+  const lesson=info.lesson;
+  if(lesson.is_template!==false||lesson.rooms.length!==1||lesson.teachers.length!==1||lesson.teachers[0].staff_id!==myStaffId)
+    return showToast('คาบแม่แบบ คาบหลายครู หรือคาบหลายห้องสลับไม่ได้',true);
+  box.hidden=false;box.scrollIntoView({block:'start'});content.textContent='กำลังโหลดวันหยุด…';
+  try { await loadHolidays(); } catch(error) {content.innerHTML=`<p role="alert">${esc(error.message)} · แตะคาบเพื่อลองใหม่</p><button type="button" class="ghost" id="swap-close">ปิด</button>`;return;}
+  const dates=futureDates(info.placement.weekday);
+  if(!dates.length) {content.innerHTML='<p>ไม่มีวันที่ยังไม่ถึงของคาบนี้ในช่วงตาราง</p><button type="button" class="ghost" id="swap-close">ปิด</button>';return;}
+  swapChoice={aPlacementId:placementId,aDate:dates[0],bPlacementId:null,bDate:null};
+  content.innerHTML=`<p>${esc(lesson.title)} · ${esc(roomName(lesson.rooms[0]))} · ${esc(slotTime(info.placement))}</p>
+    <div class="field"><label for="swap-a-date">วันที่คาบของฉัน</label><select id="swap-a-date">${dates.map(d=>option(d,dateThai(d))).join('')}</select></div>
+    <div id="swap-candidates"></div>`;
+  renderCandidates();
+}
+function renderCandidates() {
+  if(!swapChoice)return;
+  swapChoice.aDate=$('swap-a-date').value;
+  swapCandidatesForDay=swapCandidates(details,{...swapChoice,myStaffId,approvedSwaps:swapsForSet().filter(s=>s.status==='อนุมัติ'),holidays:holidays.get(selected.id)||[],today:today()});
+  const box=$('swap-candidates');
+  if(!swapCandidatesForDay.length){box.innerHTML='<p class="empty">ไม่มีครูในห้องนี้ที่ว่างตรงกันในวันที่เลือก</p><button type="button" class="ghost" id="swap-close">ปิด</button>';return;}
+  box.innerHTML=`<div class="field"><label for="swap-b-placement">คาบของครูที่จะสลับ</label><select id="swap-b-placement">${swapCandidatesForDay.map(c=>option(c.placementId,`${c.lesson.title} · ${c.lesson.teachers[0].display_name} · ${slotTime({column_seq:c.startSeq,span:c.endSeq-c.startSeq+1})}`)).join('')}</select></div>
+    <div class="field"><label for="swap-b-date">วันที่คาบของครูอีกคน</label><select id="swap-b-date"></select></div>
+    <div class="field"><label for="swap-reason">เหตุผล (ไม่บังคับ)</label><textarea id="swap-reason"></textarea></div>
+    <div class="swap-actions"><button class="primary" id="swap-submit">ส่งคำขอสลับคาบ</button><button class="ghost" id="swap-close">ปิด</button></div>`;
+  renderBDates();
+}
+function renderBDates() {
+  const candidate=swapCandidatesForDay.find(c=>c.placementId===$('swap-b-placement')?.value);
+  $('swap-b-date').innerHTML=(candidate?.bDates||[]).map(d=>option(d,dateThai(d))).join('');
+}
+async function refreshSwaps() {
+  const list=fail(await sb.from('timetables').select(SWAP_SET_SELECT).eq('status','ใช้งาน')
+    .or(`a_date.gte.${today()},b_date.gte.${today()}`,{referencedTable:'timetable_swaps'})
+    .order('start_date'),'โหลดคำขอสลับคาบ');
+  sets=list||[];selected=sets.find(row=>row.id===selected.id)||selected;
+  renderGrid();
+}
+async function swapAction(name,args,success) {
+  if(swapBusy)return false;
+  swapBusy=true;
+  try {const response=await sb.rpc(name,args);if(response.error)throw response.error;
+    showToast(success);await refreshSwaps();return true;}
+  catch(error){showToast(error.message,true);return false;}finally{swapBusy=false;}
+}
 function renderGrid() {
   const options=currentChoices();
   const item=view==='mine'?{key:myStaffId,name:'ของฉัน',staffId:myStaffId}:options.find(row=>row.key===target);
@@ -210,6 +351,8 @@ function renderGrid() {
   $('schedule-title').textContent=view==='mine'?'ตารางสอนของฉัน':`ตารางสอน${view==='teacher'?'ครู':view==='room'?'ห้อง':'ห้องปฏิบัติการ'} ${item.name}`;
   $('grid').innerHTML=buildTable(item,view);
   $('weekly-total').textContent=(view==='mine'||view==='teacher')?`สัปดาห์ละ ${weeklyPeriods(item,view)} คาบเรียน`:'';
+  renderUpcomingSwaps(item);
+  renderSwapRequests();
   $('print-one').disabled=false;
   $('print-all').disabled=view==='mine'||!options.length;
   linkState();
@@ -234,9 +377,9 @@ function renderView() {
 async function selectSet(row,initial=false) {
   $('load-error').textContent=''; $('load-state').textContent='กำลังโหลดตารางสอน…'; $('controls').hidden=true; $('schedule-card').hidden=true;
   try {
-    const data=await loadTimetableDetails({sb,fetchAllRows,storage:safeStorage(),timetable:row});
+    const data=await loadTimetableDetails({sb,fetchAllRows,storage:safeStorage(),timetable:row,swapReady:true});
     const normalized=normalizeDetails(data);
-    selected=row; details={...data,columns:normalized.columns}; lessons=normalized.lessons;
+    selected=row; details={...data,start_date:row.start_date,end_date:row.end_date,columns:normalized.columns}; lessons=normalized.lessons;
     const mine=myAvailable();
     document.querySelector('[data-view="mine"]').hidden=!mine;
     const wanted=initial?params.get('view'):null;
@@ -248,6 +391,7 @@ async function selectSet(row,initial=false) {
     $('period-notice').textContent=row.start_date<=today()&&today()<=row.end_date?'':`ตารางนี้ใช้ ${rangeText(row)} · วันนี้ไม่อยู่ในช่วง`;
     if(sets.length>1) $('set-select').value=row.id;
     renderView();
+    $('swap-panel').hidden=true;swapChoice=null;
   } catch(error) { showError(`${error.message} · ตรวจอินเทอร์เน็ตแล้วรีเฟรชหน้า`); }
 }
 function printSheet(item,kind) {
@@ -266,17 +410,45 @@ $('print-all').addEventListener('click',()=>printSchedules(true));
 window.addEventListener('afterprint',()=>{ $('print-area').innerHTML=''; });
 $('set-select').addEventListener('change',event=>{const row=sets.find(item=>item.id===event.target.value);if(row) void selectSet(row);});
 $('target-select').addEventListener('change',event=>{target=event.target.value;renderGrid();});
+$('grid').addEventListener('click',event=>{const button=event.target.closest('[data-placement]');if(button)void openSwapPanel(button.dataset.placement);});
+$('swap-panel-content').addEventListener('change',event=>{
+  if(event.target.id==='swap-a-date')renderCandidates();
+  if(event.target.id==='swap-b-placement')renderBDates();
+});
+$('swap-panel-content').addEventListener('click',async event=>{
+  if(event.target.id==='swap-close'){$('swap-panel').hidden=true;return;}
+  if(event.target.id!=='swap-submit'||swapBusy)return;
+  const candidate=swapCandidatesForDay.find(row=>row.placementId===$('swap-b-placement').value);
+  const bDate=$('swap-b-date').value;
+  if(!candidate||!candidate.bDates.includes(bDate))return showToast('กรุณาเลือกคาบและวันที่ที่สลับได้',true);
+  if(!await window.crsAskConfirm({title:'ส่งคำขอสลับคาบ',message:`${dateThai(swapChoice.aDate)} ⇄ ${dateThai(bDate)} · อีกฝ่ายต้องตอบรับและหัวหน้าวิชาการต้องอนุมัติ`,okLabel:'ส่งคำขอ'}))return;
+  if(await swapAction('request_timetable_swap',{p_a_placement:swapChoice.aPlacementId,p_a_date:swapChoice.aDate,p_b_placement:candidate.placementId,p_b_date:bDate,p_reason:$('swap-reason').value.trim()||null},'ส่งคำขอสลับคาบแล้ว'))$('swap-panel').hidden=true;
+});
+$('swap-requests-list').addEventListener('click',async event=>{
+  const button=event.target.closest('[data-swap-action]');if(!button||swapBusy)return;
+  const {id,swapAction:action}=button.dataset;
+  const note=$(`note-${id}`)?.value.trim()||null;
+  const title=action==='cancel'?'ยกเลิกคำขอ':action==='accept'?'ตอบรับคำขอ':'ปฏิเสธคำขอ';
+  if(!await window.crsAskConfirm({title,message:'ตรวจคาบและวันที่ทั้งสองขาก่อนยืนยัน',okLabel:title,danger:action!=='accept'}))return;
+  await swapAction(action==='cancel'?'cancel_timetable_swap':'respond_timetable_swap',
+    action==='cancel'?{p_id:id,p_note:note}:{p_id:id,p_accept:action==='accept',p_note:note},`${title}แล้ว`);
+});
 document.querySelectorAll('.view-buttons button').forEach(button=>button.addEventListener('click',()=>{view=button.dataset.view;target='';renderView();}));
 const session=await requireAuth();
 if(session) {
   $('btn-signout').addEventListener('click',async event=>{event.preventDefault();await signOut();});
   try {
-    const list=fail(await sb.from('timetables').select('id,year,term,name,start_date,end_date,updated_at').eq('status','ใช้งาน').order('start_date'),'โหลดรายการตารางสอน');
+    const list=fail(await sb.from('timetables').select(SWAP_SET_SELECT).eq('status','ใช้งาน')
+      .or(`a_date.gte.${today()},b_date.gte.${today()}`,{referencedTable:'timetable_swaps'})
+      .order('start_date'),'โหลดรายการตารางสอน');
     sets=list||[];
     pruneTimetableCache(safeStorage(),sets.map(row=>row.id));
-    const deepId=params.get('tt'); let first=deepId?sets.find(row=>row.id===deepId):null;
+    const deepId=params.get('tt'); let first=deepId?sets.find(row=>row.id===deepId):
+      sets.find(row=>row.timetable_swaps?.some(swap=>swap.id===params.get('swap')))||null;
     if(deepId&&!first) {
-      const linked=fail(await sb.from('timetables').select('id,year,term,name,start_date,end_date,updated_at,status').eq('id',deepId).maybeSingle(),'ตรวจลิงก์ตารางสอน');
+      const linked=fail(await sb.from('timetables').select(`${SWAP_SET_SELECT},status`).eq('id',deepId)
+        .or(`a_date.gte.${today()},b_date.gte.${today()}`,{referencedTable:'timetable_swaps'})
+        .maybeSingle(),'ตรวจลิงก์ตารางสอน');
       if(!linked) { showError('ไม่พบตารางนี้ หรือคุณไม่มีสิทธิ์ดู · ตรวจลิงก์แล้วรีเฟรชหน้า'); }
       else { sets=[...sets,linked]; first=linked; }
     }

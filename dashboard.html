@@ -501,6 +501,7 @@
   let isApprover = false;
   let makeupApprover = false;
   let pendingMakeups = 0;
+  let swapHead = false;
 
   function hideMyAlerts() {
     myAlerts.hidden = true;
@@ -508,7 +509,7 @@
   }
 
   function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver,
-    pendingMakeups = 0, makeupApproverFlag = false, dutyMonths = []) {
+    pendingMakeups = 0, makeupApproverFlag = false, dutyMonths = [], swapAlertsResult = null) {
     try {
       const loaded = resultValue(alertsResult) || {};
       let daily = null;
@@ -517,6 +518,25 @@
         ...loaded, daily, today, pendingApprovals, isApprover:approver,
         pendingMakeups, isMakeupApprover:makeupApproverFlag, dutyMonths
       });
+      const swapData=swapAlertsResult?.value?.data;
+      if(swapData && !swapAlertsResult.value.error) {
+        const pending=(swapData.rows||[]).filter(row=>row.status==='รออนุมัติ').length;
+        if(swapData.is_head && pending) rows.push({kind:'สลับคาบ',text:`คำขอสลับคาบรออนุมัติ ${pending} รายการ`,href:'academic/timetable-swaps.html',linkLabel:'ไปอนุมัติ'});
+        for(const swap of swapData.rows||[]) {
+          if(swap.role==='ผู้อนุมัติ')continue;
+          const expired=['รอตอบรับ','รออนุมัติ'].includes(swap.status)&&
+            (swap.a_date<=today||swap.b_date<=today);
+          if(swap.role==='ผู้รับ'&&swap.status!=='รอตอบรับ')continue;
+          const status=expired?'หมดเวลา':({รอตอบรับ:'รอครูอีกคนตอบ',รออนุมัติ:'รอหัวหน้าวิชาการ',อนุมัติ:'อนุมัติแล้ว',ไม่อนุมัติ:'ไม่อนุมัติ',ปฏิเสธ:'ครูอีกคนปฏิเสธ',ยกเลิก:'ยกเลิกแล้ว'})[swap.status]||swap.status;
+          const aDate=formatShortDate(swap.a_date), bDate=formatShortDate(swap.b_date);
+          const aStart=String(swap.a_start??'').slice(0,5), bStart=String(swap.b_start??'').slice(0,5);
+          const text=swap.role==='ผู้รับ'
+            ? `${expired?'หมดเวลา · ':''}${swap.from_name} ขอสลับคาบ ${swap.room} · ${aDate} ${aStart} ⇄ ${bDate} ${bStart}`
+            : `คำขอสลับคาบ ${swap.room} · ${status} · ${aDate} ⇄ ${bDate}`;
+          rows.push({kind:'สลับคาบ',text,href:`academic/timetable.html?view=mine&swap=${encodeURIComponent(swap.id)}`,
+            linkLabel:swap.role==='ผู้รับ'&&!expired?'ไปตอบ':'ดูสถานะ'});
+        }
+      }
       if (!rows.length) {
         hideMyAlerts();
         return;
@@ -960,7 +980,7 @@
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
     const [dailyResult, calendarResult, projectResult, approverResult, makeupApproverResult,
-      myAlertsResult, dutyMonths] = await Promise.all([
+      myAlertsResult, dutyMonths, swapAlertsResult] = await Promise.all([
       capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
@@ -970,11 +990,13 @@
       capture(isProjectApprover()),
       capture(isMakeupApprover()),
       me ? capture(loadMyDashboardAlerts({ staffId:me.id, userId:session.user.id, year, today })) : Promise.resolve({ value:null }),
-      loadDutyMonthReminders(today).catch(() => [])
+      loadDutyMonthReminders(today).catch(() => []),
+      capture(sb.rpc('my_timetable_swap_alerts'))
     ]);
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
     makeupApprover = makeupApproverResult?.value === true;
+    swapHead = swapAlertsResult?.value?.data?.is_head === true;
     // คิวสอนชดดึงเฉพาะผู้อนุมัติ — ครูทั้งโรงเรียนไม่ต้องจ่ายคิวรีนี้
     pendingMakeups = makeupApprover ? (await listPendingMakeupRequests()).length : 0;
 
@@ -1009,7 +1031,7 @@
       pendingApprovals = 0;
     }
     renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-      pendingMakeups, makeupApprover, dutyMonths);
+      pendingMakeups, makeupApprover, dutyMonths, swapAlertsResult);
 
     let upcomingResult;
     let leadDays = resolveCalendarLeadDays(null);
@@ -1052,28 +1074,31 @@
     //    จากสถานะนั้น ถ้ากรองไว้ เลขจะขึ้นตอนมีของเข้าคิว แต่ไม่ยอมลดตอน ผอ. อนุมัติเสร็จ
     // ⛔ ไม่ subscribe daily_attendance — ตารางใหญ่และมี event พร้อมกันหลายร้อยแถว
     // ต่อเมื่อมีแถว staff หรือเป็นผู้อนุมัติเท่านั้น คนอื่นไม่มีแถวในการ์ดที่ต้องอัปเดต
-    if (me || isApprover || makeupApprover) {
+    if (me || isApprover || makeupApprover || swapHead) {
       // ดึงใหม่เฉพาะส่วนที่ event นั้นเปลี่ยน (ลด request) — ส่วนที่ไม่ได้ดึงใช้ผลล่าสุดตอน render
       // กลับมาที่แท็บ = ดึงครบทุกส่วน แต่ไม่เกิน 1 ครั้งต่อ 5 นาที (ผู้ใช้เคาะ 2026-10-27)
-      const ALL_PARTS = ["projects", "alerts", "duty", "makeups"];
+      const ALL_PARTS = ["projects", "alerts", "duty", "makeups", "tswaps"];
       const TAB_RETURN_MIN_MS = 5 * 60 * 1000;
       let lastFullSyncAt = Date.now();
       let lastAlertsResult = me ? myAlertsResult : { value:{} };
       let lastDutyMonths = dutyMonths;
+      let lastSwapResult = swapAlertsResult;
       let syncPending = false;
       async function syncDashboardAlerts(parts) {
         if (syncPending) return;
         syncPending = true;
         try {
-          const [freshProjectsResult, freshAlertsResult, freshDutyMonths] = await Promise.all([
+          const [freshProjectsResult, freshAlertsResult, freshDutyMonths, freshSwapResult] = await Promise.all([
             isApprover && parts.has("projects") ? capture(loadAcademicProjects(year, { details:false })) : Promise.resolve(null),
             me && parts.has("alerts")
               ? capture(loadMyDashboardAlerts({ staffId:me.id, userId:session.user.id, year, today }))
               : Promise.resolve(null),
-            parts.has("duty") ? loadDutyMonthReminders(today).catch(() => []) : Promise.resolve(null)
+            parts.has("duty") ? loadDutyMonthReminders(today).catch(() => []) : Promise.resolve(null),
+            parts.has("tswaps") ? capture(sb.rpc('my_timetable_swap_alerts')) : Promise.resolve(null)
           ]);
           if (freshAlertsResult) lastAlertsResult = freshAlertsResult;
           if (freshDutyMonths) lastDutyMonths = freshDutyMonths;
+          if (freshSwapResult?.value && !freshSwapResult.value.error) lastSwapResult = freshSwapResult;
           // คิวสอนชดนับใหม่เมื่อมีสัญญาณ — ครูส่งคำขอเพิ่มหรือถูกตัดสินไปแล้วก็ได้
           if (makeupApprover && parts.has("makeups")) pendingMakeups = (await listPendingMakeupRequests()).length;
           if (freshProjectsResult) {
@@ -1088,7 +1113,7 @@
           }
           renderMyAlerts(
             lastAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-            pendingMakeups, makeupApprover, lastDutyMonths
+            pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult
           );
           if ((!freshProjectsResult || !freshProjectsResult.error) && (!freshAlertsResult || !freshAlertsResult.error)) {
             updateFreshTime();
@@ -1133,6 +1158,9 @@
           event: "*", schema: "public", table: "teacher_makeups"
         }, () => scheduleSync(["makeups", "alerts"]));
       }
+      if (swapHead) alertsChannel.on("postgres_changes", {
+        event:"*", schema:"public", table:"timetable_swaps"
+      }, () => scheduleSync(["tswaps"]));
       alertsChannel.subscribe();
 
       // 🛟 กันเหนียวเมื่อ Realtime ต่อไม่ติด (เน็ตโรงเรียน/พร็อกซีบล็อก WebSocket)

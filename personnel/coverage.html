@@ -206,6 +206,7 @@
         <button id="btn-reload" class="ghost small">โหลดใหม่</button>
       </div>
       <div id="timetable-note" class="field-note" role="status"></div>
+      <div id="timetable-swap-strip" class="banner info" role="status" hidden></div>
       <details class="coverage-details" style="margin-top:12px">
         <summary>ⓘ สิทธิ์เช็คชื่อของคนแทน</summary>
       <div class="banner info" style="margin-top:12px">
@@ -264,7 +265,7 @@ import {
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
 } from "../supabase-client.js?v=20261027-5";
-import { loadTimetableForDate, staffDaySchedule, subjectPeriodsFromSchedule, busyStaffIds } from "../academic/timetable-fet.js?v=20261101-1";
+import { loadTimetableForDate, staffDaySchedule, subjectPeriodsFromSchedule, busyStaffIds } from "../academic/timetable-fet.js?v=20261102-1";
 
 const session = await requireAuth();
 if (session) {
@@ -292,6 +293,8 @@ if (session) {
     let day = null;          // ผลจาก loadCoverageDay()
     let timetableDetails = null;
     let timetableWeekday = null;
+    let timetableDate = null;
+    let timetableSwaps = [];
     let timetableDayCache = null; // ผลของวันที่โหลดสำเร็จ รวมกรณีไม่มีตาราง
     let busy = false;
     const draftRows = new Set();
@@ -344,7 +347,8 @@ if (session) {
     //   กรองแค่ 2 อย่าง: ต้องยังทำงานอยู่ และต้องไม่ใช่คนที่ไม่มาเอง
     const substituteOptions = (absentStaffId, selectedId, excludedIds = new Set(), seqRanges = []) => {
       const busyStaff = timetableDetails && seqRanges.length
-        ? busyStaffIds(timetableDetails, timetableWeekday, seqRanges) : new Map();
+        ? busyStaffIds(timetableDetails, timetableWeekday, seqRanges,
+          { dateStr:timetableDate, swaps:timetableSwaps }) : new Map();
       const absent = timetableDetails && seqRanges.length
         ? new Map(day.absentees.map(entry => [entry.staff.id, entry.source])) : new Map();
       const rows = day.staff.filter(s =>
@@ -362,15 +366,17 @@ if (session) {
     };
 
     // เพิ่มข้อเสนอจากตารางให้ข้อมูลวันที่โหลดมาแล้วเท่านั้น ไม่แตะข้อมูลที่บันทึกในฐาน
-    const applyTimetable = (dateStr, details) => {
+    const applyTimetable = (dateStr, details, swaps = []) => {
       const weekday = (new Date(dateStr + 'T12:00:00Z').getUTCDay() + 6) % 7 + 1;
       const proposals = day.absentees.map(entry => {
         const portion = entry.leave?.day_portion || 'full';
-        const schedule = staffDaySchedule(details, weekday, entry.staff.id, { portion });
+        const schedule = staffDaySchedule(details, weekday, entry.staff.id, { portion, dateStr, swaps });
         return { entry, schedule, bySubject:subjectPeriodsFromSchedule(schedule) };
       });
       timetableDetails = details;
       timetableWeekday = weekday;
+      timetableDate = dateStr;
+      timetableSwaps = swaps;
       for (const { entry, schedule, bySubject } of proposals) {
         entry.unlinkedLessons = schedule.filter(slot => slot.isTeaching && !slot.subjectId);
         for (const [subjectId, info] of bySubject) {
@@ -383,9 +389,36 @@ if (session) {
           }
           item.suggestedPeriods = info.periods;
           item.scheduleSlots = info.slots;
+          item.swapNote = info.slots.filter(slot=>slot.swappedWith).map(slot=>
+            'ได้มาจากการสลับกับ ' + (day.staffById.get(slot.swappedWith)?.full_name||'ครูอีกคน')).join(' · ');
           if (item.orphan) { item.label = schedule.find(row => row.subjectId === subjectId).title; item.orphan = false; }
         }
       }
+    };
+
+    const renderSwapStrip = (dateStr, details, swaps) => {
+      const box=el('timetable-swap-strip');box.hidden=!swaps.length;
+      if(!swaps.length){box.innerHTML='';return;}
+      const lessons=details.timetable_lessons||[];
+      const byPlacement=new Map(lessons.flatMap(lesson=>(lesson.timetable_placements||[])
+        .map(placement=>[placement.id,{lesson,placement}])));
+      const bySeq=new Map((details.timetable_columns||[]).map(column=>[column.seq,column]));
+      box.innerHTML='<strong>สลับคาบวันนี้</strong>' + swaps.map(swap=>{
+        const onA=swap.a_date===dateStr, origin=byPlacement.get(onA?swap.a_placement_id:swap.b_placement_id);
+        const timeOf=placement=>{
+          const first=bySeq.get(placement?.column_seq)?.start_time?.slice(0,5)||'—';
+          const last=bySeq.get(placement?.column_seq+placement?.span-1)?.end_time?.slice(0,5)||'—';
+          return `${first}–${last}`;
+        };
+        const time=swap.a_date===swap.b_date
+          ? `${timeOf(byPlacement.get(swap.a_placement_id)?.placement)} ⇄ ${timeOf(byPlacement.get(swap.b_placement_id)?.placement)}`
+          : timeOf(origin?.placement);
+        const a=day.staffById.get(swap.from_staff_id)?.full_name||'ครู A';
+        const b=day.staffById.get(swap.to_staff_id)?.full_name||'ครู B';
+        const absent=day.absentees.some(entry=>entry.staff.id===swap.from_staff_id||entry.staff.id===swap.to_staff_id);
+        return '<div>' + esc(`${swap.grade_level}/${swap.classroom} ${time} · ${a} ⇄ ${b}`) +
+          (absent?'<span class="chip urgent">⚠ มีครูฝ่ายหนึ่งไม่มา · ตรวจคนแทนของคาบที่รับไป</span>':'')+'</div>';
+      }).join('');
     };
 
     // พับเฉพาะคนที่ครบตอนโหลดวันนั้น ไม่แย่งมือเมื่อเพิ่งจัดครบระหว่างใช้งาน
@@ -576,6 +609,7 @@ if (session) {
                     esc(item.scheduleSlots.map(slot => slot.startTime + '–' + slot.endTime + ' · ' + slot.rooms.join(', ')).join('; ')) + "</span>"
                   : item.suggestedPeriods == null ? "" : "<span class='item-sub'>ปกติสอนวันละ " +
                     esc(item.suggestedPeriods) + " คาบ</span>") +
+                (item.swapNote ? "<span class='item-sub'>" + esc(item.swapNote) + "</span>" : "") +
                 "<span class='chip " + status + "'>" + esc(statusText) + "</span>" +
                 (item.sub && item.kind !== "เวร" ? "<span class='item-sub'>" + esc(item.sub) + "</span>" : "") +
                 (item.integratedParent ? "<span class='item-sub'>ในบูรณาการ · " +
@@ -911,6 +945,9 @@ if (session) {
         applySuggestedTerm(day.term);
         timetableDetails = null;
         timetableWeekday = null;
+        timetableDate = null;
+        timetableSwaps = [];
+        el('timetable-swap-strip').hidden = true;
         try {
           if (timetableDayCache?.date !== date) {
             const result = await loadTimetableForDate({ sb, fetchAllRows,
@@ -919,7 +956,8 @@ if (session) {
           }
           const result = timetableDayCache.result;
           if (result.timetable) {
-            applyTimetable(date, result.details);
+            applyTimetable(date, result.details, result.swaps || []);
+            renderSwapStrip(date, result.details, result.swaps || []);
             el('timetable-note').textContent = 'เสนอวิชาและคาบตามตารางสอน · ครึ่งเช้า = คาบที่เริ่มก่อน 12:00 · คนจัดยังต้องกดบันทึกเอง';
           } else el('timetable-note').textContent = 'ไม่มีตารางสอนที่ใช้วันนี้ · แสดงทุกวิชาของครู';
         } catch (error) {

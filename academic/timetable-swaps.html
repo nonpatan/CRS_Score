@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>อนุมัติสลับคาบ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+:root { --ink:#1f2a2e;--muted:#5f6b70;--line:#dfe4e3;--teal:#0f6e56;--teal-soft:#e1f5ee;--bg:#f7f8f7;--white:#fff;--danger:#a32d2d;--danger-soft:#fceaea;--amber:#8a5a00;--amber-soft:#fff4df; }
+* { box-sizing:border-box; }
+body { margin:0;padding:16px;background:var(--bg);color:var(--ink);font:16px/1.6 Sarabun,sans-serif; }
+.wrap { max-width:760px;margin:auto; }
+header h1 { margin:4px 0;font-size:23px; }
+header p,.meta { color:var(--muted); }
+.nav { min-height:54px; }
+.card { padding:16px;margin-bottom:16px;background:var(--white);border:1px solid var(--line);border-radius:12px; }
+.queue-card { padding:15px;margin-top:12px;border:1px solid var(--line);border-radius:12px; }
+h2 { margin:0 0 12px;font-size:19px; } h3 { margin:0 0 6px;font-size:18px; }
+p { margin:5px 0;overflow-wrap:anywhere; }
+.meta { font-size:14px; }
+.banner { padding:11px 13px;margin:10px 0;border-radius:10px; }
+.banner.warn { background:var(--amber-soft);color:var(--amber); }
+.banner.fail { background:var(--danger-soft);color:var(--danger); }
+.actions { display:flex;flex-wrap:wrap;gap:8px;margin-top:14px; }
+button { min-height:44px;padding:9px 14px;border:0;border-radius:8px;font:inherit;font-weight:600;cursor:pointer; }
+button.primary { background:var(--teal);color:var(--white); }
+button.danger { background:var(--danger-soft);color:var(--danger); }
+button:disabled { opacity:.5;cursor:default; }
+textarea { width:100%;min-height:74px;padding:10px;border:1px solid var(--line);border-radius:8px;font:inherit; }
+button:focus-visible,textarea:focus-visible,summary:focus-visible { outline:2px solid var(--teal);outline-offset:2px; }
+.field { margin-top:12px; } label { display:block;margin-bottom:5px;font-weight:600; }
+.empty { color:var(--muted);text-align:center;padding:22px; }
+.toast { position:sticky;bottom:12px;padding:10px;border-radius:8px;text-align:center;background:var(--teal-soft); }
+.toast.err { color:var(--danger);background:var(--danger-soft); }
+[hidden] { display:none!important; }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body><div class="wrap">
+<header><h1>อนุมัติคำขอสลับคาบ</h1><p>ตรวจคาบทั้งสองขาและผลตรวจชนล่าสุดก่อนตัดสิน</p>
+<div class="nav"><a href="timetable.html">ตารางสอน</a><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261031-2"></script></header>
+<main class="academic-content">
+<section class="card" id="gate" hidden></section>
+<div id="content" hidden>
+<section class="card"><h2 id="pending-count">รออนุมัติ</h2><div id="pending-list" role="status">กำลังโหลด…</div></section>
+<details class="card"><summary>ตัดสินแล้ว 30 วัน</summary><div id="closed-list"></div></details>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</main></div>
+<script type="module">
+import {sb,requireAuth,isAcademicHead,signOut} from '../supabase-client.js?v=20261027-5';
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const today=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const dateThai=value=>new Intl.DateTimeFormat('th-TH',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(`${value}T12:00:00Z`));
+function toast(message,error=false){const box=$('toast');box.hidden=false;box.className=`toast ${error?'err':''}`;box.textContent=message;clearTimeout(toast.timer);toast.timer=setTimeout(()=>box.hidden=true,5000);}
+function expired(row){return row.a_date<=today()||row.b_date<=today();}
+function card(row,open){
+  const blocked=Boolean(row.problem),late=expired(row);
+  return `<article class="queue-card" data-id="${esc(row.id)}"><h3>${esc(row.room)} · ${esc(row.status)}</h3>
+    <p><strong>ขา A</strong> ${esc(dateThai(row.a_date))} ${esc(row.a_start)}–${esc(row.a_end)} · ${esc(row.a_title)} · ${esc(row.from_name)}</p>
+    <p><strong>ขา B</strong> ${esc(dateThai(row.b_date))} ${esc(row.b_start)}–${esc(row.b_end)} · ${esc(row.b_title)} · ${esc(row.to_name)}</p>
+    ${row.reason?`<p>เหตุผลผู้ขอ: ${esc(row.reason)}</p>`:''}
+    ${row.respond_note?`<p>ข้อความผู้รับ: ${esc(row.respond_note)}</p>`:''}
+    ${row.decide_note?`<p>ข้อความผู้อนุมัติ: ${esc(row.decide_note)}</p>`:''}
+    ${row.leave_note?`<div class="banner warn">⚠ ${esc(row.leave_note)} — คาบที่รับไปต้องหาคนแทน</div>`:''}
+    ${row.problem?`<div class="banner fail" role="alert">${esc(row.problem)}</div>`:''}
+    ${late&&open?'<div class="banner warn">หมดเวลา · วันแรกของการสลับมาถึงแล้ว</div>':''}
+    ${open?`<div class="field"><label for="note-${esc(row.id)}">ข้อความตัดสิน (ไม่บังคับ)</label><textarea id="note-${esc(row.id)}"></textarea></div>
+      <div class="actions"><button class="primary" data-action="approve" ${blocked||late?'disabled':''}>อนุมัติ</button>
+      <button class="danger" data-action="reject" ${late?'disabled':''}>ไม่อนุมัติ</button></div>`:''}
+  </article>`;
+}
+async function load(){
+  const {data,error}=await sb.rpc('list_timetable_swaps_for_approval',{p_days:30});
+  if(error)throw error;
+  const rows=Array.isArray(data)?data:[];
+  const pending=rows.filter(row=>row.status==='รออนุมัติ');
+  $('pending-count').textContent=`รออนุมัติ ${pending.length} รายการ`;
+  $('pending-list').innerHTML=pending.length?pending.map(row=>card(row,true)).join(''):'<div class="empty">ไม่มีคำขอรออนุมัติ</div>';
+  const closed=rows.filter(row=>row.status!=='รออนุมัติ');
+  $('closed-list').innerHTML=closed.length?closed.map(row=>card(row,false)).join(''):'<div class="empty">ไม่มีรายการที่ตัดสินแล้ว</div>';
+}
+$('pending-list').addEventListener('click',async event=>{
+  const button=event.target.closest('[data-action]');if(!button||button.disabled)return;
+  const article=button.closest('[data-id]'),approve=button.dataset.action==='approve';
+  if(!await window.crsAskConfirm({title:approve?'อนุมัติสลับคาบ':'ไม่อนุมัติสลับคาบ',
+    message:'ตรวจวัน เวลา ครู และผลตรวจชนของทั้งสองขาแล้ว',okLabel:approve?'อนุมัติ':'ไม่อนุมัติ',danger:!approve}))return;
+  article.querySelectorAll('button').forEach(b=>b.disabled=true);
+  const {error}=await sb.rpc('decide_timetable_swap',{p_id:article.dataset.id,p_approve:approve,
+    p_note:article.querySelector('textarea').value.trim()||null});
+  if(error){toast(error.message,true);try{await load();}catch{}return;}
+  toast(approve?'อนุมัติแล้ว':'ไม่อนุมัติแล้ว');
+  try{await load();}catch(e){toast(e.message,true);}
+});
+const session=await requireAuth();
+if(session){
+  $('btn-signout').addEventListener('click',event=>{event.preventDefault();signOut();});
+  try{if(!await isAcademicHead()){$('gate').hidden=false;$('gate').textContent='เฉพาะหัวหน้าฝ่ายวิชาการหรือผู้ดูแลระบบเท่านั้น';}
+    else{$('content').hidden=false;await load();}}
+  catch(error){$('gate').hidden=false;$('gate').textContent=`โหลดคิวไม่สำเร็จ: ${error.message} · รีเฟรชเพื่อลองใหม่`;}
+}
+</script></body></html>

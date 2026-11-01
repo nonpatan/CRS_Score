@@ -228,18 +228,19 @@ export function pruneTimetableCache(storage, activeIds) {
   } catch { return false; }
 }
 
-const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(weekday,column_seq,span))';
-const LESSON_SELECT = 'id,title,subject_id,facility_id,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(weekday,column_seq,span)';
+const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,is_template,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span))';
+const LESSON_SELECT = 'id,title,subject_id,facility_id,is_template,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span)';
 const queryData = (result, label) => {
   if (result.error) throw new Error(`${label}: ${result.error.message}`);
   return result.data;
 };
 
-export async function loadTimetableDetails({ sb, fetchAllRows, storage, timetable }) {
+export async function loadTimetableDetails({ sb, fetchAllRows, storage, timetable, swapReady = false }) {
   const row = timetable;
   if (row.status !== 'ร่าง') {
     const cached = readTimetableCache(storage, row.id, row.updated_at);
-    if (cached) return cached;
+    if (cached && (!swapReady || cached.timetable_lessons.every(lesson =>
+      typeof lesson.is_template === 'boolean' && lesson.timetable_placements.every(placement => Boolean(placement.id))))) return cached;
   }
   const data = queryData(await sb.from('timetables').select(DETAIL_SELECT).eq('id', row.id).maybeSingle(), 'โหลดรายละเอียดตารางสอน');
   if (!data) throw new Error('ไม่พบตารางนี้ หรือคุณไม่มีสิทธิ์ดู · ตรวจลิงก์แล้วรีเฟรชหน้า');
@@ -254,17 +255,19 @@ export async function loadTimetableDetails({ sb, fetchAllRows, storage, timetabl
 
 export async function loadTimetableForDate({ sb, fetchAllRows, storage, dateStr }) {
   const timetable = queryData(await sb.from('timetables')
-    .select('id,year,term,name,start_date,end_date,updated_at')
+    .select('id,year,term,name,start_date,end_date,updated_at,timetable_swaps(id,a_placement_id,a_date,b_placement_id,b_date,from_staff_id,to_staff_id,grade_level,classroom)')
+    .eq('timetable_swaps.status', 'อนุมัติ')
+    .or(`a_date.eq.${dateStr},b_date.eq.${dateStr}`, { referencedTable:'timetable_swaps' })
     .eq('status', 'ใช้งาน').lte('start_date', dateStr).gte('end_date', dateStr).maybeSingle(), 'โหลดตารางสอนของวัน');
-  if (!timetable) return { timetable: null };
-  const details = await loadTimetableDetails({ sb, fetchAllRows, storage, timetable });
-  return { timetable, details };
+  if (!timetable) return { timetable: null, swaps:[] };
+  const details = await loadTimetableDetails({ sb, fetchAllRows, storage, timetable, swapReady:true });
+  return { timetable, details, swaps:timetable.timetable_swaps || [] };
 }
 
 export function normalizeDetails(data) {
   const columns = [...(data.timetable_columns || [])].sort((a, b) => a.seq - b.seq);
   const lessons = (data.timetable_lessons || []).map(row => ({
-    id: row.id, title: row.title, subject_id: row.subject_id, facility_id: row.facility_id,
+    id: row.id, title: row.title, subject_id: row.subject_id, facility_id: row.facility_id, is_template:row.is_template,
     facility: row.facilities?.name || null, note: row.note,
     rooms: row.timetable_lesson_rooms || [], teachers: row.timetable_lesson_teachers || [],
     placements: row.timetable_placements || []
@@ -274,11 +277,57 @@ export function normalizeDetails(data) {
 
 const clock = value => String(value || '').slice(0, 5);
 const roomLabels = rooms => [...new Set(rooms.map(room => `${room.grade_level}/${room.classroom}`))];
+export const isoWeekday = dateStr => (new Date(`${dateStr}T12:00:00Z`).getUTCDay() + 6) % 7 + 1;
+const addDays = (dateStr, count) => new Date(Date.parse(`${dateStr}T12:00:00Z`) + count * 86400000).toISOString().slice(0, 10);
 
-export function staffDaySchedule(details, weekday, staffId, { portion = 'full' } = {}) {
+// Mirrors timetable_day_slots in schema.sql. Keep the original placement id for each incoming lesson.
+export function daySlots(details, dateStr, swaps = []) {
+  const { lessons } = normalizeDetails(details);
+  const placements = new Map(lessons.flatMap(lesson => lesson.placements.map(placement => [placement.id, { lesson, placement }])));
+  const relevant = swaps.filter(swap => swap.a_date === dateStr || swap.b_date === dateStr);
+  const removed = new Set(relevant.flatMap(swap => [
+    swap.a_date === dateStr ? swap.a_placement_id : null,
+    swap.b_date === dateStr ? swap.b_placement_id : null
+  ].filter(Boolean)));
+  const slots = [];
+  for (const lesson of lessons) for (const placement of lesson.placements) {
+    if (placement.weekday === isoWeekday(dateStr) && !removed.has(placement.id))
+      slots.push({ placementId:placement.id, lesson, startSeq:placement.column_seq,
+        endSeq:placement.column_seq + placement.span - 1, swap:null });
+  }
+  for (const swap of relevant) {
+    const a = placements.get(swap.a_placement_id), b = placements.get(swap.b_placement_id);
+    if (!a || !b) continue;
+    if (swap.a_date === dateStr) slots.push({ placementId:swap.b_placement_id, lesson:b.lesson,
+      startSeq:a.placement.column_seq, endSeq:a.placement.column_seq + a.placement.span - 1, swap });
+    if (swap.b_date === dateStr) slots.push({ placementId:swap.a_placement_id, lesson:a.lesson,
+      startSeq:b.placement.column_seq, endSeq:b.placement.column_seq + b.placement.span - 1, swap });
+  }
+  return slots.sort((a,b) => a.startSeq - b.startSeq || String(a.placementId).localeCompare(String(b.placementId)));
+}
+
+export function staffDaySchedule(details, weekday, staffId, { portion = 'full', dateStr, swaps = [] } = {}) {
   const { columns, lessons } = normalizeDetails(details);
   const bySeq = new Map(columns.map(column => [column.seq, column]));
   const result = [];
+  if (dateStr) {
+    for (const slot of daySlots(details, dateStr, swaps)) {
+      const lesson = slot.lesson;
+      if (!lesson.teachers.some(teacher => teacher.staff_id === staffId)) continue;
+      const span = Array.from({length:slot.endSeq-slot.startSeq+1}, (_, index) => bySeq.get(slot.startSeq+index)).filter(Boolean);
+      const startTime = clock(span[0]?.start_time);
+      if (!span.length || (portion === 'morning' && startTime >= '12:00') ||
+        (portion === 'afternoon' && startTime < '12:00')) continue;
+      const periods = span.filter(column => column.kind === 'คาบเรียน').length;
+      const rooms = roomLabels(lesson.rooms);
+      if (!periods && !rooms.length) continue;
+      result.push({ lessonId:lesson.id, subjectId:lesson.subject_id, title:lesson.title,
+        rooms, startSeq:slot.startSeq, endSeq:slot.endSeq, startTime,
+        endTime:clock(span.at(-1)?.end_time), periods, isTeaching:periods>0,
+        swappedWith:slot.swap ? (slot.swap.a_date === dateStr ? slot.swap.from_staff_id : slot.swap.to_staff_id) : null });
+    }
+    return result.sort((a,b) => a.startSeq-b.startSeq || a.title.localeCompare(b.title,'th'));
+  }
   for (const lesson of lessons) {
     if (!lesson.teachers.some(teacher => teacher.staff_id === staffId)) continue;
     for (const placement of lesson.placements) {
@@ -307,16 +356,27 @@ export function subjectPeriodsFromSchedule(schedule) {
     if (!result.has(slot.subjectId)) result.set(slot.subjectId, { periods: 0, slots: [] });
     const subject = result.get(slot.subjectId);
     subject.periods += slot.periods;
-    subject.slots.push({ startTime: slot.startTime, endTime: slot.endTime, rooms: slot.rooms,
-      startSeq: slot.startSeq, endSeq: slot.endSeq });
+    const scheduled = { startTime: slot.startTime, endTime: slot.endTime, rooms: slot.rooms,
+      startSeq: slot.startSeq, endSeq: slot.endSeq };
+    if (slot.swappedWith) scheduled.swappedWith = slot.swappedWith;
+    subject.slots.push(scheduled);
   }
   return result;
 }
 
-export function busyStaffIds(details, weekday, seqRanges) {
+export function busyStaffIds(details, weekday, seqRanges, { dateStr, swaps = [] } = {}) {
   const { columns, lessons } = normalizeDetails(details);
   const bySeq = new Map(columns.map(column => [column.seq, column]));
   const busy = new Map();
+  if (dateStr) {
+    for (const slot of daySlots(details,dateStr,swaps)) {
+      if (!seqRanges.some(range => slot.startSeq <= range.endSeq && slot.endSeq >= range.startSeq)) continue;
+      const room = roomLabels(slot.lesson.rooms)[0];
+      const reason = `${room ? `สอน ${room}` : slot.lesson.title} ${clock(bySeq.get(slot.startSeq)?.start_time)}`.trim();
+      for (const teacher of slot.lesson.teachers) if (teacher.staff_id && !busy.has(teacher.staff_id)) busy.set(teacher.staff_id, reason);
+    }
+    return busy;
+  }
   for (const lesson of lessons) for (const placement of lesson.placements) {
     if (placement.weekday !== weekday || !seqRanges.some(range =>
       placement.column_seq <= range.endSeq && placement.column_seq + placement.span - 1 >= range.startSeq)) continue;
@@ -325,4 +385,50 @@ export function busyStaffIds(details, weekday, seqRanges) {
     for (const teacher of lesson.teachers) if (teacher.staff_id && !busy.has(teacher.staff_id)) busy.set(teacher.staff_id, reason);
   }
   return busy;
+}
+
+export function swapCandidates(details, { aPlacementId, aDate, myStaffId, approvedSwaps = [], holidays = [], today }) {
+  const { lessons } = normalizeDetails(details);
+  const all = lessons.flatMap(lesson => lesson.placements.map(placement => ({lesson,placement})));
+  const a = all.find(row => row.placement.id === aPlacementId);
+  const holidayDates = new Set(holidays.map(row => typeof row === 'string' ? row : row.holiday_date));
+  const eligible = row => row.lesson.is_template === false && row.lesson.rooms.length === 1 &&
+    row.lesson.teachers.length === 1 && Boolean(row.lesson.teachers[0].staff_id);
+  const used = (placementId,date) => approvedSwaps.some(swap =>
+    (swap.a_placement_id === placementId && swap.a_date === date) ||
+    (swap.b_placement_id === placementId && swap.b_date === date));
+  if (!a || !eligible(a) || a.lesson.teachers[0].staff_id !== myStaffId ||
+    aDate <= today || aDate < details.start_date || aDate > details.end_date ||
+    isoWeekday(aDate) !== a.placement.weekday || holidayDates.has(aDate) || used(aPlacementId,aDate)) return [];
+  const overlaps = (slot,start,end) => slot.startSeq <= end && slot.endSeq >= start;
+  const slotsByDate = new Map();
+  const slotsOn = date => {
+    if (!slotsByDate.has(date)) slotsByDate.set(date, daySlots(details,date,approvedSwaps));
+    return slotsByDate.get(date);
+  };
+  const available = (staffId, facilityId, date, start, end, excluded) =>
+    !slotsOn(date).some(slot => slot.placementId !== excluded &&
+      overlaps(slot,start,end) && (slot.lesson.teachers.some(teacher => teacher.staff_id === staffId) ||
+      (facilityId && slot.lesson.facility_id === facilityId)));
+  const result = [];
+  for (const b of all) {
+    if (!eligible(b) || b.placement.id === aPlacementId ||
+      b.lesson.teachers[0].staff_id === myStaffId ||
+      b.lesson.rooms[0].grade_level !== a.lesson.rooms[0].grade_level ||
+      b.lesson.rooms[0].classroom !== a.lesson.rooms[0].classroom ||
+      b.placement.span !== a.placement.span) continue;
+    const bStaffId = b.lesson.teachers[0].staff_id;
+    if (!available(bStaffId,b.lesson.facility_id,aDate,a.placement.column_seq,
+      a.placement.column_seq+a.placement.span-1,aPlacementId)) continue;
+    const bDates = [];
+    for (let date=addDays(today,1); date<=details.end_date && bDates.length<8; date=addDays(date,1)) {
+      if (date<details.start_date || isoWeekday(date)!==b.placement.weekday || holidayDates.has(date) ||
+        used(b.placement.id,date)) continue;
+      if (available(myStaffId,a.lesson.facility_id,date,b.placement.column_seq,
+        b.placement.column_seq+b.placement.span-1,b.placement.id)) bDates.push(date);
+    }
+    if (bDates.length) result.push({ placementId:b.placement.id, lesson:b.lesson,
+      startSeq:b.placement.column_seq, endSeq:b.placement.column_seq+b.placement.span-1, bDates });
+  }
+  return result;
 }
