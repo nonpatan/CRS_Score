@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ส่งมอบงานครูที่ออก — CRS MIS</title>
+<title>ส่งมอบงานครู — CRS MIS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -60,9 +60,9 @@
 
 <div class="wrap">
 <header>
-  <h1>ส่งมอบงานครูที่ออก</h1><p>โอนงานที่ครูคนหนึ่งถือไว้ให้ครูคนอื่น แล้วปิดการล็อกอินเมื่อส่งมอบครบ</p>
-  <div class="nav"><a href="dashboard.html">ภาพรวม</a><a href="academic/index.html">ฝ่ายวิชาการ</a><a href="finance/index.html">ฝ่ายการเงิน</a><a href="personnel/index.html">ฝ่ายบุคคล</a><a href="general-affairs/index.html">บริหารทั่วไป</a><a href="permissions.html" data-restricted hidden>จัดการสิทธิ์ผู้ใช้</a><a href="handover.html" data-restricted hidden>ส่งมอบงานครูที่ออก</a><a href="profile.html">ข้อมูลส่วนตัว</a></div>
-  <script src="app-shell.js?v=20261031-2"></script>
+  <h1>ส่งมอบงานครู</h1><p>โอนวิชา ครูประจำชั้น โครงการ หรือเวร จากครูคนหนึ่งให้ครูคนอื่น — ใช้ได้ทั้งครูที่ออกและครูที่ยังสอนอยู่</p>
+  <div class="nav"><a href="dashboard.html">ภาพรวม</a><a href="academic/index.html">ฝ่ายวิชาการ</a><a href="finance/index.html">ฝ่ายการเงิน</a><a href="personnel/index.html">ฝ่ายบุคคล</a><a href="general-affairs/index.html">บริหารทั่วไป</a><a href="permissions.html" data-restricted hidden>จัดการสิทธิ์ผู้ใช้</a><a href="handover.html" data-restricted hidden>ส่งมอบงานครู</a><a href="profile.html">ข้อมูลส่วนตัว</a></div>
+  <script src="app-shell.js?v=20261101-1"></script>
 </header>
 <main class="academic-content">
 
@@ -73,11 +73,10 @@
   <div id="main-area" style="display:none">
     <div class="card handover-step" id="staff-card">
       <span class="step-number" aria-hidden="true">1</span>
-      <label class="field" for="staff">เลือกครูที่ออก</label>
+      <label class="field" for="staff">เลือกครูเจ้าของงาน</label>
       <select id="staff" class="wide"><option value="">— เลือกบุคลากร —</option></select>
       <p class="intro" style="margin:9px 0 0">
-        คนที่ Jibble ระบุว่าออกแล้วจะอยู่บนสุด — แต่เลือกใครก็ได้
-        เพราะสถานะจาก Jibble ไม่ครอบคลุมทุกกรณี
+        คนที่ออกแล้วจะอยู่บนสุด · ครูที่ยังสอนอยู่ก็เลือกได้ โอนเฉพาะรายการที่เลือกผู้รับ
       </p>
       <span id="pending-count" class="pending-pill" hidden></span>
     </div>
@@ -97,7 +96,7 @@
       <div class="card handover-step danger-step">
         <span class="step-number" aria-hidden="true">3</span>
         <h2>ปิดการล็อกอิน</h2>
-        <p class="hint">ทำเป็นขั้นสุดท้าย เมื่อโอนงานครบแล้วเท่านั้น</p>
+        <p class="hint">เฉพาะครูที่ออกแล้ว — ครูที่ยังสอนอยู่ ห้ามกด</p>
         <div class="note danger" id="login-note">
           <b>ปิดการล็อกอินเมื่อส่งมอบงานครบแล้วเท่านั้น</b><br>
           ครูที่ยังถือวิชาอยู่แล้วถูกปิดล็อกอิน จะไม่มีใครแก้คะแนนวิชานั้นได้นอกจากผู้ดูแลระบบ
@@ -382,16 +381,20 @@
       return;
     }
     const remaining = items.filter(i => !i.done).length;
+    const loginTarget = "ปิดการล็อกอินของ " + currentStaff.full_name +
+      " (" + (currentStaff.is_active ? "ยังทำงานอยู่" : "ออกแล้ว") + ")";
+    const activeWarning = currentStaff.is_active
+      ? "\n\nครูคนนี้ยังทำงานอยู่ — ปิดแล้วจะเข้าระบบไม่ได้" : "";
     if (!enabled && remaining > 0 &&
         !await window.crsAskConfirm({
           title: "ปิดการล็อกอินทั้งที่ยังมีงานค้าง",
-          message: "ยังมีงานค้างอยู่ " + remaining + " รายการ ถ้าปิดล็อกอินตอนนี้จะไม่มีใครดูแลงานพวกนั้น\n\nปิดการล็อกอินของ " + currentStaff.full_name + " หรือไม่",
+          message: "ยังมีงานค้างอยู่ " + remaining + " รายการ ถ้าปิดล็อกอินตอนนี้จะไม่มีใครดูแลงานพวกนั้น\n\n" + loginTarget + activeWarning,
           okLabel: "ปิดการล็อกอิน"
         })) return;
     if (!enabled && remaining === 0 &&
         !await window.crsAskConfirm({
           title: "ปิดการล็อกอิน",
-          message: "ปิดการล็อกอินของ " + currentStaff.full_name + " ใช่ไหม (กดเปิดคืนได้ภายหลัง)",
+          message: loginTarget + activeWarning + "\n\nกดเปิดคืนได้ภายหลัง",
           okLabel: "ปิดการล็อกอิน"
         })) return;
 

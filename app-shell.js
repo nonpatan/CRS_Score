@@ -200,14 +200,14 @@ function syncFinanceKpiTones() {
           ["personnel/index.html", "ฝ่ายบุคคล", { short: "บุคคล" }], ["general-affairs/index.html", "บริหารทั่วไป", { short: "ทั่วไป" }]
         ] },
         { label: "ผู้ดูแลระบบ", items: [
-          ["permissions.html", "จัดการสิทธิ์ผู้ใช้", { id: "link-permissions" }], ["handover.html", "ส่งมอบงานครูที่ออก", { id: "link-handover" }]
+          ["permissions.html", "จัดการสิทธิ์ผู้ใช้", { id: "link-permissions" }], ["handover.html", "ส่งมอบงานครู", { id: "link-handover" }]
         ] },
         { label: "บัญชีของฉัน", items: [["profile.html", "ข้อมูลส่วนตัว"]] }
       ],
       adminOnly: ["permissions.html", "handover.html"],
       workflows: {
         "permissions.html": { title: "จัดการสิทธิ์ผู้ใช้", steps: ["ค้นหาคน", "กำหนดสิทธิ์รายฝ่าย"] },
-        "handover.html": { title: "ส่งมอบงานครูที่ออก", steps: ["เลือกครู", "โอนงานค้าง", "ปิดการล็อกอิน"] }
+        "handover.html": { title: "ส่งมอบงานครู", steps: ["เลือกครู", "โอนงานค้าง", "ปิดการล็อกอิน"] }
       }
     },
     academic: {
