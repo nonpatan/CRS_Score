@@ -609,6 +609,7 @@
       <label for="inp-periods">จำนวนคาบ</label>
       <div class="period-stepper"><button type="button" class="ghost" id="period-minus" aria-label="ลดครึ่งคาบ">−</button><input type="number" inputmode="decimal" id="inp-periods" min="0.5" step="0.5" placeholder="คาบ"><button type="button" class="ghost" id="period-plus" aria-label="เพิ่มครึ่งคาบ">+</button></div>
     </div>
+    <div class="hint" id="timetable-period-note" role="status" hidden></div>
     <div class="hint" id="dock-member-periods" hidden>คาบ: กรอกที่วิชาย่อยด้านบน</div>
     <button class="save" id="btn-save">บันทึกการเช็คชื่อ</button>
     </div>
@@ -622,7 +623,8 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder } from "../supabase-client.js?v=20261027-5";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder, fetchAllRows } from "../supabase-client.js?v=20261027-5";
+import { loadTimetableForDate, daySlots, normalizeDetails, attendancePeriodsOf } from "./timetable-fet.js?v=20261102-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -791,6 +793,9 @@ let lessonLogSaving = false;
 let lessonLogRequestSeq = 0;
 let lessonLogEditable = false;
 let lessonLogCurrentIds = new Set();
+const timetableByDate = new Map();
+let timetableKnownRange = null;
+let timetablePrefillToken = 0;
 
 function lessonLogCurrentSessions() {
   if (blockMode) {
@@ -1855,6 +1860,42 @@ function writeCurrentPeriods(v) {
     elPeriods.value = v;
   }
 }
+function timetableForAttendanceDate(dateStr) {
+  if(timetableByDate.has(dateStr)) return timetableByDate.get(dateStr);
+  if(timetableKnownRange && (dateStr<timetableKnownRange.start_date||dateStr>timetableKnownRange.end_date)) {
+    timetableByDate.set(dateStr,Promise.resolve(null));return timetableByDate.get(dateStr);
+  }
+  const promise=loadTimetableForDate({sb,fetchAllRows,storage:(()=>{try{return localStorage;}catch{return null;}})(),dateStr})
+    .then(result=>{if(result.timetable)timetableKnownRange=result.timetable;return result.timetable?result:null;})
+    .catch(()=>null);
+  timetableByDate.set(dateStr,promise);
+  return promise;
+}
+async function tryTimetablePrefill(token, sessionIndex, seq) {
+  const dateStr=elDate.value, room=selectedRoom(), integrated=pickedSubject?.subject_type==='บูรณาการ';
+  if(!room||room.all||(!integrated&&elPeriods.value!==''))return;
+  const subjectId=integrated?pickedSubject.id:currentSubjectId;
+  if(!subjectId)return;
+  const result=await timetableForAttendanceDate(dateStr);
+  if(!result||token!==timetablePrefillToken||seq!==loadSeq||elDate.value!==dateStr||
+    (!integrated&&currentSession)|| (integrated&&blockMode&&blockEditRound!==null))return;
+  try {
+    const {columns,lessons}=normalizeDetails(result.details);
+    const placements=new Map(lessons.flatMap(lesson=>lesson.placements.map(placement=>[placement.id,placement])));
+    const matching=daySlots(result.details,dateStr,result.swaps).filter(slot=>
+      slot.lesson.subject_id===subjectId&&slot.lesson.rooms.some(item=>
+        item.grade_level===room.grade_level&&item.classroom===room.classroom));
+    if(!matching.length)return;
+    const periods=matching.map(slot=>attendancePeriodsOf(columns,placements.get(slot.placementId)||
+      {column_seq:slot.startSeq,span:slot.endSeq-slot.startSeq+1,attendancePeriods:null}));
+    const note=document.getElementById('timetable-period-note');
+    note.textContent=matching.length>1
+      ? `วันนี้ตามตาราง ${matching.length} ช่วง: ${matching.map((slot,index)=>`${columns.find(column=>column.seq===slot.startSeq)?.start_time?.slice(0,5)||'—'} (${fmtPeriods(periods[index])} คาบ)`).join(' · ')}`
+      : `ตามตารางสอน · ${fmtPeriods(periods[0])} คาบ`;
+    note.hidden=false;
+    if(!integrated&&matching[sessionIndex]&&elPeriods.value==='')writeCurrentPeriods(fmtPeriods(periods[sessionIndex]));
+  } catch { /* ตารางสอนเป็นเพียงคำแนะนำ: ไม่รบกวนการเช็คชื่อ */ }
+}
 
 // ---------- กดโหลดรายชื่อ ----------
 async function loadRosterFromSelection(seq = ++loadSeq) {
@@ -2183,6 +2224,7 @@ async function deleteBlockRound(r) {
 
 // เปิดครั้งเดิมมาแก้ — เซ็ตคาบรายวิชา + สถานะเด็ก (ช่องเดียวต่อคน แก้ทีเดียวทุกวิชา)
 async function selectBlockRound(r) {
+  timetablePrefillToken++;document.getElementById('timetable-period-note').hidden=true;
   blockEditRound = r;
   const round = blockRounds[r];
   const scoreMap = {};
@@ -2208,6 +2250,8 @@ async function selectBlockRound(r) {
 
 // ตั้งต้นเพิ่มครั้งใหม่ (คืนช่องคาบเป็นค่าเริ่มต้นของแต่ละวิชา)
 function startNewBlockRound() {
+  const token=++timetablePrefillToken;
+  document.getElementById('timetable-period-note').hidden=true;
   hideLessonLogUI();
   blockEditRound = null;
   for (const m of blockMembers) {
@@ -2219,6 +2263,7 @@ function startNewBlockRound() {
     : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่ให้ทุกวิชาที่ติ๊ก";
   renderStudents({}, { usePrefill: true });
   renderBlockRoundChips();
+  void tryTimetablePrefill(token,blockRounds.length,loadSeq);
 }
 
 // ---------- ข้อ 4: คำนวณคาบขาดสะสมต่อคน (รวมทุกวิชาใน subjectIds) ----------
@@ -2373,6 +2418,7 @@ async function deleteCurrentSession(idx) {
 
 // เปิดครั้งเดิมมาแก้
 async function selectDaySession(s) {
+  timetablePrefillToken++;document.getElementById('timetable-period-note').hidden=true;
   currentSession = s;
   writeCurrentPeriods(fmtPeriods(s.periods_covered));
   const scoreMap = {};
@@ -2389,6 +2435,8 @@ async function selectDaySession(s) {
 
 // เริ่มครั้งใหม่ (ของวันเดียวกันก็ได้ เช่น วันนี้เรียน 2 รอบ เช็คแยกกันคนละครั้ง)
 function startNewSession() {
+  const token=++timetablePrefillToken;
+  document.getElementById('timetable-period-note').hidden=true;
   currentSession = null;
   writeCurrentPeriods("");
   hideLessonLogUI();
@@ -2397,6 +2445,7 @@ function startNewSession() {
     : "ยังไม่เคยเช็คชื่อวันนี้ — บันทึกแล้วจะสร้างครั้งใหม่";
   renderStudents({}, { usePrefill: true });
   renderDaySessionChips();
+  void tryTimetablePrefill(token,daySessions.length,loadSeq);
 }
 
 function shortNameList(items) {

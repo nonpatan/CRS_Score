@@ -84,6 +84,8 @@ button:disabled { opacity:.45; cursor:default; }
 .time-grid tr.is-today td.empty .tile { background:var(--teal-soft); opacity:.35; }
 .time-grid .cell-title { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; overflow-wrap:break-word; line-height:1.3; }
 .time-grid .cell-detail { overflow-wrap:break-word; line-height:1.3; margin-top:2px; }
+.time-grid .subject-link { display:block; width:max-content; max-width:100%; margin-top:5px; padding:1px 7px; border-radius:6px; background:var(--white); color:var(--teal); font-size:12px; font-weight:600; line-height:1.5; }
+.time-grid .subject-link.unlinked { color:var(--muted); }
 .time-grid .swap-dot { display:inline-block; margin-left:4px; color:var(--amber); font-weight:700; }
 .slot-button { display:block; width:100%; min-height:44px; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
 .slot-button:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
@@ -94,6 +96,10 @@ button:disabled { opacity:.45; cursor:default; }
 .swap-card .field { margin-top:12px; }
 .swap-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .swap-actions button { min-height:44px; }
+.attendance-stepper { display:flex; align-items:center; gap:8px; margin:8px 0; }
+.attendance-stepper button { min-width:44px; }
+.attendance-stepper input { width:82px; min-height:44px; text-align:center; font:inherit; border:1px solid var(--line); border-radius:8px; }
+.attendance-stepper input:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
 .swap-card select,.swap-card textarea { width:100%; min-height:44px; padding:10px; font:inherit; border:1px solid var(--line); border-radius:8px; }
 .swap-card textarea { min-height:78px; }
 .swap-card :focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
@@ -199,7 +205,7 @@ button:disabled { opacity:.45; cursor:default; }
 </div>
 <script type="module">
 import { sb, requireAuth, signOut, fetchAllRows } from '../supabase-client.js?v=20261027-5';
-import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache, swapCandidates, isoWeekday } from './timetable-fet.js?v=20261102-1';
+import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache, swapCandidates, isoWeekday, attendancePeriodsOf } from './timetable-fet.js?v=20261102-2';
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const weekdays=['','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์'];
@@ -213,8 +219,10 @@ const roomName=room=>`${room.grade_level}/${room.classroom}`;
 const SWAP_SET_SELECT='id,year,term,name,start_date,end_date,updated_at,timetable_swaps(id,status,a_placement_id,a_date,b_placement_id,b_date,from_staff_id,to_staff_id,grade_level,classroom,reason,respond_note,decide_note,requested_at)';
 // cache รายชุดใช้คีย์ crs_tt_v1_<id>; อ่านได้เฉพาะเมื่อ updated_at จากเซิร์ฟเวอร์ตรงกัน
 const safeStorage=()=>{try{return localStorage;}catch{return null;}};
-let sets=[], selected=null, details=null, lessons=[], colors=new Map(), myStaffId=null, view='', target='';
+let sets=[], selected=null, details=null, lessons=[], colors=new Map(), myStaffId=null, isAcademic=false, view='', target='';
 let swapChoice=null, swapCandidatesForDay=[], holidays=new Map(), swapBusy=false;
+let detailPlacementId=null, detailBusy=false;
+const staleHeaders=new Set();
 function fail(result,label) { if(result.error) throw new Error(`${label}: ${result.error.message}`); return result.data; }
 function showError(message) { $('load-state').textContent=''; $('load-error').textContent=message; $('controls').hidden=true; $('schedule-card').hidden=true; }
 function readStaffCache(uid) { try {const raw=localStorage.getItem(`crs_my_staff_${uid}`);if(raw!==null){const value=JSON.parse(raw);if(typeof value==='string')return {hit:true,value};}if(sessionStorage.getItem(`crs_my_staff_${uid}`)==='null')return {hit:true,value:null};}catch{}return {hit:false,value:null}; }
@@ -225,6 +233,18 @@ async function getMyStaffId(uid) {
   try { if(id) localStorage.setItem(`crs_my_staff_${uid}`,JSON.stringify(id)); else {localStorage.removeItem(`crs_my_staff_${uid}`);sessionStorage.setItem(`crs_my_staff_${uid}`,'null');} } catch {}
   return id;
 }
+async function getAcademicAccess(uid) {
+  const key=`crs_tt_academic_${uid}`;
+  try {const cached=sessionStorage.getItem(key);if(cached!==null)return cached==='true';}catch{}
+  try {
+    const response=await sb.rpc('has_department',{p_department:'วิชาการ'});
+    if(response.error) return false;
+    const allowed=response.data===true;
+    try {sessionStorage.setItem(key,String(allowed));}catch{}
+    return allowed;
+  } catch {return false;}
+}
+const canSeeLink=lesson=>isAcademic||lesson.teachers.some(teacher=>teacher.staff_id===myStaffId&&Boolean(myStaffId));
 function teacherChoices() {
   const map=new Map();
   for(const lesson of lessons) for(const teacher of lesson.teachers) {
@@ -327,8 +347,11 @@ function buildTable(item,kind,printing=false) {
       const extra=itemDetail(lesson,kind);
       const affected=(selected.timetable_swaps||[]).some(s=>s.status==='อนุมัติ'&&
         ((s.a_placement_id===placement.id&&s.a_date>today())||(s.b_placement_id===placement.id&&s.b_date>today())));
-      const inner=`<div class="cell-title">${esc(lesson.title)}${affected?'<span class="swap-dot" aria-label="มีการสลับคาบที่จะถึง">●</span>':''}</div>${extra?`<div class="cell-detail">${esc(extra)}</div>`:''}`;
-      return kind==='mine'&&!printing?`<button type="button" class="slot-button" data-placement="${esc(placement.id||'')}" aria-label="ขอสลับคาบ ${esc(lesson.title)} ${weekdays[row.weekday]}">${inner}</button>`:`<div>${inner}</div>`;
+      const link=printing||!isSubject(lesson)||!canSeeLink(lesson)?'':lesson.subject
+        ? `<span class="subject-link">${esc(lesson.subject.code||subjectKey(lesson.subject.name||lesson.title))}${placement.attendancePeriods!=null&&placement.attendancePeriods!==attendancePeriodsOf(details.columns,{...placement,attendancePeriods:null})?` · เช็ค ${esc(placement.attendancePeriods)} คาบ`:''}</span>`
+        : '<span class="subject-link unlinked">ไม่ผูกรายวิชา</span>';
+      const inner=`<div class="cell-title">${esc(lesson.title)}${affected?'<span class="swap-dot" aria-label="มีการสลับคาบที่จะถึง">●</span>':''}</div>${extra?`<div class="cell-detail">${esc(extra)}</div>`:''}${link}`;
+      return !printing&&isSubject(lesson)&&canSeeLink(lesson)?`<button type="button" class="slot-button" data-placement="${esc(placement.id||'')}" aria-label="รายละเอียดคาบ ${esc(lesson.title)} ${weekdays[row.weekday]}">${inner}</button>`:`<div>${inner}</div>`;
     }).join('');
     const full=cell.items.map(({lesson})=>`${lesson.title}${itemDetail(lesson,kind)?` · ${itemDetail(lesson,kind)}`:''}`).join(' | ');
     const first=cell.items[0].lesson, style=isSubject(first)?` style="${colorStyle(first)}"`:'';
@@ -371,6 +394,53 @@ const slotTime=placement=>{
   const last=details.columns.find(column=>column.seq===placement?.column_seq+placement?.span-1);
   return `${first?.start_time?.slice(0,5)||'—'}–${last?.end_time?.slice(0,5)||'—'}`;
 };
+function updateDetailSave() {
+  const info=placementInfo(detailPlacementId), input=$('detail-periods'), save=$('detail-save');
+  if(!info||!input||!save)return;
+  const value=Number(input.value), maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+  save.disabled=detailBusy||!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0||
+    value===attendancePeriodsOf(details.columns,info.placement);
+  const reset=$('detail-reset');if(reset)reset.disabled=detailBusy;
+}
+function openDetailPanel(placementId) {
+  const info=placementInfo(placementId);
+  if(!info||!isSubject(info.lesson)||!canSeeLink(info.lesson))return;
+  detailPlacementId=placementId;swapChoice=null;
+  const {lesson,placement}=info, box=$('swap-panel'), content=$('swap-panel-content');
+  const baseline=attendancePeriodsOf(details.columns,{...placement,attendancePeriods:null});
+  const value=attendancePeriodsOf(details.columns,placement);
+  $('swap-panel-title').textContent='รายละเอียดคาบ';
+  content.innerHTML=`<p><strong>${esc(lesson.title)}</strong> · ${weekdays[placement.weekday]} · ${esc(slotTime(placement))} · ${esc(lesson.rooms.map(roomName).join(', ')||'ไม่ระบุห้อง')}</p>
+    <p><strong>ผูกกับรายวิชา:</strong> ${lesson.subject?esc([lesson.subject.code,lesson.subject.name,lesson.subject.grade_level].filter(Boolean).join(' · ')):'ไม่ผูกรายวิชา — ฝ่ายวิชาการจับคู่ได้ตอนนำเข้า FET'}</p>
+    <p><strong>ในตาราง:</strong> ${placement.span} คาบติด (${esc(slotTime(placement))})</p>
+    ${lesson.subject?`<div class="field"><label for="detail-periods">นับเช็คชื่อ</label><div class="attendance-stepper"><button type="button" class="ghost" id="detail-minus" aria-label="ลดครึ่งคาบ">−</button><input id="detail-periods" type="number" inputmode="decimal" min="0.5" max="${baseline}" step="0.5" value="${value}"><button type="button" class="ghost" id="detail-plus" aria-label="เพิ่มครึ่งคาบ">+</button></div><div class="hint">หน้าเช็คชื่อและหน้าจัดคนแทนจะเติมจำนวนนี้ให้</div></div>
+    <div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`:''}
+    <div class="swap-actions">${view==='mine'?'<button type="button" class="ghost" id="detail-swap">ขอสลับคาบนี้</button>':''}<button type="button" class="ghost" id="swap-close">ปิด</button></div>`;
+  box.hidden=false;box.scrollIntoView({block:'start'});
+}
+async function saveDetailPeriods(reset=false) {
+  if(detailBusy)return;
+  const placementId=detailPlacementId, info=placementInfo(placementId), input=$('detail-periods');
+  if(!info||!input||!info.lesson.subject)return;
+  const value=reset?null:Number(input.value);
+  const maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+  if(!reset&&(!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0))return;
+  detailBusy=true;$('set-select').disabled=true;$('swap-panel').setAttribute('aria-busy','true');updateDetailSave();
+  try {
+    const response=await sb.rpc('set_timetable_attendance_periods',{p_placement:placementId,p_periods:value});
+    if(response.error)throw response.error;
+    const baseline=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+    const effective=Number(response.data);
+    const stored=effective===baseline?null:effective;
+    info.placement.attendancePeriods=stored;
+    const raw=details.timetable_lessons.find(row=>row.id===info.lesson.id)?.timetable_placements.find(row=>row.id===placementId);
+    if(raw)raw.timetable_attendance_periods=stored==null?null:{periods:stored};
+    try {safeStorage()?.removeItem(`crs_tt_v1_${selected.id}`);}catch{}
+    staleHeaders.add(selected.id);
+    renderGrid();openDetailPanel(placementId);showToast('บันทึกจำนวนคาบเช็คชื่อแล้ว');
+  } catch(error) {showToast(error.message||'บันทึกไม่สำเร็จ',true);}
+  finally {detailBusy=false;$('set-select').disabled=false;$('swap-panel').removeAttribute('aria-busy');updateDetailSave();}
+}
 function renderUpcomingSwaps(item) {
   const mine=view==='mine', filtered=swapsForSet().filter(swap=>swap.status==='อนุมัติ'&&
     (swap.a_date>today()||swap.b_date>today())&&
@@ -419,6 +489,7 @@ const futureDates=weekday=>{
 };
 async function openSwapPanel(placementId) {
   const info=placementInfo(placementId), box=$('swap-panel'), content=$('swap-panel-content');
+  $('swap-panel-title').textContent='ขอสลับคาบ';
   if(!info)return showToast('ระบุคาบนี้ไม่ได้ · โหลดหน้าใหม่แล้วลองอีกครั้ง',true);
   const lesson=info.lesson;
   if(lesson.is_template!==false||lesson.rooms.length!==1||lesson.teachers.length!==1||lesson.teachers[0].staff_id!==myStaffId)
@@ -497,6 +568,11 @@ function renderView() {
 async function selectSet(row,initial=false) {
   $('load-error').textContent=''; $('load-state').textContent='กำลังโหลดตารางสอน…'; $('controls').hidden=true; $('schedule-card').hidden=true;
   try {
+    if(staleHeaders.has(row.id)) {
+      const fresh=fail(await sb.from('timetables').select('updated_at').eq('id',row.id).maybeSingle(),'ตรวจเวอร์ชันตารางสอน');
+      if(!fresh)throw new Error('ไม่พบตารางสอนนี้แล้ว');
+      row.updated_at=fresh.updated_at;staleHeaders.delete(row.id);
+    }
     const data=await loadTimetableDetails({sb,fetchAllRows,storage:safeStorage(),timetable:row,swapReady:true});
     const normalized=normalizeDetails(data);
     selected=row; details={...data,start_date:row.start_date,end_date:row.end_date,columns:normalized.columns}; lessons=normalized.lessons; colors=subjectColors(lessons);
@@ -553,13 +629,24 @@ $('print-all').addEventListener('click',()=>printSchedules(true));
 window.addEventListener('afterprint',()=>{ $('print-area').innerHTML=''; });
 $('set-select').addEventListener('change',event=>{const row=sets.find(item=>item.id===event.target.value);if(row) void selectSet(row);});
 $('target-select').addEventListener('change',event=>{target=event.target.value;renderGrid();});
-$('grid').addEventListener('click',event=>{const button=event.target.closest('[data-placement]');if(button)void openSwapPanel(button.dataset.placement);});
+$('grid').addEventListener('click',event=>{const button=event.target.closest('[data-placement]');if(button&&!detailBusy)openDetailPanel(button.dataset.placement);});
+$('swap-panel-content').addEventListener('input',event=>{if(event.target.id==='detail-periods')updateDetailSave();});
 $('swap-panel-content').addEventListener('change',event=>{
   if(event.target.id==='swap-a-date')renderCandidates();
   if(event.target.id==='swap-b-placement')renderBDates();
 });
 $('swap-panel-content').addEventListener('click',async event=>{
+  if(detailBusy)return;
   if(event.target.id==='swap-close'){$('swap-panel').hidden=true;return;}
+  if(event.target.id==='detail-swap'){void openSwapPanel(detailPlacementId);return;}
+  if(event.target.id==='detail-minus'||event.target.id==='detail-plus'){
+    const input=$('detail-periods'), change=event.target.id==='detail-plus'?0.5:-0.5;
+    input.value=String(Math.max(0.5,Math.min(Number(input.max),Number(input.value)+change)));
+    updateDetailSave();return;
+  }
+  if(event.target.id==='detail-save'||event.target.id==='detail-reset'){
+    await saveDetailPeriods(event.target.id==='detail-reset');return;
+  }
   if(event.target.id!=='swap-submit'||swapBusy)return;
   const candidate=swapCandidatesForDay.find(row=>row.placementId===$('swap-b-placement').value);
   const bDate=$('swap-b-date').value;
@@ -580,6 +667,9 @@ document.querySelectorAll('.view-buttons button').forEach(button=>button.addEven
 const session=await requireAuth();
 if(session) {
   $('btn-signout').addEventListener('click',async event=>{event.preventDefault();await signOut();});
+  const academicAccess=getAcademicAccess(session.user.id).then(allowed=>{
+    if(allowed!==isAcademic){isAcademic=allowed;if(details)renderGrid();}
+  });
   try {
     const list=fail(await sb.from('timetables').select(SWAP_SET_SELECT).eq('status','ใช้งาน')
       .or(`a_date.gte.${today()},b_date.gte.${today()}`,{referencedTable:'timetable_swaps'})
@@ -606,6 +696,7 @@ if(session) {
       }
     }
   } catch(error) { showError(`โหลดรายการตารางไม่สำเร็จ: ${error.message} · ตรวจอินเทอร์เน็ตแล้วรีเฟรชหน้า`); }
+  await academicAccess;
 }
 </script>
 </body>

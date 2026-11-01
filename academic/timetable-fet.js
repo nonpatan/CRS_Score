@@ -228,8 +228,8 @@ export function pruneTimetableCache(storage, activeIds) {
   } catch { return false; }
 }
 
-const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,is_template,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span))';
-const LESSON_SELECT = 'id,title,subject_id,facility_id,is_template,note,facilities(name),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span)';
+const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,is_template,note,facilities(name),subjects(code,name,grade_level),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span,timetable_attendance_periods(periods)))';
+const LESSON_SELECT = 'id,title,subject_id,facility_id,is_template,note,facilities(name),subjects(code,name,grade_level),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span,timetable_attendance_periods(periods))';
 const queryData = (result, label) => {
   if (result.error) throw new Error(`${label}: ${result.error.message}`);
   return result.data;
@@ -240,7 +240,8 @@ export async function loadTimetableDetails({ sb, fetchAllRows, storage, timetabl
   if (row.status !== 'ร่าง') {
     const cached = readTimetableCache(storage, row.id, row.updated_at);
     if (cached && (!swapReady || cached.timetable_lessons.every(lesson =>
-      typeof lesson.is_template === 'boolean' && lesson.timetable_placements.every(placement => Boolean(placement.id))))) return cached;
+      typeof lesson.is_template === 'boolean' && Object.hasOwn(lesson,'subjects') &&
+      lesson.timetable_placements.every(placement => Boolean(placement.id) && Object.hasOwn(placement,'timetable_attendance_periods'))))) return cached;
   }
   const data = queryData(await sb.from('timetables').select(DETAIL_SELECT).eq('id', row.id).maybeSingle(), 'โหลดรายละเอียดตารางสอน');
   if (!data) throw new Error('ไม่พบตารางนี้ หรือคุณไม่มีสิทธิ์ดู · ตรวจลิงก์แล้วรีเฟรชหน้า');
@@ -265,14 +266,24 @@ export async function loadTimetableForDate({ sb, fetchAllRows, storage, dateStr 
 }
 
 export function normalizeDetails(data) {
+  const embedded = value => Array.isArray(value) ? value[0] || null : value || null;
   const columns = [...(data.timetable_columns || [])].sort((a, b) => a.seq - b.seq);
   const lessons = (data.timetable_lessons || []).map(row => ({
     id: row.id, title: row.title, subject_id: row.subject_id, facility_id: row.facility_id, is_template:row.is_template,
-    facility: row.facilities?.name || null, note: row.note,
+    facility: row.facilities?.name || null, note: row.note, subject:embedded(row.subjects),
     rooms: row.timetable_lesson_rooms || [], teachers: row.timetable_lesson_teachers || [],
-    placements: row.timetable_placements || []
+    placements: (row.timetable_placements || []).map(placement => ({...placement,
+      attendancePeriods:embedded(placement.timetable_attendance_periods)?.periods == null ? null :
+        Number(embedded(placement.timetable_attendance_periods).periods)}))
   }));
   return { columns, lessons };
+}
+
+export function attendancePeriodsOf(columns, placement) {
+  if (placement.attendancePeriods != null) return Number(placement.attendancePeriods);
+  const bySeq = new Map(columns.map(column => [column.seq,column]));
+  return Array.from({length:placement.span},(_,offset) => bySeq.get(placement.column_seq+offset))
+    .filter(column => column?.kind === 'คาบเรียน').length || placement.span;
 }
 
 const clock = value => String(value || '').slice(0, 5);
@@ -309,6 +320,7 @@ export function daySlots(details, dateStr, swaps = []) {
 export function staffDaySchedule(details, weekday, staffId, { portion = 'full', dateStr, swaps = [] } = {}) {
   const { columns, lessons } = normalizeDetails(details);
   const bySeq = new Map(columns.map(column => [column.seq, column]));
+  const placementById = new Map(lessons.flatMap(lesson => lesson.placements.map(placement => [placement.id,placement])));
   const result = [];
   if (dateStr) {
     for (const slot of daySlots(details, dateStr, swaps)) {
@@ -318,12 +330,15 @@ export function staffDaySchedule(details, weekday, staffId, { portion = 'full', 
       const startTime = clock(span[0]?.start_time);
       if (!span.length || (portion === 'morning' && startTime >= '12:00') ||
         (portion === 'afternoon' && startTime < '12:00')) continue;
-      const periods = span.filter(column => column.kind === 'คาบเรียน').length;
+      const slotPeriods = span.filter(column => column.kind === 'คาบเรียน').length;
       const rooms = roomLabels(lesson.rooms);
-      if (!periods && !rooms.length) continue;
+      if (!slotPeriods && !rooms.length) continue;
+      const sourcePlacement = placementById.get(slot.placementId);
       result.push({ lessonId:lesson.id, subjectId:lesson.subject_id, title:lesson.title,
-        rooms, startSeq:slot.startSeq, endSeq:slot.endSeq, startTime,
-        endTime:clock(span.at(-1)?.end_time), periods, isTeaching:periods>0,
+        rooms, placementId:slot.placementId, startSeq:slot.startSeq, endSeq:slot.endSeq, startTime,
+        endTime:clock(span.at(-1)?.end_time), slotPeriods,
+        periods:sourcePlacement ? attendancePeriodsOf(columns,sourcePlacement) : slotPeriods, isTeaching:slotPeriods>0,
+        customAttendancePeriods:sourcePlacement?.attendancePeriods != null,
         swappedWith:slot.swap ? (slot.swap.a_date === dateStr ? slot.swap.from_staff_id : slot.swap.to_staff_id) : null });
     }
     return result.sort((a,b) => a.startSeq-b.startSeq || a.title.localeCompare(b.title,'th'));
@@ -338,12 +353,14 @@ export function staffDaySchedule(details, weekday, staffId, { portion = 'full', 
       if (portion === 'morning' && startTime >= '12:00') continue;
       if (portion === 'afternoon' && startTime < '12:00') continue;
       const span = Array.from({ length: placement.span }, (_, index) => bySeq.get(placement.column_seq + index)).filter(Boolean);
-      const periods = span.filter(column => column.kind === 'คาบเรียน').length;
+      const slotPeriods = span.filter(column => column.kind === 'คาบเรียน').length;
       const rooms = roomLabels(lesson.rooms);
-      if (!periods && !rooms.length) continue;
+      if (!slotPeriods && !rooms.length) continue;
       result.push({ lessonId: lesson.id, subjectId: lesson.subject_id, title: lesson.title,
-        rooms, startSeq: placement.column_seq, endSeq: placement.column_seq + placement.span - 1,
-        startTime, endTime: clock(span.at(-1)?.end_time), periods, isTeaching: periods > 0 });
+        rooms, placementId:placement.id, startSeq: placement.column_seq, endSeq: placement.column_seq + placement.span - 1,
+        startTime, endTime: clock(span.at(-1)?.end_time), slotPeriods,
+        periods:attendancePeriodsOf(columns,placement), isTeaching: slotPeriods > 0,
+        customAttendancePeriods:placement.attendancePeriods != null });
     }
   }
   return result.sort((a, b) => a.startSeq - b.startSeq || a.title.localeCompare(b.title, 'th'));
@@ -357,7 +374,8 @@ export function subjectPeriodsFromSchedule(schedule) {
     const subject = result.get(slot.subjectId);
     subject.periods += slot.periods;
     const scheduled = { startTime: slot.startTime, endTime: slot.endTime, rooms: slot.rooms,
-      startSeq: slot.startSeq, endSeq: slot.endSeq };
+      startSeq: slot.startSeq, endSeq: slot.endSeq, periods: slot.periods, slotPeriods: slot.slotPeriods,
+      customAttendancePeriods: Boolean(slot.customAttendancePeriods) };
     if (slot.swappedWith) scheduled.swappedWith = slot.swappedWith;
     subject.slots.push(scheduled);
   }

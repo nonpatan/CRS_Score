@@ -265,7 +265,7 @@ import {
   deleteCoverageAssignment, saveDutyRosterEntry, removeDutyRosterEntry,
   COVERAGE_DUTY_NOTE, isCoverageDutyRow, bangkokNow, toDateStr
 } from "../supabase-client.js?v=20261027-5";
-import { loadTimetableForDate, staffDaySchedule, subjectPeriodsFromSchedule, busyStaffIds } from "../academic/timetable-fet.js?v=20261102-1";
+import { loadTimetableForDate, staffDaySchedule, subjectPeriodsFromSchedule, busyStaffIds } from "../academic/timetable-fet.js?v=20261102-2";
 
 const session = await requireAuth();
 if (session) {
@@ -605,7 +605,9 @@ if (session) {
               return "<div class='item" + (summary.complete ? " covered" : "") + "' data-item-key='" + esc(item.key) + "'>" +
                 "<div class='item-head'><span class='item-label'>" + esc(item.label) + "</span>" +
                 (item.scheduleSlots?.length
-                  ? "<span class='item-sub'>ตามตาราง: " + esc(item.suggestedPeriods) + " คาบ · " +
+                  ? "<span class='item-sub'>ตามตาราง: " + (item.scheduleSlots.some(slot=>slot.customAttendancePeriods)
+                    ? esc(item.scheduleSlots.map(slot=>slot.slotPeriods).reduce((sum,n)=>sum+n,0)) + " คาบ · นับเช็คชื่อ " + esc(item.suggestedPeriods) + " คาบ · "
+                    : esc(item.suggestedPeriods) + " คาบ · ") +
                     esc(item.scheduleSlots.map(slot => slot.startTime + '–' + slot.endTime + ' · ' + slot.rooms.join(', ')).join('; ')) + "</span>"
                   : item.suggestedPeriods == null ? "" : "<span class='item-sub'>ปกติสอนวันละ " +
                     esc(item.suggestedPeriods) + " คาบ</span>") +
