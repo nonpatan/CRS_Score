@@ -30,6 +30,7 @@
   button.danger { background:var(--danger-soft); color:var(--danger); }
   button:disabled { opacity:.5; cursor:default; }
   .field-note { color:var(--muted); font-size:13px; margin-top:4px; }
+  .field-error { color:var(--danger); font-size:14px; margin-top:4px; }
   .weight-grid { display:grid; grid-template-columns:minmax(72px,max-content) repeat(2,minmax(0,200px)); justify-content:start; gap:8px 10px; align-items:center; }
   .weight-grid .grid-head { color:var(--muted); font-size:13px; font-weight:600; text-align:center; }
   .weight-grid .level-name { font-weight:600; }
@@ -67,7 +68,7 @@
 <div class="wrap">
   <header>
     <h1>ตั้งค่างานวิชาการ</h1>
-    <p>ปีการศึกษา วันที่ภาคเรียน และอัตราส่วนคะแนนเก็บ:สอบ ของทั้งโรงเรียน</p>
+    <p>ปีการศึกษา วันที่ภาคเรียน อัตราส่วนคะแนน และตารางสอนของทั้งโรงเรียน</p>
     <div class="nav">
       <a href="entry.html">กรอกคะแนน</a>
       <a href="competency-manage.html">กำหนดกิจกรรม/กิจวัตร</a>
@@ -129,6 +130,20 @@
     <button class="primary" id="btn-save-weights" disabled>บันทึกอัตราส่วน</button>
   </div>
 
+  <div class="card" id="timetable-settings-card">
+    <h2>ตารางสอน</h2>
+    <div class="weight-readonly" id="tt-extra-readonly" style="display:none">
+      คุณไม่มีสิทธิ์แก้ค่านี้ — ดูได้อย่างเดียว เฉพาะ admin หรือหัวหน้าฝ่ายวิชาการเท่านั้นที่แก้ได้
+    </div>
+    <div class="field">
+      <label for="tt-extra">นับเช็คชื่อเกินคาบในตารางได้สูงสุด (คาบต่อช่อง)</label>
+      <input type="number" id="tt-extra" inputmode="decimal" min="0" max="10" step="0.5" aria-describedby="tt-extra-note tt-extra-error" disabled>
+      <div class="field-note" id="tt-extra-note">0 = นับได้ไม่เกินคาบในตาราง · เช่น ตั้ง 1 แล้วช่อง 2 คาบ ครูตั้งนับเช็คชื่อได้ถึง 3 คาบ</div>
+      <div class="field-error" id="tt-extra-error" role="alert" hidden></div>
+    </div>
+    <button type="button" class="primary" id="btn-save-tt-extra" disabled>บันทึก</button>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </main>
 </div>
@@ -186,6 +201,10 @@ const elWeightsMissing = document.getElementById("weights-missing");
 const elWeightsMissingText = document.getElementById("weights-missing-text");
 const btnInitWeights = document.getElementById("btn-init-weights");
 const btnSaveWeights = document.getElementById("btn-save-weights");
+const elTtExtra = document.getElementById("tt-extra");
+const elTtExtraError = document.getElementById("tt-extra-error");
+const elTtExtraReadonly = document.getElementById("tt-extra-readonly");
+const btnSaveTtExtra = document.getElementById("btn-save-tt-extra");
 const weightInputs = {
   "ประถม": {
     collect: document.getElementById("weight-primary-collect"),
@@ -635,8 +654,59 @@ btnSaveWeights.addEventListener("click", async () => {
   }
 });
 
+function validateTtExtra() {
+  const raw = elTtExtra.value.trim();
+  const value = Number(raw);
+  const message = !raw ? "กรุณากรอกจำนวนคาบที่เกินได้" :
+    !Number.isFinite(value) || value < 0 || value > 10 ? "กรุณากรอกค่าระหว่าง 0 ถึง 10 คาบ" :
+    value * 2 % 1 !== 0 ? "กรุณากรอกทีละครึ่งคาบ เช่น 0, 0.5 หรือ 1" : "";
+  elTtExtraError.textContent = message;
+  elTtExtraError.hidden = !message;
+  elTtExtra.setAttribute("aria-invalid", String(Boolean(message)));
+  return message ? null : value;
+}
+
+async function loadTtExtra() {
+  try {
+    const { data, error } = await sb.from("app_settings").select("value")
+      .eq("key", "timetable_attendance_extra_max").maybeSingle();
+    if (error) throw error;
+    elTtExtra.value = data?.value ?? "0";
+    elTtExtra.disabled = !canEditAcademicSettings;
+    btnSaveTtExtra.disabled = !canEditAcademicSettings;
+    elTtExtraReadonly.style.display = canEditAcademicSettings ? "none" : "block";
+  } catch (error) {
+    elTtExtraReadonly.textContent = "โหลดค่าตารางสอนไม่สำเร็จ: " + error.message;
+    elTtExtraReadonly.style.display = "block";
+    showToast("โหลดค่าตารางสอนไม่สำเร็จ: " + error.message, false);
+  }
+}
+
+elTtExtra.addEventListener("blur", validateTtExtra);
+elTtExtra.addEventListener("input", () => {
+  if (!elTtExtraError.hidden) validateTtExtra();
+});
+btnSaveTtExtra.addEventListener("click", async () => {
+  if (!canEditAcademicSettings || btnSaveTtExtra.disabled) return;
+  const value = validateTtExtra();
+  if (value === null) { elTtExtra.focus(); return; }
+  btnSaveTtExtra.disabled = true;
+  try {
+    const { data, error } = await sb.from("app_settings")
+      .upsert({ key: "timetable_attendance_extra_max", value: String(value) }, { onConflict: "key" })
+      .select("key");
+    if (error) throw error;
+    if (data?.length !== 1) throw new Error("กรุณาตรวจสิทธิ์ฝ่ายวิชาการ");
+    showToast("บันทึกแล้ว — มีผลเมื่อครูเปิดหน้าตารางสอนใหม่", true);
+  } catch (error) {
+    showToast("บันทึกค่าตารางสอนไม่สำเร็จ: " + error.message, false);
+  } finally {
+    btnSaveTtExtra.disabled = false;
+  }
+});
+
 try {
-  await refreshSelectableYears();
+  await Promise.all([refreshSelectableYears(), loadTtExtra()]);
   await loadWeightSettings();
 } catch (error) {
   showToast(error.message, false);

@@ -31,6 +31,8 @@ button.ghost { background:var(--teal-soft); color:var(--teal); }
 button:focus-visible,select:focus-visible,a:focus-visible { outline:2px solid var(--teal); outline-offset:2px; scroll-margin:16px; }
 button:disabled { opacity:.45; cursor:default; }
 .hint,.meta,.empty { color:var(--muted); font-size:14px; }
+.period-warning { color:var(--amber); background:var(--amber-soft); padding:6px 9px; border-radius:8px; margin-top:8px; }
+.period-error { color:var(--danger); font-size:14px; margin-top:6px; }
 .empty { padding:16px; border:1px dashed var(--line); border-radius:8px; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .empty a { color:var(--teal); }
@@ -222,7 +224,21 @@ const safeStorage=()=>{try{return localStorage;}catch{return null;}};
 let sets=[], selected=null, details=null, lessons=[], colors=new Map(), myStaffId=null, isAcademic=false, view='', target='';
 let swapChoice=null, swapCandidatesForDay=[], holidays=new Map(), swapBusy=false;
 let detailPlacementId=null, detailBusy=false, detailOpenToken=0, detailSplitOptions=null;
+let attendanceExtra=0;
 const staleHeaders=new Set();
+function normalizeAttendanceExtra(raw) {
+  const value=String(raw??'').trim();
+  if(!/^\d+(?:\.\d+)?$/.test(value))return 0;
+  const numeric=Number(value);
+  return Number.isFinite(numeric)?Math.min(10,Math.floor(numeric*2)/2):0;
+}
+async function loadAttendanceExtra() {
+  try {
+    const {data,error}=await sb.from('app_settings').select('value').eq('key','timetable_attendance_extra_max').maybeSingle();
+    if(error)throw error;
+    attendanceExtra=normalizeAttendanceExtra(data?.value);
+  } catch { attendanceExtra=0; }
+}
 function fail(result,label) { if(result.error) throw new Error(`${label}: ${result.error.message}`); return result.data; }
 function showError(message) { $('load-state').textContent=''; $('load-error').textContent=message; $('controls').hidden=true; $('schedule-card').hidden=true; }
 function readStaffCache(uid) { try {const raw=localStorage.getItem(`crs_my_staff_${uid}`);if(raw!==null){const value=JSON.parse(raw);if(typeof value==='string')return {hit:true,value};}if(sessionStorage.getItem(`crs_my_staff_${uid}`)==='null')return {hit:true,value:null};}catch{}return {hit:false,value:null}; }
@@ -397,7 +413,8 @@ const slotTime=placement=>{
 function updateDetailSave() {
   const info=placementInfo(detailPlacementId), input=$('detail-periods'), save=$('detail-save');
   if(!info||!save)return;
-  const maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+  const baseline=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+  const maximum=baseline+attendanceExtra;
   if(detailSplitOptions?.length) {
     const fields=[...$('swap-panel-content').querySelectorAll('.detail-member-periods')];
     const values=fields.map(field=>Number(field.value));
@@ -405,11 +422,16 @@ function updateDetailSave() {
     const valid=fields.every(field=>field.value!==''&&Number.isFinite(Number(field.value))&&Number(field.value)>=0&&Number(field.value)*2%1===0)&&total>0&&total<=maximum;
     const original=detailSplitOptions.map(row=>Number(row.periods??0));
     const summary=$('detail-split-total'), error=$('detail-split-error');
-    if(summary)summary.textContent=`รวม ${fmtPeriods(total)} จาก ${fmtPeriods(maximum)} คาบในตาราง`;
-    if(error){error.hidden=total<=maximum;error.textContent=total>maximum?`รวมเกิน ${fmtPeriods(maximum)} คาบในตาราง · ลดจำนวนคาบก่อนบันทึก`:'';}
+    if(summary)summary.textContent=`รวม ${fmtPeriods(total)} จาก ${fmtPeriods(baseline)} คาบในตาราง`;
+    const warning=$('detail-period-warning');
+    if(warning){warning.hidden=attendanceExtra===0||total<=baseline;warning.textContent=total>baseline?`เกินคาบในตาราง ${fmtPeriods(total-baseline)} คาบ (ฝ่ายวิชาการให้เกินได้ไม่เกิน ${fmtPeriods(attendanceExtra)})`:'';}
+    if(error){error.hidden=total<=maximum;error.textContent=total>maximum?(attendanceExtra===0?`รวมเกิน ${fmtPeriods(baseline)} คาบในตาราง · ลดจำนวนคาบก่อนบันทึก`:`รวมเกิน ${fmtPeriods(maximum)} คาบ (ในตาราง ${fmtPeriods(baseline)} + เกินได้ ${fmtPeriods(attendanceExtra)})`):'';}
     save.disabled=detailBusy||!valid||values.every((value,index)=>value===original[index]);
   } else if(input) {
     const value=Number(input.value);
+    const warning=$('detail-period-warning'), error=$('detail-period-error');
+    if(warning){warning.hidden=attendanceExtra===0||value<=baseline;warning.textContent=value>baseline?`เกินคาบในตาราง ${fmtPeriods(value-baseline)} คาบ (ฝ่ายวิชาการให้เกินได้ไม่เกิน ${fmtPeriods(attendanceExtra)})`:'';}
+    if(error){error.hidden=value<=maximum;error.textContent=value>maximum?`เกินเพดาน ${fmtPeriods(maximum)} คาบ (ในตาราง ${fmtPeriods(baseline)} + เกินได้ ${fmtPeriods(attendanceExtra)}) · ลดจำนวนคาบก่อนบันทึก`:'';}
     save.disabled=detailBusy||!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0||
       value===attendancePeriodsOf(details.columns,info.placement);
   }
@@ -417,7 +439,7 @@ function updateDetailSave() {
 }
 const fmtPeriods=value=>String(Number(value));
 function detailPeriodControls(placement,baseline,value,hint='') {
-  return `<div class="field"><label for="detail-periods">นับเช็คชื่อ</label><div class="attendance-stepper"><button type="button" class="ghost" id="detail-minus" aria-label="ลดครึ่งคาบ">−</button><input id="detail-periods" type="number" inputmode="decimal" min="0.5" max="${baseline}" step="0.5" value="${value}"><button type="button" class="ghost" id="detail-plus" aria-label="เพิ่มครึ่งคาบ">+</button></div><div class="hint">หน้าเช็คชื่อและหน้าจัดคนแทนจะเติมจำนวนนี้ให้</div>${hint?`<div class="hint">${hint}</div>`:''}</div>
+  return `<div class="field"><label for="detail-periods">นับเช็คชื่อ</label><div class="attendance-stepper"><button type="button" class="ghost" id="detail-minus" aria-label="ลดครึ่งคาบ">−</button><input id="detail-periods" type="number" inputmode="decimal" min="0.5" max="${baseline+attendanceExtra}" step="0.5" value="${value}" aria-describedby="detail-period-warning detail-period-error"><button type="button" class="ghost" id="detail-plus" aria-label="เพิ่มครึ่งคาบ">+</button></div><div class="hint">หน้าเช็คชื่อและหน้าจัดคนแทนจะเติมจำนวนนี้ให้</div><div class="period-warning" id="detail-period-warning" hidden></div><div class="period-error" id="detail-period-error" role="alert" hidden></div>${hint?`<div class="hint">${hint}</div>`:''}</div>
     <div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`;
 }
 function renderDetailSplit(options) {
@@ -426,7 +448,7 @@ function renderDetailSplit(options) {
   detailSplitOptions=options;
   const area=$('detail-period-area');if(!area)return;
   if(!options.length){area.innerHTML=detailPeriodControls(placement,baseline,attendancePeriodsOf(details.columns,placement),'ไม่พบวิชาย่อยที่ครูผู้สอนคาบนี้เป็นเจ้าของ — ตั้งได้แค่ยอดรวม');updateDetailSave();return;}
-  area.innerHTML=`<div class="field"><div class="section">นับเช็คชื่อแยกวิชาย่อย</div>${options.map((row,index)=>`<div class="field"><label for="detail-member-${index}">${esc(row.name)} (${esc(row.code)})</label><div class="attendance-stepper"><button type="button" class="ghost" data-step="-0.5" data-index="${index}" aria-label="ลดครึ่งคาบ ${esc(row.name)}">−</button><input id="detail-member-${index}" class="detail-member-periods" data-id="${esc(row.subject_id)}" type="number" inputmode="decimal" min="0" max="${baseline}" step="0.5" value="${Number(row.periods??0)}" aria-describedby="detail-split-total detail-split-error"><button type="button" class="ghost" data-step="0.5" data-index="${index}" aria-label="เพิ่มครึ่งคาบ ${esc(row.name)}">+</button></div></div>`).join('')}<div id="detail-split-total" aria-live="polite"></div><div id="detail-split-error" style="color:var(--danger)" role="alert" hidden></div>${placement.memberPeriods==null?'<div class="hint">ยังไม่ได้แบ่ง — หน้าเช็คชื่อจะเติมแค่ยอดรวม</div>':''}</div><div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`;
+  area.innerHTML=`<div class="field"><div class="section">นับเช็คชื่อแยกวิชาย่อย</div>${options.map((row,index)=>`<div class="field"><label for="detail-member-${index}">${esc(row.name)} (${esc(row.code)})</label><div class="attendance-stepper"><button type="button" class="ghost" data-step="-0.5" data-index="${index}" aria-label="ลดครึ่งคาบ ${esc(row.name)}">−</button><input id="detail-member-${index}" class="detail-member-periods" data-id="${esc(row.subject_id)}" type="number" inputmode="decimal" min="0" max="${baseline+attendanceExtra}" step="0.5" value="${Number(row.periods??0)}" aria-describedby="detail-split-total detail-period-warning detail-split-error"><button type="button" class="ghost" data-step="0.5" data-index="${index}" aria-label="เพิ่มครึ่งคาบ ${esc(row.name)}">+</button></div></div>`).join('')}<div id="detail-split-total" aria-live="polite"></div><div class="period-warning" id="detail-period-warning" hidden></div><div id="detail-split-error" style="color:var(--danger)" role="alert" hidden></div>${placement.memberPeriods==null?'<div class="hint">ยังไม่ได้แบ่ง — หน้าเช็คชื่อจะเติมแค่ยอดรวม</div>':''}</div><div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`;
   updateDetailSave();
 }
 function openDetailPanel(placementId) {
@@ -461,7 +483,7 @@ async function saveDetailPeriods(reset=false) {
   const placementId=detailPlacementId, info=placementInfo(placementId), input=$('detail-periods');
   if(!info||(!input&&!reset)||!info.lesson.subject)return;
   const value=reset?null:Number(input.value);
-  const maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+  const maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null})+attendanceExtra;
   if(!reset&&(!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0))return;
   detailBusy=true;$('set-select').disabled=true;$('swap-panel').setAttribute('aria-busy','true');updateDetailSave();
   try {
@@ -700,12 +722,16 @@ $('swap-panel-content').addEventListener('click',async event=>{
   if(event.target.id==='detail-swap'){void openSwapPanel(detailPlacementId);return;}
   if(event.target.dataset.step){
     const input=$(`detail-member-${event.target.dataset.index}`),change=Number(event.target.dataset.step);
-    input.value=String(Math.max(0,Math.min(Number(input.max),Number(input.value||0)+change)));
+    const current=Number(input.value||0);
+    if(change>0&&current>=Number(input.max))return;
+    input.value=String(Math.max(0,change<0?current+change:Math.min(Number(input.max),current+change)));
     updateDetailSave();return;
   }
   if(event.target.id==='detail-minus'||event.target.id==='detail-plus'){
     const input=$('detail-periods'), change=event.target.id==='detail-plus'?0.5:-0.5;
-    input.value=String(Math.max(0.5,Math.min(Number(input.max),Number(input.value)+change)));
+    const current=Number(input.value||0);
+    if(change>0&&current>=Number(input.max))return;
+    input.value=String(Math.max(0.5,change<0?current+change:Math.min(Number(input.max),current+change)));
     updateDetailSave();return;
   }
   if(event.target.id==='detail-save'||event.target.id==='detail-reset'){
@@ -732,6 +758,7 @@ document.querySelectorAll('.view-buttons button').forEach(button=>button.addEven
 const session=await requireAuth();
 if(session) {
   $('btn-signout').addEventListener('click',async event=>{event.preventDefault();await signOut();});
+  await loadAttendanceExtra();
   const academicAccess=getAcademicAccess(session.user.id).then(allowed=>{
     if(allowed!==isAcademic){isAcademic=allowed;if(details)renderGrid();}
   });
