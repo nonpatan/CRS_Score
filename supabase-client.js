@@ -9184,16 +9184,16 @@ export function themeWorkLateDays(submittedAt, dueDate) {
 }
 
 export const THEME_WORK_REMINDER_LEAD_DAYS = 3;
-export const THEME_WORK_REVIEW_NOTICE_DAYS = 14;
 const THEME_WORK_REVIEW_CACHE_MS = 2 * 60 * 60 * 1000;
+// ต้องเก็บนานกว่าช่วงแจ้งทั้งปี ไม่เช่นนั้นผลตรวจเก่าจะถูกแจ้งซ้ำหลังเปิดดู
+const THEME_WORK_REVIEW_SEEN_KEEP_DAYS = 400;
 
-export function pickThemeWorkReviewNotice({ rows = [], seen = {}, now = new Date() } = {}) {
-  const cutoff = new Date(now).getTime() - THEME_WORK_REVIEW_NOTICE_DAYS * 86400000;
+export function pickThemeWorkReviewNotice({ rows = [], seen = {} } = {}) {
   const fresh = (rows || []).filter(row => {
     const reviewedAt = Date.parse(row?.reviewed_at || "");
     return row?.id && row?.work_id && row?.subject_id && Number.isInteger(Number(row?.review_score))
       && Number(row.review_score) >= 1 && Number(row.review_score) <= 4
-      && Number.isFinite(reviewedAt) && reviewedAt >= cutoff
+      && Number.isFinite(reviewedAt)
       && seen?.[row.id] !== row.reviewed_at;
   }).sort((a, b) => Date.parse(b.reviewed_at) - Date.parse(a.reviewed_at));
   if (!fresh.length) return null;
@@ -9218,7 +9218,7 @@ export function readThemeWorkReviewSeen(userId) {
 export function markThemeWorkReviewsSeen(userId, parts) {
   if (!userId) return;
   try {
-    const cutoff = Date.now() - 30 * 86400000;
+    const cutoff = Date.now() - THEME_WORK_REVIEW_SEEN_KEEP_DAYS * 86400000;
     const seen = { ...readThemeWorkReviewSeen(userId) };
     for (const part of parts || []) if (part?.id && part?.reviewed_at) seen[part.id] = part.reviewed_at;
     for (const [id, at] of Object.entries(seen)) if (!Number.isFinite(Date.parse(at)) || Date.parse(at) < cutoff) delete seen[id];
@@ -9241,11 +9241,10 @@ export async function loadMyThemeWorkReviewNotice({ year, userId, now = new Date
     if (Array.isArray(saved?.rows) && age >= 0 && age < THEME_WORK_REVIEW_CACHE_MS) rows = saved.rows;
   } catch { /* storage may be unavailable */ }
   if (!rows) {
-    const cutoff = new Date(new Date(now).getTime() - THEME_WORK_REVIEW_NOTICE_DAYS * 86400000).toISOString();
     const { data, error } = await sb.from("theme_work_parts")
       .select("id,work_id,subject_id,term,reviewed_at,review_score,subjects!inner(code,name,year,owner_id)")
       .eq("subjects.owner_id", userId).eq("subjects.year", year)
-      .not("reviewed_at", "is", null).gte("reviewed_at", cutoff);
+      .not("reviewed_at", "is", null);
     if (error) throw new Error("โหลดผลตรวจผลงานของฉันไม่สำเร็จ: " + error.message);
     await requireMySession();
     rows = (data || []).map(row => ({ id:row.id, work_id:row.work_id, subject_id:row.subject_id,
@@ -9255,7 +9254,7 @@ export async function loadMyThemeWorkReviewNotice({ year, userId, now = new Date
     try { localStorage.setItem(key, JSON.stringify({ at:new Date(now).getTime(), rows })); }
     catch { /* use fresh rows without a cache */ }
   }
-  return pickThemeWorkReviewNotice({ rows, seen:readThemeWorkReviewSeen(userId), now });
+  return pickThemeWorkReviewNotice({ rows, seen:readThemeWorkReviewSeen(userId) });
 }
 
 export function themeWorkDaysLeft(today, window) {
