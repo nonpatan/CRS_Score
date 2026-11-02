@@ -63,6 +63,10 @@ button:disabled { opacity:.55; cursor:default; }
 .status-icon { width:14px; height:14px; flex:none; vertical-align:-2px; }
 .tile .status-icon,.master-list .status-icon,.lockline .status-icon,.review-done .status-icon { margin-right:4px; }
 .pill.match { background:var(--teal-soft); color:var(--teal); border-color:var(--teal-soft); }
+.pill.new-review { background:var(--teal-soft); color:var(--teal); border-color:var(--teal); }
+.new-review-count { color:var(--teal); }
+.own-card { scroll-margin-top:24px; }
+.own-card.linked { border:2px solid var(--teal); }
 .pill.adjust { background:var(--bg); color:var(--muted); }
 .pill.none,.pill.missing,.pill.late { background:var(--amber-soft); color:var(--amber); border-color:var(--amber-soft); }
 .pill.late { background:var(--white); border-color:var(--amber); }
@@ -289,8 +293,9 @@ import {
   buildThemeWorkUnits, groupThemeWorkByOwner, themeWorkLateDays, themeWorkCountdown, summarizeThemeWorks,
   validateThemeWorkForm, loadThemeWorkData, submitThemeWorkPart, saveThemeWorkWindow, setThemeWorkReviewed,
   themeWorkReturnState, returnThemeWork, setThemeWorkReviewNote, confirmThemeWorkReview, THEME_WORK_SCORE_LABELS,
-  exemptThemeWorkParts, unexemptThemeWork
-} from "../supabase-client.js?v=20261027-5";
+  exemptThemeWorkParts, unexemptThemeWork, pickThemeWorkReviewNotice,
+  readThemeWorkReviewSeen, markThemeWorkReviewsSeen
+} from "../supabase-client.js?v=20261102-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -335,6 +340,8 @@ if (!session) {
   let isViewer = false, isReviewer = false, busy = false;
   let teacherOpenState = null;
   let composing = null; // { key, kind:"return" | "advice" | "exempt" } กล่องเขียนความเห็นที่กางอยู่ในแถว
+  const newReviewIdsByTerm = new Map();
+  let newReviewIds = new Set(), deepLinkHandled = false, linkedSubjectId = "";
   const profiles = new Map();
   const toast = (message, ok = true) => {
     const box = el("toast"); box.textContent = message; box.className = "toast show" + (ok ? " ok" : " err");
@@ -377,6 +384,8 @@ if (!session) {
     const counts = { match:0, adjust:0, none:0, missing:0, mixed:0, exempt:0 };
     ownGroups.forEach(group => counts[group.status]++);
     const returnedCount = ownGroups.filter(group => group.returned === "pending").length;
+    const reviewedCount = active.filter(group => group.reviewed === "all").length;
+    const newCount = ownGroups.filter(group => group.items.some(item => newReviewIds.has(item.part?.id))).length;
     const countdown = themeWorkCountdown(today(), data.window);
     el("progress").innerHTML = '<div class="row"><strong>ส่งแล้ว ' + sent + ' จาก ' + active.length + ' รายการ</strong><span>' +
       (countdown ? esc(countdown) : "ฝ่ายวิชาการยังไม่ได้ตั้งวันปิดรับ · ยังส่งได้") +
@@ -385,6 +394,8 @@ if (!session) {
       '<div class="meta">ตรงธีม ' + counts.match + ' · ปรับจากธีม ' + counts.adjust +
       ' · ยังไม่ได้ทำ ' + counts.none + ' · ส่งไม่ครบ ' + counts.mixed + ' · ยังไม่ส่ง ' + counts.missing +
       (counts.exempt ? ' · ไม่ต้องส่ง ' + counts.exempt : '') +
+      ' · ตรวจแล้ว ' + reviewedCount +
+      (newCount ? ' · <strong class="new-review-count">ผลตรวจใหม่ ' + newCount + '</strong>' : '') +
       (returnedCount ? ' · <strong style="color:var(--danger)">ส่งกลับให้แก้ ' + returnedCount + '</strong>' : '') + '</div>';
   }
 
@@ -433,8 +444,11 @@ if (!session) {
     const unit = group.unit, part = firstPart(group);
     const late = themeWorkLateDays(group.submittedAt, data.window?.due_date);
     const locked = group.reviewed !== "none", editOpen = (group.status === "missing" || group.status === "mixed" || group.editing) && !locked;
-    let html = '<article class="card own-card" data-own="' + esc(group.key) + '"><div class="row"><h3 class="subject-title">' +
+    let html = '<article class="card own-card' + (group.items.some(item => item.subject.id === linkedSubjectId) ? ' linked' : '') +
+      '" data-own="' + esc(group.key) + '" data-subjects="' +
+      esc(group.items.map(item => item.subject.id).join(' ')) + '"><div class="row"><h3 class="subject-title">' +
       groupTitle(group) + '</h3><span class="row" style="gap:6px">' + pill(group.status) +
+      (group.items.some(item => newReviewIds.has(item.part?.id)) ? '<span class="pill new-review">ผลตรวจใหม่</span>' : '') +
       (group.returned ? pill(group.returned === "pending" ? "returned" : "fixed") : '') + '</span></div><div class="meta subject-meta">' +
       esc(unit.subject.grade_level || "") + (unit.kind === "integrated" ? " · บูรณาการ" : " · พื้นฐาน") + '</div>' + childChips(group);
     if (otherCount(group)) html += '<p class="hint">วิชาย่อยของครูคนอื่นอีก ' + otherCount(group) + ' วิชา · ส่งแยกเอง</p>';
@@ -827,9 +841,36 @@ if (!session) {
       units.forEach(unit => { unit.dueDate = data.window?.due_date || null; });
       workGroups = groupThemeWorkByOwner(units);
       ownGroups = workGroups.filter(group => group.ownerId === session.user.id);
+      const reviewedParts = ownGroups.flatMap(group => group.items.map(item => item.part).filter(part => part?.reviewed_at));
+      const firstVisitToTerm = !newReviewIdsByTerm.has(term);
+      if (firstVisitToTerm) {
+        const notice = pickThemeWorkReviewNotice({ rows:reviewedParts, seen:readThemeWorkReviewSeen(session.user.id) });
+        newReviewIdsByTerm.set(term, new Set(notice?.items.map(item => item.partId) || []));
+      }
+      newReviewIds = newReviewIdsByTerm.get(term);
       selectedKey = "";
+      if (!deepLinkHandled && location.hash.startsWith("#tw-")) {
+        try { linkedSubjectId = decodeURIComponent(location.hash.slice(4)); } catch { /* invalid hash */ }
+        const linkedGroup = ownGroups.find(group => group.items.some(item => item.subject.id === linkedSubjectId));
+        if (linkedGroup) selectedKey = linkedGroup.key;
+        else linkedSubjectId = "";
+      }
       if (!preserveReviewView) { filter = "all"; teacherOpenState = null; composing = null; }
       render(); el("page").hidden = false;
+      if (firstVisitToTerm) markThemeWorkReviewsSeen(session.user.id, reviewedParts);
+      if (!deepLinkHandled) {
+        deepLinkHandled = true;
+        if (linkedSubjectId) requestAnimationFrame(() => {
+          const card = [...document.querySelectorAll(".own-card")].find(item =>
+            item.getClientRects().length && item.dataset.subjects.split(" ").includes(linkedSubjectId));
+          if (!card) return;
+          card.classList.add("linked");
+          card.setAttribute("tabindex", "-1");
+          const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          card.scrollIntoView({ block:"start", behavior:reduce ? "auto" : "smooth" });
+          card.focus({ preventScroll:true });
+        });
+      }
       if (scrollY !== null) requestAnimationFrame(() => window.scrollTo(0, scrollY));
     } catch (error) {
       el("loading").textContent = "โหลดผลงานตามธีมไม่สำเร็จ: " + error.message;
@@ -892,7 +933,7 @@ if (!session) {
     const button = event.target.closest("[data-action], [data-term], [data-view]");
     if (!button || busy) return;
     if (button.dataset.term) {
-      term = button.dataset.term; history.replaceState(null, "", "?term=" + term); teacherOpenState = null; await load(); return;
+      term = button.dataset.term; linkedSubjectId = ""; history.replaceState(null, "", "?term=" + term); teacherOpenState = null; await load(); return;
     }
     if (button.dataset.view) {
       activeView = button.dataset.view; render(); return;

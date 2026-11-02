@@ -4814,10 +4814,10 @@ export function clearMyExamCloseCache() {
 
 export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {}) {
   if (!staffId || !year || !today) {
-    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null, themeWork: null, examClose: null };
+    return { swaps: [], coverage: [], duty: [], projects: [], homerooms: [], teachingGap: null, cutoff: null, themeWork: null, themeReview: null, examClose: null };
   }
 
-  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff, themeWork, examClose] = await Promise.all([
+  const [swaps, coverageRes, dutyRes, projects, homeroomRes, teachingGap, cutoff, themeWork, themeReview, examClose] = await Promise.all([
     listMyDutySwaps(),
     sb.rpc("my_coverage_from", { p_from: today }),
     sb.from("duty_roster")
@@ -4836,6 +4836,7 @@ export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {
     // ค่าตั้งเวลาเป็นข้อมูลเสริม — อ่านไม่ได้ต้องคงการ์ดแบบเดิม ไม่ทำให้การ์ดทั้งใบหาย
     getDailyAttendanceCutoff().catch(() => null),
     userId ? loadMyThemeWorkReminder({ year, userId, today }).catch(() => null) : Promise.resolve(null),
+    userId ? loadMyThemeWorkReviewNotice({ year, userId }).catch(() => null) : Promise.resolve(null),
     userId ? loadMyExamClosePending({ year, userId, today }).catch(() => null) : Promise.resolve(null)
   ]);
 
@@ -4856,6 +4857,7 @@ export async function loadMyDashboardAlerts({ staffId, userId, year, today } = {
     teachingGap,
     cutoff,
     themeWork,
+    themeReview,
     examClose
   };
 }
@@ -4881,7 +4883,7 @@ const ALERT_ORDER = { "วันนี้": 0, "ค้าง": 1, "รอคุ�
 export function pickMyDashboardAlerts({
   homerooms = [], daily = {}, swaps = [], coverage = [], duty = [], projects = [], teachingGap = null, today,
   pendingApprovals = 0, isApprover = false, pendingMakeups = 0, isMakeupApprover = false,
-  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = [], themeWork = null, examClose = null
+  cutoff = null, nowIso = new Date().toISOString(), dutyMonths = [], themeWork = null, themeReview = null, examClose = null
 } = {}) {
   const alerts = [...dutyMonths];
 
@@ -4902,6 +4904,13 @@ export function pickMyDashboardAlerts({
     href: `academic/theme-works.html?term=${encodeURIComponent(themeWork.term)}`,
     linkLabel: themeWork.returned?.length ? "ไปแก้ผลงาน" : "ไปส่งผลงาน",
     kind: themeWork.overdue && !themeWork.returned?.length ? "ค้าง" : "รอคุณ"
+  });
+
+  if (themeReview) alerts.push({
+    text: themeReview.text,
+    href: themeWorkReviewHref(themeReview, "academic/"),
+    linkLabel: "ดูผลตรวจ",
+    kind: "รอคุณ"
   });
 
   if (isApprover && pendingApprovals > 0) {
@@ -9175,6 +9184,79 @@ export function themeWorkLateDays(submittedAt, dueDate) {
 }
 
 export const THEME_WORK_REMINDER_LEAD_DAYS = 3;
+export const THEME_WORK_REVIEW_NOTICE_DAYS = 14;
+const THEME_WORK_REVIEW_CACHE_MS = 2 * 60 * 60 * 1000;
+
+export function pickThemeWorkReviewNotice({ rows = [], seen = {}, now = new Date() } = {}) {
+  const cutoff = new Date(now).getTime() - THEME_WORK_REVIEW_NOTICE_DAYS * 86400000;
+  const fresh = (rows || []).filter(row => {
+    const reviewedAt = Date.parse(row?.reviewed_at || "");
+    return row?.id && row?.work_id && row?.subject_id && Number.isInteger(Number(row?.review_score))
+      && Number(row.review_score) >= 1 && Number(row.review_score) <= 4
+      && Number.isFinite(reviewedAt) && reviewedAt >= cutoff
+      && seen?.[row.id] !== row.reviewed_at;
+  }).sort((a, b) => Date.parse(b.reviewed_at) - Date.parse(a.reviewed_at));
+  if (!fresh.length) return null;
+  const items = fresh.map(row => ({ partId:row.id, subjectId:row.subject_id, code:row.code,
+    name:row.name, term:row.term, score:Number(row.review_score), reviewedAt:row.reviewed_at }));
+  const count = new Set(fresh.map(row => row.work_id)).size;
+  return { count, term:fresh[0].term, anchorSubjectId:fresh[0].subject_id, items,
+    text:`ฝ่ายวิชาการตรวจผลงานตามธีมแล้ว ${count} วิชา · ดูคะแนนและความคิดเห็น` };
+}
+
+export function themeWorkReviewHref(notice, prefix = "") {
+  return `${prefix}theme-works.html?term=${encodeURIComponent(notice.term)}#tw-${encodeURIComponent(notice.anchorSubjectId)}`;
+}
+
+export function readThemeWorkReviewSeen(userId) {
+  try {
+    const value = JSON.parse(localStorage.getItem(`crs-theme-review-seen:${userId}`));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+
+export function markThemeWorkReviewsSeen(userId, parts) {
+  if (!userId) return;
+  try {
+    const cutoff = Date.now() - 30 * 86400000;
+    const seen = { ...readThemeWorkReviewSeen(userId) };
+    for (const part of parts || []) if (part?.id && part?.reviewed_at) seen[part.id] = part.reviewed_at;
+    for (const [id, at] of Object.entries(seen)) if (!Number.isFinite(Date.parse(at)) || Date.parse(at) < cutoff) delete seen[id];
+    localStorage.setItem(`crs-theme-review-seen:${userId}`, JSON.stringify(seen));
+  } catch { /* private mode: keep the page usable */ }
+}
+
+export async function loadMyThemeWorkReviewNotice({ year, userId, now = new Date() } = {}) {
+  if (!year || !userId) return null;
+  const requireMySession = async () => {
+    const { data, error } = await sb.auth.getSession();
+    if (error || data?.session?.user?.id !== userId) throw new Error("เซสชันหมดอายุ");
+  };
+  await requireMySession();
+  const key = `crs-theme-review:${userId}:${year}`;
+  let rows;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    const age = new Date(now).getTime() - saved?.at;
+    if (Array.isArray(saved?.rows) && age >= 0 && age < THEME_WORK_REVIEW_CACHE_MS) rows = saved.rows;
+  } catch { /* storage may be unavailable */ }
+  if (!rows) {
+    const cutoff = new Date(new Date(now).getTime() - THEME_WORK_REVIEW_NOTICE_DAYS * 86400000).toISOString();
+    const { data, error } = await sb.from("theme_work_parts")
+      .select("id,work_id,subject_id,term,reviewed_at,review_score,subjects!inner(code,name,year,owner_id)")
+      .eq("subjects.owner_id", userId).eq("subjects.year", year)
+      .not("reviewed_at", "is", null).gte("reviewed_at", cutoff);
+    if (error) throw new Error("โหลดผลตรวจผลงานของฉันไม่สำเร็จ: " + error.message);
+    await requireMySession();
+    rows = (data || []).map(row => ({ id:row.id, work_id:row.work_id, subject_id:row.subject_id,
+      term:row.term, reviewed_at:row.reviewed_at, review_score:row.review_score,
+      code:(Array.isArray(row.subjects) ? row.subjects[0] : row.subjects)?.code,
+      name:(Array.isArray(row.subjects) ? row.subjects[0] : row.subjects)?.name }));
+    try { localStorage.setItem(key, JSON.stringify({ at:new Date(now).getTime(), rows })); }
+    catch { /* use fresh rows without a cache */ }
+  }
+  return pickThemeWorkReviewNotice({ rows, seen:readThemeWorkReviewSeen(userId), now });
+}
 
 export function themeWorkDaysLeft(today, window) {
   if (!window?.due_date) return null;
