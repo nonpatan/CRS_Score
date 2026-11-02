@@ -59,13 +59,43 @@ h2 {
   padding:16px;
   margin-bottom:16px
 }
+/* display:flex ทำให้เบราว์เซอร์ไม่วาดสามเหลี่ยมเอง จึงวาดลูกศรเองแบบเดียวกับ students.html */
 details.card>summary {
   font-weight:600;
   font-size:18px;
   cursor:pointer;
   min-height:44px;
   display:flex;
-  align-items:center
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px 8px;
+  list-style:none
+}
+details.card>summary::-webkit-details-marker {
+  display:none
+}
+details.card>summary::before {
+  content:"▸";
+  color:var(--teal);
+  width:1em;
+  flex:0 0 auto
+}
+details.card[open]>summary::before {
+  content:"▾"
+}
+.section-status {
+  font-size:13px;
+  font-weight:500;
+  border-radius:999px;
+  padding:1px 8px
+}
+.section-status.todo {
+  color:var(--amber);
+  background:var(--amber-soft)
+}
+.section-status.done {
+  color:var(--teal);
+  background:var(--teal-soft)
 }
 details.card>summary:focus-visible {
   outline:2px solid var(--teal)
@@ -254,11 +284,11 @@ button:disabled {
 </div>
 <p id="citizen-readonly" class="hint"></p>
 </section>
-<details class="card" open><summary>ตัวนักเรียน</summary>
+<details class="card" open><summary>ตัวนักเรียน <span class="section-status" data-section="personal"></span></summary>
 <div id="personal-fields" class="fields">
 </div>
 </details>
-<details class="card" open><summary>ผู้ปกครอง</summary>
+<details class="card" open><summary>ผู้ปกครอง <span class="section-status" data-section="guardians"></span></summary>
 <div id="guardians" aria-live="polite">
 </div>
 <div class="actions" id="guardian-actions"><button type="button" class="ghost" id="add-guardian">เพิ่มผู้ปกครอง</button><button type="button" class="ghost" id="copy-sibling">คัดลอกจากพี่น้อง</button>
@@ -266,11 +296,11 @@ button:disabled {
 <div id="family-fields" class="fields">
 </div>
 </details>
-<details class="card"><summary>ที่อยู่</summary>
+<details class="card"><summary>ที่อยู่ <span class="section-status" data-section="address"></span></summary>
 <div id="address-fields" class="fields">
 </div><a id="map-link" href="#" target="_blank" rel="noopener" hidden>เปิดแผนที่</a>
 </details>
-<details class="card"><summary>สุขภาพ</summary>
+<details class="card"><summary>สุขภาพ <span class="section-status" data-section="health"></span></summary>
 <div id="health-fields" class="fields">
 </div>
 </details>
@@ -590,8 +620,27 @@ function renderForm(){
   for(const input of $("profile-form").querySelectorAll("input,select"))input.disabled=!canEdit||(!isAcademic&&input.closest("#registry-fields"));
   syncConditional();
   renderGuardians();
+  updateSectionStatus();
   snapshot=JSON.stringify(collect());
   dirty=false;
+}
+// ข้อ ⭐ ของ profileCompleteness แยกตามหมวด — หมวดที่พับอยู่ต้องบอกได้ว่ายังขาดอะไร
+// (เลขประจำตัวประชาชนอยู่ส่วนข้อมูลทะเบียน ไม่ได้อยู่ในหมวดพับ จึงไม่นับในป้ายหมวด)
+const SECTION_ITEMS={
+  personal:["เพศ","วันเกิด","ศาสนา"],
+  guardians:["ผู้ปกครองที่มีชื่อและเบอร์โทร","ผู้ติดต่อหลัก"],
+  address:["ที่อยู่ทะเบียนบ้าน","ที่อยู่ปัจจุบัน"],
+  health:["โรคประจำตัว","ยาที่แพ้","อาหารที่แพ้"]
+};
+function updateSectionStatus(){
+  // อ่านจากค่าในฟอร์มตอนนี้ ไม่ใช่ค่าที่บันทึกแล้ว ป้ายจะได้เปลี่ยนทันทีที่ครูกรอก
+  const missing=new Set(profileCompleteness(collect().profile,guardians).missing);
+  for(const badge of document.querySelectorAll(".section-status[data-section]")){
+    const left=SECTION_ITEMS[badge.dataset.section].filter(label=>missing.has(label));
+    badge.className="section-status "+(left.length?"todo":"done");
+    badge.textContent=left.length?"ยังขาด "+left.length+" ข้อ ⭐":"ครบแล้ว";
+    badge.title=left.length?"ยังขาด: "+left.join(" · "):"";
+  }
 }
 function updateAge(){
   const value=read("birth_date"),
@@ -680,11 +729,13 @@ if(session){
 $("profile-form").addEventListener("input",()=>{
   syncConditional();
   updateAge();
+  updateSectionStatus();
   dirty=JSON.stringify(collect())!==snapshot
 });
 $("profile-form").addEventListener("change",()=>{
   syncConditional();
   updateAge();
+  updateSectionStatus();
   dirty=JSON.stringify(collect())!==snapshot
 });
 window.addEventListener("beforeunload",e=>{
