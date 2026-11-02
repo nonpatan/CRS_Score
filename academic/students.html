@@ -731,7 +731,7 @@ async function insertStudentsWithPlacements(rows, year) {
 // ---------- ลบนักเรียน ----------
 // ทุก FK ที่ผูก student_id เป็น ON DELETE CASCADE ทั้งหมด (schema.sql) ฐานข้อมูลจึงลบได้เสมอ
 // และจะลบข้อมูลลูกตามให้ — guard ที่นี่เป็นแค่ด่านฝั่งหน้าเว็บกันลบพลาด ถ้ามีคะแนน/เช็คชื่อ/ร./
-// ชั่วโมงชดเชย/คะแนนสมรรถนะ อยู่ จะไม่ลบเงียบ ๆ แต่เปิด modal โชว์ว่าติดตรงไหนบ้างก่อน ให้ครู
+// ชั่วโมงชดเชย/คะแนนสมรรถนะ/ประวัติ/ผู้ปกครอง อยู่ จะไม่ลบเงียบ ๆ แต่เปิด modal โชว์ข้อมูลที่จะหายก่อน ให้ครู
 // พิมพ์ชื่อยืนยันแล้วจึงลบทั้งหมดทีเดียว (เผื่อกรณีสร้างผิด/ทดสอบแล้วอยากล้างจริง)
 
 // ป้ายวิชา: รหัส · ชื่อ · ปี · เทอม (เทอมเฉพาะมัธยมที่มีค่า)
@@ -759,16 +759,18 @@ function tallyBySubject(rows, getSubject) {
 
 // ดึงข้อมูลทั้งหมดที่ผูกกับนักเรียนคนนี้ พร้อมชื่อวิชา/กิจกรรม เพื่อแสดงรายละเอียด
 async function gatherStudentLinks(studentId) {
-  const [scores, att, remarks, makeup, comp, enroll, placements] = await Promise.all([
+  const [scores, att, remarks, makeup, comp, enroll, placements, profile, guardians] = await Promise.all([
     sb.from("scores").select("id, collections!inner(indicators!inner(units!inner(subjects!inner(id,name,code,year,term))))").eq("student_id", studentId),
     sb.from("attendance_records").select("id, attendance_sessions!inner(subjects!inner(id,name,code,year,term))").eq("student_id", studentId),
     sb.from("remarks").select("id, code, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
     sb.from("makeup_hours").select("id, periods, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
     sb.from("competency_assessment_scores").select("id, competency_assessment_sessions!inner(competency_assessments!inner(id,name))").eq("student_id", studentId),
     sb.from("enrollments").select("id, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
-    sb.from("student_year_placements").select("id, year, grade_level, classroom").eq("student_id", studentId).order("year")
+    sb.from("student_year_placements").select("id, year, grade_level, classroom").eq("student_id", studentId).order("year"),
+    sb.from("student_profiles").select("student_id").eq("student_id", studentId),
+    sb.from("student_guardians").select("id, relation, prefix, first_name, last_name").eq("student_id", studentId).order("sort_order")
   ]);
-  const err = scores.error || att.error || remarks.error || makeup.error || comp.error || enroll.error || placements.error;
+  const err = scores.error || att.error || remarks.error || makeup.error || comp.error || enroll.error || placements.error || profile.error || guardians.error;
   if (err) throw err;
 
   // คะแนนสมรรถนะ (กิจกรรม/กิจวัตร) รวมตามชื่อรายการ
@@ -787,7 +789,9 @@ async function gatherStudentLinks(studentId) {
     makeup:   tallyBySubject(makeup.data,  r => r.subjects),
     comp:     [...compMap.values()].sort((a, b) => a.name.localeCompare(b.name, "th")),
     enroll:   tallyBySubject(enroll.data,  r => r.subjects),
-    placements: (placements.data || []).map(p => ({ year: p.year, grade_level: p.grade_level, classroom: p.classroom }))
+    placements: (placements.data || []).map(p => ({ year: p.year, grade_level: p.grade_level, classroom: p.classroom })),
+    profile: (profile.data || []).length > 0,
+    guardians: guardians.data || []
   };
 }
 
@@ -830,17 +834,17 @@ async function deleteStudent(stu) {
     + links.makeup.reduce((s, r) => s + r.count, 0)
     + links.comp.reduce((s, r) => s + r.count, 0);
 
-  // ไม่มีคะแนน/เช็คชื่อ/ร./ชดเชย/สมรรถนะ เลย → ลบได้เลยแบบเดิม (ยืนยันสั้น ๆ)
-  if (gradeCount === 0) {
+  // ไม่มีคะแนน/เช็คชื่อ/ร./ชดเชย/สมรรถนะ/ประวัติ/ผู้ปกครอง → ยืนยันสั้น ๆ
+  if (gradeCount === 0 && !links.profile && links.guardians.length === 0) {
     const enrollN = links.enroll.length;
     if (enrollN > 0 && !await window.crsAskConfirm({
       title: "ลบนักเรียนและการลงทะเบียน",
-      message: "นักเรียน \"" + stu.name + "\" ลงทะเบียนอยู่ " + enrollN + " วิชา ระบบจะเลิกลงทะเบียนทั้งหมดพร้อมลบนักเรียน",
+      message: "นักเรียน \"" + stu.name + "\" ลงทะเบียนอยู่ " + enrollN + " วิชา ระบบจะเลิกลงทะเบียนทั้งหมดพร้อมลบนักเรียน · ลบแล้วกู้คืนไม่ได้",
       okLabel: "ลบนักเรียน"
     })) return;
     if (enrollN === 0 && !await window.crsAskConfirm({
       title: "ลบนักเรียน",
-      message: "ยืนยันลบ \"" + stu.name + "\" ?",
+      message: "\"" + stu.name + "\" ยังไม่มีคะแนน ประวัติ หรือข้อมูลอื่นผูกอยู่ · ลบแล้วกู้คืนไม่ได้",
       okLabel: "ลบนักเรียน"
     })) return;
     const { error } = await sb.from("students").delete().eq("id", stu.id);
@@ -868,8 +872,18 @@ async function deleteStudent(stu) {
     const items = links.placements.map(p => "<li>ปี " + escapeHtml(p.year) + " — " + escapeHtml(p.grade_level || "?") + "/" + escapeHtml(p.classroom || "?") + "</li>").join("");
     body += "<div class='link-group'><div class='g-title'>ประวัติชั้น/ห้อง</div><ul>" + items + "</ul></div>";
   }
+  if (links.profile || links.guardians.length) {
+    let items = links.profile ? "<li>ประวัตินักเรียน (ข้อมูลส่วนตัว ที่อยู่ สุขภาพ)</li>" : "";
+    if (links.guardians.length) {
+      const names = links.guardians.map(g => [g.relation, g.prefix, g.first_name, g.last_name]
+        .filter(Boolean).map(escapeHtml).join(" ")).join(" · ");
+      items += "<li>ผู้ปกครอง " + links.guardians.length + " คน: " + names + "</li>";
+    }
+    body += "<div class='link-group'><div class='g-title'>ทะเบียนประวัติ</div><ul>" + items + "</ul></div>";
+  }
 
   body += "<div class='danger-box'>⚠ การลบนี้ <b>กู้คืนไม่ได้</b> — คะแนนและข้อมูลทั้งหมดของนักเรียนคนนี้จะถูกลบถาวร<br>"
+    + (links.profile || links.guardians.length ? "ประวัติและข้อมูลผู้ปกครองที่ครูประจำชั้นกรอกไว้จะหายด้วย<br>" : "")
     + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้กดปุ่ม \"กำหนดสถานะ\" ของนักเรียนคนนี้แทน — เลือกย้ายสถานศึกษา ลาออกกลางคัน หรือจบการศึกษา ข้อมูลทั้งหมดจะยังอยู่ครบ</div>";
   body += "<div class='confirm-field'><label for='del-confirm-name'>พิมพ์ชื่อนักเรียนให้ตรงเพื่อยืนยัน: <b>" + escapeHtml(stu.name) + "</b></label>"
     + "<input type='text' id='del-confirm-name' autocomplete='off' placeholder='พิมพ์ชื่อ-นามสกุลให้ตรง'></div>";
