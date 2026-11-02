@@ -228,8 +228,8 @@ export function pruneTimetableCache(storage, activeIds) {
   } catch { return false; }
 }
 
-const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,is_template,note,facilities(name),subjects(code,name,grade_level),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span,timetable_attendance_periods(periods)))';
-const LESSON_SELECT = 'id,title,subject_id,facility_id,is_template,note,facilities(name),subjects(code,name,grade_level),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span,timetable_attendance_periods(periods))';
+const DETAIL_SELECT = 'id,updated_at,teaching_days,timetable_columns(seq,start_time,end_time,kind),timetable_lessons(id,title,subject_id,facility_id,is_template,note,facilities(name),subjects(code,name,grade_level,subject_type),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span,timetable_attendance_periods(periods,member_periods)))';
+const LESSON_SELECT = 'id,title,subject_id,facility_id,is_template,note,facilities(name),subjects(code,name,grade_level,subject_type),timetable_lesson_rooms(grade_level,classroom),timetable_lesson_teachers(staff_id,display_name),timetable_placements(id,weekday,column_seq,span,timetable_attendance_periods(periods,member_periods))';
 const queryData = (result, label) => {
   if (result.error) throw new Error(`${label}: ${result.error.message}`);
   return result.data;
@@ -239,9 +239,11 @@ export async function loadTimetableDetails({ sb, fetchAllRows, storage, timetabl
   const row = timetable;
   if (row.status !== 'ร่าง') {
     const cached = readTimetableCache(storage, row.id, row.updated_at);
-    if (cached && (!swapReady || cached.timetable_lessons.every(lesson =>
-      typeof lesson.is_template === 'boolean' && Object.hasOwn(lesson,'subjects') &&
-      lesson.timetable_placements.every(placement => Boolean(placement.id) && Object.hasOwn(placement,'timetable_attendance_periods'))))) return cached;
+    if (cached && cached.timetable_lessons.every(lesson =>
+      !lesson.subjects || Object.hasOwn(Array.isArray(lesson.subjects) ? lesson.subjects[0] || {} : lesson.subjects,'subject_type')) &&
+      (!swapReady || cached.timetable_lessons.every(lesson =>
+        typeof lesson.is_template === 'boolean' && Object.hasOwn(lesson,'subjects') &&
+        lesson.timetable_placements.every(placement => Boolean(placement.id) && Object.hasOwn(placement,'timetable_attendance_periods'))))) return cached;
   }
   const data = queryData(await sb.from('timetables').select(DETAIL_SELECT).eq('id', row.id).maybeSingle(), 'โหลดรายละเอียดตารางสอน');
   if (!data) throw new Error('ไม่พบตารางนี้ หรือคุณไม่มีสิทธิ์ดู · ตรวจลิงก์แล้วรีเฟรชหน้า');
@@ -272,9 +274,13 @@ export function normalizeDetails(data) {
     id: row.id, title: row.title, subject_id: row.subject_id, facility_id: row.facility_id, is_template:row.is_template,
     facility: row.facilities?.name || null, note: row.note, subject:embedded(row.subjects),
     rooms: row.timetable_lesson_rooms || [], teachers: row.timetable_lesson_teachers || [],
-    placements: (row.timetable_placements || []).map(placement => ({...placement,
-      attendancePeriods:embedded(placement.timetable_attendance_periods)?.periods == null ? null :
-        Number(embedded(placement.timetable_attendance_periods).periods)}))
+    placements: (row.timetable_placements || []).map(placement => {
+      const attendance=embedded(placement.timetable_attendance_periods);
+      const split=attendance?.member_periods;
+      return {...placement,
+        attendancePeriods:attendance?.periods == null ? null : Number(attendance.periods),
+        memberPeriods:split && typeof split==='object' ? Object.fromEntries(Object.entries(split).map(([id,value])=>[id,Number(value)])) : null};
+    })
   }));
   return { columns, lessons };
 }

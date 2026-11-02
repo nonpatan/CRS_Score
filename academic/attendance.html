@@ -624,7 +624,7 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder, fetchAllRows } from "../supabase-client.js?v=20261027-5";
-import { loadTimetableForDate, daySlots, normalizeDetails, attendancePeriodsOf } from "./timetable-fet.js?v=20261102-2";
+import { loadTimetableForDate, daySlots, normalizeDetails, attendancePeriodsOf } from "./timetable-fet.js?v=20261102-3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -796,6 +796,7 @@ let lessonLogCurrentIds = new Set();
 const timetableByDate = new Map();
 let timetableKnownRange = null;
 let timetablePrefillToken = 0;
+let timetableSelectionKey = '';
 
 function lessonLogCurrentSessions() {
   if (blockMode) {
@@ -1793,6 +1794,8 @@ async function loadMemberOptions(integratedId, seq = loadSeq) {
       const nextChecked = cb.checked;
       if (!await confirmDiscard()) { cb.checked = acceptedMemberIds.has(cb.dataset.id); return; }
       cb.checked = nextChecked;
+      timetableSelectionKey = [pickedSubject?.id, elDate.value, elClassroom.value].join('|');
+      document.getElementById('timetable-period-note').dataset.autoChecked='';
       rememberControls();
       hideStudents();
       currentSubjectId = null; currentSubject = null;
@@ -1889,17 +1892,78 @@ async function tryTimetablePrefill(token, sessionIndex, seq) {
     const periods=matching.map(slot=>attendancePeriodsOf(columns,placements.get(slot.placementId)||
       {column_seq:slot.startSeq,span:slot.endSeq-slot.startSeq+1,attendancePeriods:null}));
     const note=document.getElementById('timetable-period-note');
-    note.textContent=matching.length>1
-      ? `วันนี้ตามตาราง ${matching.length} ช่วง: ${matching.map((slot,index)=>`${columns.find(column=>column.seq===slot.startSeq)?.start_time?.slice(0,5)||'—'} (${fmtPeriods(periods[index])} คาบ)`).join(' · ')}`
-      : `ตามตารางสอน · ${fmtPeriods(periods[0])} คาบ`;
+    const splitText=placement=>{
+      const split=placement?.memberPeriods;
+      if(!integrated||!split)return '';
+      const parts=memberSubjects.filter(member=>Number(split[member.id])>0).map(member=>`${member.name} ${fmtPeriods(split[member.id])}`);
+      return parts.length?` (${parts.join(' · ')})`:'';
+    };
+    note.textContent=(matching.length>1
+      ? `วันนี้ตามตาราง ${matching.length} ช่วง: ${matching.map((slot,index)=>`${columns.find(column=>column.seq===slot.startSeq)?.start_time?.slice(0,5)||'—'} (${fmtPeriods(periods[index])} คาบ)${splitText(placements.get(slot.placementId))}`).join(' · ')}`
+      : `ตามตารางสอน · ${fmtPeriods(periods[0])} คาบ${splitText(placements.get(matching[0].placementId))}`)+
+      (note.dataset.autoChecked==='true'?' · ติ๊กวิชาย่อยตามตารางสอนแล้ว':'');
     note.hidden=false;
+    const chosen=matching[sessionIndex]&&placements.get(matching[sessionIndex].placementId);
+    if(integrated&&chosen?.memberPeriods){
+      if(blockMode){
+        for(const field of elMemberList.querySelectorAll('.member-periods')){
+          const value=Number(chosen.memberPeriods[field.dataset.id]);
+          if(field.value===''&&value>0)field.value=fmtPeriods(value);
+        }
+      } else if(Number(chosen.memberPeriods[currentSubjectId])>0){
+        const field=elMemberList.querySelector(`.member-periods[data-id="${currentSubjectId}"]`);
+        if(field?.value==='')writeCurrentPeriods(fmtPeriods(chosen.memberPeriods[currentSubjectId]));
+      }
+    }
     if(!integrated&&matching[sessionIndex]&&elPeriods.value==='')writeCurrentPeriods(fmtPeriods(periods[sessionIndex]));
   } catch { /* ตารางสอนเป็นเพียงคำแนะนำ: ไม่รบกวนการเช็คชื่อ */ }
+}
+
+// ตั้งค่าติ๊กก่อนโหลดรายชื่อครั้งแรกของชุดวิชา/วันที่/ห้อง โดยไม่ยิง change event
+async function applyTimetableMemberSelection(seq) {
+  try {
+    if(pickedSubject?.subject_type!=='บูรณาการ'||dirtyCount())return;
+    const room=selectedRoom();if(!room||room.all)return;
+    const key=[pickedSubject.id,elDate.value,elClassroom.value].join('|');
+    if(timetableSelectionKey===key)return;
+    const note=document.getElementById('timetable-period-note');
+    const wasAutoChecked=note.dataset.autoChecked==='true';
+    note.dataset.autoChecked='';
+    if(wasAutoChecked){
+      // คืนค่าเริ่มเมื่อรอบก่อนระบบเลือกให้; ถ้าครูเปลี่ยนเอง เครื่องหมายนี้ถูกล้างแล้ว
+      for(const cb of elMemberList.querySelectorAll('.member-cb')){
+        const member=memberSubjects.find(row=>row.id===cb.dataset.id);
+        cb.checked=!cb.disabled&&member?.owner_id===session.user.id;
+      }
+      rememberControls();
+    }
+    const result=await timetableForAttendanceDate(elDate.value);
+    if(seq!==loadSeq||key!==[pickedSubject?.id,elDate.value,elClassroom.value].join('|'))return;
+    timetableSelectionKey=key;
+    if(!result)return;
+    const matching=daySlots(result.details,elDate.value,result.swaps).filter(slot=>
+      slot.lesson.subject_id===pickedSubject.id&&slot.lesson.rooms.some(item=>
+        item.grade_level===room.grade_level&&item.classroom===room.classroom));
+    if(matching.length!==1)return;
+    const {lessons}=normalizeDetails(result.details);
+    const placement=lessons.flatMap(lesson=>lesson.placements).find(row=>row.id===matching[0].placementId);
+    if(!placement?.memberPeriods)return;
+    for(const cb of elMemberList.querySelectorAll('.member-cb')){
+      if(cb.disabled||!Object.hasOwn(placement.memberPeriods,cb.dataset.id))continue;
+      cb.checked=Number(placement.memberPeriods[cb.dataset.id])>0;
+    }
+    rememberControls();
+    note.dataset.autoChecked='true';
+  } catch {
+    // ตารางสอนเป็นเพียงคำแนะนำ: โหลดรายชื่อเช็คชื่อต่อได้แม้ข้อมูลตารางผิดพลาด
+  }
 }
 
 // ---------- กดโหลดรายชื่อ ----------
 async function loadRosterFromSelection(seq = ++loadSeq) {
   if (seq !== loadSeq || !pickedSubject || !elDate.value) return;
+  await applyTimetableMemberSelection(seq);
+  if(seq!==loadSeq)return;
   hideLessonLogUI();
   dailyPrefill = null;
   elPrefillNote.style.display = "none"; elPrefillNote.innerHTML = "";

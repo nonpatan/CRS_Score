@@ -205,7 +205,7 @@ button:disabled { opacity:.45; cursor:default; }
 </div>
 <script type="module">
 import { sb, requireAuth, signOut, fetchAllRows } from '../supabase-client.js?v=20261027-5';
-import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache, swapCandidates, isoWeekday, attendancePeriodsOf } from './timetable-fet.js?v=20261102-2';
+import { buildGrid, chooseTimetable, loadTimetableDetails, normalizeDetails, pruneTimetableCache, swapCandidates, isoWeekday, attendancePeriodsOf } from './timetable-fet.js?v=20261102-3';
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const weekdays=['','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์'];
@@ -221,7 +221,7 @@ const SWAP_SET_SELECT='id,year,term,name,start_date,end_date,updated_at,timetabl
 const safeStorage=()=>{try{return localStorage;}catch{return null;}};
 let sets=[], selected=null, details=null, lessons=[], colors=new Map(), myStaffId=null, isAcademic=false, view='', target='';
 let swapChoice=null, swapCandidatesForDay=[], holidays=new Map(), swapBusy=false;
-let detailPlacementId=null, detailBusy=false;
+let detailPlacementId=null, detailBusy=false, detailOpenToken=0, detailSplitOptions=null;
 const staleHeaders=new Set();
 function fail(result,label) { if(result.error) throw new Error(`${label}: ${result.error.message}`); return result.data; }
 function showError(message) { $('load-state').textContent=''; $('load-error').textContent=message; $('controls').hidden=true; $('schedule-card').hidden=true; }
@@ -396,16 +396,44 @@ const slotTime=placement=>{
 };
 function updateDetailSave() {
   const info=placementInfo(detailPlacementId), input=$('detail-periods'), save=$('detail-save');
-  if(!info||!input||!save)return;
-  const value=Number(input.value), maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
-  save.disabled=detailBusy||!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0||
-    value===attendancePeriodsOf(details.columns,info.placement);
+  if(!info||!save)return;
+  const maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
+  if(detailSplitOptions?.length) {
+    const fields=[...$('swap-panel-content').querySelectorAll('.detail-member-periods')];
+    const values=fields.map(field=>Number(field.value));
+    const total=values.reduce((sum,value)=>sum+value,0);
+    const valid=fields.every(field=>field.value!==''&&Number.isFinite(Number(field.value))&&Number(field.value)>=0&&Number(field.value)*2%1===0)&&total>0&&total<=maximum;
+    const original=detailSplitOptions.map(row=>Number(row.periods??0));
+    const summary=$('detail-split-total'), error=$('detail-split-error');
+    if(summary)summary.textContent=`รวม ${fmtPeriods(total)} จาก ${fmtPeriods(maximum)} คาบในตาราง`;
+    if(error){error.hidden=total<=maximum;error.textContent=total>maximum?`รวมเกิน ${fmtPeriods(maximum)} คาบในตาราง · ลดจำนวนคาบก่อนบันทึก`:'';}
+    save.disabled=detailBusy||!valid||values.every((value,index)=>value===original[index]);
+  } else if(input) {
+    const value=Number(input.value);
+    save.disabled=detailBusy||!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0||
+      value===attendancePeriodsOf(details.columns,info.placement);
+  }
   const reset=$('detail-reset');if(reset)reset.disabled=detailBusy;
+}
+const fmtPeriods=value=>String(Number(value));
+function detailPeriodControls(placement,baseline,value,hint='') {
+  return `<div class="field"><label for="detail-periods">นับเช็คชื่อ</label><div class="attendance-stepper"><button type="button" class="ghost" id="detail-minus" aria-label="ลดครึ่งคาบ">−</button><input id="detail-periods" type="number" inputmode="decimal" min="0.5" max="${baseline}" step="0.5" value="${value}"><button type="button" class="ghost" id="detail-plus" aria-label="เพิ่มครึ่งคาบ">+</button></div><div class="hint">หน้าเช็คชื่อและหน้าจัดคนแทนจะเติมจำนวนนี้ให้</div>${hint?`<div class="hint">${hint}</div>`:''}</div>
+    <div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`;
+}
+function renderDetailSplit(options) {
+  const info=placementInfo(detailPlacementId);if(!info)return;
+  const {placement}=info, baseline=attendancePeriodsOf(details.columns,{...placement,attendancePeriods:null});
+  detailSplitOptions=options;
+  const area=$('detail-period-area');if(!area)return;
+  if(!options.length){area.innerHTML=detailPeriodControls(placement,baseline,attendancePeriodsOf(details.columns,placement),'ไม่พบวิชาย่อยที่ครูผู้สอนคาบนี้เป็นเจ้าของ — ตั้งได้แค่ยอดรวม');updateDetailSave();return;}
+  area.innerHTML=`<div class="field"><div class="section">นับเช็คชื่อแยกวิชาย่อย</div>${options.map((row,index)=>`<div class="field"><label for="detail-member-${index}">${esc(row.name)} (${esc(row.code)})</label><div class="attendance-stepper"><button type="button" class="ghost" data-step="-0.5" data-index="${index}" aria-label="ลดครึ่งคาบ ${esc(row.name)}">−</button><input id="detail-member-${index}" class="detail-member-periods" data-id="${esc(row.subject_id)}" type="number" inputmode="decimal" min="0" max="${baseline}" step="0.5" value="${Number(row.periods??0)}" aria-describedby="detail-split-total detail-split-error"><button type="button" class="ghost" data-step="0.5" data-index="${index}" aria-label="เพิ่มครึ่งคาบ ${esc(row.name)}">+</button></div></div>`).join('')}<div id="detail-split-total" aria-live="polite"></div><div id="detail-split-error" style="color:var(--danger)" role="alert" hidden></div>${placement.memberPeriods==null?'<div class="hint">ยังไม่ได้แบ่ง — หน้าเช็คชื่อจะเติมแค่ยอดรวม</div>':''}</div><div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`;
+  updateDetailSave();
 }
 function openDetailPanel(placementId) {
   const info=placementInfo(placementId);
   if(!info||!isSubject(info.lesson)||!canSeeLink(info.lesson))return;
-  detailPlacementId=placementId;swapChoice=null;
+  detailPlacementId=placementId;swapChoice=null;detailSplitOptions=null;
+  const openToken=++detailOpenToken;
   const {lesson,placement}=info, box=$('swap-panel'), content=$('swap-panel-content');
   const baseline=attendancePeriodsOf(details.columns,{...placement,attendancePeriods:null});
   const value=attendancePeriodsOf(details.columns,placement);
@@ -413,15 +441,25 @@ function openDetailPanel(placementId) {
   content.innerHTML=`<p><strong>${esc(lesson.title)}</strong> · ${weekdays[placement.weekday]} · ${esc(slotTime(placement))} · ${esc(lesson.rooms.map(roomName).join(', ')||'ไม่ระบุห้อง')}</p>
     <p><strong>ผูกกับรายวิชา:</strong> ${lesson.subject?esc([lesson.subject.code,lesson.subject.name,lesson.subject.grade_level].filter(Boolean).join(' · ')):'ไม่ผูกรายวิชา — ฝ่ายวิชาการจับคู่ได้ตอนนำเข้า FET'}</p>
     <p><strong>ในตาราง:</strong> ${placement.span} คาบติด (${esc(slotTime(placement))})</p>
-    ${lesson.subject?`<div class="field"><label for="detail-periods">นับเช็คชื่อ</label><div class="attendance-stepper"><button type="button" class="ghost" id="detail-minus" aria-label="ลดครึ่งคาบ">−</button><input id="detail-periods" type="number" inputmode="decimal" min="0.5" max="${baseline}" step="0.5" value="${value}"><button type="button" class="ghost" id="detail-plus" aria-label="เพิ่มครึ่งคาบ">+</button></div><div class="hint">หน้าเช็คชื่อและหน้าจัดคนแทนจะเติมจำนวนนี้ให้</div></div>
-    <div class="swap-actions"><button type="button" class="primary" id="detail-save" disabled>บันทึก</button>${placement.attendancePeriods!=null?'<button type="button" class="ghost" id="detail-reset">กลับเป็นตามตาราง</button>':''}</div>`:''}
+    ${lesson.subject?`<div id="detail-period-area">${lesson.subject.subject_type==='บูรณาการ'?'<div class="hint" role="status">กำลังโหลดวิชาย่อย…</div>':detailPeriodControls(placement,baseline,value)}</div>`:''}
     <div class="swap-actions">${view==='mine'?'<button type="button" class="ghost" id="detail-swap">ขอสลับคาบนี้</button>':''}<button type="button" class="ghost" id="swap-close">ปิด</button></div>`;
   box.hidden=false;box.scrollIntoView({block:'start'});
+  if(lesson.subject?.subject_type==='บูรณาการ') {
+    void sb.rpc('timetable_member_split_options',{p_placement:placementId}).then(response=>{
+      if(detailPlacementId!==placementId||detailOpenToken!==openToken||box.hidden)return;
+      if(response.error)throw response.error;
+      renderDetailSplit(response.data||[]);
+    }).catch(error=>{
+      if(detailPlacementId!==placementId||detailOpenToken!==openToken||box.hidden)return;
+      $('detail-period-area').innerHTML=detailPeriodControls(placement,baseline,value,`โหลดวิชาย่อยไม่สำเร็จ: ${esc(error.message||String(error))} · ยังตั้งยอดรวมได้`);
+      updateDetailSave();
+    });
+  }
 }
 async function saveDetailPeriods(reset=false) {
   if(detailBusy)return;
   const placementId=detailPlacementId, info=placementInfo(placementId), input=$('detail-periods');
-  if(!info||!input||!info.lesson.subject)return;
+  if(!info||(!input&&!reset)||!info.lesson.subject)return;
   const value=reset?null:Number(input.value);
   const maximum=attendancePeriodsOf(details.columns,{...info.placement,attendancePeriods:null});
   if(!reset&&(!Number.isFinite(value)||value<0.5||value>maximum||value*2%1!==0))return;
@@ -433,11 +471,32 @@ async function saveDetailPeriods(reset=false) {
     const effective=Number(response.data);
     const stored=effective===baseline?null:effective;
     info.placement.attendancePeriods=stored;
+    info.placement.memberPeriods=null;
     const raw=details.timetable_lessons.find(row=>row.id===info.lesson.id)?.timetable_placements.find(row=>row.id===placementId);
     if(raw)raw.timetable_attendance_periods=stored==null?null:{periods:stored};
     try {safeStorage()?.removeItem(`crs_tt_v1_${selected.id}`);}catch{}
     staleHeaders.add(selected.id);
     renderGrid();openDetailPanel(placementId);showToast('บันทึกจำนวนคาบเช็คชื่อแล้ว');
+  } catch(error) {showToast(error.message||'บันทึกไม่สำเร็จ',true);}
+  finally {detailBusy=false;$('set-select').disabled=false;$('swap-panel').removeAttribute('aria-busy');updateDetailSave();}
+}
+async function saveDetailSplit() {
+  if(detailBusy||!detailSplitOptions?.length)return;
+  updateDetailSave();if($('detail-save').disabled)return;
+  const placementId=detailPlacementId, info=placementInfo(placementId);
+  const split=Object.fromEntries([...$('swap-panel-content').querySelectorAll('.detail-member-periods')].map(field=>[field.dataset.id,Number(field.value)]));
+  detailBusy=true;$('set-select').disabled=true;$('swap-panel').setAttribute('aria-busy','true');updateDetailSave();
+  try {
+    const response=await sb.rpc('set_timetable_member_periods',{p_placement:placementId,p_split:split});
+    if(response.error)throw response.error;
+    const saved=response.data;
+    info.placement.attendancePeriods=Number(saved.periods);
+    info.placement.memberPeriods=saved.member_periods;
+    const raw=details.timetable_lessons.find(row=>row.id===info.lesson.id)?.timetable_placements.find(row=>row.id===placementId);
+    if(raw)raw.timetable_attendance_periods={periods:saved.periods,member_periods:saved.member_periods};
+    try {safeStorage()?.removeItem(`crs_tt_v1_${selected.id}`);}catch{}
+    staleHeaders.add(selected.id);
+    renderGrid();openDetailPanel(placementId);showToast('บันทึกการแบ่งคาบแล้ว');
   } catch(error) {showToast(error.message||'บันทึกไม่สำเร็จ',true);}
   finally {detailBusy=false;$('set-select').disabled=false;$('swap-panel').removeAttribute('aria-busy');updateDetailSave();}
 }
@@ -630,7 +689,7 @@ window.addEventListener('afterprint',()=>{ $('print-area').innerHTML=''; });
 $('set-select').addEventListener('change',event=>{const row=sets.find(item=>item.id===event.target.value);if(row) void selectSet(row);});
 $('target-select').addEventListener('change',event=>{target=event.target.value;renderGrid();});
 $('grid').addEventListener('click',event=>{const button=event.target.closest('[data-placement]');if(button&&!detailBusy)openDetailPanel(button.dataset.placement);});
-$('swap-panel-content').addEventListener('input',event=>{if(event.target.id==='detail-periods')updateDetailSave();});
+$('swap-panel-content').addEventListener('input',event=>{if(event.target.id==='detail-periods'||event.target.classList.contains('detail-member-periods'))updateDetailSave();});
 $('swap-panel-content').addEventListener('change',event=>{
   if(event.target.id==='swap-a-date')renderCandidates();
   if(event.target.id==='swap-b-placement')renderBDates();
@@ -639,13 +698,19 @@ $('swap-panel-content').addEventListener('click',async event=>{
   if(detailBusy)return;
   if(event.target.id==='swap-close'){$('swap-panel').hidden=true;return;}
   if(event.target.id==='detail-swap'){void openSwapPanel(detailPlacementId);return;}
+  if(event.target.dataset.step){
+    const input=$(`detail-member-${event.target.dataset.index}`),change=Number(event.target.dataset.step);
+    input.value=String(Math.max(0,Math.min(Number(input.max),Number(input.value||0)+change)));
+    updateDetailSave();return;
+  }
   if(event.target.id==='detail-minus'||event.target.id==='detail-plus'){
     const input=$('detail-periods'), change=event.target.id==='detail-plus'?0.5:-0.5;
     input.value=String(Math.max(0.5,Math.min(Number(input.max),Number(input.value)+change)));
     updateDetailSave();return;
   }
   if(event.target.id==='detail-save'||event.target.id==='detail-reset'){
-    await saveDetailPeriods(event.target.id==='detail-reset');return;
+    if(event.target.id==='detail-save'&&detailSplitOptions?.length)await saveDetailSplit();
+    else await saveDetailPeriods(event.target.id==='detail-reset');return;
   }
   if(event.target.id!=='swap-submit'||swapBusy)return;
   const candidate=swapCandidatesForDay.find(row=>row.placementId===$('swap-b-placement').value);
