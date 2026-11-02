@@ -225,7 +225,8 @@ function syncFinanceKpiTones() {
             ["attendance.html", "เช็คชื่อ"],
             ["entry.html", "กรอกคะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
-            ["theme-works.html", "ส่งผลงานตามธีม"]
+            ["theme-works.html", "ส่งผลงานตามธีม"],
+            ["student-registry.html", "ทะเบียนประวัติ"]
           ]
         },
         {
@@ -332,6 +333,16 @@ function syncFinanceKpiTones() {
           title: "จัดการรายชื่อนักเรียน",
           description: "กรองรายชื่อก่อนเพิ่ม แก้ไข หรือนำข้อมูลจาก Excel เข้าระบบ",
           steps: ["เลือกชั้น", "ตรวจรายชื่อ", "บันทึก"]
+        },
+        "student-registry.html": {
+          title: "ทะเบียนประวัติ",
+          description: "ตรวจความครบของประวัตินักเรียนตามห้อง",
+          steps: ["เลือกห้อง", "เลือกนักเรียน", "กรอกประวัติ"]
+        },
+        "student-profile.html": {
+          title: "ประวัตินักเรียน",
+          description: "กรอกข้อมูลนักเรียน ผู้ปกครอง ที่อยู่ และสุขภาพ",
+          steps: ["ตรวจข้อมูลทะเบียน", "กรอกประวัติ", "บันทึก"]
         },
         "rollover.html": {
           title: "เตรียมขึ้นปีการศึกษาใหม่",

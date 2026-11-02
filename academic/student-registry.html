@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ทะเบียนประวัติ — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1f2a2e;
+  --muted:#5f6b70;
+  --line:#dfe4e3;
+  --teal:#0f6e56;
+  --teal-soft:#e1f5ee;
+  --bg:#f7f8f7;
+  --white:#ffffff;
+  --danger:#a32d2d;
+  --danger-soft:#fceaea;
+  --amber:#8a5a00;
+  --amber-soft:#fff4df
+}
+* {
+  box-sizing:border-box
+}
+body {
+  font:16px/1.6 Sarabun,sans-serif;
+  color:var(--ink);
+  background:var(--bg);
+  margin:0;
+  padding:16px
+}
+.wrap {
+  max-width:760px;
+  margin:auto
+}
+h1 {
+  font-size:22px;
+  margin:0
+}
+h2 {
+  font-size:18px;
+  margin:0 0 10px
+}
+p {
+  margin:4px 0 16px;
+  color:var(--muted)
+}
+.card {
+  background:var(--white);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:16px;
+  margin:0 0 16px
+}
+.nav {
+  display:flex;
+  gap:12px;
+  margin:12px 0 20px;
+  flex-wrap:wrap
+}
+.nav a,a {
+  color:var(--teal)
+}
+button {
+  font:inherit;
+  cursor:pointer
+}
+button:focus-visible,a:focus-visible,input:focus-visible {
+  outline:2px solid var(--teal);
+  outline-offset:2px
+}
+.rooms {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:10px
+}
+.room-button {
+  width:100%;
+  min-height:72px;
+  text-align:left;
+  padding:10px 12px;
+  background:var(--white);
+  border:1px solid var(--line);
+  border-radius:10px;
+  color:var(--ink)
+}
+.room-button.active {
+  border:2px solid var(--teal);
+  background:var(--teal-soft)
+}
+.room-button strong {
+  display:block
+}
+.muted {
+  color:var(--muted)
+}
+.student-row {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 110px auto;
+  gap:10px;
+  align-items:center;
+  border-top:1px solid var(--line);
+  padding:10px 0
+}
+.student-row:first-child {
+  border-top:0
+}
+.student-row strong {
+  display:block;
+  overflow-wrap:anywhere
+}
+.student-row small {
+  color:var(--muted)
+}
+.bar {
+  height:8px;
+  background:var(--line);
+  border-radius:9px;
+  overflow:hidden
+}
+.bar span {
+  display:block;
+  height:100%;
+  background:var(--amber)
+}
+.bar span.complete { background:var(--teal) }
+.progress-label {
+  display:block;
+  text-align:right;
+  font-size:14px
+}
+.profile-link {
+  display:inline-flex;
+  min-height:44px;
+  align-items:center;
+  padding:6px
+}
+.filters {
+  display:flex;
+  gap:16px;
+  flex-wrap:wrap;
+  margin:10px 0
+}
+.filters label {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:44px
+}
+.filters input {
+  width:20px;
+  height:20px
+}
+.toast {
+  position:sticky;
+  bottom:12px;
+  padding:10px;
+  border-radius:8px;
+  display:none
+}
+.toast.err {
+  display:block;
+  background:var(--danger-soft);
+  color:var(--danger)
+}
+[hidden] {
+  display:none!important
+}
+@media(max-width:480px) {
+  .student-row {
+    grid-template-columns:minmax(0,1fr) auto
+  }
+  .student-progress {
+    grid-column:1/-1;
+    grid-row:2
+  }
+  .rooms {
+    grid-template-columns:repeat(2,minmax(0,1fr))
+  }
+}
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>ทะเบียนประวัติ</h1>
+<p id="year-label">ตรวจข้อมูลประวัตินักเรียนตามห้อง</p>
+<nav class="nav"><a href="students.html">นักเรียน</a><a href="index.html">ภาพรวมวิชาการ</a><a href="#" id="btn-signout">ออกจากระบบ</a>
+</nav><script src="../app-shell.js?v=20261102-2"></script>
+</header>
+<main class="academic-content">
+<div id="message" class="card" role="status">กำลังตรวจสิทธิ์และโหลดข้อมูล…</div>
+<section id="room-section" class="card" hidden>
+<h2>ห้องเรียน</h2>
+<div id="rooms" class="rooms">
+</div>
+</section>
+<section id="student-card" class="card" hidden>
+<h2 id="student-heading">รายชื่อนักเรียน</h2>
+<div class="filters"><label><input type="checkbox" id="show-other">แสดงนักเรียนที่ไม่ได้กำลังศึกษาด้วย</label><label><input type="checkbox" id="incomplete-only">ยังไม่ครบ</label>
+</div>
+<div id="students" aria-live="polite">
+</div>
+</section>
+<div id="toast" class="toast" role="status">
+</div>
+</main>
+</div>
+<script type="module">
+import {
+  sb,
+  requireAuth,
+  signOut,
+  getProfile,
+  checkDepartment,
+  getAcademicYears,
+  academicYearOf,
+  bangkokNow,
+  toDateStr,
+  loadMyHomeroomRooms,
+  getStudentPlacements,
+  GRADE_ORDER
+} from "../supabase-client.js?v=20261102-2";
+import {
+  profileCompleteness
+} from "./student-registry.js?v=20261102-1";
+const message=document.getElementById("message"),roomSection=document.getElementById("room-section"),studentCard=document.getElementById("student-card");
+const key=(g,c)=>String(g||"")+"\0"+String(c||"");
+const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({
+  "&":"&amp;",
+  "<":"&lt;",
+  ">":"&gt;",
+  "\"":"&quot;",
+  "'":"&#39;"
+}[c]));
+let rooms=[],selectedRoom=null,selectedStudentId=null,placements=[],profiles=new Map(),guardians=new Map(),statuses=new Map();
+const session=await requireAuth();
+if(session){
+  document.getElementById("btn-signout").addEventListener("click",e=>{
+    e.preventDefault();
+    signOut();
+  });
+  try{
+    // ใช้ปีตามวันปัจจุบันให้ตรงกับ current_academic_year() ของ RLS
+    const years=await getAcademicYears();
+    const year=academicYearOf(toDateStr(bangkokNow()),years);
+    if(!year) throw new Error("ไม่พบปีการศึกษาปัจจุบัน");
+    document.getElementById("year-label").textContent="ปีการศึกษา "+year+" · ตรวจข้อมูลประวัตินักเรียนตามห้อง";
+    const profile=await getProfile(session.user.id);
+    const [academic,
+      general,
+      homeroom]=await Promise.all([checkDepartment("วิชาการ"),
+      checkDepartment("บริหารทั่วไป"),
+      loadMyHomeroomRooms(session.user.id)]);
+    const all=profile?.role==="admin"||academic||general,
+    allowed=homeroom.get(String(year))||new Set();
+    if(!all&&allowed.size===0){
+      message.textContent="หน้านี้สำหรับฝ่ายวิชาการ ครูประจำชั้น และฝ่ายบริหารทั่วไป";
+    }
+    else{
+      const result=await getStudentPlacements(year);
+      if(result.error) throw result.error;
+      placements=result.data.filter(p=>all||allowed.has(key(p.grade_level,p.classroom)));
+      if(!all){
+        const representatives=new Map();
+        for(const p of placements)if(!representatives.has(key(p.grade_level,p.classroom)))representatives.set(key(p.grade_level,p.classroom),
+        p.student_id);
+        const checked=await Promise.all([...representatives].map(async([room,
+          studentId])=>{
+          const r=await sb.rpc("can_view_student_profile",{
+            p_student_id:studentId
+          });
+          if(r.error)throw r.error;
+          return [room,
+            r.data===true];
+        }));
+        const readable=new Set(checked.filter(([,
+          ok])=>ok).map(([room])=>room));
+        placements=placements.filter(p=>readable.has(key(p.grade_level,p.classroom)));
+      }
+      const ids=[...new Set(placements.map(p=>p.student_id))];
+      if(ids.length){
+        const [pr,
+          gu,
+          st]=await Promise.all([sb.from("student_profiles").select("*").in("student_id",ids),
+          sb.from("student_guardians").select("*").in("student_id",ids),
+          sb.from("students").select("id,status").in("id",ids)]);
+        for(const r of [pr,
+          gu,
+          st]) if(r.error) throw r.error;
+        // 0 แถวจาก RLS อาจแปลว่าไม่มีสิทธิ์ จึงตรวจสิทธิ์ห้องก่อนแสดง 0%
+        profiles=new Map((pr.data||[]).map(p=>[p.student_id,
+          p]));
+        for(const g of gu.data||[]) guardians.set(g.student_id,[...(guardians.get(g.student_id)||[]),
+          g]);
+        statuses=new Map((st.data||[]).map(s=>[s.id,
+          s.status]));
+      }
+      const unique=new Map();
+      for(const p of placements) unique.set(key(p.grade_level,p.classroom),{
+        grade:p.grade_level,
+        classroom:p.classroom
+      });
+      const gradeIndex=g=>{
+        const n=GRADE_ORDER.indexOf(g);
+        return n<0?GRADE_ORDER.length:n;
+      };
+      rooms=[...unique.values()].sort((a,b)=>gradeIndex(a.grade)-gradeIndex(b.grade)||Number(a.classroom)-Number(b.classroom)||String(a.classroom).localeCompare(String(b.classroom),
+      "th"));
+      message.hidden=true;
+      roomSection.hidden=false;
+      renderRooms();
+      if(!rooms.length){
+        message.hidden=false;
+        message.textContent="ยังไม่มีรายชื่อนักเรียนในห้องที่คุณดูได้";
+      }
+      else if(rooms.length===1)selectRoom(rooms[0]);
+    }
+  }catch(error){
+    message.hidden=false;
+    message.textContent="โหลดทะเบียนประวัติไม่สำเร็จ: "+error.message;
+    roomSection.hidden=true;
+    studentCard.hidden=true;
+  }
+}
+function visibleStudents(room){
+  return placements.filter(p=>key(p.grade_level,p.classroom)===key(room.grade,room.classroom)&& (document.getElementById("show-other").checked||statuses.get(p.student_id)==="กำลังศึกษา")).sort((a,
+  b)=>Number(a.student?.student_no)-Number(b.student?.student_no)||String(a.student?.student_no).localeCompare(String(b.student?.student_no),
+  "th"));
+}
+function renderRooms(){
+  const box=document.getElementById("rooms");
+  box.replaceChildren();
+  for(const room of rooms){
+    const list=visibleStudents(room),
+    stats=list.map(p=>profileCompleteness(profiles.get(p.student_id),guardians.get(p.student_id)||[],statuses.get(p.student_id)));
+    const done=stats.filter(x=>x.percent===100).length,
+    average=stats.length?Math.round(stats.reduce((n,x)=>n+x.percent,0)/stats.length):0;
+    const b=document.createElement("button");
+    b.className="room-button"+(selectedRoom&&key(room.grade,room.classroom)===key(selectedRoom.grade,selectedRoom.classroom)?" active":"");
+    b.type="button";
+    b.innerHTML="<strong>"+escapeHtml(room.grade)+"/"+escapeHtml(room.classroom)+"</strong><span>"+list.length+" คน · ครบ "+done+" · เฉลี่ย "+average+"%</span>";
+    b.addEventListener("click",()=>selectRoom(room));
+    box.append(b);
+  }
+}
+function selectRoom(room){
+  selectedRoom=room;
+  selectedStudentId=null;
+  studentCard.hidden=false;
+  document.getElementById("student-heading").textContent="รายชื่อนักเรียน "+room.grade+"/"+room.classroom;
+  renderRooms();
+  renderStudents();
+}
+function renderStudents(){
+  if(!selectedRoom)return;
+  const list=visibleStudents(selectedRoom).filter(p=>!document.getElementById("incomplete-only").checked||profileCompleteness(profiles.get(p.student_id),
+  guardians.get(p.student_id)||[]).percent<100);
+  const box=document.getElementById("students");
+  box.innerHTML=list.length?list.map(p=>{
+    const s=profileCompleteness(profiles.get(p.student_id),guardians.get(p.student_id)||[]);
+    return `<div class="student-row"><div><strong>${escapeHtml(p.student?.name)}</strong><small>รหัส ${escapeHtml(p.student?.student_no)}</small></div><div class="student-progress"><div class="bar" aria-hidden="true"><span class="${s.percent===100?"complete":""}" style="width:${s.percent}%"></span></div><span class="progress-label">${s.percent}%</span></div><a class="profile-link" href="student-profile.html?id=${encodeURIComponent(p.student_id)}" aria-label="ประวัติ ${escapeHtml(p.student?.name)}">ประวัติ</a></div>`}).join(""):"<p>ไม่มีนักเรียนตามตัวกรองนี้</p>";
+}
+document.getElementById("show-other").addEventListener("change",()=>{
+  renderRooms();
+  renderStudents()
+});
+document.getElementById("incomplete-only").addEventListener("change",renderStudents);
+</script>
+</body></html>

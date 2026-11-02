@@ -72,7 +72,8 @@
   .field:last-child { margin-bottom: 0; }
   .field-note { color: var(--muted); font-size: 13px; margin-top: 4px; }
   .row2 { display: flex; gap: 12px; }
-  .row2 > * { flex: 1; }
+  .row2 > * { flex: 1; min-width: 0; }
+  @media (max-width:540px) { .name-row { flex-direction:column; gap:0; } }
 
   button {
     font-family: inherit;
@@ -123,6 +124,7 @@
   .icon-btn.del:hover { background: var(--danger-soft); color: var(--danger); }
   .student-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   .status-btn { min-height: 44px; white-space: nowrap; }
+  .profile-link { display:inline-flex; align-items:center; min-height:44px; padding:6px 9px; color:var(--teal); font-weight:600; text-decoration:underline; }
 
   table.preview { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
   table.preview th, table.preview td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; }
@@ -224,7 +226,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261101-1"></script>
+    <script src="../app-shell.js?v=20261102-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -287,12 +289,13 @@
   <div class="card" id="import-card" style="display:none">
     <div class="section-title">วางจาก Excel (เพิ่มทีละหลายคน)</div>
     <div class="field-note" style="margin-bottom:10px">
-      คัดลอกจาก Excel มา 5 คอลัมน์เรียงตามนี้: <b>ชั้นปี, ห้อง, รหัสประจำตัว, ชื่อ, นามสกุล</b>
+      คัดลอกจาก Excel มา 6 คอลัมน์เรียงตามนี้: <b>ชั้นปี, ห้อง, รหัสประจำตัว, คำนำหน้า, ชื่อ, นามสกุล</b>
+      (แบบเดิม 5 คอลัมน์ยังใช้ได้ ถ้าคำนำหน้าติดอยู่กับชื่อ)
       (คั่นด้วย tab อัตโนมัติเวลา copy จาก Excel — ไม่ต้องมีหัวตาราง) แล้ววางในช่องด้านล่าง
     </div>
     <div class="field">
-      <textarea id="import-text" placeholder="ม.3	1	12345	เล็ก	เด่นดี
-ม.3	1	12346	กานต์	ใจงาม"></textarea>
+      <textarea id="import-text" placeholder="ม.3	1	12345	เด็กชาย	เล็ก	เด่นดี
+ม.3	1	12346	เด็กหญิง	กานต์	ใจงาม"></textarea>
     </div>
     <button class="ghost" id="btn-preview" style="width:100%">ตรวจสอบข้อมูลก่อนบันทึก</button>
     <div id="preview-area"></div>
@@ -317,7 +320,11 @@
       <label for="f-studentno">รหัสประจำตัว</label>
       <input type="text" id="f-studentno">
     </div>
-    <div class="row2">
+    <div class="row2 name-row">
+      <div class="field">
+        <label for="f-prefix">คำนำหน้า</label>
+        <select id="f-prefix" required><option value="">— เลือกคำนำหน้า —</option><option>เด็กชาย</option><option>เด็กหญิง</option><option>นาย</option><option>นางสาว</option><option>นาง</option></select>
+      </div>
       <div class="field">
         <label for="f-firstname">ชื่อ</label>
         <input type="text" id="f-firstname">
@@ -383,6 +390,7 @@
 
 <script type="module">
 import { sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20261102-2";
+import { normalizeNamePart, splitPrefix, parseStudentImportRows } from "./student-registry.js?v=20261102-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -574,6 +582,12 @@ function renderList() {
       row.appendChild(info);
       const actions = document.createElement("div");
       actions.className = "student-actions";
+      const profileLink = document.createElement("a");
+      profileLink.className = "profile-link";
+      profileLink.href = "student-profile.html?id=" + encodeURIComponent(stu.id);
+      profileLink.textContent = "ประวัติ";
+      profileLink.setAttribute("aria-label", "ประวัตินักเรียน " + stu.name);
+      actions.appendChild(profileLink);
       if (canSetStudentStatus) {
         const statusBtn = document.createElement("button");
         statusBtn.type = "button";
@@ -682,11 +696,14 @@ function placementYear() {
 // สร้างนักเรียนและประวัติชั้น/ห้องของปีเดียวกัน
 // ถ้าบันทึก placement ไม่สำเร็จ จะลบนักเรียนที่เพิ่งสร้างกลับทันที เพื่อไม่ให้ข้อมูลค้างคนละตาราง
 async function insertStudentsWithPlacements(rows, year) {
+  // name เป็น generated column หลัง migration ห้ามใส่ใน payload
   const payload = rows.map(row => ({
     grade_level: row.grade,
     classroom: row.classroom,
     student_no: row.studentNo,
-    name: row.name
+    prefix: row.prefix,
+    first_name: row.first,
+    last_name: row.last || null
   }));
   const { data: created, error: studentError } = await sb.from("students")
     .insert(payload)
@@ -884,19 +901,26 @@ document.getElementById("btn-add-one").addEventListener("click", async () => {
   const grade = document.getElementById("f-grade").value;
   const classroom = document.getElementById("f-classroom").value.trim();
   const studentNo = document.getElementById("f-studentno").value.trim();
-  const first = document.getElementById("f-firstname").value.trim();
-  const last = document.getElementById("f-lastname").value.trim();
+  const selectedPrefix = document.getElementById("f-prefix").value;
+  const parsedName = splitPrefix(document.getElementById("f-firstname").value, selectedPrefix);
+  if (!selectedPrefix && parsedName.prefix) document.getElementById("f-prefix").value = parsedName.prefix;
+  const prefix = document.getElementById("f-prefix").value;
+  const first = normalizeNamePart(parsedName.rest);
+  const last = normalizeNamePart(document.getElementById("f-lastname").value);
   if (!grade) { showToast("เลือกชั้นก่อน", false); return; }
   if (!classroom) { showToast("กรอกห้องก่อน", false); return; }
   if (!studentNo) { showToast("กรอกรหัสประจำตัวก่อน", false); return; }
+  if (!prefix) { showToast("เลือกคำนำหน้าก่อน", false); return; }
   if (!first) { showToast("กรอกชื่อก่อน", false); return; }
+  if (/\s/.test(first)) { showToast("ชื่อต้องไม่มีช่องว่าง", false); return; }
 
   const { error } = await insertStudentsWithPlacements([{
-    grade, classroom, studentNo, name: (first + " " + last).trim()
+    grade, classroom, studentNo, prefix, first, last
   }], year);
   if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
   showToast("เพิ่มนักเรียนแล้ว", true);
   document.getElementById("f-studentno").value = "";
+  document.getElementById("f-prefix").value = "";
   document.getElementById("f-firstname").value = "";
   document.getElementById("f-lastname").value = "";
   await loadStudents();
@@ -906,21 +930,7 @@ document.getElementById("btn-add-one").addEventListener("click", async () => {
 let parsedRows = [];
 document.getElementById("btn-preview").addEventListener("click", () => {
   const raw = document.getElementById("import-text").value;
-  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-  parsedRows = lines.map(line => {
-    const cols = line.split("\t");
-    const [grade, classroom, studentNo, first, last] = cols;
-    const errors = [];
-    if (!grade || !grade.trim()) errors.push("ไม่มีชั้นปี");
-    if (!classroom || !classroom.trim()) errors.push("ไม่มีห้อง");
-    if (!studentNo || !studentNo.trim()) errors.push("ไม่มีรหัสประจำตัว");
-    if (!first || !first.trim()) errors.push("ไม่มีชื่อ");
-    return {
-      grade: (grade || "").trim(), classroom: (classroom || "").trim(),
-      studentNo: (studentNo || "").trim(), first: (first || "").trim(), last: (last || "").trim(),
-      errors
-    };
-  });
+  parsedRows = parseStudentImportRows(raw);
   renderPreview();
 });
 
@@ -928,13 +938,13 @@ function renderPreview() {
   const area = document.getElementById("preview-area");
   if (parsedRows.length === 0) { area.innerHTML = "<div class='hint'>ยังไม่มีข้อมูล ลองวางแล้วกดตรวจสอบอีกครั้ง</div>"; document.getElementById("btn-import-save").style.display = "none"; return; }
 
-  let html = "<table class='preview'><tr><th>ชั้น</th><th>ห้อง</th><th>รหัส</th><th>ชื่อ</th><th>นามสกุล</th><th>สถานะ</th></tr>";
+  let html = "<table class='preview'><tr><th>ชั้น</th><th>ห้อง</th><th>รหัส</th><th>คำนำหน้า</th><th>ชื่อ</th><th>นามสกุล</th><th>สถานะ</th></tr>";
   let errCount = 0;
   for (const r of parsedRows) {
     const isErr = r.errors.length > 0;
     if (isErr) errCount++;
     html += "<tr class='" + (isErr ? "err" : "") + "'><td>" + escapeHtml(r.grade) + "</td><td>" + escapeHtml(r.classroom) +
-      "</td><td>" + escapeHtml(r.studentNo) + "</td><td>" + escapeHtml(r.first) + "</td><td>" + escapeHtml(r.last) +
+      "</td><td>" + escapeHtml(r.studentNo) + "</td><td>" + escapeHtml(r.prefix || "") + "</td><td>" + escapeHtml(r.first) + "</td><td>" + escapeHtml(r.last) +
       "</td><td>" + (isErr ? escapeHtml(r.errors.join(", ")) : "โอเค") + "</td></tr>";
   }
   html += "</table>";
@@ -951,7 +961,7 @@ document.getElementById("btn-import-save").addEventListener("click", async () =>
 
   const payload = validRows.map(r => ({
     grade: r.grade, classroom: r.classroom, studentNo: r.studentNo,
-    name: (r.first + " " + r.last).trim()
+    prefix: r.prefix, first: r.first, last: r.last
   }));
 
   const btn = document.getElementById("btn-import-save");

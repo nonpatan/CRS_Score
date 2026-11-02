@@ -1,0 +1,937 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ประวัตินักเรียน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1f2a2e;
+  --muted:#5f6b70;
+  --line:#dfe4e3;
+  --teal:#0f6e56;
+  --teal-soft:#e1f5ee;
+  --bg:#f7f8f7;
+  --white:#ffffff;
+  --danger:#a32d2d;
+  --danger-soft:#fceaea;
+  --amber:#8a5a00;
+  --amber-soft:#fff4df
+}
+* {
+  box-sizing:border-box
+}
+body {
+  font:16px/1.6 Sarabun,sans-serif;
+  margin:0;
+  padding:16px;
+  background:var(--bg);
+  color:var(--ink)
+}
+.wrap {
+  max-width:560px;
+  margin:auto
+}
+h1 {
+  font-size:22px;
+  margin:0
+}
+h2 {
+  font-size:18px;
+  margin:0
+}
+.nav {
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  margin:12px 0 20px
+}
+.nav a,a {
+  color:var(--teal)
+}
+.card {
+  background:var(--white);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:16px;
+  margin-bottom:16px
+}
+details.card>summary {
+  font-weight:600;
+  font-size:18px;
+  cursor:pointer;
+  min-height:44px;
+  display:flex;
+  align-items:center
+}
+details.card>summary:focus-visible {
+  outline:2px solid var(--teal)
+}
+.fields {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:12px
+}
+.field {
+  min-width:0
+}
+.field.full {
+  grid-column:1/-1
+}
+label {
+  display:block;
+  font-weight:500;
+  margin-bottom:4px
+}
+input,select {
+  font:inherit;
+  color:var(--ink);
+  border:1px solid var(--line);
+  background:var(--white);
+  border-radius:8px;
+  padding:9px 11px;
+  width:100%;
+  min-height:44px
+}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible {
+  outline:2px solid var(--teal);
+  outline-offset:2px
+}
+input[type=checkbox] {
+  width:20px;
+  min-height:20px;
+  height:20px;
+  margin:0
+}
+.check {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:44px;
+  font-weight:400
+}
+.hint,.meta {
+  font-size:14px;
+  color:var(--muted)
+}
+.error {
+  color:var(--danger);
+  font-size:14px;
+  min-height:1.4em
+}
+.error:empty {
+  min-height:0
+}
+.notice {
+  background:var(--amber-soft);
+  color:var(--amber);
+  padding:10px;
+  border-radius:8px
+}
+.actions {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:12px 0
+}
+button {
+  font:inherit;
+  font-weight:600;
+  min-height:44px;
+  padding:8px 14px;
+  border:0;
+  border-radius:8px;
+  cursor:pointer
+}
+.primary {
+  background:var(--teal);
+  color:var(--white)
+}
+.ghost {
+  background:var(--teal-soft);
+  color:var(--teal)
+}
+.danger {
+  background:var(--danger-soft);
+  color:var(--danger)
+}
+button:disabled {
+  opacity:.55;
+  cursor:default
+}
+.guardian {
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:12px;
+  margin:10px 0
+}
+.guardian .actions {
+  margin:4px 0
+}
+.badge {
+  font-size:13px;
+  background:var(--teal-soft);
+  color:var(--teal);
+  border-radius:6px;
+  padding:2px 6px
+}
+.modal-overlay {
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:60;
+  background:rgba(20,28,30,.5);
+  overflow:auto;
+  padding:16px
+}
+.modal-overlay.show {
+  display:flex
+}
+.modal-card {
+  background:var(--white);
+  border-radius:12px;
+  padding:20px;
+  max-width:560px;
+  width:100%;
+  margin:auto;
+  box-shadow:0 12px 40px #0003
+}
+.modal-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:16px
+}
+.toast {
+  position:sticky;
+  bottom:12px;
+  display:none;
+  padding:10px;
+  border-radius:8px
+}
+.toast.ok {
+  display:block;
+  background:var(--teal-soft);
+  color:var(--teal)
+}
+.toast.err {
+  display:block;
+  background:var(--danger-soft);
+  color:var(--danger)
+}
+[hidden] {
+  display:none!important
+}
+@media(max-width:540px) {
+  .fields {
+    grid-template-columns:1fr
+  }
+  .field.full {
+    grid-column:1
+  }
+}
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>ประวัตินักเรียน</h1>
+<nav class="nav"><a href="student-registry.html">ทะเบียนประวัติ</a><a href="students.html">นักเรียน</a><a href="#" id="btn-signout">ออกจากระบบ</a>
+</nav><script src="../app-shell.js?v=20261102-2"></script>
+</header>
+<main class="academic-content">
+<div id="state" class="card" role="status">กำลังตรวจสิทธิ์…</div>
+<form id="profile-form" hidden novalidate>
+<section class="card">
+<h2 id="student-title">ข้อมูลทะเบียน</h2>
+<p id="student-meta" class="meta"></p>
+<div id="registry-fields" class="fields">
+</div>
+<p id="citizen-readonly" class="hint"></p>
+</section>
+<details class="card" open><summary>ตัวนักเรียน</summary>
+<div id="personal-fields" class="fields">
+</div>
+</details>
+<details class="card" open><summary>ผู้ปกครอง</summary>
+<div id="guardians" aria-live="polite">
+</div>
+<div class="actions" id="guardian-actions"><button type="button" class="ghost" id="add-guardian">เพิ่มผู้ปกครอง</button><button type="button" class="ghost" id="copy-sibling">คัดลอกจากพี่น้อง</button>
+</div>
+<div id="family-fields" class="fields">
+</div>
+</details>
+<details class="card"><summary>ที่อยู่</summary>
+<div id="address-fields" class="fields">
+</div><a id="map-link" href="#" target="_blank" rel="noopener" hidden>เปิดแผนที่</a>
+</details>
+<details class="card"><summary>สุขภาพ</summary>
+<div id="health-fields" class="fields">
+</div>
+</details>
+<div class="actions"><button type="submit" id="save" class="primary">บันทึกประวัติ</button>
+</div>
+</form>
+<div id="toast" class="toast" role="status">
+</div>
+</main>
+</div>
+<div id="guardian-modal" class="modal-overlay">
+<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="guardian-modal-title">
+<h2 id="guardian-modal-title">ผู้ปกครอง</h2>
+<form id="guardian-form" novalidate>
+<div id="guardian-fields" class="fields">
+</div>
+<div class="modal-actions"><button type="button" class="ghost" id="cancel-guardian">ยกเลิก</button><button type="submit" class="primary" id="save-guardian">บันทึกผู้ปกครอง</button>
+</div>
+</form>
+</div>
+</div>
+<div id="sibling-modal" class="modal-overlay">
+<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sibling-modal-title">
+<h2 id="sibling-modal-title">คัดลอกจากพี่น้อง</h2>
+<p class="hint">เลือกนักเรียนนามสกุลเดียวกัน</p>
+<div id="siblings">
+</div><label class="check"><input type="checkbox" id="copy-address" checked>คัดลอกที่อยู่ด้วย</label>
+<div class="modal-actions"><button type="button" class="ghost" id="cancel-sibling">ยกเลิก</button><button type="button" class="primary" id="do-copy">คัดลอก</button>
+</div>
+</div>
+</div>
+<script type="module">
+import {
+  sb,
+  requireAuth,
+  signOut,
+  checkDepartment
+} from "../supabase-client.js?v=20261102-2";
+import {
+  STUDENT_PREFIXES,
+  normalizeNamePart,
+  splitPrefix,
+  genderFromPrefix,
+  isValidCitizenId,
+  formatCitizenId,
+  normalizePhone,
+  formatPhone,
+  profileCompleteness
+} from "./student-registry.js?v=20261102-1";
+const id=new URLSearchParams(location.search).get("id"),$=x=>document.getElementById(x),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({
+  "&":"&amp;",
+  "<":"&lt;",
+  ">":"&gt;",
+  "\"":"&quot;",
+  "'":"&#39;"
+}[c]));
+let student=null,profile=null,guardians=[],sourceNames=new Map(),canEdit=false,isAcademic=false,dirty=false,guardianDirty=false,snapshot="",editingGuardian=null;
+const fields={
+  personal:[["nickname",
+      "ชื่อเล่น"],
+    ["gender",
+      "เพศ ⭐",
+      "select",
+      ["ชาย",
+        "หญิง"]],
+    ["birth_date",
+      "วันเกิด ⭐",
+      "date"],
+    ["nationality",
+      "สัญชาติ"],
+    ["ethnicity",
+      "เชื้อชาติ"],
+    ["religion",
+      "ศาสนา ⭐",
+      "select",
+      ["อิสลาม",
+        "พุทธ",
+        "คริสต์",
+        "อื่น ๆ"]],
+    ["name_en",
+      "ชื่อภาษาอังกฤษ"],
+    ["birth_order",
+      "ลูกคนที่",
+      "number"],
+    ["sibling_count",
+      "พี่น้องทั้งหมด",
+      "number"],
+    ["previous_school",
+      "โรงเรียนเดิม"],
+    ["enrolled_date",
+      "วันที่เข้าเรียน",
+      "date"]],
+  family:[["parents_marital",
+      "สถานภาพบิดามารดา",
+      "select",
+      ["อยู่ด้วยกัน",
+        "แยกกันอยู่",
+        "หย่าร้าง",
+        "บิดาเสียชีวิต",
+        "มารดาเสียชีวิต",
+        "เสียชีวิตทั้งคู่"]],
+    ["lives_with",
+      "อาศัยอยู่กับ",
+      "select",
+      ["บิดาและมารดา",
+        "บิดา",
+        "มารดา",
+        "ญาติ",
+        "อื่น ๆ"]]],
+  address:[["reg_house_no",
+      "บ้านเลขที่ทะเบียนบ้าน ⭐"],
+    ["reg_moo",
+      "หมู่"],
+    ["reg_road",
+      "ถนน"],
+    ["reg_subdistrict",
+      "ตำบลทะเบียนบ้าน ⭐"],
+    ["reg_district",
+      "อำเภอทะเบียนบ้าน ⭐"],
+    ["reg_province",
+      "จังหวัดทะเบียนบ้าน ⭐"],
+    ["reg_postcode",
+      "รหัสไปรษณีย์ทะเบียนบ้าน ⭐",
+      "postcode"],
+    ["cur_same_as_reg",
+      "ที่อยู่ปัจจุบันเหมือนทะเบียนบ้าน",
+      "check"],
+    ["cur_house_no",
+      "บ้านเลขที่ปัจจุบัน ⭐"],
+    ["cur_moo",
+      "หมู่ปัจจุบัน"],
+    ["cur_road",
+      "ถนนปัจจุบัน"],
+    ["cur_subdistrict",
+      "ตำบลปัจจุบัน ⭐"],
+    ["cur_district",
+      "อำเภอปัจจุบัน ⭐"],
+    ["cur_province",
+      "จังหวัดปัจจุบัน ⭐"],
+    ["cur_postcode",
+      "รหัสไปรษณีย์ปัจจุบัน ⭐",
+      "postcode"],
+    ["map_url",
+      "ลิงก์แผนที่",
+      "url"],
+    ["travel_mode",
+      "การเดินทางมาโรงเรียน"]],
+  health:[["blood_type",
+      "กรุ๊ปเลือด",
+      "select",
+      ["A",
+        "B",
+        "AB",
+        "O",
+        "ไม่ทราบ"]],
+    ["chronic_disease",
+      "โรคประจำตัว ⭐"],
+    ["chronic_none",
+      "ไม่มีโรคประจำตัว",
+      "check"],
+    ["drug_allergy",
+      "ยาที่แพ้ ⭐"],
+    ["drug_allergy_none",
+      "ไม่มียาที่แพ้",
+      "check"],
+    ["food_allergy",
+      "อาหารที่แพ้ ⭐"],
+    ["food_allergy_none",
+      "ไม่มีอาหารที่แพ้",
+      "check"],
+    ["regular_meds",
+      "ยาที่ใช้ประจำ"],
+    ["emergency_phone",
+      "เบอร์ฉุกเฉิน",
+      "phone"]]
+};
+const guardianDefs=[["relation",
+    "ความเกี่ยวข้อง",
+    "select",
+    ["บิดา",
+      "มารดา",
+      "ผู้ปกครอง"]],
+  ["prefix",
+    "คำนำหน้า",
+    "select",
+    STUDENT_PREFIXES],
+  ["first_name",
+    "ชื่อ"],
+  ["last_name",
+    "นามสกุล"],
+  ["phone",
+    "เบอร์โทร",
+    "phone"],
+  ["occupation",
+    "อาชีพ"],
+  ["monthly_income",
+    "รายได้ต่อเดือน (บาท)",
+    "number"],
+  ["citizen_id",
+    "เลขประจำตัวประชาชน",
+    "citizen"],
+  ["is_primary",
+    "ผู้ติดต่อหลัก",
+    "check"]];
+function fieldHtml([name,
+  label,
+  type="text",
+  options],value,group="p") {
+  const fid=group+"-"+name,
+  attr=type==="phone"||type==="postcode"||type==="citizen"?' inputmode="numeric"':"";
+  const input=type==="select"?`<select id="${fid}" name="${name}"><option value="">— เลือก —</option>${options.map(o=>`<option value="${esc(o)}" ${value===o?"selected":""}>${esc(o)}</option>`).join("")}</select>`:type==="check"?`<input id="${fid}" name="${name}" type="checkbox" ${value?"checked":""}>`:`<input id="${fid}" name="${name}" type="${["date",
+      "number",
+      "url"].includes(type)?type:"text"}" ${attr} value="${esc(type==="citizen"?formatCitizenId(value):type==="phone"?formatPhone(value):value)}">`;
+  return `<div class="field ${type==="check"?"full":""}"><label for="${fid}" class="${type==="check"?"check":""}">${type==="check"?input+esc(label):esc(label)+input}</label><div class="error" id="${fid}-error" aria-live="polite"></div></div>`;
+}
+function toast(text,ok){
+  const el=$("toast");
+  el.textContent=text;
+  el.className="toast "+(ok?"ok":"err");
+  setTimeout(()=>el.className="toast",4000);
+}
+function err(name,msg,group="p"){
+  const input=$(group+"-"+name),
+  box=$(group+"-"+name+"-error");
+  if(box)box.textContent=msg;
+  if(input){
+    input.setAttribute("aria-invalid",msg?"true":"false");
+    input.setAttribute("aria-describedby",box.id);
+  }
+}
+function read(name,group="p"){
+  const input=$(group+"-"+name);
+  return input?.type==="checkbox"?input.checked:input?.value?.trim()||null;
+}
+function payload(defs,group="p"){
+  const out={};
+  for(const [name,
+    ,
+    type] of defs){
+    let value=read(name,group);
+    if(type==="phone")value=value?normalizePhone(value):null;
+    if(type==="citizen")value=value?String(value).toUpperCase().replace(/[^0-9G]/g,""):null;
+    if(type==="number")value=value==null?null:Number(value);
+    out[name]=value;
+  }
+  return out;
+}
+function invalid(defs,group="p"){
+  let first=null;
+  for(const [name,
+    ,
+    type] of defs){
+    let msg="",
+    value=read(name,group);
+    if(type==="phone"&&value&&!/^[0-9]{9,10}$/.test(normalizePhone(value)))msg="เบอร์โทรต้องมี 9–10 หลัก";
+    if(type==="postcode"&&value&&!/^[0-9]{5}$/.test(value))msg="รหัสไปรษณีย์ต้องมี 5 หลัก";
+    if(type==="citizen"&&value&&!isValidCitizenId(value))msg="เลขประจำตัวประชาชนไม่ถูกต้อง";
+    if(type==="number"&&value!==null&&(!/^\d+(?:\.\d+)?$/.test(value)||Number(value)<0))msg="กรอกตัวเลขที่ไม่ติดลบ";
+    if(["birth_order",
+      "sibling_count"].includes(name)&&value!==null&&(!/^\d+$/.test(value)||Number(value)<1||Number(value)>20))msg="กรอกจำนวน 1–20";
+    err(name,msg,group);
+    if(msg&&!first)first=$(group+"-"+name);
+  }
+  if(first){
+    const section=first.closest("details");
+    if(section)section.open=true;
+    first.focus();
+  }
+  return !!first;
+}
+function syncConditional(){
+  const same=read("cur_same_as_reg");
+  for(const [name] of fields.address.filter(x=>x[0].startsWith("cur_")&&x[0]!=="cur_same_as_reg")){
+    const input=$("p-"+name);
+    input.closest(".field").hidden=same;
+    input.disabled=same||!canEdit;
+  }
+  for(const [name,
+    none] of [["chronic_disease",
+      "chronic_none"],
+    ["drug_allergy",
+      "drug_allergy_none"],
+    ["food_allergy",
+      "food_allergy_none"]]){
+    const input=$("p-"+name);
+    if(read(none))input.value="";
+    input.disabled=read(none)||!canEdit;
+  }
+  const url=read("map_url"),
+  link=$("map-link");
+  link.hidden=!/^https?:\/\//i.test(url||"");
+  if(!link.hidden)link.href=url;
+}
+function renderForm(){
+  for(const [group,
+    defs] of Object.entries(fields))$(group+"-fields").innerHTML=defs.map(d=>fieldHtml(d,profile?.[d[0]]??(d[0]==="gender"?genderFromPrefix(student.prefix):d[0]==="cur_same_as_reg"?true:["nationality",
+    "ethnicity"].includes(d[0])?"ไทย":null))).join("");
+  $("student-title").textContent=student.name;
+  $("student-meta").textContent=`รหัส ${student.student_no} · ${student.grade_level}/${student.classroom} · ${student.status||"กำลังศึกษา"}`;
+  const registry=[["prefix",
+      "คำนำหน้า",
+      "select",
+      STUDENT_PREFIXES],
+    ["first_name",
+      "ชื่อ"],
+    ["last_name",
+      "นามสกุล"]];
+  $("registry-fields").innerHTML=isAcademic?registry.map(d=>fieldHtml(d,student[d[0]],"r")).join("")+fieldHtml(["citizen_id",
+    "เลขประจำตัวประชาชน ⭐",
+    "citizen"],profile?.citizen_id,"p"):"";
+  if(!isAcademic)$("citizen-readonly").textContent="เลขประจำตัวประชาชน: "+(profile?.citizen_id?formatCitizenId(profile.citizen_id):"รอฝ่ายวิชาการกรอก");
+  $("p-birth_date").closest(".field").insertAdjacentHTML("beforeend",'<div id="age-note" class="hint"></div>');
+  updateAge();
+  $("profile-form").hidden=false;
+  $("save").hidden=!canEdit;
+  $("guardian-actions").hidden=!canEdit;
+  for(const input of $("profile-form").querySelectorAll("input,select"))input.disabled=!canEdit||(!isAcademic&&input.closest("#registry-fields"));
+  syncConditional();
+  renderGuardians();
+  snapshot=JSON.stringify(collect());
+  dirty=false;
+}
+function updateAge(){
+  const value=read("birth_date"),
+  node=$("age-note");
+  if(!value){
+    node.textContent="";
+    return;
+  }
+  const date=new Date(value+"T00:00:00Z");
+  if(Number.isNaN(date.getTime())){
+    node.textContent="";
+    return;
+  }
+  const parts=Object.fromEntries(new Intl.DateTimeFormat("en-US",{
+    timeZone:"Asia/Bangkok",
+    year:"numeric",
+    month:"2-digit",
+    day:"2-digit"
+  }).formatToParts(new Date()).map(p=>[p.type,
+    p.value]));
+  let age=Number(parts.year)-date.getUTCFullYear();
+  if(Number(parts.month)<date.getUTCMonth()+1||Number(parts.month)===date.getUTCMonth()+1&&Number(parts.day)<date.getUTCDate())age--;
+  node.textContent=age>=0?"อายุ "+age+" ปี":"วันเกิดอยู่ในอนาคต";
+}
+function collect(){
+  return {
+    registry:isAcademic?payload([["prefix"],
+      ["first_name"],
+      ["last_name"]],"r"):null,
+    profile:Object.values(fields).flat().map(x=>x[0]).reduce((o,n)=>(o[n]=read(n),o),{}),
+    citizen:isAcademic?read("citizen_id"):null
+  };
+}
+async function loadPrivate(){
+  const [pr,
+    gu]=await Promise.all([sb.from("student_profiles").select("*").eq("student_id",id).maybeSingle(),
+    sb.from("student_guardians").select("*").eq("student_id",id).order("sort_order")]);
+  if(pr.error)throw pr.error;
+  if(gu.error)throw gu.error;
+  profile=pr.data;
+  guardians=gu.data||[];
+  const sourceIds=[...new Set(guardians.map(g=>g.copied_from_student_id).filter(Boolean))];
+  sourceNames=new Map();
+  if(sourceIds.length){
+    const sources=await sb.from("students").select("id,name").in("id",sourceIds);
+    if(sources.error)throw sources.error;
+    sourceNames=new Map((sources.data||[]).map(row=>[row.id,
+      row.name]));
+  }
+  renderForm();
+}
+const session=await requireAuth();
+if(session){
+  $("btn-signout").addEventListener("click",e=>{
+    e.preventDefault();
+    signOut();
+  });
+  try{
+    if(!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(id||""))throw new Error("รหัสนักเรียนในลิงก์ไม่ถูกต้อง");
+    const [edit,
+      view]=await Promise.all([sb.rpc("can_edit_student_profile",{
+        p_student_id:id
+      }),
+      sb.rpc("can_view_student_profile",{
+        p_student_id:id
+      })]);
+    if(edit.error)throw edit.error;
+    if(view.error)throw view.error;
+    canEdit=edit.data===true;
+    if(!view.data){
+      $("state").textContent="คุณไม่มีสิทธิ์ดูประวัตินักเรียนคนนี้";
+    }else{
+      isAcademic=await checkDepartment("วิชาการ");
+      const st=await sb.from("students").select("id,student_no,prefix,first_name,last_name,name,grade_level,classroom,status").eq("id",id).maybeSingle();
+      if(st.error)throw st.error;
+      if(!st.data)throw new Error("ไม่พบนักเรียน");
+      student=st.data;
+      await loadPrivate();
+      $("state").hidden=canEdit;
+      if(!canEdit)$("state").textContent="ดูได้อย่างเดียว";
+    }
+  }catch(e){
+    $("state").textContent="เปิดประวัติไม่สำเร็จ: "+e.message;
+  }
+}
+$("profile-form").addEventListener("input",()=>{
+  syncConditional();
+  updateAge();
+  dirty=JSON.stringify(collect())!==snapshot
+});
+$("profile-form").addEventListener("change",()=>{
+  syncConditional();
+  updateAge();
+  dirty=JSON.stringify(collect())!==snapshot
+});
+window.addEventListener("beforeunload",e=>{
+  if(dirty||guardianDirty){
+    e.preventDefault();
+    e.returnValue="";
+  }
+});
+$("profile-form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  if(!canEdit)return;
+  const defs=Object.values(fields).flat();
+  if(invalid(defs)||isAcademic&&invalid([["citizen_id",
+      null,
+      "citizen"]]))return;
+  let registry=null;
+  if(isAcademic){
+    const selectedPrefix=read("prefix","r");
+    // ถ้าเลือกคำนำหน้าแล้ว ตัดจากช่องชื่อได้เฉพาะคำนำหน้าเดียวกัน
+    const parsed=splitPrefix(read("first_name","r"),selectedPrefix);
+    if(!selectedPrefix&&parsed.prefix)$("r-prefix").value=parsed.prefix;
+    registry={
+      prefix:read("prefix","r"),
+      first_name:normalizeNamePart(parsed.rest),
+      last_name:normalizeNamePart(read("last_name","r"))||null
+    };
+    if(!registry.prefix||!registry.first_name||/\s/.test(registry.first_name)){
+      err("first_name","กรอกชื่อที่ไม่มีช่องว่างและเลือกคำนำหน้า","r");
+      $("r-first_name").focus();
+      return;
+    }
+  }
+  const data=payload(defs);
+  // ครูประจำชั้นห้ามส่ง citizen_id ใน payload แม้ค่าเดิมจะไม่เปลี่ยน
+  if(isAcademic)data.citizen_id=read("citizen_id")?String(read("citizen_id")).toUpperCase().replace(/[^0-9G]/g,""):null;
+  for(const [name,
+    none] of [["chronic_disease",
+      "chronic_none"],
+    ["drug_allergy",
+      "drug_allergy_none"],
+    ["food_allergy",
+      "food_allergy_none"]])if(data[none])data[name]=null;
+  if(data.cur_same_as_reg)for(const [name] of fields.address.filter(x=>x[0].startsWith("cur_")&&x[0]!=="cur_same_as_reg"))data[name]=null;
+  const btn=$("save");
+  btn.disabled=true;
+  btn.textContent="กำลังบันทึก…";
+  try{
+    if(isAcademic){
+      const r=await sb.from("students").update(registry).eq("id",id);
+      if(r.error)throw r.error;
+    }
+    const r=await sb.from("student_profiles").upsert({
+      student_id:id,
+      ...data
+    },{
+      onConflict:"student_id"
+    });
+    if(r.error)throw r.error;
+    dirty=false;
+    student={
+      ...student,
+      ...registry,
+      name:registry?`${registry.prefix} ${registry.first_name}${registry.last_name?" "+registry.last_name:""}`:student.name
+    };
+    await loadPrivate();
+    toast("บันทึกประวัติแล้ว",true);
+  }catch(error){
+    toast(error.code==="23505"?"เลขนี้มีนักเรียนคนอื่นใช้แล้ว":"บันทึกไม่สำเร็จ: "+error.message,false);
+  }finally{
+    btn.disabled=false;
+    btn.textContent="บันทึกประวัติ";
+  }
+});
+function renderGuardians(){
+  const box=$("guardians");
+  box.innerHTML=guardians.length?guardians.map(g=>`<div class="guardian"><strong>${esc([g.prefix,
+      g.first_name,
+      g.last_name].filter(Boolean).join(" "))}</strong> · ${esc(g.relation)} ${g.is_primary?'<span class="badge">ผู้ติดต่อหลัก</span>':''}<div>${g.phone?`<a href="tel:${esc(g.phone)}">${esc(formatPhone(g.phone))}</a>`:"ยังไม่มีเบอร์โทร"}${g.occupation?" · "+esc(g.occupation):""}</div>${g.copied_from_student_id?`<small class="hint">คัดลอกจาก ${esc(sourceNames.get(g.copied_from_student_id)
+      ||"พี่น้อง")}</small>`:""}${canEdit?`<div class="actions"><button type="button" class="ghost" data-edit="${esc(g.id)}">แก้ไข</button><button type="button" class="danger" data-delete="${esc(g.id)}">ลบ</button></div>`:""}</div>`).join(""):"<p class='hint'>ยังไม่มีข้อมูลผู้ปกครอง</p>";
+}
+$("guardians").addEventListener("click",e=>{
+  const edit=e.target.closest("[data-edit]"),
+  del=e.target.closest("[data-delete]");
+  if(edit)openGuardian(guardians.find(g=>g.id===edit.dataset.edit));
+  if(del)deleteGuardian(guardians.find(g=>g.id===del.dataset.delete));
+});
+let modalOpener=null;
+function showModal(name,focusSelector){
+  modalOpener=document.activeElement;
+  $(name).classList.add("show");
+  $(name).querySelector(focusSelector)?.focus();
+}
+function closeModal(name){
+  $(name).classList.remove("show");
+  if(name==="guardian-modal")guardianDirty=false;
+  modalOpener?.focus();
+  modalOpener=null;
+}
+for(const modal of [$("guardian-modal"),
+  $("sibling-modal")])modal.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){
+    e.preventDefault();
+    closeModal(modal.id);
+  }
+  if(e.key==="Tab"){
+    const items=[...modal.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled)")].filter(x=>x.offsetParent!==null);
+    if(!items.length)return;
+    const first=items[0],
+    last=items.at(-1);
+    if(e.shiftKey&&document.activeElement===first){
+      e.preventDefault();
+      last.focus();
+    }else if(!e.shiftKey&&document.activeElement===last){
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
+function openGuardian(g=null){
+  if(dirty){
+    toast("บันทึกประวัติก่อนแก้ผู้ปกครอง",false);
+    return;
+  }
+  editingGuardian=g;
+  guardianDirty=false;
+  $("guardian-modal-title").textContent=g?"แก้ไขผู้ปกครอง":"เพิ่มผู้ปกครอง";
+  $("guardian-fields").innerHTML=guardianDefs.map(d=>fieldHtml(d,g?.[d[0]]??(d[0]==="is_primary"?guardians.length===0:null),"g")).join("");
+  showModal("guardian-modal","#g-relation");
+}
+$("guardian-form").addEventListener("input",()=>guardianDirty=true);
+$("guardian-form").addEventListener("change",()=>guardianDirty=true);
+$("add-guardian").addEventListener("click",()=>openGuardian());
+$("cancel-guardian").addEventListener("click",()=>closeModal("guardian-modal"));
+$("guardian-form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  if(invalid(guardianDefs,"g"))return;
+  const data=payload(guardianDefs,"g");
+  data.first_name=normalizeNamePart(data.first_name);
+  data.last_name=normalizeNamePart(data.last_name)||null;
+  if(!data.relation||!data.first_name){
+    err(!data.relation?"relation":"first_name","กรอกข้อมูลช่องนี้","g");
+    return;
+  }
+  const btn=$("save-guardian");
+  btn.disabled=true;
+  let previous=null,
+  saved=false;
+  try{
+    if(data.is_primary){
+      // unique index ให้มีผู้ติดต่อหลักคนเดียว: ปิดคนเดิมก่อนตั้งคนใหม่
+      previous=guardians.find(g=>g.is_primary&&g.id!==editingGuardian?.id);
+      if(previous){
+        const r=await sb.from("student_guardians").update({
+          is_primary:false
+        }).eq("id",previous.id);
+        if(r.error)throw r.error;
+      }
+    }
+    const r=editingGuardian?await sb.from("student_guardians").update(data).eq("id",editingGuardian.id):await sb.from("student_guardians").insert({
+      student_id:id,
+      ...data
+    });
+    if(r.error)throw r.error;
+    saved=true;
+    closeModal("guardian-modal");
+    await loadPrivate();
+    toast("บันทึกผู้ปกครองแล้ว",true);
+  }catch(error){
+    if(previous&&!saved)await sb.from("student_guardians").update({
+      is_primary:true
+    }).eq("id",previous.id);
+    toast("บันทึกผู้ปกครองไม่สำเร็จ: "+error.message,false);
+    await loadPrivate();
+  }finally{
+    btn.disabled=false;
+  }
+});
+async function deleteGuardian(g){
+  if(!g)return;
+  if(dirty){
+    toast("บันทึกประวัติก่อนลบผู้ปกครอง",false);
+    return;
+  }
+  const name=[g.prefix,
+    g.first_name,
+    g.last_name].filter(Boolean).join(" ");
+  if(!await window.crsAskConfirm({
+    title:"ลบผู้ปกครอง",
+    message:`ข้อมูลผู้ปกครอง ${name} 1 คนจะหายจากประวัตินักเรียน`,
+    okLabel:"ลบผู้ปกครอง",
+    danger:true
+  }))return;
+  const r=await sb.from("student_guardians").delete().eq("id",g.id);
+  if(r.error)toast("ลบไม่สำเร็จ: "+r.error.message,false);
+  else{
+    await loadPrivate();
+    toast("ลบผู้ปกครองแล้ว",true);
+  }
+}
+$("copy-sibling").addEventListener("click",async()=>{
+  if(dirty){
+    toast("บันทึกประวัติก่อนคัดลอกจากพี่น้อง",false);
+    return;
+  }
+  showModal("sibling-modal","#cancel-sibling");
+  $("siblings").textContent="กำลังค้นหา…";
+  const r=await sb.rpc("sibling_candidates",{
+    p_student_id:id
+  });
+  if(r.error){
+    $("siblings").textContent=r.error.message;
+    return;
+  }
+  $("siblings").innerHTML=r.data?.length?r.data.map(s=>`<label class="check"><input type="radio" name="sibling" value="${esc(s.student_id)}" ${s.guardian_count?"":"disabled"}><span>${esc(s.name)} · ${esc(s.grade_level)}/${esc(s.classroom)} · ${esc(s.status)} · ${s.guardian_count?s.guardian_count+" ผู้ปกครอง":"ยังไม่มีข้อมูล"} · ${s.has_address?"มีที่อยู่":"ไม่มีที่อยู่"}</span></label>`).join(""):"ไม่พบนักเรียนนามสกุลเดียวกัน";
+});
+$("cancel-sibling").addEventListener("click",()=>closeModal("sibling-modal"));
+$("do-copy").addEventListener("click",async()=>{
+  const from=$("siblings").querySelector("input:checked")?.value;
+  if(!from){
+    toast("เลือกพี่น้องก่อน",false);
+    return;
+  }
+  const count=guardians.length;
+  if(count&&!await window.crsAskConfirm({
+    title:"แทนที่ผู้ปกครอง",
+    message:`แทนที่ผู้ปกครอง ${count} คนเดิม ข้อมูลเดิมจะหาย`,
+    okLabel:"แทนที่",
+    danger:true
+  }))return;
+  const btn=$("do-copy");
+  btn.disabled=true;
+  try{
+    const r=await sb.rpc("copy_guardians_from_sibling",{
+      p_from:from,
+      p_to:id,
+      p_replace:count>0,
+      p_include_address:$("copy-address").checked
+    });
+    if(r.error)throw r.error;
+    closeModal("sibling-modal");
+    await loadPrivate();
+    toast("คัดลอกผู้ปกครอง "+r.data+" คนแล้ว",true);
+  }catch(error){
+    toast(error.message,false);
+  }finally{
+    btn.disabled=false;
+  }
+});
+</script>
+</body></html>
