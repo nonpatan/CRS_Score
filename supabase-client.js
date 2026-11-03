@@ -695,6 +695,17 @@ export function buildStructureCopyPlan(sourceUnits, options = {}) {
 // 🪤 ลำดับนี้ห้ามมีใครเอา index ไปแปลงความหมาย (เช่นช่วงชั้น) — ดู STAGE_BY_GRADE
 export const GRADE_ORDER = ["อ.1","อ.2","อ.3","ป.1","ป.2","ป.3","ป.4","ป.5","ป.6","ม.1","ม.2","ม.3","ม.4","ม.5","ม.6"];
 
+// ชั้นนอกหลักสูตร (ฝากเลี้ยง) — ห้ามเติมใน GRADE_ORDER ซึ่งใช้กับหลักสูตรและการเลื่อนชั้นปกติ
+export const PRE_SCHOOL_GRADE = "เตรียมอนุบาล";
+export function isTempStudentNo(no) {
+  return /^ต\d{3,}$/.test(String(no || ""));
+}
+export function nextTempStudentNos(existingNos, count) {
+  const highest = (existingNos || []).reduce((max, no) =>
+    isTempStudentNo(no) ? Math.max(max, Number(String(no).slice(1))) : max, 0);
+  return Array.from({ length: Math.max(0, count) }, (_, i) => "ต" + String(highest + i + 1).padStart(3, "0"));
+}
+
 // ช่วงชั้นของนักเรียน ใช้เลือกองค์ประกอบสมรรถนะหลักมาตรฐาน
 // รองรับถึง ม.6 แต่ช่วงชั้น 4 จะยังไม่มีองค์ประกอบจนกว่าจะได้เอกสาร สพฐ. ตัวจริง
 // ผูกกับ "ชื่อชั้น" ตรง ๆ ห้ามกลับไปใช้ index ของ GRADE_ORDER อีก
@@ -904,10 +915,11 @@ export async function setSetting(key, value) {
 
 const CUTOFF_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
-// ระดับของชั้น ตัดจาก "คำนำหน้า" ไม่ใช่รายชื่อชั้น — ปีหน้าเปิด ม.4-ม.6 หรือเพิ่มห้อง
-// โค้ดตรงนี้ต้องไม่ต้องตามแก้ · ชั้นที่ไม่ตรงคำนำหน้าไหนคืน "" แล้วไปใช้ค่าตั้งต้น
+// ระดับของชั้น ตัดจาก "คำนำหน้า" ยกเว้นเตรียมอนุบาลซึ่งใช้เวลาอนุบาล
+// ปีหน้าเปิด ม.4-ม.6 หรือเพิ่มห้องได้โดยไม่ต้องตามแก้ · ชั้นอื่นที่ไม่รู้จักคืน ""
 export function levelOfGrade(gradeLevel) {
   const text = String(gradeLevel || "").trim();
+  if (text === "เตรียมอนุบาล") return "อ.";
   for (const prefix of ["อ.", "ป.", "ม."]) {
     if (text.startsWith(prefix)) return prefix;
   }

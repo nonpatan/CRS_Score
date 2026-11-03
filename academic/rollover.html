@@ -325,8 +325,8 @@
 import {
   sb, requireAuth, signOut, getProfile,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
-  getSetting, setSetting, GRADE_ORDER, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20261102-2";
+  getSetting, setSetting, GRADE_ORDER, PRE_SCHOOL_GRADE, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
+} from "../supabase-client.js?v=20261103-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -529,6 +529,9 @@ async function onSourceYearChange() {
 // คืน { advance: 'promote'|'graduate', targetGrade, targetClassroom }
 // (advance = ทางหลักตามชั้น — ชั้นสูงสุด = จบ, ชั้นอื่น = เลื่อนขึ้น) ครูเลือกทับเป็น "ซ้ำชั้น/ย้ายออก" ได้
 function planFor(stu) {
+  if (stu.grade_level === PRE_SCHOOL_GRADE) {
+    return { advance: "promote", targetGrade: "อ.1", targetClassroom: promoteClassroom(stu.classroom, stu.grade_level, "อ.1") };
+  }
   const target = nextGrade(stu.grade_level, highestGrade);
   if (target === null) {
     return { advance: "graduate", targetGrade: null, targetClassroom: stu.classroom };
@@ -566,7 +569,9 @@ function renderPromote() {
     if (!byGrade[g]) byGrade[g] = [];
     byGrade[g].push(stu);
   }
-  const grades = Object.keys(byGrade).sort((a, b) => GRADE_ORDER.indexOf(a) - GRADE_ORDER.indexOf(b));
+  const gradeRank = grade => grade === PRE_SCHOOL_GRADE ? -1 :
+    GRADE_ORDER.indexOf(grade) < 0 ? GRADE_ORDER.length : GRADE_ORDER.indexOf(grade);
+  const grades = Object.keys(byGrade).sort((a, b) => gradeRank(a) - gradeRank(b) || a.localeCompare(b, "th"));
 
   let html = "";
   for (const g of grades) {
@@ -1003,10 +1008,13 @@ btnRun.addEventListener("click", async () => {
   const activityIds = checkedIds("activity-cb");
   const activitiesToClone = sourceActivities.filter(activity => activityIds.indexOf(activity.id) !== -1);
 
-  let upN = 0, gradN = 0, holdN = 0, leftN = 0;
+  let upN = 0, gradN = 0, holdN = 0, leftN = 0, preSchoolUpN = 0;
   for (const s of activeStudents) {
     const a = actionById[s.id];
-    if (a === "promote") upN++;
+    if (a === "promote") {
+      upN++;
+      if (s.grade_level === PRE_SCHOOL_GRADE) preSchoolUpN++;
+    }
     else if (a === "graduate") gradN++;
     else if (a === "left") leftN++;
     else holdN++;
@@ -1016,6 +1024,7 @@ btnRun.addEventListener("click", async () => {
     title: "ยืนยันขึ้นปีการศึกษา " + newYear,
     message:
     "• เลื่อนชั้นนักเรียน " + upN + " คน\n" +
+    (preSchoolUpN ? "• เตรียมอนุบาล " + preSchoolUpN + " คนจะขึ้น อ.1 ด้วยรหัสชั่วคราว — แก้เป็นรหัสจริงที่หน้าประวัติหลังเลื่อนชั้น\n" : "") +
     "• จบการศึกษา " + gradN + " คน\n" +
     "• คงชั้นเดิม (ซ้ำชั้น) " + holdN + " คน\n" +
     "• ย้ายออก/ไม่เรียนต่อ " + leftN + " คน\n" +

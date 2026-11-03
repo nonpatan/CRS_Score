@@ -337,8 +337,10 @@ import {
   sb,
   requireAuth,
   signOut,
-  checkDepartment
-} from "../supabase-client.js?v=20261102-2";
+  checkDepartment,
+  PRE_SCHOOL_GRADE,
+  isTempStudentNo
+} from "../supabase-client.js?v=20261103-1";
 import {
   STUDENT_PREFIXES,
   normalizeNamePart,
@@ -349,7 +351,7 @@ import {
   normalizePhone,
   formatPhone,
   profileCompleteness
-} from "./student-registry.js?v=20261102-1";
+} from "./student-registry.js?v=20261103-1";
 const id=new URLSearchParams(location.search).get("id"),$=x=>document.getElementById(x),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({
   "&":"&amp;",
   "<":"&lt;",
@@ -607,10 +609,15 @@ function renderForm(){
     ["first_name",
       "ชื่อ"],
     ["last_name",
-      "นามสกุล"]];
+      "นามสกุล"],
+    ["student_no",
+      "รหัสประจำตัว"]];
   $("registry-fields").innerHTML=isAcademic?registry.map(d=>fieldHtml(d,student[d[0]],"r")).join("")+fieldHtml(["citizen_id",
     "เลขประจำตัวประชาชน ⭐",
     "citizen"],profile?.citizen_id,"p"):"";
+  if(isAcademic&&isTempStudentNo(student.student_no)&&student.grade_level!==PRE_SCHOOL_GRADE){
+    $("r-student_no").closest(".field").insertAdjacentHTML("beforeend",'<div class="hint" style="color:var(--amber);font-size:13px">ยังเป็นรหัสชั่วคราว ใส่รหัสจริงของ อ.1</div>');
+  }
   if(!isAcademic)$("citizen-readonly").textContent="เลขประจำตัวประชาชน: "+(profile?.citizen_id?formatCitizenId(profile.citizen_id):"รอฝ่ายวิชาการกรอก");
   $("p-birth_date").closest(".field").insertAdjacentHTML("beforeend",'<div id="age-note" class="hint"></div>');
   updateAge();
@@ -669,7 +676,8 @@ function collect(){
   return {
     registry:isAcademic?payload([["prefix"],
       ["first_name"],
-      ["last_name"]],"r"):null,
+      ["last_name"],
+      ["student_no"]],"r"):null,
     profile:Object.values(fields).flat().map(x=>x[0]).reduce((o,n)=>(o[n]=read(n),o),{}),
     citizen:isAcademic?read("citizen_id"):null
   };
@@ -760,8 +768,14 @@ $("profile-form").addEventListener("submit",async e=>{
     registry={
       prefix:read("prefix","r"),
       first_name:normalizeNamePart(parsed.rest),
-      last_name:normalizeNamePart(read("last_name","r"))||null
+      last_name:normalizeNamePart(read("last_name","r"))||null,
+      student_no:String(read("student_no","r")||"").trim()
     };
+    if(!registry.student_no){
+      err("student_no","กรอกรหัสประจำตัว","r");
+      $("r-student_no").focus();
+      return;
+    }
     if(!registry.prefix||!registry.first_name||/\s/.test(registry.first_name)){
       err("first_name","กรอกชื่อที่ไม่มีช่องว่างและเลือกคำนำหน้า","r");
       $("r-first_name").focus();
@@ -800,6 +814,7 @@ $("profile-form").addEventListener("submit",async e=>{
       ...registry,
       name:registry?`${registry.prefix} ${registry.first_name}${registry.last_name?" "+registry.last_name:""}`:student.name
     };
+    $("student-meta").textContent=`รหัส ${student.student_no} · ${student.grade_level}/${student.classroom} · ${student.status||"กำลังศึกษา"}`;
     await loadPrivate();
     toast("บันทึกประวัติแล้ว",true);
   }catch(error){

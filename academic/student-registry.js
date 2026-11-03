@@ -64,7 +64,7 @@ export function parseStudentImportRows(raw) {
     const errors = [];
     if (!grade?.trim()) errors.push("ไม่มีชั้นปี");
     if (!classroom?.trim()) errors.push("ไม่มีห้อง");
-    if (!studentNo?.trim()) errors.push("ไม่มีรหัสประจำตัว");
+    if (!studentNo?.trim() && grade?.trim() !== "เตรียมอนุบาล") errors.push("ไม่มีรหัสประจำตัว");
     if (!prefix) errors.push("ไม่มีคำนำหน้า");
     if (!first) errors.push("ไม่มีชื่อ");
     if (/\s/.test(first)) errors.push("ชื่อมีช่องว่าง");

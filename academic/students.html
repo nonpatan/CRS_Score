@@ -190,6 +190,7 @@
   #student-list .status-btn { min-height:44px; padding:6px; font-size:12px; }
   #student-list .icon-btn { min-height:44px; min-width:44px; }
   .student-status-chip { color:var(--amber); background:var(--amber-soft); font-size:12px; border-radius:6px; padding:1px 5px; }
+  .temp-no-chip { color:var(--amber); background:var(--amber-soft); font-size:13px; border-radius:6px; padding:1px 5px; }
   input[type="search"] { width:100%; min-height:44px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--white); color:var(--ink); font:inherit; font-size:16px; }
   textarea { font-size:16px; }
   .list-head, .add-panel-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
@@ -290,6 +291,7 @@
     <div class="section-title">วางจาก Excel (เพิ่มทีละหลายคน)</div>
     <div class="field-note" style="margin-bottom:10px">
       คัดลอกจาก Excel มา 6 คอลัมน์เรียงตามนี้: <b>ชั้นปี, ห้อง, รหัสประจำตัว, คำนำหน้า, ชื่อ, นามสกุล</b>
+      (เตรียมอนุบาลเว้นช่องรหัสได้ ระบบจะออกรหัสชั่วคราวให้)
       (แบบเดิม 5 คอลัมน์ยังใช้ได้ ถ้าคำนำหน้าติดอยู่กับชื่อ)
       (คั่นด้วย tab อัตโนมัติเวลา copy จาก Excel — ไม่ต้องมีหัวตาราง) แล้ววางในช่องด้านล่าง
     </div>
@@ -318,7 +320,8 @@
     </div>
     <div class="field">
       <label for="f-studentno">รหัสประจำตัว</label>
-      <input type="text" id="f-studentno">
+      <input type="text" id="f-studentno" aria-describedby="f-studentno-hint">
+      <div class="field-note" id="f-studentno-hint" hidden>เว้นว่างได้ ระบบออกรหัสชั่วคราว (ต001…) ให้ · ขึ้น อ.1 แล้วแก้เป็นรหัสจริงที่หน้าประวัติ</div>
     </div>
     <div class="row2 name-row">
       <div class="field">
@@ -389,8 +392,8 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, getSetting } from "../supabase-client.js?v=20261102-2";
-import { normalizeNamePart, splitPrefix, parseStudentImportRows } from "./student-registry.js?v=20261102-1";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, PRE_SCHOOL_GRADE, isTempStudentNo, nextTempStudentNos, getSetting } from "../supabase-client.js?v=20261103-1";
+import { normalizeNamePart, splitPrefix, parseStudentImportRows } from "./student-registry.js?v=20261103-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -530,7 +533,9 @@ function renderList() {
 
   const orderedGroups = [...groups.values()].sort((a,b) => {
     const ai = GRADE_ORDER.indexOf(a.grade), bi = GRADE_ORDER.indexOf(b.grade);
-    return (ai < 0 ? GRADE_ORDER.length : ai) - (bi < 0 ? GRADE_ORDER.length : bi)
+    const ar = a.grade === PRE_SCHOOL_GRADE ? -1 : ai < 0 ? GRADE_ORDER.length : ai;
+    const br = b.grade === PRE_SCHOOL_GRADE ? -1 : bi < 0 ? GRADE_ORDER.length : bi;
+    return ar - br
       || a.grade.localeCompare(b.grade,"th") || a.classroom.localeCompare(b.classroom,"th",{numeric:true});
   });
   for (const group of orderedGroups) {
@@ -578,7 +583,9 @@ function renderList() {
       const studentStatus = stu.status || "กำลังศึกษา";
       info.innerHTML = "<div class='name'>" + escapeHtml(stu.name) +
         (studentStatus !== "กำลังศึกษา" ? " <span class='student-status-chip'>" + escapeHtml(studentStatus) + "</span>" : "") + "</div>" +
-        "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) + "</div>";
+        "<div class='meta'>รหัสประจำตัว " + escapeHtml(stu.student_no) +
+        (isTempStudentNo(stu.student_no) ? " <span class='temp-no-chip'>" +
+          (stu.grade_level === PRE_SCHOOL_GRADE ? "รหัสชั่วคราว" : "รหัสชั่วคราว · ใส่รหัสจริง") + "</span>" : "") + "</div>";
       row.appendChild(info);
       const actions = document.createElement("div");
       actions.className = "student-actions";
@@ -696,6 +703,20 @@ function placementYear() {
 // สร้างนักเรียนและประวัติชั้น/ห้องของปีเดียวกัน
 // ถ้าบันทึก placement ไม่สำเร็จ จะลบนักเรียนที่เพิ่งสร้างกลับทันที เพื่อไม่ให้ข้อมูลค้างคนละตาราง
 async function insertStudentsWithPlacements(rows, year) {
+  // อ่านเลขชั่วคราวทุกสถานะก่อนออกเลขใหม่; คิวรีผิดพลาดต้องหยุด ไม่เริ่มนับใหม่เอง
+  const missing = rows.filter(row => row.grade === PRE_SCHOOL_GRADE && !row.studentNo);
+  if (missing.length) {
+    const existingNos = rows.map(row => row.studentNo).filter(Boolean);
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from("students").select("student_no")
+        .like("student_no", "ต%").order("student_no").range(from, from + 999);
+      if (error) return { error: new Error("อ่านรหัสชั่วคราวไม่สำเร็จ: " + error.message) };
+      existingNos.push(...(data || []).map(student => student.student_no));
+      if ((data || []).length < 1000) break;
+    }
+    const generated = nextTempStudentNos(existingNos, missing.length);
+    missing.forEach((row, index) => { row.studentNo = generated[index]; });
+  }
   // name เป็น generated column หลัง migration ห้ามใส่ใน payload
   const payload = rows.map(row => ({
     grade_level: row.grade,
@@ -923,7 +944,7 @@ document.getElementById("btn-add-one").addEventListener("click", async () => {
   const last = normalizeNamePart(document.getElementById("f-lastname").value);
   if (!grade) { showToast("เลือกชั้นก่อน", false); return; }
   if (!classroom) { showToast("กรอกห้องก่อน", false); return; }
-  if (!studentNo) { showToast("กรอกรหัสประจำตัวก่อน", false); return; }
+  if (!studentNo && grade !== PRE_SCHOOL_GRADE) { showToast("กรอกรหัสประจำตัวก่อน", false); return; }
   if (!prefix) { showToast("เลือกคำนำหน้าก่อน", false); return; }
   if (!first) { showToast("กรอกชื่อก่อน", false); return; }
   if (/\s/.test(first)) { showToast("ชื่อต้องไม่มีช่องว่าง", false); return; }
@@ -958,7 +979,7 @@ function renderPreview() {
     const isErr = r.errors.length > 0;
     if (isErr) errCount++;
     html += "<tr class='" + (isErr ? "err" : "") + "'><td>" + escapeHtml(r.grade) + "</td><td>" + escapeHtml(r.classroom) +
-      "</td><td>" + escapeHtml(r.studentNo) + "</td><td>" + escapeHtml(r.prefix || "") + "</td><td>" + escapeHtml(r.first) + "</td><td>" + escapeHtml(r.last) +
+      "</td><td>" + escapeHtml(r.studentNo || (r.grade === PRE_SCHOOL_GRADE ? "(ออกให้อัตโนมัติ)" : "")) + "</td><td>" + escapeHtml(r.prefix || "") + "</td><td>" + escapeHtml(r.first) + "</td><td>" + escapeHtml(r.last) +
       "</td><td>" + (isErr ? escapeHtml(r.errors.join(", ")) : "โอเค") + "</td></tr>";
   }
   html += "</table>";
@@ -1007,9 +1028,13 @@ async function populateAddGradeOptions() {
     ? "<optgroup label='" + label + "'>" + list.map(g => "<option value='" + g + "'>" + g + "</option>").join("") + "</optgroup>"
     : "";
   document.getElementById("f-grade").innerHTML =
-    "<option value=''>— เลือกชั้น —</option>" + optGroup("อนุบาล", kindergarten) +
+    "<option value=''>— เลือกชั้น —</option>" + optGroup("นอกหลักสูตร", [PRE_SCHOOL_GRADE]) + optGroup("อนุบาล", kindergarten) +
     optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
 }
+
+document.getElementById("f-grade").addEventListener("change", () => {
+  document.getElementById("f-studentno-hint").hidden = document.getElementById("f-grade").value !== PRE_SCHOOL_GRADE;
+});
 
 // เริ่มทำงาน
 await populateAddGradeOptions();
