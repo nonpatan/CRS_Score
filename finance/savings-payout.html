@@ -170,7 +170,7 @@ let balanceByStudent = new Map();
 let departedAccounts = [];
 // สถานะที่คืนเงิน 'ทุน' ได้ — เงื่อนไขของผู้ให้ทุน ไม่ใช่กติกาของสมุดออมทรัพย์
 // ⛔ ห้ามเอาชุดนี้ไปใช้กับการคืนเงินออมทรัพย์ เงินในสมุดเป็นของเด็กเอง ไม่มีเงื่อนไขผูก
-const SCHOLARSHIP_PAYOUT_STATUSES = ["จบการศึกษา", "ย้ายสถานศึกษา", "ลาออกกลางคัน", "ถึงแก่กรรม"];
+const SCHOLARSHIP_PAYOUT_STATUSES = ["จบการศึกษา", "ย้ายสถานศึกษา", "ลาออก", "ออกกลางคัน", "พ้นสภาพ"];
 const createdTxnByRequest = new Map();
 const withdrawalNote = request => `จ่ายตามคำขอเบิกวันที่ ${request.request_date}` +
   (request.payout_method === "โอน"
@@ -243,7 +243,7 @@ function savingsPayoutState(balance, pendingRequest) {
 }
 
 // คืนเงินทุน: มีเงื่อนไขของผู้ให้ทุน — คืนได้เฉพาะตอนออกจากโรงเรียนจริง
-// 🪤 'ขาดเรียนนาน' คืนไม่ได้ เพราะยังตามตัวไม่เจอ (ฐานปฏิเสธด้วย)
+// 🪤 'พักการเรียน' คืนทุนไม่ได้ เพราะยังจะกลับมาเรียน (ฐานปฏิเสธด้วย)
 function scholarshipPayoutState(status, balance, closingRow) {
   const value = Number(balance);
   if (!(value > 0)) return { enabled:false, note:"ไม่มียอดค้าง" };
@@ -254,9 +254,13 @@ function scholarshipPayoutState(status, balance, closingRow) {
   const current = status || "กำลังศึกษา";
   if (!SCHOLARSHIP_PAYOUT_STATUSES.includes(current)) return {
     enabled:false,
-    note:`ทุนคืนได้เฉพาะนักเรียนที่จบหรือย้ายออกแล้ว · สถานะตอนนี้คือ ${current}`
+    note:`ทุนคืนได้เฉพาะนักเรียนที่จบหรือออกจากโรงเรียนแล้ว · สถานะตอนนี้คือ ${current}`
   };
   return { enabled:true, note:"พร้อมปิดบัญชีทุน" };
+}
+
+function eligibleForAccountClosure(student) {
+  return student.status !== "พักการเรียน";
 }
 
 function renderDepartedAccounts() {
@@ -300,7 +304,8 @@ async function loadQueue() {
   if (queueRes.error) throw new Error("โหลดคิวรอจ่ายไม่สำเร็จ: " + queueRes.error.message);
   if (departedRes.error) throw new Error("โหลดนักเรียนที่ออกแล้วไม่สำเร็จ: " + departedRes.error.message);
   queue = queueRes.data || [];
-  const departed = departedRes.data || [];
+  // พักการเรียนมี left_school=true เพื่อซ่อนจากงานรายวัน แต่ยังไม่ใช่การออกจากโรงเรียน
+  const departed = (departedRes.data || []).filter(eligibleForAccountClosure);
   const studentIds = [...new Set([...queue.map(row => row.student_id), ...departed.map(row => row.id)])];
   if (studentIds.length) {
     const txnRes = await fetchAllRows(() => sb.from("savings_txns")

@@ -355,11 +355,12 @@
       <label for="student-status">สถานะ</label>
       <select id="student-status">
         <option value="กำลังศึกษา">กำลังศึกษา</option>
+        <option value="พักการเรียน">พักการเรียน</option>
         <option value="จบการศึกษา">จบการศึกษา</option>
         <option value="ย้ายสถานศึกษา">ย้ายสถานศึกษา</option>
-        <option value="ลาออกกลางคัน">ลาออกกลางคัน</option>
-        <option value="ขาดเรียนนาน">ขาดเรียนนาน</option>
-        <option value="ถึงแก่กรรม">ถึงแก่กรรม</option>
+        <option value="ลาออก">ลาออก</option>
+        <option value="ออกกลางคัน">ออกกลางคัน</option>
+        <option value="พ้นสภาพ">พ้นสภาพ</option>
       </select>
     </div>
     <div class="field">
@@ -369,7 +370,7 @@
     </div>
     <div class="field">
       <label for="student-status-note">หมายเหตุ</label>
-      <textarea id="student-status-note" placeholder="เช่น ย้ายไปโรงเรียนบ้านคลอง"></textarea>
+      <textarea id="student-status-note" placeholder="เช่น ย้ายไปโรงเรียนบ้านคลอง · ถ้าพ้นสภาพให้ใส่สาเหตุ"></textarea>
     </div>
     <div class="modal-actions">
       <button type="button" class="ghost" id="status-modal-cancel">ยกเลิก</button>
@@ -406,10 +407,10 @@ const isAdminUser = !!myProfile && myProfile.role === "admin";
 const canSetStudentStatus = isAdminUser || await checkDepartment("วิชาการ");
 
 const elToast = document.getElementById("toast");
-function showToast(msg, ok) {
+function showToast(msg, ok, duration = 3000) {
   elToast.textContent = msg;
   elToast.className = "toast " + (ok ? "ok" : "err");
-  setTimeout(() => { elToast.className = "toast"; }, 3000);
+  setTimeout(() => { if (elToast.textContent === msg) elToast.className = "toast"; }, duration);
 }
 
 if (!isAdminUser) {
@@ -668,6 +669,8 @@ statusModal.addEventListener("click", event => { if (event.target === statusModa
 statusSave.addEventListener("click", async () => {
   if (!statusTarget || !canSetStudentStatus) return;
   const nextStatus = statusSelect.value;
+  const returningFromSuspension = statusTarget.status === "พักการเรียน" && nextStatus === "กำลังศึกษา";
+  const studentId = statusTarget.id;
   const nextDate = statusDate.value;
   if (!nextDate) { showToast("กรุณาระบุวันที่สถานะมีผล", false); statusDate.focus(); return; }
   const nextNote = statusNoteForSave(statusTarget, nextStatus, statusNote.value, nextDate);
@@ -687,8 +690,21 @@ statusSave.addEventListener("click", async () => {
   const { error } = await sb.from("students").update(payload).eq("id", statusTarget.id);
   if (error) { showToast("บันทึกสถานะไม่สำเร็จ: " + error.message, false); statusSave.disabled = false; return; }
   closeStatusModal();
-  showToast("บันทึกสถานะนักเรียนแล้ว", true);
   await loadStudents();
+  if (returningFromSuspension) {
+    const year = elPlacementYear.value.trim() || getActiveYear();
+    const { data: placement, error: placementError } = await sb.from("student_year_placements")
+      .select("student_id").eq("student_id", studentId).eq("year", year).limit(1).maybeSingle();
+    if (placementError) {
+      showToast(`บันทึกสถานะแล้ว แต่ตรวจห้องปี ${year} ไม่สำเร็จ: ${placementError.message}`, false, 8000);
+      return;
+    }
+    if (!placement) {
+      showToast(`บันทึกสถานะแล้ว แต่ยังไม่มีห้องในปี ${year} — จัดห้องให้ก่อน`, false, 8000);
+      return;
+    }
+  }
+  showToast("บันทึกสถานะนักเรียนแล้ว", true);
 });
 
 function placementYear() {
@@ -905,7 +921,7 @@ async function deleteStudent(stu) {
 
   body += "<div class='danger-box'>⚠ การลบนี้ <b>กู้คืนไม่ได้</b> — คะแนนและข้อมูลทั้งหมดของนักเรียนคนนี้จะถูกลบถาวร<br>"
     + (links.profile || links.guardians.length ? "ประวัติและข้อมูลผู้ปกครองที่ครูประจำชั้นกรอกไว้จะหายด้วย<br>" : "")
-    + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้กดปุ่ม \"กำหนดสถานะ\" ของนักเรียนคนนี้แทน — เลือกย้ายสถานศึกษา ลาออกกลางคัน หรือจบการศึกษา ข้อมูลทั้งหมดจะยังอยู่ครบ</div>";
+    + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้กดปุ่ม \"กำหนดสถานะ\" ของนักเรียนคนนี้แทน — เลือกย้ายสถานศึกษา ลาออก หรือจบการศึกษา ข้อมูลทั้งหมดจะยังอยู่ครบ</div>";
   body += "<div class='confirm-field'><label for='del-confirm-name'>พิมพ์ชื่อนักเรียนให้ตรงเพื่อยืนยัน: <b>" + escapeHtml(stu.name) + "</b></label>"
     + "<input type='text' id='del-confirm-name' autocomplete='off' placeholder='พิมพ์ชื่อ-นามสกุลให้ตรง'></div>";
 
