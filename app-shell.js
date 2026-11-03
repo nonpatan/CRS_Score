@@ -225,8 +225,15 @@ function syncFinanceKpiTones() {
             ["attendance.html", "เช็คชื่อ"],
             ["entry.html", "กรอกคะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
-            ["theme-works.html", "ส่งผลงานตามธีม"],
-            ["student-registry.html", "ทะเบียนประวัติ"]
+            ["theme-works.html", "ส่งผลงานตามธีม"]
+          ]
+        },
+        {
+          label: "งานทะเบียน",
+          items: [
+            ["student-registry.html", "ทะเบียนประวัติ"],
+            ["students.html", "รายชื่อนักเรียน"],
+            ["rollover.html", "ขึ้นปีใหม่"]
           ]
         },
         {
@@ -235,8 +242,6 @@ function syncFinanceKpiTones() {
             ["manage.html", "จัดการโครงสร้าง"],
             ["competency-manage.html", "กำหนดกิจกรรม/กิจวัตร"],
             ["competency-core.html", "กำหนดสมรรถนะหลัก"],
-            ["students.html", "นักเรียน"],
-            ["rollover.html", "ขึ้นปีใหม่"],
             ["academic-settings.html", "ตั้งค่างานวิชาการ"],
             ["timetable-import.html", "นำเข้าตารางสอน"]
           ]
