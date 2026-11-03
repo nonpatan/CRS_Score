@@ -231,7 +231,7 @@ function syncFinanceKpiTones() {
         {
           label: "งานทะเบียน",
           items: [
-            ["student-registry.html", "ทะเบียนประวัติ"],
+            ["student-registry.html", "ระเบียนนักเรียน"],
             ["students.html", "รายชื่อนักเรียน"],
             ["rollover.html", "ขึ้นปีใหม่"]
           ]
@@ -340,7 +340,7 @@ function syncFinanceKpiTones() {
           steps: ["เลือกชั้น", "ตรวจรายชื่อ", "บันทึก"]
         },
         "student-registry.html": {
-          title: "ทะเบียนประวัติ",
+          title: "ระเบียนนักเรียน",
           description: "ตรวจความครบของประวัตินักเรียนตามห้อง",
           steps: ["เลือกห้อง", "เลือกนักเรียน", "กรอกประวัติ"]
         },
