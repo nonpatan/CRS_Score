@@ -200,6 +200,21 @@
   .add-tabs { display:flex; gap:8px; margin-bottom:12px; }
   .add-tabs button { flex:1; min-height:44px; }
   .add-tabs button[aria-selected="true"] { background:var(--teal); color:#fff; }
+  .regis-section { border-top:1px solid var(--line); padding-top:16px; margin-top:18px; }
+  .regis-section h3 { font-size:17px; margin:0 0 8px; }
+  .regis-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0; }
+  .regis-actions button { min-height:44px; }
+  .regis-actions .primary { width:auto; margin:0; }
+  .regis-table-wrap { overflow-x:auto; }
+  .regis-table { width:100%; border-collapse:collapse; min-width:600px; font-size:14px; }
+  .regis-table th,.regis-table td { border-bottom:1px solid var(--line); padding:8px; text-align:left; vertical-align:top; }
+  .regis-table select { min-width:90px; }
+  .regis-table input[type="checkbox"] { width:22px; height:22px; }
+  .regis-table label { margin:0; }
+  .regis-error { color:var(--danger); font-size:13px; }
+  .regis-warning { background:var(--amber-soft); color:var(--amber); padding:8px 12px; border-radius:8px; }
+  #regis-file { width:100%; min-height:44px; font:inherit; }
+  #regis-result { white-space:pre-line; overflow-wrap:anywhere; }
   #add-panel .panel-inactive { display:none !important; }
   #add-panel { margin-top:16px; scroll-margin-top:16px; }
   #preview-area { overflow-x:auto; }
@@ -285,7 +300,24 @@
     <div class="add-tabs" role="tablist" aria-label="วิธีเพิ่มนักเรียน">
       <button type="button" id="add-single-tab" role="tab" aria-selected="true" aria-controls="add-card">ทีละคน</button>
       <button type="button" id="add-excel-tab" role="tab" aria-selected="false" aria-controls="import-card" tabindex="-1">วางจาก Excel</button>
+      <button type="button" id="add-regis-tab" role="tab" aria-selected="false" aria-controls="regis-card" tabindex="-1">จากไฟล์ REGIS</button>
     </div>
+  <div class="card" id="regis-card" role="tabpanel" aria-labelledby="add-regis-tab" style="display:none">
+    <div class="section-title">จากไฟล์ REGIS</div>
+    <p class="field-note">ใช้ชั้นจาก REGIS และเลือกห้องก่อนเพิ่มนักเรียน · ชื่อที่ต่างแก้ได้เฉพาะคนที่เลือก · ไม่เปลี่ยนสถานะหรือห้องของนักเรียนเดิม</p>
+    <div class="field"><label for="regis-file">ไฟล์รายชื่อนักเรียนทั้งหมด (.xlsx)</label><input id="regis-file" type="file" accept=".xlsx" aria-describedby="regis-file-error"></div>
+    <p id="regis-file-error" class="regis-error" role="alert"></p>
+    <p id="regis-loading" role="status"></p>
+    <p id="regis-year-warning" class="regis-warning" hidden></p>
+    <div id="regis-preview" hidden>
+      <section class="regis-section" aria-labelledby="regis-new-title"><h3 id="regis-new-title">ยังไม่มีในระบบ (0)</h3><p class="hint">รายชื่อนี้อาจรวมนักเรียนฝากที่ไม่ได้ใช้ระบบนี้ — ติ๊กเฉพาะคนที่เรียนเต็มเวลาและต้องมีเช็คชื่อ/คะแนน</p><div class="regis-actions"><button type="button" class="ghost" id="regis-new-all">ติ๊กทั้งหมด</button><button type="button" class="ghost" id="regis-new-none">เอาติ๊กออกทั้งหมด</button></div><div id="regis-new-list"></div><div class="regis-actions"><label for="regis-bulk-grade">ตั้งห้องให้คนที่ติ๊ก</label><select id="regis-bulk-grade"><option value="">— เลือกชั้น —</option></select><label for="regis-bulk-room">ห้อง</label><select id="regis-bulk-room"><option value="">— เลือกห้อง —</option></select><button type="button" class="ghost" id="regis-bulk-apply">ใช้กับที่ติ๊ก</button></div><button type="button" class="primary" id="regis-add-save">เพิ่มนักเรียน 0 คน</button></section>
+      <section class="regis-section" aria-labelledby="regis-name-title"><h3 id="regis-name-title">ชื่อไม่ตรงกับ REGIS (0)</h3><div class="regis-actions"><button type="button" class="ghost" id="regis-name-all">ติ๊กทั้งหมด</button><button type="button" class="ghost" id="regis-name-none">เอาติ๊กออกทั้งหมด</button></div><div id="regis-name-list"></div><button type="button" class="primary" id="regis-name-save">แก้ชื่อตาม REGIS 0 คน</button></section>
+      <section class="regis-section" aria-labelledby="regis-check-title"><h3 id="regis-check-title">ต้องตรวจ (0)</h3><p class="field-note">แก้ที่ปุ่มแก้ไขของนักเรียนคนนั้นในรายชื่อด้านล่าง</p><div id="regis-check-list"></div></section>
+      <section class="regis-section" aria-labelledby="regis-missing-title"><h3 id="regis-missing-title">อยู่ในระบบแต่ไม่อยู่ใน REGIS (0)</h3><p class="field-note">อาจเป็นเตรียมอนุบาล หรือเด็กที่ออกแล้วแต่ยังไม่ได้เปลี่ยนสถานะ</p><div id="regis-missing-list"></div></section>
+      <p id="regis-result" role="status"></p>
+      <a id="regis-profile-import" href="student-import.html" hidden>นำเข้าระเบียนของนักเรียนใหม่</a>
+    </div>
+  </div>
   <!-- วางจาก Excel -->
   <div class="card" id="import-card" style="display:none">
     <div class="section-title">วางจาก Excel (เพิ่มทีละหลายคน)</div>
@@ -387,14 +419,17 @@
     <div id="del-modal-body"></div>
     <div class="modal-actions">
       <button class="ghost" id="del-modal-cancel">ยกเลิก</button>
+      <button class="ghost" id="del-modal-status" hidden>กำหนดสถานะ</button>
       <button class="danger" id="del-modal-confirm" disabled>ลบนักเรียน + ข้อมูลทั้งหมด</button>
     </div>
   </div>
 </div>
 
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, PRE_SCHOOL_GRADE, isTempStudentNo, nextTempStudentNos, getSetting } from "../supabase-client.js?v=20261103-1";
-import { normalizeNamePart, splitPrefix, parseStudentImportRows } from "./student-registry.js?v=20261103-2";
+import { sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, PRE_SCHOOL_GRADE, isTempStudentNo, nextTempStudentNos, getSetting, getAcademicYears, academicYearOf, bangkokNow, toDateStr } from "../supabase-client.js?v=20261103-1";
+import { normalizeNamePart, splitPrefix, parseStudentImportRows, STUDENT_PREFIXES } from "./student-registry.js?v=20261103-2";
+import { parseRegisRows, classifyAgainstDb, buildProfileUpsertRows } from "./student-import.js?v=20261103-2";
 
 const session = await requireAuth();
 if (!session) {
@@ -417,17 +452,22 @@ if (!isAdminUser) {
   const readonlyNote = document.getElementById("readonly-note");
   readonlyNote.style.display = "block";
   readonlyNote.textContent = canSetStudentStatus
-    ? "คุณกำหนดสถานะนักเรียนได้ · การเพิ่มนักเรียนและการลบข้อมูลทั้งหมดสงวนไว้สำหรับ admin"
+    ? "คุณกำหนดสถานะและเพิ่มนักเรียนจากไฟล์ REGIS ได้ · การเพิ่มแบบอื่นและการลบสงวนไว้สำหรับ admin"
     : "คุณดูรายชื่อนักเรียนได้อย่างเดียว · การกำหนดสถานะใช้สิทธิ์ฝ่ายวิชาการ และการลบใช้สิทธิ์ admin";
 } else {
   document.getElementById("placement-year-card").style.display = "block";
   document.getElementById("import-card").style.display = "block";
   document.getElementById("add-card").style.display = "block";
 }
+if (canSetStudentStatus) document.getElementById("regis-card").style.display = "block";
+if (!isAdminUser) {
+  document.getElementById("add-single-tab").hidden = true;
+  document.getElementById("add-excel-tab").hidden = true;
+}
 
 // แผงเพิ่มอ่านสิทธิ์หลังโค้ดเดิมตั้ง display แล้ว สลับแท็บด้วยคลาสเท่านั้น
 function syncStudentAddAccess() {
-  const allowed = document.getElementById("add-card").style.display !== "none";
+  const allowed = isAdminUser || canSetStudentStatus;
   document.getElementById("open-add-panel").hidden = !allowed;
   if (!allowed) document.getElementById("add-panel").hidden = true;
 }
@@ -439,26 +479,28 @@ function setStudentAddPanel(open) {
   if (open) document.getElementById("add-panel").scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",block:"start"});
   else document.getElementById("open-add-panel").focus();
 }
-function selectStudentAddTab(excel, focus = false) {
-  document.getElementById("add-card").classList.toggle("panel-inactive", excel);
-  document.getElementById("import-card").classList.toggle("panel-inactive", !excel);
-  for (const [id,selected] of [["add-single-tab",!excel],["add-excel-tab",excel]]) {
+const addTabIds = isAdminUser ? ["add-single-tab","add-excel-tab","add-regis-tab"] : ["add-regis-tab"];
+function selectStudentAddTab(activeId, focus = false) {
+  for (const [id,card] of [["add-single-tab","add-card"],["add-excel-tab","import-card"],["add-regis-tab","regis-card"]]) {
+    document.getElementById(card).classList.toggle("panel-inactive", id !== activeId);
     const tab = document.getElementById(id);
-    tab.setAttribute("aria-selected", String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-    if (selected && focus) tab.focus();
+    tab.setAttribute("aria-selected", String(id === activeId));
+    tab.tabIndex = id === activeId ? 0 : -1;
+    if (id === activeId && focus) tab.focus();
   }
 }
 syncStudentAddAccess();
-selectStudentAddTab(false);
+selectStudentAddTab(isAdminUser ? "add-single-tab" : "add-regis-tab");
 document.getElementById("open-add-panel").addEventListener("click", () => setStudentAddPanel(true));
 document.getElementById("close-add-panel").addEventListener("click", () => setStudentAddPanel(false));
-for (const [id,excel] of [["add-single-tab",false],["add-excel-tab",true]]) {
-  document.getElementById(id).addEventListener("click", () => selectStudentAddTab(excel));
+for (const id of addTabIds) {
+  document.getElementById(id).addEventListener("click", () => selectStudentAddTab(id));
   document.getElementById(id).addEventListener("keydown", event => {
     if (["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) {
       event.preventDefault();
-      selectStudentAddTab(event.key === "Home" ? false : event.key === "End" ? true : !excel, true);
+      const index = addTabIds.indexOf(id);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? addTabIds.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + addTabIds.length) % addTabIds.length;
+      selectStudentAddTab(addTabIds[next], true);
     }
   });
 }
@@ -756,94 +798,270 @@ async function insertStudentsWithPlacements(rows, year) {
   const { error: placementError } = await sb.from("student_year_placements").insert(placementRows);
   if (!placementError) return { count: placementRows.length, error: null };
 
-  // นักเรียนกลุ่มนี้เพิ่งสร้างและยังไม่มีคะแนน/การลงทะเบียน จึงลบย้อนกลับได้อย่างปลอดภัย
+  // ตรวจจำนวนแถวที่ลบจริง: RLS อาจกรอง DELETE จนได้ 0 แถวโดยไม่คืน error
   const ids = (created || []).map(student => student.id);
-  const { error: cleanupError } = ids.length
-    ? await sb.from("students").delete().in("id", ids)
-    : { error: null };
-  const cleanupText = cleanupError ? " และลบข้อมูลนักเรียนที่ค้างไม่สำเร็จ: " + cleanupError.message : " (ยกเลิกการเพิ่มนักเรียนกลับแล้ว)";
+  const { data: cleaned, error: cleanupError } = ids.length
+    ? await sb.from("students").delete().in("id", ids).select("id")
+    : { data: [], error: null };
+  const cleanupText = cleanupError || (cleaned || []).length !== ids.length
+    ? ` · เพิ่มนักเรียน ${ids.length} คนแล้วแต่จัดห้องไม่สำเร็จ — แจ้ง admin ให้จัดห้องหรือลบ (รหัส ${rows.map(row => row.studentNo).join(", ")})${cleanupError ? " · " + cleanupError.message : ""}`
+    : " (ยกเลิกการเพิ่มนักเรียนกลับแล้ว)";
   return { error: new Error("บันทึกประวัติชั้น/ห้องไม่สำเร็จ: " + placementError.message + cleanupText) };
 }
 
-// ---------- ลบนักเรียน ----------
-// ทุก FK ที่ผูก student_id เป็น ON DELETE CASCADE ทั้งหมด (schema.sql) ฐานข้อมูลจึงลบได้เสมอ
-// และจะลบข้อมูลลูกตามให้ — guard ที่นี่เป็นแค่ด่านฝั่งหน้าเว็บกันลบพลาด ถ้ามีคะแนน/เช็คชื่อ/ร./
-// ชั่วโมงชดเชย/คะแนนสมรรถนะ/ประวัติ/ผู้ปกครอง อยู่ จะไม่ลบเงียบ ๆ แต่เปิด modal โชว์ข้อมูลที่จะหายก่อน ให้ครู
-// พิมพ์ชื่อยืนยันแล้วจึงลบทั้งหมดทีเดียว (เผื่อกรณีสร้างผิด/ทดสอบแล้วอยากล้างจริง)
-
-// ป้ายวิชา: รหัส · ชื่อ · ปี · เทอม (เทอมเฉพาะมัธยมที่มีค่า)
-function subjLabel(subj) {
-  if (!subj) return "(ไม่ทราบวิชา)";
-  const parts = [];
-  if (subj.code) parts.push(subj.code);
-  parts.push(subj.name || "(ไม่มีชื่อ)");
-  if (subj.year) parts.push("ปี " + subj.year);
-  if (subj.term) parts.push("เทอม " + subj.term);
-  return parts.join(" · ");
+// ---------- เพิ่มจากไฟล์ REGIS ----------
+const regisEl = id => document.getElementById(id);
+let regisParsed = null, regisClassified = null, regisYear = null, regisPlacements = [];
+const regisNewSelected = new Set(), regisNameSelected = new Set();
+const regisRooms = new Map(), regisChosenRooms = new Map();
+let regisBusy = false;
+function regisSetBusy(busy) {
+  regisBusy = busy;
+  for (const id of ["regis-file","regis-add-save","regis-name-save","regis-bulk-apply","regis-new-all","regis-new-none","regis-name-all","regis-name-none","regis-bulk-grade","regis-bulk-room"])
+    regisEl(id).disabled = busy;
+  regisEl("regis-card").setAttribute("aria-busy",String(busy));
 }
-
-// รวมยอดรายการตามวิชา แล้วคืน array เรียงตามชื่อวิชา
-function tallyBySubject(rows, getSubject) {
-  const map = new Map();
-  for (const r of (rows || [])) {
-    const subj = getSubject(r);
-    if (!subj) continue;
-    if (!map.has(subj.id)) map.set(subj.id, { subj, count: 0 });
-    map.get(subj.id).count++;
-  }
-  return [...map.values()].sort((a, b) => subjLabel(a.subj).localeCompare(subjLabel(b.subj), "th"));
+function regisRoomOptions(grade, selected, regisRoom = selected, includeAllFileRooms = false) {
+  const existing = regisRooms.get(grade) || new Set();
+  const rooms = [...existing].sort((a,b) => String(a).localeCompare(String(b),"th",{numeric:true}));
+  const extra = new Set();
+  if (includeAllFileRooms) for (const item of regisClassified.missingInDb) if (item.grade === grade && item.classroom && !existing.has(item.classroom)) extra.add(item.classroom);
+  if (regisRoom && !existing.has(regisRoom)) extra.add(regisRoom);
+  if (selected && !existing.has(selected)) extra.add(selected);
+  rooms.push(...[...extra].sort((a,b) => String(a).localeCompare(String(b),"th",{numeric:true})));
+  return (selected ? "" : '<option value="">— เลือกห้อง —</option>') + rooms
+    .map(room => `<option value="${escapeHtml(room)}"${room === selected ? " selected" : ""}>${escapeHtml(room)}${existing.has(room) ? "" : " (ห้องใหม่)"}</option>`).join("");
 }
-
-// ดึงข้อมูลทั้งหมดที่ผูกกับนักเรียนคนนี้ พร้อมชื่อวิชา/กิจกรรม เพื่อแสดงรายละเอียด
-async function gatherStudentLinks(studentId) {
-  const [scores, att, remarks, makeup, comp, enroll, placements, profile, guardians] = await Promise.all([
-    sb.from("scores").select("id, collections!inner(indicators!inner(units!inner(subjects!inner(id,name,code,year,term))))").eq("student_id", studentId),
-    sb.from("attendance_records").select("id, attendance_sessions!inner(subjects!inner(id,name,code,year,term))").eq("student_id", studentId),
-    sb.from("remarks").select("id, code, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
-    sb.from("makeup_hours").select("id, periods, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
-    sb.from("competency_assessment_scores").select("id, competency_assessment_sessions!inner(competency_assessments!inner(id,name))").eq("student_id", studentId),
-    sb.from("enrollments").select("id, subjects!inner(id,name,code,year,term)").eq("student_id", studentId),
-    sb.from("student_year_placements").select("id, year, grade_level, classroom").eq("student_id", studentId).order("year"),
-    sb.from("student_profiles").select("student_id").eq("student_id", studentId),
-    sb.from("student_guardians").select("id, relation, prefix, first_name, last_name").eq("student_id", studentId).order("sort_order")
+function regisNameValid(item) {
+  if (!STUDENT_PREFIXES.includes(normalizeNamePart(item.prefix))) return "คำนำหน้าไม่อยู่ในรายการ";
+  if (!item.first || /\s/.test(item.first)) return "ชื่อต้องมีค่าและไม่มีช่องว่าง";
+  return "";
+}
+function regisNewError(item) {
+  if (!item.grade || !item.studentNo) return "ชั้นหรือรหัสประจำตัวว่าง";
+  if (!regisChosenRooms.get(item.studentNo)?.trim()) return "ยังไม่เลือกห้อง";
+  return regisNameValid(item);
+}
+function regisUpdateButtons() {
+  const newCount = regisClassified?.missingInDb.filter(item => regisNewSelected.has(item.studentNo) && !regisNewError(item)).length || 0;
+  const nameCount = regisClassified?.nameMismatches.filter(item => regisNameSelected.has(item.studentId) && !regisNameValid(item.regis)).length || 0;
+  regisEl("regis-add-save").textContent = `เพิ่มนักเรียน ${newCount} คน`;
+  regisEl("regis-name-save").textContent = `แก้ชื่อตาม REGIS ${nameCount} คน`;
+  regisEl("regis-add-save").disabled = regisBusy || !newCount;
+  regisEl("regis-name-save").disabled = regisBusy || !nameCount;
+}
+function regisRender() {
+  const c = regisClassified;
+  regisEl("regis-preview").hidden = false;
+  regisEl("regis-new-title").textContent = `ยังไม่มีในระบบ (${c.missingInDb.length})`;
+  regisEl("regis-name-title").textContent = `ชื่อไม่ตรงกับ REGIS (${c.nameMismatches.length})`;
+  regisEl("regis-check-title").textContent = `ต้องตรวจ (${c.gradeMismatches.length + c.noPlacement.length})`;
+  regisEl("regis-missing-title").textContent = `อยู่ในระบบแต่ไม่อยู่ใน REGIS (${c.missingInFile.length})`;
+  regisEl("regis-new-list").innerHTML = c.missingInDb.length ? `<div class="regis-table-wrap"><table class="regis-table"><thead><tr><th>เลือก</th><th>รหัส</th><th>ชื่อตาม REGIS</th><th>ชั้น</th><th>ห้อง</th></tr></thead><tbody>${c.missingInDb.map((item,index) => {
+    const reason = regisNewError(item), room = regisChosenRooms.get(item.studentNo) || "";
+    return `<tr><td><label><input type="checkbox" data-regis-new="${index}" aria-label="เลือก ${escapeHtml(item.studentNo)}"${regisNewSelected.has(item.studentNo) && !reason ? " checked" : ""}${reason ? " disabled" : ""}></label></td><td>${escapeHtml(item.studentNo)}</td><td>${escapeHtml(`${item.prefix}${item.first} ${item.last}`.trim())}${reason ? `<div class="regis-error">${escapeHtml(reason)}</div>` : ""}${item.warnings?.length ? `<div class="regis-warning">${item.warnings.map(escapeHtml).join(" · ")}</div>` : ""}</td><td>${escapeHtml(item.grade)}</td><td><label for="regis-room-${index}" class="field-note">ห้องของ ${escapeHtml(item.studentNo)}</label><select id="regis-room-${index}" data-regis-room="${index}">${regisRoomOptions(item.grade,room,item.classroom)}</select></td></tr>`;
+  }).join("")}</tbody></table></div>` : '<p class="field-note">ไม่มีรายการ</p>';
+  const grades = [...new Set(c.missingInDb.map(item => item.grade).filter(Boolean))].sort((a,b) => GRADE_ORDER.indexOf(a)-GRADE_ORDER.indexOf(b));
+  const gradeSelect = regisEl("regis-bulk-grade"), priorGrade = gradeSelect.value;
+  gradeSelect.innerHTML = '<option value="">— เลือกชั้น —</option>' + grades.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+  if (grades.includes(priorGrade)) gradeSelect.value = priorGrade;
+  regisUpdateBulkRooms();
+  const fieldNames = {prefix:"คำนำหน้าต่าง",first_name:"ชื่อต่าง",last_name:"นามสกุลต่าง"};
+  const marked = (parts,fields) => `${fields.includes("prefix") ? `<b>${escapeHtml(parts.prefix)}</b>` : escapeHtml(parts.prefix)}${fields.includes("first_name") ? `<b>${escapeHtml(parts.first)}</b>` : escapeHtml(parts.first)} ${fields.includes("last_name") ? `<b>${escapeHtml(parts.last || "")}</b>` : escapeHtml(parts.last || "")}`;
+  regisEl("regis-name-list").innerHTML = c.nameMismatches.length ? c.nameMismatches.map((item,index) => {
+    const reason = regisNameValid(item.regis);
+    return `<div class="student-row"><label><input type="checkbox" data-regis-name="${index}" aria-label="เลือกแก้ชื่อ ${escapeHtml(item.studentNo)}"${regisNameSelected.has(item.studentId) && !reason ? " checked" : ""}${reason ? " disabled" : ""}></label><div class="info"><div class="name">${escapeHtml(item.studentNo)} · ${item.fields.map(f => fieldNames[f]).join(" · ")}</div><div class="meta">ในระบบ: ${marked(item.current,item.fields)}</div><div class="meta">REGIS: ${marked(item.regis,item.fields)}</div>${reason ? `<div class="regis-error">${escapeHtml(reason)}</div>` : ""}</div></div>`;
+  }).join("") : '<p class="field-note">ไม่มีรายการ</p>';
+  const needsCheck = [
+    ...c.gradeMismatches.map(item => `${item.studentNo} ${item.name} · ชั้นในระบบ ${item.currentGrade} · REGIS ${item.regisGrade}`),
+    ...c.noPlacement.map(item => `${item.studentNo} ${item.name} · ยังไม่มีห้องปีนี้ · REGIS ${item.regisGrade}/${item.regisRoom}`)
+  ];
+  regisEl("regis-check-list").innerHTML = needsCheck.length ? `<ul>${needsCheck.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>` : '<p class="field-note">ไม่มีรายการ</p>';
+  regisEl("regis-missing-list").innerHTML = c.missingInFile.length ? `<ul>${c.missingInFile.map(item => `<li>${escapeHtml(`${item.student_no} ${item.prefix || ""}${item.first_name || ""} ${item.last_name || ""}`.trim())}</li>`).join("")}</ul>` : '<p class="field-note">ไม่มีรายการ</p>';
+  regisUpdateButtons();
+}
+function regisUpdateBulkRooms() {
+  const grade = regisEl("regis-bulk-grade").value;
+  regisEl("regis-bulk-room").innerHTML = grade ? regisRoomOptions(grade,"","",true) : '<option value="">— เลือกห้อง —</option>';
+}
+async function regisReload(resetSelection = true) {
+  const [st,pl] = await Promise.all([
+    sb.from("students").select("id,student_no,prefix,first_name,last_name,status"),
+    sb.from("student_year_placements").select("student_id,grade_level,classroom").eq("year",regisYear)
   ]);
-  const err = scores.error || att.error || remarks.error || makeup.error || comp.error || enroll.error || placements.error || profile.error || guardians.error;
-  if (err) throw err;
-
-  // คะแนนสมรรถนะ (กิจกรรม/กิจวัตร) รวมตามชื่อรายการ
-  const compMap = new Map();
-  for (const r of (comp.data || [])) {
-    const a = r.competency_assessment_sessions && r.competency_assessment_sessions.competency_assessments;
-    if (!a) continue;
-    if (!compMap.has(a.id)) compMap.set(a.id, { name: a.name || "(ไม่มีชื่อ)", count: 0 });
-    compMap.get(a.id).count++;
+  if (st.error || pl.error) throw new Error(`โหลดข้อมูลปัจจุบันไม่สำเร็จ: ${(st.error || pl.error).message}`);
+  regisPlacements = pl.data || [];
+  regisRooms.clear();
+  for (const row of regisPlacements) { if (!regisRooms.has(row.grade_level)) regisRooms.set(row.grade_level,new Set()); if (row.classroom) regisRooms.get(row.grade_level).add(String(row.classroom)); }
+  regisClassified = classifyAgainstDb(regisParsed,st.data || [],regisPlacements);
+  if (resetSelection) {
+    regisNewSelected.clear(); regisNameSelected.clear(); regisChosenRooms.clear();
+    for (const item of regisClassified.missingInDb) regisChosenRooms.set(item.studentNo,item.classroom);
+    for (const item of regisClassified.nameMismatches) if (!regisNameValid(item.regis)) regisNameSelected.add(item.studentId);
   }
-
-  return {
-    scores:   tallyBySubject(scores.data,  r => r.collections && r.collections.indicators && r.collections.indicators.units && r.collections.indicators.units.subjects),
-    att:      tallyBySubject(att.data,     r => r.attendance_sessions && r.attendance_sessions.subjects),
-    remarks:  tallyBySubject(remarks.data, r => r.subjects),
-    makeup:   tallyBySubject(makeup.data,  r => r.subjects),
-    comp:     [...compMap.values()].sort((a, b) => a.name.localeCompare(b.name, "th")),
-    enroll:   tallyBySubject(enroll.data,  r => r.subjects),
-    placements: (placements.data || []).map(p => ({ year: p.year, grade_level: p.grade_level, classroom: p.classroom })),
-    profile: (profile.data || []).length > 0,
-    guardians: guardians.data || []
-  };
+  regisRender();
 }
-
-// สร้าง HTML section ของแต่ละหมวด (รายการวิชา + จำนวน)
-function linkSectionHtml(title, unit, rows, labelFn) {
-  if (!rows || rows.length === 0) return "";
-  const items = rows.map(r => "<li>" + labelFn(r) + " — <span class='link-count'>" + r.count + " " + unit + "</span></li>").join("");
-  return "<div class='link-group'><div class='g-title'>" + escapeHtml(title) + "</div><ul>" + items + "</ul></div>";
+regisEl("regis-file").addEventListener("change",async event => {
+  regisEl("regis-preview").hidden = true; regisEl("regis-profile-import").hidden = true;
+  regisEl("regis-file-error").textContent = ""; regisEl("regis-result").textContent = "";
+  const file = event.target.files?.[0]; if (!file) return;
+  if (!/\.xlsx$/i.test(file.name)) { regisEl("regis-file-error").textContent = "เลือกไฟล์ .xlsx เท่านั้น"; return; }
+  regisSetBusy(true); regisEl("regis-loading").textContent = "กำลังอ่านไฟล์และตรวจข้อมูล…";
+  try {
+    if (!window.XLSX) throw new Error("โหลดตัวอ่านไฟล์ไม่สำเร็จ — ตรวจอินเทอร์เน็ตแล้วเปิดหน้านี้ใหม่");
+    const workbook = window.XLSX.read(await file.arrayBuffer(),{type:"array"}), sheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet) throw new Error("ไฟล์ไม่มีชีตข้อมูล");
+    regisParsed = parseRegisRows(window.XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:""}));
+    if (regisParsed.errors.length) throw new Error(`พบรหัสนักเรียนซ้ำ: ${regisParsed.errors.join(" · ")}`);
+    regisYear = academicYearOf(toDateStr(bangkokNow()),await getAcademicYears());
+    if (!regisYear) throw new Error("ไม่พบปีการศึกษาปัจจุบัน");
+    regisEl("regis-year-warning").hidden = elPlacementYear.value.trim() === String(regisYear);
+    regisEl("regis-year-warning").textContent = `แท็บนี้ใช้ปีการศึกษา ${regisYear} (ปีปัจจุบัน) เสมอ`;
+    await regisReload();
+    regisEl("regis-loading").textContent = `${regisParsed.students.length} คนในไฟล์ · ปีการศึกษา ${regisYear}`;
+  } catch (error) { regisEl("regis-file-error").textContent = /requested file could not be read/i.test(error.message || "") ? "อ่านไฟล์ไม่ได้ — ตรวจสิทธิ์การเข้าถึงไฟล์แล้วเลือกใหม่" : error.message || "อ่านไฟล์ไม่สำเร็จ"; regisEl("regis-loading").textContent = ""; }
+  finally { regisSetBusy(false); regisUpdateButtons(); }
+});
+regisEl("regis-new-list").addEventListener("change",event => {
+  const node = event.target, index = Number(node.dataset.regisNew ?? node.dataset.regisRoom);
+  const item = regisClassified?.missingInDb[index]; if (!item) return;
+  if (node.dataset.regisRoom !== undefined) { regisChosenRooms.set(item.studentNo,node.value); regisRender(); return; }
+  if (node.checked) regisNewSelected.add(item.studentNo); else regisNewSelected.delete(item.studentNo);
+  regisUpdateButtons();
+});
+regisEl("regis-name-list").addEventListener("change",event => {
+  const index = Number(event.target.dataset.regisName), item = regisClassified?.nameMismatches[index]; if (!item) return;
+  if (event.target.checked) regisNameSelected.add(item.studentId); else regisNameSelected.delete(item.studentId);
+  regisUpdateButtons();
+});
+for (const [kind,all] of [["new",true],["new",false],["name",true],["name",false]]) {
+  regisEl(`regis-${kind}-${all ? "all" : "none"}`).addEventListener("click",() => {
+    const chosen = kind === "new" ? regisNewSelected : regisNameSelected;
+    chosen.clear();
+    if (all) for (const item of (kind === "new" ? regisClassified.missingInDb : regisClassified.nameMismatches)) {
+      if (kind === "new" ? !regisNewError(item) : !regisNameValid(item.regis)) chosen.add(kind === "new" ? item.studentNo : item.studentId);
+    }
+    regisRender();
+  });
 }
+regisEl("regis-bulk-grade").addEventListener("change",regisUpdateBulkRooms);
+regisEl("regis-bulk-apply").addEventListener("click",() => {
+  const grade = regisEl("regis-bulk-grade").value, room = regisEl("regis-bulk-room").value;
+  if (!grade || !room) { showToast("เลือกชั้นและห้องก่อน",false); return; }
+  let changed = 0;
+  for (const item of regisClassified.missingInDb) if (regisNewSelected.has(item.studentNo) && item.grade === grade) { regisChosenRooms.set(item.studentNo,room); changed++; }
+  regisRender(); regisEl("regis-result").textContent = `ตั้งห้อง ${room} ให้คนที่ติ๊กในชั้น ${grade} แล้ว ${changed} คน`;
+});
+async function regisFillNewProfiles(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const room = `${item.grade}/${regisChosenRooms.get(item.studentNo)}`;
+    if (!groups.has(room)) groups.set(room,[]);
+    groups.get(room).push(item);
+  }
+  let profileCount = 0, guardianCount = 0;
+  const failures = [];
+  for (const [room, group] of groups) {
+    regisEl("regis-result").textContent = `เพิ่มนักเรียนแล้ว · กำลังเติมระเบียนห้อง ${room}…`;
+    try {
+      const {data: students, error: studentError} = await sb.from("students")
+        .select("id,student_no").in("student_no",group.map(item => item.studentNo));
+      if (studentError) throw studentError;
+      const byNo = new Map();
+      for (const student of students || []) {
+        const no = String(student.student_no).trim();
+        if (byNo.has(no)) throw new Error(`พบรหัส ${no} ซ้ำในฐาน`);
+        byNo.set(no,student.id);
+      }
+      const linked = group.map(item => {
+        const studentId = byNo.get(item.studentNo);
+        if (!studentId) throw new Error(`ไม่พบรหัส ${item.studentNo} หลังเพิ่ม`);
+        return {...item,studentId};
+      });
+      const profiles = buildProfileUpsertRows(linked,new Map());
+      if (profiles.length) {
+        const {error} = await sb.from("student_profiles").upsert(profiles,{onConflict:"student_id"});
+        if (error) throw error;
+        profileCount += profiles.length;
+      }
+      const {data: existingGuardians, error: guardianReadError} = await sb.from("student_guardians")
+        .select("student_id").in("student_id",linked.map(item => item.studentId));
+      if (guardianReadError) throw guardianReadError;
+      const occupied = new Set((existingGuardians || []).map(row => row.student_id));
+      const guardians = linked.filter(item => !occupied.has(item.studentId))
+        .flatMap(item => item.guardians.map(guardian => ({student_id:item.studentId,...guardian})));
+      if (guardians.length) {
+        const {error} = await sb.from("student_guardians").insert(guardians);
+        if (error) throw error;
+        guardianCount += guardians.length;
+      }
+    } catch (error) { failures.push(`เพิ่มนักเรียนแล้ว แต่เติมระเบียนห้อง ${room} ไม่สำเร็จ — ${error.message} · นำเข้าซ้ำได้ที่หน้าระเบียนนักเรียน`); }
+  }
+  return {profileCount,guardianCount,failures};
+}
+regisEl("regis-add-save").addEventListener("click",async () => {
+  if (regisBusy || !regisClassified) return;
+  const picked = regisClassified.missingInDb.filter(item => regisNewSelected.has(item.studentNo) && !regisNewError(item));
+  if (!picked.length) return;
+  const roomCounts = new Map(); let newRoomCount = 0;
+  for (const item of picked) { const room = regisChosenRooms.get(item.studentNo), key = `${item.grade}/${room}`; roomCounts.set(key,(roomCounts.get(key)||0)+1); if (!regisRooms.get(item.grade)?.has(room)) newRoomCount++; }
+  const summary = [...roomCounts].map(([room,count]) => `${room} ${count} คน`).join(" · ");
+  if (!await window.crsAskConfirm({title:"เพิ่มนักเรียนจาก REGIS",message:`เพิ่มนักเรียน ${picked.length} คน พร้อมระเบียนและผู้ปกครอง · ${summary}${newRoomCount ? ` · ห้องใหม่ ${newRoomCount} คน` : ""}`,okLabel:`เพิ่มนักเรียน ${picked.length} คน`})) return;
+  regisSetBusy(true);
+  let addedCount = 0;
+  try {
+    const current = new Set();
+    for (let from=0;;from+=1000) {
+      const {data,error} = await sb.from("students").select("student_no").order("student_no").range(from,from+999);
+      if (error) throw new Error("ตรวจรหัสซ้ำไม่สำเร็จ: " + error.message);
+      for (const row of data || []) current.add(String(row.student_no).trim());
+      if ((data || []).length < 1000) break;
+    }
+    const fresh = picked.filter(item => !current.has(item.studentNo));
+    const skipped = picked.length - fresh.length;
+    if (!fresh.length) { regisEl("regis-result").textContent = `ไม่ได้เพิ่ม: ${skipped} คนมีรหัสอยู่ในระบบแล้ว`; await regisReload(); return; }
+    const rows = fresh.map(item => ({grade:item.grade,classroom:regisChosenRooms.get(item.studentNo),studentNo:item.studentNo,prefix:item.prefix,first:item.first,last:item.last}));
+    const {count,error} = await insertStudentsWithPlacements(rows,regisYear);
+    if (error) throw error;
+    addedCount = count;
+    regisEl("regis-result").textContent = `เพิ่มนักเรียน ${count} คนแล้ว · กำลังเติมระเบียนและผู้ปกครอง…`;
+    const filled = await regisFillNewProfiles(fresh);
+    regisEl("regis-result").textContent = `เพิ่มนักเรียน ${count} · ระเบียน ${filled.profileCount} · ผู้ปกครอง ${filled.guardianCount} แถว${skipped ? ` · ข้ามรหัสที่มีแล้ว ${skipped} คน` : ""}${filled.failures.length ? `\n${filled.failures.join("\n")}` : ""}`;
+    regisEl("regis-profile-import").hidden = !filled.failures.length;
+    showToast(filled.failures.length ? `เพิ่มนักเรียนแล้ว แต่เติมระเบียนไม่ครบ ${filled.failures.length} ห้อง` : `เพิ่มนักเรียนพร้อมระเบียนแล้ว ${count} คน`,!filled.failures.length,8000);
+    await loadStudents(); await regisReload();
+  } catch (error) {
+    const message = addedCount ? `เพิ่มนักเรียน ${addedCount} คนแล้ว แต่โหลดข้อมูลใหม่ไม่สำเร็จ: ${error.message} — ตรวจรายชื่อและนำเข้าระเบียนซ้ำได้` : `เพิ่มไม่สำเร็จ: ${error.message}`;
+    regisEl("regis-result").textContent = addedCount ? `${regisEl("regis-result").textContent}\n${message}` : message;
+    regisEl("regis-profile-import").hidden = !addedCount;
+    showToast(message,false,8000);
+  }
+  finally { regisSetBusy(false); regisUpdateButtons(); }
+});
+regisEl("regis-name-save").addEventListener("click",async () => {
+  if (regisBusy || !regisClassified) return;
+  const picked = regisClassified.nameMismatches.filter(item => regisNameSelected.has(item.studentId) && !regisNameValid(item.regis));
+  if (!picked.length) return;
+  if (!await window.crsAskConfirm({title:"แก้ชื่อตาม REGIS",message:`เปลี่ยนชื่อที่แสดง ${picked.length} คน · เกรด เช็คชื่อ และเงินออมไม่เปลี่ยน`,okLabel:`แก้ชื่อตาม REGIS ${picked.length} คน`})) return;
+  regisSetBusy(true); let success = 0; const failures = [];
+  for (const item of picked) {
+    const payload = {prefix:item.regis.prefix,first_name:item.regis.first,last_name:item.regis.last || null};
+    const {error} = await sb.from("students").update(payload).eq("id",item.studentId);
+    if (error) failures.push(`${item.studentNo}: ${error.message}`); else success++;
+  }
+  regisEl("regis-result").textContent = `สำเร็จ ${success} คน · ไม่สำเร็จ ${failures.length} คน${failures.length ? `\n${failures.join("\n")}` : ""}`;
+  try { await loadStudents(); await regisReload(); }
+  catch (error) { regisEl("regis-result").textContent += `\nโหลดข้อมูลใหม่ไม่สำเร็จ: ${error.message}`; }
+  regisSetBusy(false); regisUpdateButtons();
+});
 
+// ---------- ลบนักเรียน ----------
 const delModal = document.getElementById("del-modal");
 const delModalTitle = document.getElementById("del-modal-title");
 const delModalSub = document.getElementById("del-modal-sub");
 const delModalBody = document.getElementById("del-modal-body");
 const delModalCancel = document.getElementById("del-modal-cancel");
+const delModalStatus = document.getElementById("del-modal-status");
 const delModalConfirm = document.getElementById("del-modal-confirm");
 let delTarget = null;
 
@@ -852,97 +1070,104 @@ function closeDelModal() {
   delTarget = null;
   delModalBody.innerHTML = "";
   delModalConfirm.disabled = true;
+  delModalConfirm.hidden = false;
+  delModalStatus.hidden = true;
 }
 delModalCancel.addEventListener("click", closeDelModal);
 delModal.addEventListener("click", (e) => { if (e.target === delModal) closeDelModal(); });
+delModalStatus.addEventListener("click", () => { const target = delTarget; closeDelModal(); if (target) openStatusModal(target); });
 
+// นับทุกตารางก่อนลบ; คิวรีใดผิดพลาดต้องหยุด ไม่ถือว่าไม่มีข้อมูล
+const STUDENT_LINK_TABLES = {
+  grade: [
+    ["scores","คะแนน"],["exam_scores","คะแนนสอบ"],["remarks","ผล ร."],
+    ["makeup_hours","ชั่วโมงชดเชย"],["attendance_records","เช็คชื่อรายวิชา"],
+    ["competency_assessment_scores","คะแนนสมรรถนะ"],
+    ["activity_pass_results","ผลผ่านกิจกรรม"],["student_term_comments","ความเห็นรายเทอม"]
+  ],
+  money: [
+    ["savings_txns","เงินออม"],["savings_withdrawals","ถอนเงินออม"],
+    ["student_charges","รายการเรียกเก็บ"],["fee_receipts","ใบเสร็จ"],
+    ["scholarship_txns","ทุนการศึกษา"],["student_transport","ข้อมูลรถรับส่ง"],
+    ["transport_payments","ชำระค่ารถ"],["transport_payment_voids","ยกเลิกชำระค่ารถ"],
+    ["transport_day_overrides","วันรถรับส่ง"],["transport_opening_debts","หนี้ค่ารถยกมา"],
+    ["special_orders","คำสั่งพิเศษ"]
+  ],
+  other: [
+    ["daily_attendance","เช็คชื่อรายวัน"],["student_profiles","ประวัตินักเรียน"],
+    ["student_guardians","ผู้ปกครอง"],["enrollments","ลงทะเบียนวิชา"],
+    ["competency_assessment_members","สมาชิกประเมินสมรรถนะ"],
+    ["competency_assessment_session_students","รายชื่อในรอบประเมิน"],
+    ["student_letters","หนังสือนักเรียน"],["absence_letters","หนังสือขาดเรียน"],
+    ["student_year_placements","ประวัติชั้น/ห้อง"]
+  ]
+};
+async function countStudentLinks(studentId) {
+  const entries = Object.entries(STUDENT_LINK_TABLES).flatMap(([group, tables]) =>
+    tables.map(([table,label]) => ({group,table,label})));
+  const results = await Promise.all(entries.map(async entry => {
+    const {count,error} = await sb.from(entry.table)
+      .select("student_id", {count:"exact",head:true}).eq("student_id",studentId);
+    if (error || count == null) throw new Error(`ตรวจ ${entry.label} ไม่สำเร็จ: ${error?.message || "ไม่มีผลนับ"}`);
+    return {...entry,count};
+  }));
+  return results.filter(row => row.count > 0);
+}
+function linkedRowsHtml(rows) {
+  return rows.length ? "<ul>" + rows.map(row => `<li>${escapeHtml(row.label)} ${row.count} รายการ</li>`).join("") + "</ul>" : "";
+}
+function linkedCount(rows, group) {
+  return rows.filter(row => row.group === group).reduce((sum,row) => sum + row.count,0);
+}
+function deleteFailure(error) {
+  return error?.code === "23503" ? "ลบไม่ได้ เพราะมีข้อมูลการเงินผูกอยู่" : "ลบไม่สำเร็จ: " + (error?.message || error);
+}
 async function deleteStudent(stu) {
   let links;
-  try {
-    links = await gatherStudentLinks(stu.id);
-  } catch (e) {
-    showToast("ตรวจข้อมูลที่ผูกกับนักเรียนไม่สำเร็จ: " + (e.message || e), false);
-    return;
-  }
-
-  const gradeCount = links.scores.reduce((s, r) => s + r.count, 0)
-    + links.att.reduce((s, r) => s + r.count, 0)
-    + links.remarks.reduce((s, r) => s + r.count, 0)
-    + links.makeup.reduce((s, r) => s + r.count, 0)
-    + links.comp.reduce((s, r) => s + r.count, 0);
-
-  // ไม่มีคะแนน/เช็คชื่อ/ร./ชดเชย/สมรรถนะ/ประวัติ/ผู้ปกครอง → ยืนยันสั้น ๆ
-  if (gradeCount === 0 && !links.profile && links.guardians.length === 0) {
-    const enrollN = links.enroll.length;
-    if (enrollN > 0 && !await window.crsAskConfirm({
-      title: "ลบนักเรียนและการลงทะเบียน",
-      message: "นักเรียน \"" + stu.name + "\" ลงทะเบียนอยู่ " + enrollN + " วิชา ระบบจะเลิกลงทะเบียนทั้งหมดพร้อมลบนักเรียน · ลบแล้วกู้คืนไม่ได้",
-      okLabel: "ลบนักเรียน"
-    })) return;
-    if (enrollN === 0 && !await window.crsAskConfirm({
-      title: "ลบนักเรียน",
-      message: "\"" + stu.name + "\" ยังไม่มีคะแนน ประวัติ หรือข้อมูลอื่นผูกอยู่ · ลบแล้วกู้คืนไม่ได้",
-      okLabel: "ลบนักเรียน"
-    })) return;
-    const { error } = await sb.from("students").delete().eq("id", stu.id);
-    if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
-    showToast("ลบแล้ว", true);
-    await loadStudents();
-    return;
-  }
-
-  // มีข้อมูลผูกอยู่ → เปิด modal โชว์รายละเอียดว่าติดตรงไหนบ้าง
+  try { links = await countStudentLinks(stu.id); }
+  catch (error) { showToast("ตรวจข้อมูลไม่ครบ — ยังลบไม่ได้: " + error.message,false,8000); return; }
+  const blocked = linkedCount(links,"grade") + linkedCount(links,"money") > 0;
   delTarget = stu;
-  delModalTitle.textContent = "ลบนักเรียน: " + stu.name;
-  delModalSub.textContent = "รหัสประจำตัว " + (stu.student_no || "-")
-    + (stu.grade_level ? " · " + stu.grade_level : "")
-    + (stu.classroom ? "/" + stu.classroom : "");
-
-  let body = "<p class='no-links' style='margin-top:4px'>นักเรียนคนนี้มีข้อมูลผูกอยู่ในระบบดังนี้ (ลบนักเรียนจะลบข้อมูลเหล่านี้ทั้งหมดด้วย):</p>";
-  body += linkSectionHtml("คะแนนรายวิชา", "ช่อง", links.scores, r => escapeHtml(subjLabel(r.subj)));
-  body += linkSectionHtml("เช็คชื่อ", "รายการ", links.att, r => escapeHtml(subjLabel(r.subj)));
-  body += linkSectionHtml("ติด ร.", "รายการ", links.remarks, r => escapeHtml(subjLabel(r.subj)));
-  body += linkSectionHtml("ชั่วโมงชดเชย", "รายการ", links.makeup, r => escapeHtml(subjLabel(r.subj)));
-  body += linkSectionHtml("คะแนนสมรรถนะ (กิจกรรม/กิจวัตร)", "รายการ", links.comp, r => escapeHtml(r.name));
-  if (links.enroll.length) body += linkSectionHtml("ลงทะเบียนวิชา", "วิชา", links.enroll.map(r => ({ subj: r.subj, count: 1 })), r => escapeHtml(subjLabel(r.subj)));
-  if (links.placements.length) {
-    const items = links.placements.map(p => "<li>ปี " + escapeHtml(p.year) + " — " + escapeHtml(p.grade_level || "?") + "/" + escapeHtml(p.classroom || "?") + "</li>").join("");
-    body += "<div class='link-group'><div class='g-title'>ประวัติชั้น/ห้อง</div><ul>" + items + "</ul></div>";
+  delModalTitle.textContent = blocked ? "ลบไม่ได้ — มีเกรดหรือข้อมูลการเงิน" : "ลบนักเรียน: " + stu.name;
+  delModalSub.textContent = `รหัสประจำตัว ${stu.student_no || "-"} · ${stu.name}`;
+  if (blocked) {
+    delModalBody.innerHTML = `<p>พบข้อมูลที่ต้องเก็บไว้:</p>${linkedRowsHtml(links.filter(row => row.group !== "other"))}<p class="danger-box">ถ้านักเรียนออกแล้ว ให้กำหนดสถานะแทน ข้อมูลจะเก็บไว้ครบ</p>`;
+    delModalConfirm.hidden = true;
+    delModalStatus.hidden = !canSetStudentStatus;
+    delModalCancel.textContent = "ปิด";
+    delModal.classList.add("show");
+    delModalCancel.focus();
+    return;
   }
-  if (links.profile || links.guardians.length) {
-    let items = links.profile ? "<li>ประวัตินักเรียน (ข้อมูลส่วนตัว ที่อยู่ สุขภาพ)</li>" : "";
-    if (links.guardians.length) {
-      const names = links.guardians.map(g => [g.relation, g.prefix, g.first_name, g.last_name]
-        .filter(Boolean).map(escapeHtml).join(" ")).join(" · ");
-      items += "<li>ผู้ปกครอง " + links.guardians.length + " คน: " + names + "</li>";
-    }
-    body += "<div class='link-group'><div class='g-title'>ระเบียนนักเรียน</div><ul>" + items + "</ul></div>";
+  delModalCancel.textContent = "ยกเลิก";
+  if (!links.length) {
+    if (!await window.crsAskConfirm({title:"ลบนักเรียน",message:`“${stu.name}” ไม่มีข้อมูลผูกอยู่ · ลบแล้วกู้คืนไม่ได้`,okLabel:"ลบนักเรียน"})) { delTarget=null; return; }
+    try { links = await countStudentLinks(stu.id); }
+    catch (error) { showToast("ตรวจข้อมูลไม่ครบ — ยังลบไม่ได้: " + error.message,false,8000); delTarget=null; return; }
+    if (links.length) { delTarget=null; await deleteStudent(stu); return; }
+    const {error} = await sb.from("students").delete().eq("id",stu.id);
+    if (error) { showToast(deleteFailure(error),false); delTarget=null; return; }
+    delTarget=null; showToast("ลบแล้ว",true); await loadStudents(); return;
   }
-
-  body += "<div class='danger-box'>⚠ การลบนี้ <b>กู้คืนไม่ได้</b> — คะแนนและข้อมูลทั้งหมดของนักเรียนคนนี้จะถูกลบถาวร<br>"
-    + (links.profile || links.guardians.length ? "ประวัติและข้อมูลผู้ปกครองที่ครูประจำชั้นกรอกไว้จะหายด้วย<br>" : "")
-    + "ถ้าอยากเก็บคะแนนไว้แต่ไม่ให้นักเรียนอยู่ในรายชื่อ active ให้กดปุ่ม \"กำหนดสถานะ\" ของนักเรียนคนนี้แทน — เลือกย้ายสถานศึกษา ลาออก หรือจบการศึกษา ข้อมูลทั้งหมดจะยังอยู่ครบ</div>";
-  body += "<div class='confirm-field'><label for='del-confirm-name'>พิมพ์ชื่อนักเรียนให้ตรงเพื่อยืนยัน: <b>" + escapeHtml(stu.name) + "</b></label>"
-    + "<input type='text' id='del-confirm-name' autocomplete='off' placeholder='พิมพ์ชื่อ-นามสกุลให้ตรง'></div>";
-
-  delModalBody.innerHTML = body;
+  delModalBody.innerHTML = `<p>ข้อมูลต่อไปนี้จะถูกลบพร้อมนักเรียน:</p>${linkedRowsHtml(links)}<p class="danger-box">การลบนี้กู้คืนไม่ได้</p><div class="confirm-field"><label for="del-confirm-name">พิมพ์ชื่อนักเรียนให้ตรงเพื่อยืนยัน: <b>${escapeHtml(stu.name)}</b></label><input type="text" id="del-confirm-name" autocomplete="off"></div>`;
+  delModalConfirm.hidden = false;
+  delModalStatus.hidden = true;
   delModalConfirm.disabled = true;
   const nameInput = document.getElementById("del-confirm-name");
-  nameInput.addEventListener("input", () => {
-    delModalConfirm.disabled = nameInput.value.trim() !== stu.name.trim();
-  });
-  delModal.classList.add("show");
-  nameInput.focus();
+  nameInput.addEventListener("input", () => { delModalConfirm.disabled = nameInput.value.trim() !== stu.name.trim(); });
+  delModal.classList.add("show"); nameInput.focus();
 }
-
 delModalConfirm.addEventListener("click", async () => {
   if (!delTarget) return;
   delModalConfirm.disabled = true;
-  const { error } = await sb.from("students").delete().eq("id", delTarget.id);
-  if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); delModalConfirm.disabled = false; return; }
-  closeDelModal();
-  showToast("ลบนักเรียนและข้อมูลทั้งหมดแล้ว", true);
-  await loadStudents();
+  const stu = delTarget;
+  let fresh;
+  try { fresh = await countStudentLinks(stu.id); }
+  catch (error) { showToast("ตรวจข้อมูลไม่ครบ — ยังลบไม่ได้: " + error.message,false,8000); closeDelModal(); return; }
+  if (linkedCount(fresh,"grade") + linkedCount(fresh,"money") > 0) { closeDelModal(); await deleteStudent(stu); return; }
+  const {error} = await sb.from("students").delete().eq("id",stu.id);
+  if (error) { showToast(deleteFailure(error),false); closeDelModal(); return; }
+  closeDelModal(); showToast("ลบนักเรียนและข้อมูลทั้งหมดแล้ว",true); await loadStudents();
 });
 
 // ---------- เพิ่มทีละคน ----------

@@ -21,7 +21,7 @@
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script type="module">
 import {sb,requireAuth,signOut,checkDepartment,getAcademicYears,academicYearOf,bangkokNow,toDateStr} from '../supabase-client.js?v=20261103-1';
-import {parseRegisRows,classifyAgainstDb,mergeFillEmpty,buildProfileUpsertRows,REGIS_PROFILE_LABELS} from './student-import.js?v=20261103-1';
+import {parseRegisRows,classifyAgainstDb,mergeFillEmpty,buildProfileUpsertRows,REGIS_PROFILE_LABELS} from './student-import.js?v=20261103-2';
 const $=id=>document.getElementById(id),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function fail(result,label){if(result.error)throw new Error(`${label}: ${result.error.message}`);return result.data||[]}
 function step(number){for(let i=1;i<=3;i++){const node=$(`progress-${i}`);if(i===number)node.setAttribute('aria-current','step');else node.removeAttribute('aria-current')}}
@@ -45,8 +45,14 @@ if(session){
   const ready=classified.ready,conflicts=[],guardianSkipped=[],warnings=[];
   for(const item of ready){const existing=previewProfiles.get(item.studentId)||{};for(const conflict of mergeFillEmpty(existing,item.profile).conflicts)conflicts.push(`${name(item)} · ${REGIS_PROFILE_LABELS[conflict.field]||conflict.field}: คง “${conflict.current}” (REGIS “${conflict.regis}”)`);
    if(previewGuardians.has(item.studentId))guardianSkipped.push(item);for(const warning of item.warnings)warnings.push(`${name(item)} · ${warning}`)}
-  $('counts').innerHTML=[['พร้อมนำเข้า',ready.length],['ไม่มีในฐาน',classified.missingInDb.length],['ในฐานแต่ไม่อยู่ในไฟล์',classified.missingInFile.length],['ข้อมูลไม่ตรง',classified.mismatches.length]].map(([label,count])=>`<div><strong>${count}</strong><span>${label}</span></div>`).join('');
-  $('lists').innerHTML=list('พร้อมนำเข้า',ready,name)+list('ไม่มีในฐาน',classified.missingInDb,name)+list('ในฐานแต่ไม่อยู่ในไฟล์',classified.missingInFile,name)+list('ข้อมูลไม่ตรง (แจ้งเท่านั้น)',classified.mismatches,item=>`${item.name} ${item.roomText}: ${item.issues.join(', ')}`)+list('คำเตือนรายคน',warnings,x=>x)+list('ค่าที่มีอยู่แล้วและต่างจาก REGIS — คงค่าเดิมไว้ ไม่บันทึกทับ',conflicts,x=>x)+list('มีผู้ปกครองในฐานแล้ว — ข้ามผู้ปกครองทั้งหมด',guardianSkipped,name);
+  const mismatchMap=new Map();
+  const addIssue=(studentNo,issue)=>mismatchMap.set(studentNo,[...(mismatchMap.get(studentNo)||[]),issue]);
+  for(const item of classified.nameMismatches)for(const field of item.fields)addIssue(item.studentNo,({prefix:'คำนำหน้าต่าง',first_name:'ชื่อต่าง',last_name:'นามสกุลต่าง'})[field]);
+  for(const item of classified.gradeMismatches)addIssue(item.studentNo,`ชั้นต่าง (ระบบ ${item.currentGrade} · REGIS ${item.regisGrade})`);
+  for(const item of classified.noPlacement)addIssue(item.studentNo,'ยังไม่มีห้องปีนี้');
+  const mismatches=[...mismatchMap].map(([studentNo,issues])=>({studentNo,issues}));
+  $('counts').innerHTML=[['พร้อมนำเข้า',ready.length],['ไม่มีในฐาน',classified.missingInDb.length],['ในฐานแต่ไม่อยู่ในไฟล์',classified.missingInFile.length],['ข้อมูลไม่ตรง',mismatches.length]].map(([label,count])=>`<div><strong>${count}</strong><span>${label}</span></div>`).join('');
+  $('lists').innerHTML=list('พร้อมนำเข้า',ready,name)+list('ไม่มีในฐาน',classified.missingInDb,name)+list('ในฐานแต่ไม่อยู่ในไฟล์',classified.missingInFile,name)+list('ข้อมูลไม่ตรง (แจ้งเท่านั้น)',mismatches,item=>`${item.studentNo}: ${item.issues.join(', ')}`)+'<p class="hint">แก้ได้ที่หน้ารายชื่อนักเรียน แท็บ “จากไฟล์ REGIS” · <a href="students.html">ไปหน้ารายชื่อนักเรียน</a></p>'+list('คำเตือนรายคน',warnings,x=>x)+list('ค่าที่มีอยู่แล้วและต่างจาก REGIS — คงค่าเดิมไว้ ไม่บันทึกทับ',conflicts,x=>x)+list('มีผู้ปกครองในฐานแล้ว — ข้ามผู้ปกครองทั้งหมด',guardianSkipped,name);
   $('to-save').textContent=`นำเข้า ${ready.length} คน`; $('to-save').disabled=!ready.length;
  }
  $('regis-file').addEventListener('change',async event=>{

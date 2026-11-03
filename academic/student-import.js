@@ -147,21 +147,25 @@ export function buildProfileUpsertRows(items, existingProfiles = new Map()) {
 export function classifyAgainstDb(parsed, dbStudents, placements) {
   const byNo = new Map(dbStudents.map(s => [String(s.student_no).trim(),s]));
   const byId = new Map(placements.map(p => [p.student_id,p]));
-  const ready = [], missingInDb = [], mismatches = [], matched = new Set();
+  const ready = [], missingInDb = [], nameMismatches = [], gradeMismatches = [], noPlacement = [], matched = new Set();
   for (const item of parsed.students) {
     const db = byNo.get(item.studentNo);
     if (!db) { missingInDb.push(item); continue; }
     ready.push({...item,studentId:db.id}); matched.add(db.id);
-    const issues = [];
-    for (const [key,label] of [['prefix','คำนำหน้า'],['first_name','ชื่อ'],['last_name','นามสกุล']]) {
-      const source = key === 'first_name' ? item.first : key === 'last_name' ? item.last : item.prefix;
-      if (normalizeNamePart(db[key]) !== normalizeNamePart(source)) issues.push(`${label}ต่าง`);
-    }
+    if (db.status !== 'กำลังศึกษา') continue;
+    const current = {prefix:db.prefix,first:db.first_name,last:db.last_name};
+    const regis = {prefix:item.prefix,first:item.first,last:item.last};
+    const fields = [['prefix','prefix'],['first_name','first'],['last_name','last']]
+      .filter(([field,key]) => normalizeNamePart(db[field]) !== normalizeNamePart(item[key]))
+      .map(([field]) => field);
+    if (fields.length) nameMismatches.push({studentId:db.id,studentNo:item.studentNo,grade:item.grade,current,regis,fields});
     const placement = byId.get(db.id);
-    if (!placement) issues.push('ไม่มีห้องในปีปัจจุบัน');
-    else if (normalizeNamePart(placement.grade_level) !== item.grade || normalizeNamePart(placement.classroom) !== item.classroom) issues.push('ห้องต่าง');
-    if (issues.length) mismatches.push({studentNo:item.studentNo,name:`${item.prefix}${item.first} ${item.last}`.trim(),roomText:item.roomText,issues});
+    const name = `${item.prefix}${item.first} ${item.last}`.trim();
+    if (!placement) noPlacement.push({studentId:db.id,studentNo:item.studentNo,name,regisGrade:item.grade,regisRoom:item.classroom});
+    else if (normalizeNamePart(placement.grade_level) !== normalizeNamePart(item.grade)) {
+      gradeMismatches.push({studentId:db.id,studentNo:item.studentNo,name,currentGrade:placement.grade_level,regisGrade:item.grade});
+    }
   }
   const missingInFile = dbStudents.filter(s => s.status === 'กำลังศึกษา' && byId.has(s.id) && !matched.has(s.id));
-  return {ready,missingInDb,missingInFile,mismatches};
+  return {ready,missingInDb,missingInFile,nameMismatches,gradeMismatches,noPlacement};
 }
