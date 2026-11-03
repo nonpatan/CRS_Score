@@ -76,9 +76,14 @@ button:focus-visible,a:focus-visible,input:focus-visible {
   grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
   gap:10px
 }
+.summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px }
+.kpi { background:var(--white); border:1px solid var(--line); border-radius:12px; padding:12px 14px }
+.kpi strong { display:block; font-size:26px; line-height:1.2; font-variant-numeric:tabular-nums }
+.kpi span { display:block; color:var(--muted); font-size:13px }
+.kpi.ok strong { color:var(--teal) }
+.kpi.warn strong { color:var(--amber) }
 .room-button {
   width:100%;
-  min-height:72px;
   text-align:left;
   padding:10px 12px;
   background:var(--white);
@@ -86,6 +91,12 @@ button:focus-visible,a:focus-visible,input:focus-visible {
   border-radius:10px;
   color:var(--ink)
 }
+.room-top { display:flex; justify-content:space-between; align-items:baseline; gap:8px }
+.room-top strong { font-size:18px }
+.room-pct { font-size:20px; font-weight:600; color:var(--teal); font-variant-numeric:tabular-nums }
+.room-pct.low { color:var(--amber) }
+.room-button .bar { display:block; width:100%; height:6px; margin:7px 0 }
+.room-sub { display:block; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums }
 .room-button.active {
   border:2px solid var(--teal);
   background:var(--teal-soft)
@@ -98,7 +109,7 @@ button:focus-visible,a:focus-visible,input:focus-visible {
 }
 .student-row {
   display:grid;
-  grid-template-columns:minmax(0,1fr) 110px auto;
+  grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) auto;
   gap:10px;
   align-items:center;
   border-top:1px solid var(--line);
@@ -115,7 +126,7 @@ button:focus-visible,a:focus-visible,input:focus-visible {
   color:var(--muted)
 }
 .bar {
-  height:8px;
+  height:6px;
   background:var(--line);
   border-radius:9px;
   overflow:hidden
@@ -123,19 +134,24 @@ button:focus-visible,a:focus-visible,input:focus-visible {
 .bar span {
   display:block;
   height:100%;
-  background:var(--amber)
+  background:var(--teal)
 }
-.bar span.complete { background:var(--teal) }
-.progress-label {
-  display:block;
-  text-align:right;
-  font-size:14px
-}
+.bar span.low { background:var(--amber) }
+.segments { display:flex; flex-wrap:wrap; gap:6px }
+.segment { display:inline-flex; align-items:center; white-space:nowrap; border-radius:999px; padding:2px 10px; font-size:13px }
+.segment.done { background:var(--teal-soft); color:var(--teal) }
+.segment.todo { background:var(--amber-soft); color:var(--amber); font-weight:600 }
+.temp-no { color:var(--amber); background:var(--amber-soft); border-radius:999px; padding:1px 7px; margin-left:5px }
 .profile-link {
   display:inline-flex;
   min-height:44px;
   align-items:center;
-  padding:6px
+  padding:6px 14px;
+  border-radius:8px;
+  background:var(--teal-soft);
+  font-weight:600;
+  text-decoration:none;
+  white-space:nowrap
 }
 .filters {
   display:flex;
@@ -168,16 +184,14 @@ button:focus-visible,a:focus-visible,input:focus-visible {
 [hidden] {
   display:none!important
 }
-@media(max-width:480px) {
+@media(max-width:640px) {
+  .summary { grid-template-columns:repeat(2,minmax(0,1fr)) }
   .student-row {
     grid-template-columns:minmax(0,1fr) auto
   }
-  .student-progress {
+  .segments {
     grid-column:1/-1;
     grid-row:2
-  }
-  .rooms {
-    grid-template-columns:repeat(2,minmax(0,1fr))
   }
 }
 </style>
@@ -193,6 +207,7 @@ button:focus-visible,a:focus-visible,input:focus-visible {
 </header>
 <main class="academic-content">
 <div id="message" class="card" role="status">กำลังตรวจสิทธิ์และโหลดข้อมูล…</div>
+<div id="summary" class="summary" aria-label="สรุปทะเบียนประวัติ" hidden></div>
 <section id="room-section" class="card" hidden>
 <h2>ห้องเรียน</h2>
 <div id="rooms" class="rooms">
@@ -222,11 +237,14 @@ import {
   toDateStr,
   loadMyHomeroomRooms,
   getStudentPlacements,
-  GRADE_ORDER
+  GRADE_ORDER,
+  PRE_SCHOOL_GRADE,
+  isTempStudentNo
 } from "../supabase-client.js?v=20261103-1";
 import {
-  profileCompleteness
-} from "./student-registry.js?v=20261103-1";
+  profileCompleteness,
+  sectionStatus
+} from "./student-registry.js?v=20261103-2";
 const message=document.getElementById("message"),roomSection=document.getElementById("room-section"),studentCard=document.getElementById("student-card");
 const key=(g,c)=>String(g||"")+"\0"+String(c||"");
 const escapeHtml=s=>String(s??"").replace(/[&<>"']/g,c=>({
@@ -305,6 +323,7 @@ if(session){
         classroom:p.classroom
       });
       const gradeIndex=g=>{
+        if(g===PRE_SCHOOL_GRADE)return -1;
         const n=GRADE_ORDER.indexOf(g);
         return n<0?GRADE_ORDER.length:n;
       };
@@ -312,6 +331,8 @@ if(session){
       "th"));
       message.hidden=true;
       roomSection.hidden=false;
+      document.getElementById("summary").hidden=false;
+      renderSummary();
       renderRooms();
       if(!rooms.length){
         message.hidden=false;
@@ -331,6 +352,20 @@ function visibleStudents(room){
   b)=>Number(a.student?.student_no)-Number(b.student?.student_no)||String(a.student?.student_no).localeCompare(String(b.student?.student_no),
   "th"));
 }
+function renderSummary(){
+  const seen=new Set(),list=[];
+  for(const room of rooms)for(const p of visibleStudents(room))if(!seen.has(p.student_id)){
+    seen.add(p.student_id);
+    list.push(p);
+  }
+  const stats=list.map(p=>profileCompleteness(profiles.get(p.student_id),guardians.get(p.student_id)||[]));
+  const complete=stats.filter(s=>s.percent===100).length;
+  const noPhone=stats.filter(s=>s.missing.includes("ผู้ปกครองที่มีชื่อและเบอร์โทร")).length;
+  document.getElementById("summary").innerHTML=[
+    [list.length,"นักเรียน",""], [complete,"กรอกครบ 100%","ok"],
+    [list.length-complete,"ยังไม่ครบ","warn"], [noPhone,"ยังไม่มีเบอร์ผู้ปกครอง","warn"]
+  ].map(([n,label,kind])=>`<div class="kpi ${kind}"><strong>${n}</strong><span>${label}</span></div>`).join("");
+}
 function renderRooms(){
   const box=document.getElementById("rooms");
   box.replaceChildren();
@@ -342,7 +377,8 @@ function renderRooms(){
     const b=document.createElement("button");
     b.className="room-button"+(selectedRoom&&key(room.grade,room.classroom)===key(selectedRoom.grade,selectedRoom.classroom)?" active":"");
     b.type="button";
-    b.innerHTML="<strong>"+escapeHtml(room.grade)+"/"+escapeHtml(room.classroom)+"</strong><span>"+list.length+" คน · ครบ "+done+" · เฉลี่ย "+average+"%</span>";
+    b.setAttribute("aria-pressed",String(!!selectedRoom&&key(room.grade,room.classroom)===key(selectedRoom.grade,selectedRoom.classroom)));
+    b.innerHTML=`<span class="room-top"><strong>${escapeHtml(room.grade)}/${escapeHtml(room.classroom)}</strong><span class="room-pct ${average<50?"low":""}">${average}%</span></span><span class="bar" aria-hidden="true"><span class="${average<50?"low":""}" style="width:${average}%"></span></span><span class="room-sub">${list.length} คน · ${average===0?"ยังไม่เริ่ม":done===list.length?"ครบทุกคน":`ครบ ${done} · ขาด ${list.length-done}`}</span>`;
     b.addEventListener("click",()=>selectRoom(room));
     box.append(b);
   }
@@ -362,9 +398,11 @@ function renderStudents(){
   const box=document.getElementById("students");
   box.innerHTML=list.length?list.map(p=>{
     const s=profileCompleteness(profiles.get(p.student_id),guardians.get(p.student_id)||[]);
-    return `<div class="student-row"><div><strong>${escapeHtml(p.student?.name)}</strong><small>รหัส ${escapeHtml(p.student?.student_no)}</small></div><div class="student-progress"><div class="bar" aria-hidden="true"><span class="${s.percent===100?"complete":""}" style="width:${s.percent}%"></span></div><span class="progress-label">${s.percent}%</span></div><a class="profile-link" href="student-profile.html?id=${encodeURIComponent(p.student_id)}" aria-label="ประวัติ ${escapeHtml(p.student?.name)}">ประวัติ</a></div>`}).join(""):"<p>ไม่มีนักเรียนตามตัวกรองนี้</p>";
+    const badges=sectionStatus(s.missing).map(section=>`<span class="segment ${section.left.length?"todo":"done"}" title="${escapeHtml(section.left.length?"ยังขาด: "+section.left.join(" · "):"ครบแล้ว")}">${section.left.length?"":"✓ "}${section.label}</span>`).join("");
+    return `<div class="student-row"><div><strong>${escapeHtml(p.student?.name)}</strong><small>รหัส ${escapeHtml(p.student?.student_no)}${isTempStudentNo(p.student?.student_no)?'<span class="temp-no">รหัสชั่วคราว</span>':""}</small></div><div class="segments">${badges}</div><a class="profile-link" href="student-profile.html?id=${encodeURIComponent(p.student_id)}" aria-label="ประวัติ ${escapeHtml(p.student?.name)}">ประวัติ ›</a></div>`}).join(""):"<p>ไม่มีนักเรียนตามตัวกรองนี้</p>";
 }
 document.getElementById("show-other").addEventListener("change",()=>{
+  renderSummary();
   renderRooms();
   renderStudents()
 });

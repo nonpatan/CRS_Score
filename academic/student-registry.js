@@ -122,3 +122,24 @@ export function profileCompleteness(profile, guardians = [], status) {
       ok]) => !ok).map(([label]) => label)
   };
 }
+
+export const REGISTRY_SECTIONS = [
+  { key: "registry", label: "ทะเบียน", items: ["เลขประจำตัวประชาชน"] },
+  { key: "personal", label: "ตัวนักเรียน", items: ["เพศ", "วันเกิด", "ศาสนา"] },
+  { key: "guardians", label: "ผู้ปกครอง", items: ["ผู้ปกครองที่มีชื่อและเบอร์โทร", "ผู้ติดต่อหลัก"] },
+  { key: "address", label: "ที่อยู่", items: ["ที่อยู่ทะเบียนบ้าน", "ที่อยู่ปัจจุบัน"] },
+  { key: "health", label: "สุขภาพ", items: ["โรคประจำตัว", "ยาที่แพ้", "อาหารที่แพ้"] }
+];
+export function sectionStatus(missing = []) {
+  const absent = new Set(missing);
+  return REGISTRY_SECTIONS.map(({ key, label, items }) => ({
+    key, label, left: items.filter(item => absent.has(item))
+  }));
+}
+export function initials(firstName, lastName) {
+  const first = value => {
+    const letters = String(value ?? "").trim().replace(/^[เแโใไ\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]+/u, "");
+    return Array.from(letters)[0]?.toUpperCase() || "";
+  };
+  return first(firstName) + first(lastName);
+}
