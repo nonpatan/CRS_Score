@@ -5038,22 +5038,26 @@ export function pickMyDashboardAlerts({
   }
 
   const projectByKey = new Map();
-  const addProject = project => {
+  const addProject = (project, reason) => {
     const key = project?.id ? `id:${project.id}` : project;
-    if (key != null) projectByKey.set(key, project);
+    if (key == null) return;
+    if (!projectByKey.has(key)) projectByKey.set(key, { project, reasons: new Set() });
+    projectByKey.get(key).reasons.add(reason);
   };
   for (const project of activeFollowUpProjects(projects)) {
-    if (project.approval_status === "ส่งกลับให้แก้" ||
-        (project.approval_status === "ร่าง" && !project.approved_at)) addProject(project);
+    if (project.approval_status === "ส่งกลับให้แก้") addProject(project, "ถูกส่งกลับให้แก้");
+    if (project.approval_status === "ร่าง" && !project.approved_at) addProject(project, "ยังไม่ส่งขออนุมัติ");
   }
-  for (const rows of [
-    projectsPastDueNotClosed(projects, today),
-    projectsFinishedWithoutSummary(projects),
-    projectsFinishedWithoutActualBudget(projects)
-  ]) rows.forEach(addProject);
+  for (const project of projectsPastDueNotClosed(projects, today)) addProject(project, "เลยกำหนด ยังไม่ปิดโครงการ");
+  for (const project of projectsFinishedWithoutSummary(projects)) addProject(project, "ยังไม่สรุปผล");
+  for (const project of projectsFinishedWithoutActualBudget(projects)) addProject(project, "ยังไม่กรอกงบที่ใช้จริง");
   if (projectByKey.size) {
+    const labels = [...projectByKey.values()].slice(0, 3).map(({ project, reasons }) =>
+      `${String(project.name ?? "").trim() || "ไม่ระบุชื่อ"} (${[...reasons].join(" · ")})`);
+    const extra = projectByKey.size > 3 ? ` และอีก ${projectByKey.size - 3} รายการ` : "";
     alerts.push({
-      text: `โครงการของคุณต้องทำต่อ ${projectByKey.size} รายการ`,
+      text: `โครงการ/กิจกรรมต้องทำต่อ: ${labels.join(" · ")}${extra}`,
+      count: projectByKey.size,
       href: "academic/projects.html",
       linkLabel: "ไปแก้ไข",
       kind: "ค้าง"
