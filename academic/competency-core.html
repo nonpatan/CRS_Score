@@ -153,7 +153,7 @@
   <div class="card">
     <div class="section">รายการสมรรถนะหลัก</div>
     <div class="settings-note">รายการด้านและองค์ประกอบชุดนี้ใช้ร่วมทุกปี · เพิ่ม แก้ชื่อ หรือปลดระวางได้ โดยข้อมูลเดิมยังแสดงในรายงานย้อนหลัง</div>
-    <div id="catalog-readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว · การแก้รายการ น้ำหนัก และเกณฑ์กลางใช้สิทธิ์ admin หรือฝ่ายวิชาการ</div>
+    <div id="catalog-readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว · การแก้ชื่อ เปิด-ปิดด้าน และจัดการองค์ประกอบใช้สิทธิ์ admin หรือฝ่ายวิชาการ</div>
     <div id="catalog-list">กำลังโหลด...</div>
     <div id="catalog-forms">
       <details class="catalog-form" id="add-competency-fold"><summary>+ เพิ่มด้าน</summary>
@@ -164,6 +164,7 @@
         </div>
         <button type="button" class="ghost" id="btn-add-competency" style="width:100%">+ เพิ่มด้านสมรรถนะ</button>
       </details>
+      <div id="add-competency-readonly" class="settings-note" style="display:none">เพิ่มด้านสมรรถนะใหม่ได้เฉพาะหัวหน้าฝ่ายวิชาการและ admin (ต้องตั้งสัดส่วนให้ด้านใหม่ด้วย)</div>
       <details class="catalog-form" id="add-element-fold"><summary>+ เพิ่มองค์ประกอบ</summary>
         <div class="section">เพิ่มองค์ประกอบ</div>
         <div class="row2">
@@ -192,7 +193,7 @@
     <div id="level-settings" class="empty">กำลังโหลด...</div>
     <div class="settings-note" style="margin:10px 0 0">ระบบใช้ขอบล่างตัดสินอย่างเดียว ช่องขอบบนมีไว้แสดงช่วงให้อ่านเท่านั้น</div>
     <button class="primary" id="btn-save-levels" style="margin-top:12px">บันทึกเกณฑ์แปลผล</button>
-    <div id="settings-readonly" class="readonly" style="display:none;margin-top:12px">คุณมีสิทธิ์ดูอย่างเดียว · เฉพาะ admin หรือฝ่ายวิชาการที่ได้รับอนุมัติเท่านั้นที่แก้ได้</div>
+    <div id="settings-readonly" class="readonly" style="display:none;margin-top:12px">สัดส่วนและเกณฑ์แปลผลแก้ได้เฉพาะหัวหน้าฝ่ายวิชาการและ admin</div>
   </div>
   <div class="overlay" id="name-overlay">
     <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="name-modal-title">
@@ -208,7 +209,7 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, getProfile, checkDepartment, getSetting,
+  sb, requireAuth, signOut, getProfile, checkDepartment, getSetting, isAcademicHead,
   availableCompetencyStages, getActiveYear, setActiveYear, listSelectableYears,
   loadCompetencySettings
 } from "../supabase-client.js?v=20261104-1";
@@ -221,7 +222,8 @@ const [profile, hasAcademicDept] = await Promise.all([
   checkDepartment("วิชาการ")
 ]);
 const isAdmin = profile && profile.role === "admin";
-const canManageCore = Boolean(isAdmin || hasAcademicDept);
+const canManageCatalog = Boolean(isAdmin || hasAcademicDept);
+const canManageSettings = Boolean(isAdmin || await isAcademicHead());
 document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
 
 let competencies = [], elements = [], sourceWeights = [], interpretationLevels = [];
@@ -296,8 +298,14 @@ $("settings-year").addEventListener("change",async()=>{
 const catalogOpen = new Set();
 function renderCatalog() {
   const list=$("catalog-list"), openIds=catalogOpen;
-  $("catalog-readonly").style.display=canManageCore?"none":"block";
-  $("catalog-forms").style.display=canManageCore?"block":"none";
+  $("catalog-readonly").style.display=canManageCatalog?"none":"block";
+  $("catalog-readonly").textContent=canManageSettings
+    ?"คุณเพิ่มด้านสมรรถนะใหม่ได้ · การแก้ชื่อ เปิด-ปิดด้าน และจัดการองค์ประกอบใช้สิทธิ์ admin หรือฝ่ายวิชาการ"
+    :"คุณมีสิทธิ์ดูอย่างเดียว · การแก้ชื่อ เปิด-ปิดด้าน และจัดการองค์ประกอบใช้สิทธิ์ admin หรือฝ่ายวิชาการ";
+  $("catalog-forms").style.display=canManageCatalog||canManageSettings?"block":"none";
+  $("add-competency-fold").style.display=canManageSettings?"block":"none";
+  $("add-competency-readonly").style.display=canManageCatalog&&!canManageSettings?"block":"none";
+  $("add-element-fold").style.display=canManageCatalog?"block":"none";
   if(catalogLoadError){list.innerHTML="<div class='readonly'>โหลดรายการสมรรถนะไม่สำเร็จ: "+esc(catalogLoadError)+"</div>";return;}
   const rows=[...competencies].sort((a,b)=>(isActive(a)===isActive(b)?a.seq-b.seq:(isActive(a)?-1:1)));
   list.innerHTML=rows.length?"":"ยังไม่มีรายการสมรรถนะหลัก";
@@ -311,7 +319,7 @@ function renderCatalog() {
       (isActive(competency)?"":"<span class='status-badge'>ปลดระวาง</span>");
     const body=document.createElement("div"); body.className="catalog-body";
     const code=document.createElement("div");code.className="meta";code.textContent=competency.code;body.appendChild(code);
-    if(canManageCore){
+    if(canManageCatalog){
       const actions=document.createElement("div"); actions.className="catalog-actions";
       const edit=document.createElement("button"); edit.type="button"; edit.className="ghost"; edit.textContent="✎ แก้ชื่อ"; edit.onclick=()=>openNameEditor("competency",competency);
       const toggle=document.createElement("button"); toggle.type="button"; toggle.className="ghost"; toggle.textContent=isActive(competency)?"⏸ ปลดระวาง":"↩ นำกลับมาใช้"; toggle.onclick=()=>toggleActive("core_competencies",competency);
@@ -331,7 +339,7 @@ function renderCatalog() {
       for(const element of stageElements){
         const row=document.createElement("div"); row.className="element-row"+(isActive(element)?"":" inactive");
         row.innerHTML="<span class='catalog-name'>"+esc(element.name)+"</span>"+(isActive(element)?"":"<span class='status-badge'>ปลดระวาง</span>");
-        if(canManageCore){
+        if(canManageCatalog){
           const edit=document.createElement("button"); edit.type="button"; edit.className="ghost"; edit.textContent="✎"; edit.title="แก้ชื่อองค์ประกอบ"; edit.setAttribute("aria-label","แก้ชื่อองค์ประกอบ "+element.name); edit.onclick=()=>openNameEditor("element",element);
           const toggle=document.createElement("button"); toggle.type="button"; toggle.className="ghost"; toggle.textContent=isActive(element)?"⏸":"↩"; toggle.title=isActive(element)?"ปลดระวางองค์ประกอบ":"นำองค์ประกอบกลับมาใช้"; toggle.setAttribute("aria-label",toggle.title+" "+element.name); toggle.onclick=()=>toggleActive("core_competency_elements",element);
           row.append(edit,toggle);
@@ -360,7 +368,7 @@ function fillCatalogForms(){
 }
 
 async function toggleActive(table,row){
-  if(!canManageCore)return;
+  if(!canManageCatalog)return;
   const next=!isActive(row);
   const {data,error}=await sb.from(table).update({active:next}).eq("id",row.id).select().single();
   if(error){toast((next?"นำกลับมาใช้":"ปลดระวาง")+"ไม่สำเร็จ: "+error.message,false);return;}
@@ -379,7 +387,7 @@ function closeNameEditor(){$("name-overlay").classList.remove("show");editingCat
 $("name-modal-cancel").onclick=closeNameEditor;
 $("name-overlay").addEventListener("click",event=>{if(event.target===$("name-overlay"))closeNameEditor();});
 $("name-modal-save").onclick=async()=>{
-  if(!editingCatalog||!canManageCore)return;
+  if(!editingCatalog||!canManageCatalog)return;
   const name=$("name-modal-input").value.trim();
   if(!name){toast("กรอกชื่อใหม่ก่อนบันทึก",false);return;}
   const table=editingCatalog.type==="competency"?"core_competencies":"core_competency_elements";
@@ -389,7 +397,7 @@ $("name-modal-save").onclick=async()=>{
 };
 
 $("btn-add-competency").onclick=async()=>{
-  if(!canManageCore)return;
+  if(!canManageSettings)return;
   const code=$("new-competency-code").value.trim(), name=$("new-competency-name").value.trim();
   if(!/^[a-z_]+$/.test(code)){toast("รหัสใช้ได้เฉพาะ a–z และ _ เท่านั้น",false);return;}
   if(!name){toast("กรอกชื่อด้านสมรรถนะ",false);return;}
@@ -420,7 +428,7 @@ $("btn-add-competency").onclick=async()=>{
 };
 
 $("btn-add-element").onclick=async()=>{
-  if(!canManageCore)return;
+  if(!canManageCatalog)return;
   const competencyId=$("new-element-competency").value, stage=$("new-element-stage").value, name=$("new-element-name").value.trim();
   if(!competencyId||!stage||!name){toast("เลือกด้าน ช่วงชั้น และกรอกชื่อองค์ประกอบให้ครบ",false);return;}
   if(!activeCompetencies().some(row=>row.id===competencyId)||!allowedStages.includes(stage)){toast("รายการที่เลือกไม่ได้เปิดให้เพิ่มองค์ประกอบใหม่",false);return;}
@@ -448,9 +456,9 @@ function renderSettings(){
   $("weight-title").textContent="น้ำหนักสรุปสมรรถนะ 3 แหล่ง"+yearLabel;
   $("level-title").textContent="เกณฑ์แปลผลกลาง"+yearLabel;
   const complete=settingsAreComplete({weights:sourceWeights,levels:interpretationLevels});
-  $("btn-save-weights").style.display=canManageCore&&complete?"block":"none";
-  $("btn-save-levels").style.display=canManageCore&&complete?"block":"none";
-  $("settings-readonly").style.display=canManageCore?"none":"block";
+  $("btn-save-weights").style.display=canManageSettings&&complete?"block":"none";
+  $("btn-save-levels").style.display=canManageSettings&&complete?"block":"none";
+  $("settings-readonly").style.display=canManageSettings?"none":"block";
   $("btn-save-weights").textContent="บันทึกน้ำหนักทั้ง "+activeRows.length+" ด้านที่ใช้งาน";
   const missingEl=$("settings-missing");missingEl.style.display="none";missingEl.innerHTML="";
   if(settingsLoadError){
@@ -465,7 +473,7 @@ function renderSettings(){
     const messages=["ปีการศึกษา "+settingsYear+" ยังไม่ได้ตั้งค่า"];
     if(missingNames.length)messages.push("ขาดน้ำหนัก: "+missingNames.join(", "));
     if(interpretationLevels.length!==4)messages.push("เกณฑ์แปลผลมี "+interpretationLevels.length+"/4 ระดับ");
-    missingEl.innerHTML=messages.map(esc).join("<br>")+(canManageCore&&copySourceYear?"<button type='button' class='ghost' id='btn-copy-settings'>คัดลอกค่าจากปี "+esc(copySourceYear)+"</button>":"");
+    missingEl.innerHTML=messages.map(esc).join("<br>")+(canManageSettings&&copySourceYear?"<button type='button' class='ghost' id='btn-copy-settings'>คัดลอกค่าจากปี "+esc(copySourceYear)+"</button>":"");
     missingEl.style.display="block";
     const copyButton=$("btn-copy-settings");if(copyButton)copyButton.onclick=copySettingsFromYear;
   }
@@ -474,24 +482,24 @@ function renderSettings(){
     const weight=sourceWeights.find(row=>row.competency_id===competency.id)||{};
     const row=document.createElement("div"); row.className="weight-row"; row.dataset.competency=competency.id;
     row.innerHTML="<div class='title'>"+esc(competency.name)+"</div>"+
-      "<input aria-label='น้ำหนักรายวิชา' data-source='subject' type='number' min='0' max='100' step='0.01' value='"+(weight.subject_weight??"")+"' "+(canManageCore?"":"disabled")+">"+
-      "<input aria-label='น้ำหนักกิจกรรม' data-source='activity' type='number' min='0' max='100' step='0.01' value='"+(weight.activity_weight??"")+"' "+(canManageCore?"":"disabled")+">"+
-      "<input aria-label='น้ำหนักกิจวัตร' data-source='routine' type='number' min='0' max='100' step='0.01' value='"+(weight.routine_weight??"")+"' "+(canManageCore?"":"disabled")+">";
+      "<input aria-label='น้ำหนักรายวิชา' data-source='subject' type='number' min='0' max='100' step='0.01' value='"+(weight.subject_weight??"")+"' "+(canManageSettings?"":"disabled")+">"+
+      "<input aria-label='น้ำหนักกิจกรรม' data-source='activity' type='number' min='0' max='100' step='0.01' value='"+(weight.activity_weight??"")+"' "+(canManageSettings?"":"disabled")+">"+
+      "<input aria-label='น้ำหนักกิจวัตร' data-source='routine' type='number' min='0' max='100' step='0.01' value='"+(weight.routine_weight??"")+"' "+(canManageSettings?"":"disabled")+">";
     weightEl.appendChild(row);
   }
   levelEl.innerHTML="";
   for(const level of interpretationLevels){
     const row=document.createElement("div"); row.className="level-row"; row.dataset.code=level.code; row.dataset.seq=level.seq;
-    row.innerHTML="<input aria-label='ชื่อระดับ' data-field='label' type='text' value='"+esc(level.label)+"' "+(canManageCore?"":"disabled")+">"+
-      "<input aria-label='คะแนนต่ำสุด' data-field='min' type='number' min='0' max='100' step='1' value='"+level.min_score+"' "+(canManageCore?"":"disabled")+">"+
+    row.innerHTML="<input aria-label='ชื่อระดับ' data-field='label' type='text' value='"+esc(level.label)+"' "+(canManageSettings?"":"disabled")+">"+
+      "<input aria-label='คะแนนต่ำสุด' data-field='min' type='number' min='0' max='100' step='1' value='"+level.min_score+"' "+(canManageSettings?"":"disabled")+">"+
       "<span class='dash'>–</span>"+
-      "<input aria-label='คะแนนสูงสุด' data-field='max' type='number' min='0' max='100' step='1' value='"+level.max_score+"' "+(canManageCore?"":"disabled")+">";
+      "<input aria-label='คะแนนสูงสุด' data-field='max' type='number' min='0' max='100' step='1' value='"+level.max_score+"' "+(canManageSettings?"":"disabled")+">";
     levelEl.appendChild(row);
   }
 }
 
 async function copySettingsFromYear(){
-  if(!canManageCore||!settingsYear||!copySourceYear)return;
+  if(!canManageSettings||!settingsYear||!copySourceYear)return;
   const sourceYear=copySourceYear,targetYear=settingsYear;
   const button=$("btn-copy-settings");if(button)button.disabled=true;
   try{
@@ -511,7 +519,7 @@ async function copySettingsFromYear(){
 }
 
 $("btn-save-weights").onclick=async()=>{
-  if(!canManageCore)return;
+  if(!canManageSettings)return;
   const activeCount=activeCompetencies().length;
   const rows=[...$("weight-settings").querySelectorAll(".weight-row")].map(row=>({year:settingsYear,competency_id:row.dataset.competency,subject_weight:Number(row.querySelector("[data-source=subject]").value),activity_weight:Number(row.querySelector("[data-source=activity]").value),routine_weight:Number(row.querySelector("[data-source=routine]").value),updated_at:new Date().toISOString()}));
   if(rows.length!==activeCount||rows.some(row=>![row.subject_weight,row.activity_weight,row.routine_weight].every(value=>Number.isFinite(value)&&value>=0&&value<=100)||Math.abs(row.subject_weight+row.activity_weight+row.routine_weight-100)>0.000001)){toast("กรอกน้ำหนักของด้านที่ใช้งานให้ครบ แต่ละแหล่ง 0–100% และรวมกันเป็น 100%",false);return;}
@@ -520,7 +528,7 @@ $("btn-save-weights").onclick=async()=>{
 };
 // ขอบล่างของช่วงต่ำสุดต้องเป็น 0 ไม่ใช่ 1 — เด็กที่ได้ 0 ทุกแหล่งต้องแปลผลได้
 // (brief-score-correctness.md ข้อ 1.2 · ถ้าเปลี่ยนกลับเป็น 1 บั๊กเดิมจะกลับมาทันที)
-$("btn-save-levels").onclick=async()=>{if(!canManageCore)return;const rows=[...$("level-settings").querySelectorAll(".level-row")].map(row=>({year:settingsYear,code:row.dataset.code,seq:Number(row.dataset.seq),label:row.querySelector("[data-field=label]").value.trim(),min_score:Number(row.querySelector("[data-field=min]").value),max_score:Number(row.querySelector("[data-field=max]").value),updated_at:new Date().toISOString()})).sort((a,b)=>a.min_score-b.min_score);if(rows.length!==4||rows.some(row=>!row.label||!Number.isInteger(row.min_score)||!Number.isInteger(row.max_score)||row.min_score<0||row.max_score>100||row.min_score>row.max_score)){toast("กรอกชื่อระดับและช่วงคะแนนจำนวนเต็ม 0–100 ให้ครบ",false);return;}if(rows[0].min_score!==0||rows[rows.length-1].max_score!==100||rows.some((row,index)=>index>0&&row.min_score!==rows[index-1].max_score+1)){toast("ช่วงคะแนนต้องต่อกันตั้งแต่ 0 ถึง 100 โดยไม่ซ้อนหรือเว้นช่วง",false);return;}const button=$("btn-save-levels");button.disabled=true;const {error}=await sb.from("competency_interpretation_levels").upsert(rows,{onConflict:"year,code"});button.disabled=false;if(error){toast("บันทึกเกณฑ์ไม่สำเร็จ: "+error.message,false);return;}interpretationLevels=rows;settingsByYear.set(settingsYear,{weights:sourceWeights,levels:interpretationLevels});renderSettings();toast("บันทึกเกณฑ์แปลผลแล้ว");};
+$("btn-save-levels").onclick=async()=>{if(!canManageSettings)return;const rows=[...$("level-settings").querySelectorAll(".level-row")].map(row=>({year:settingsYear,code:row.dataset.code,seq:Number(row.dataset.seq),label:row.querySelector("[data-field=label]").value.trim(),min_score:Number(row.querySelector("[data-field=min]").value),max_score:Number(row.querySelector("[data-field=max]").value),updated_at:new Date().toISOString()})).sort((a,b)=>a.min_score-b.min_score);if(rows.length!==4||rows.some(row=>!row.label||!Number.isInteger(row.min_score)||!Number.isInteger(row.max_score)||row.min_score<0||row.max_score>100||row.min_score>row.max_score)){toast("กรอกชื่อระดับและช่วงคะแนนจำนวนเต็ม 0–100 ให้ครบ",false);return;}if(rows[0].min_score!==0||rows[rows.length-1].max_score!==100||rows.some((row,index)=>index>0&&row.min_score!==rows[index-1].max_score+1)){toast("ช่วงคะแนนต้องต่อกันตั้งแต่ 0 ถึง 100 โดยไม่ซ้อนหรือเว้นช่วง",false);return;}const button=$("btn-save-levels");button.disabled=true;const {error}=await sb.from("competency_interpretation_levels").upsert(rows,{onConflict:"year,code"});button.disabled=false;if(error){toast("บันทึกเกณฑ์ไม่สำเร็จ: "+error.message,false);return;}interpretationLevels=rows;settingsByYear.set(settingsYear,{weights:sourceWeights,levels:interpretationLevels});renderSettings();toast("บันทึกเกณฑ์แปลผลแล้ว");};
 
 await init();
 }
