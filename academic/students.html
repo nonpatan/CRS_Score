@@ -440,6 +440,7 @@ document.getElementById("btn-signout").addEventListener("click", (e) => { e.prev
 const myProfile = await getProfile(session.user.id);
 const isAdminUser = !!myProfile && myProfile.role === "admin";
 const canSetStudentStatus = isAdminUser || await checkDepartment("วิชาการ");
+const canManageStudents = canSetStudentStatus;
 
 const elToast = document.getElementById("toast");
 function showToast(msg, ok, duration = 3000) {
@@ -451,23 +452,24 @@ function showToast(msg, ok, duration = 3000) {
 if (!isAdminUser) {
   const readonlyNote = document.getElementById("readonly-note");
   readonlyNote.style.display = "block";
-  readonlyNote.textContent = canSetStudentStatus
-    ? "คุณกำหนดสถานะและเพิ่มนักเรียนจากไฟล์ REGIS ได้ · การเพิ่มแบบอื่นและการลบสงวนไว้สำหรับ admin"
+  readonlyNote.textContent = canManageStudents
+    ? "คุณเพิ่มนักเรียนและกำหนดสถานะได้ · การลบสงวนไว้สำหรับ admin"
     : "คุณดูรายชื่อนักเรียนได้อย่างเดียว · การกำหนดสถานะใช้สิทธิ์ฝ่ายวิชาการ และการลบใช้สิทธิ์ admin";
-} else {
+}
+if (canManageStudents) {
   document.getElementById("placement-year-card").style.display = "block";
   document.getElementById("import-card").style.display = "block";
   document.getElementById("add-card").style.display = "block";
 }
 if (canSetStudentStatus) document.getElementById("regis-card").style.display = "block";
-if (!isAdminUser) {
+if (!canManageStudents) {
   document.getElementById("add-single-tab").hidden = true;
   document.getElementById("add-excel-tab").hidden = true;
 }
 
 // แผงเพิ่มอ่านสิทธิ์หลังโค้ดเดิมตั้ง display แล้ว สลับแท็บด้วยคลาสเท่านั้น
 function syncStudentAddAccess() {
-  const allowed = isAdminUser || canSetStudentStatus;
+  const allowed = canManageStudents;
   document.getElementById("open-add-panel").hidden = !allowed;
   if (!allowed) document.getElementById("add-panel").hidden = true;
 }
@@ -479,7 +481,7 @@ function setStudentAddPanel(open) {
   if (open) document.getElementById("add-panel").scrollIntoView({behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",block:"start"});
   else document.getElementById("open-add-panel").focus();
 }
-const addTabIds = isAdminUser ? ["add-single-tab","add-excel-tab","add-regis-tab"] : ["add-regis-tab"];
+const addTabIds = canManageStudents ? ["add-single-tab","add-excel-tab","add-regis-tab"] : [];
 function selectStudentAddTab(activeId, focus = false) {
   for (const [id,card] of [["add-single-tab","add-card"],["add-excel-tab","import-card"],["add-regis-tab","regis-card"]]) {
     document.getElementById(card).classList.toggle("panel-inactive", id !== activeId);
@@ -490,7 +492,7 @@ function selectStudentAddTab(activeId, focus = false) {
   }
 }
 syncStudentAddAccess();
-selectStudentAddTab(isAdminUser ? "add-single-tab" : "add-regis-tab");
+if (canManageStudents) selectStudentAddTab("add-single-tab");
 document.getElementById("open-add-panel").addEventListener("click", () => setStudentAddPanel(true));
 document.getElementById("close-add-panel").addEventListener("click", () => setStudentAddPanel(false));
 for (const id of addTabIds) {

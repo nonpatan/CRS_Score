@@ -222,8 +222,8 @@
   </header>
 
   <main class="academic-content">
-  <div id="not-admin" class="card warn-note" style="display:none">
-    หน้านี้สำหรับผู้ดูแลระบบ (admin) เท่านั้น — การเลื่อนชั้น/ยกวิชากระทบทั้งโรงเรียน
+  <div id="not-admin" class="card warn-note" role="alert" style="display:none">
+    หน้านี้สำหรับหัวหน้าฝ่ายวิชาการและผู้ดูแลระบบ (admin) — การเลื่อนชั้น/ยกวิชากระทบทั้งโรงเรียน
   </div>
 
   <div id="main" style="display:none">
@@ -323,7 +323,7 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, getProfile,
+  sb, requireAuth, signOut, getProfile, isAcademicHead, checkDepartment,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, PRE_SCHOOL_GRADE, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
 } from "../supabase-client.js?v=20261104-1";
@@ -427,11 +427,15 @@ btnYearModalSave.addEventListener("click", async () => {
   }
 });
 
-// ---------- เริ่มต้น: เช็คว่าเป็น admin ไหม แล้วโหลดข้อมูล ----------
+// ---------- เริ่มต้น: ตรวจสิทธิ์หัวหน้าฝ่ายวิชาการและฝ่ายวิชาการก่อนโหลดข้อมูล ----------
 async function init() {
   const profile = await getProfile(session.user.id);
-  if (!profile || profile.role !== "admin") {
-    document.getElementById("not-admin").style.display = "block";
+  const isAdmin = profile?.role === "admin";
+  const [head, academic] = isAdmin ? [true, true] : await Promise.all([isAcademicHead(), checkDepartment("วิชาการ")]);
+  if (!isAdmin && !(head && academic)) {
+    const denied = document.getElementById("not-admin");
+    if (head && !academic) denied.textContent = "คุณเป็นหัวหน้าฝ่ายวิชาการ แต่ยังไม่มีสิทธิ์ฝ่ายวิชาการ — ให้ admin เปิดสิทธิ์ที่หน้า \"สิทธิ์ผู้ใช้\" ก่อน แล้วรีเฟรชหน้านี้";
+    denied.style.display = "block";
     return;
   }
   document.getElementById("main").style.display = "block";
@@ -481,7 +485,7 @@ async function init() {
 document.getElementById("btn-save-highest").addEventListener("click", async () => {
   const val = elHighest.value;
   const ok = await setSetting("highest_grade", val);
-  if (!ok) { showToast("บันทึกไม่สำเร็จ (ต้องเป็น admin)", false); return; }
+  if (!ok) { showToast("บันทึกไม่สำเร็จ — ตรวจสิทธิ์หัวหน้าฝ่ายวิชาการ", false); return; }
   highestGrade = val;
   showToast("บันทึกชั้นสูงสุด " + val + " แล้ว", true);
   renderPromote(); // เปลี่ยนชั้นสูงสุดแล้ว ใครจบ/ใครเลื่อน เปลี่ยนตาม
