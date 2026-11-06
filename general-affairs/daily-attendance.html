@@ -72,6 +72,7 @@
   .student-name { min-width:0; font-weight:600; overflow-wrap:anywhere; }
   .student-meta, .inactive-label { color:var(--muted); font-size:12px; font-weight:400; }
   .student-meta { margin-right:8px; }
+  .auto-late-label { display:block; color:var(--amber); font-size:13px; font-weight:400; overflow-wrap:anywhere; }
   .status-group { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:4px; }
   .status-button { min-height:44px; padding:4px 2px; font-size:14px; color:var(--muted); border:1px solid var(--line); background:var(--white); }
   .status-button[aria-checked="true"] { color:var(--white); background:var(--teal); border-color:var(--teal); }
@@ -115,6 +116,8 @@
   .reason-chip.active { color:var(--white); background:var(--teal); }
   .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
   .modal-actions .ghost { color:var(--teal); background:var(--teal-soft); }
+  .auto-late-list { margin:0; padding-left:24px; max-height:40vh; overflow:auto; overflow-wrap:anywhere; }
+  .auto-late-actions { flex-wrap:wrap; }
   [hidden] { display:none !important; }
   @media (max-width:639px) {
     .filters { gap:8px; }
@@ -201,6 +204,19 @@
     </div>
   </section>
 </div>
+<div id="auto-late-overlay" class="overlay" hidden>
+  <section class="modal" role="dialog" aria-modal="true" aria-labelledby="auto-late-title" aria-describedby="auto-late-description">
+    <h2 id="auto-late-title">ตรวจสถานะนักเรียนก่อนบันทึก</h2>
+    <p id="auto-late-description"></p>
+    <ul id="auto-late-list" class="auto-late-list"></ul>
+    <p>มาสายหรือไม่?</p>
+    <div class="modal-actions auto-late-actions">
+      <button type="button" class="ghost" id="auto-late-cancel">ยกเลิก</button>
+      <button type="button" class="ghost" id="auto-late-keep">คงขาดตามที่เช็ค แล้วบันทึก</button>
+      <button type="button" class="primary" id="auto-late-change">เปลี่ยนเป็นมาสาย แล้วบันทึก</button>
+    </div>
+  </section>
+</div>
 
 <script type="module">
 import {
@@ -250,6 +266,7 @@ let stateByStudent = new Map();
 let selectedRoom = null;
 let currentDailyData = null;
 let currentExisting = [];
+let autoLateByStudent = new Map();
 let cutoff = null;
 // เวลาที่ใช้ตัดสินของ "ห้องที่เลือกอยู่" — อนุบาลกับประถมใช้คนละเส้นได้ในหน้าเดียวกัน
 // โดยไม่ต้องรีโหลด · คืน null เมื่อยังไม่เปิดเกณฑ์ ทำให้ classifyCheckTiming() ได้ "off"
@@ -258,6 +275,8 @@ let lateReasonPresets = [];
 let timingTimer = null;
 let reasonResolver = null;
 let selectedReason = "";
+let autoLateResolver = null;
+let autoLateReturnFocus = null;
 
 function checkablePlacements(list) {
   const todayAcademicYear = academicYearOf(today, years);
@@ -284,6 +303,7 @@ function hideAttendance() {
   selectedRoom = null;
   currentDailyData = null;
   currentExisting = [];
+  autoLateByStudent.clear();
   roster = [];
   stateByStudent.clear();
 }
@@ -371,6 +391,43 @@ el("late-reason-overlay").addEventListener("click", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && !el("late-reason-overlay").hidden) closeReasonModal(null);
+});
+
+function closeAutoLateModal(choice = null) {
+  el("auto-late-overlay").hidden = true;
+  const resolve = autoLateResolver;
+  autoLateResolver = null;
+  autoLateReturnFocus?.focus();
+  autoLateReturnFocus = null;
+  if (resolve) resolve(choice);
+}
+
+function askAutoLate(matches) {
+  el("auto-late-description").textContent = `นักเรียน ${matches.length} คนที่จะบันทึกว่า “ขาด” มีคาบเรียนวันนี้เช็คว่ามา`;
+  el("auto-late-list").innerHTML = matches.map(({ placement, subjects }) =>
+    `<li>${esc(placement.student?.student_no || "—")} ${esc(placement.student?.name || "ไม่พบชื่อนักเรียน")} — ${esc(subjects.join(", ") || "ไม่ระบุวิชา")}</li>`
+  ).join("");
+  autoLateReturnFocus = document.activeElement;
+  el("auto-late-overlay").hidden = false;
+  el("auto-late-change").focus();
+  return new Promise(resolve => { autoLateResolver = resolve; });
+}
+
+el("auto-late-cancel").addEventListener("click", () => closeAutoLateModal());
+el("auto-late-keep").addEventListener("click", () => closeAutoLateModal("keep"));
+el("auto-late-change").addEventListener("click", () => closeAutoLateModal("change"));
+el("auto-late-overlay").addEventListener("click", event => {
+  if (event.target === el("auto-late-overlay")) closeAutoLateModal();
+});
+document.addEventListener("keydown", event => {
+  if (el("auto-late-overlay").hidden) return;
+  if (event.key === "Escape") { event.preventDefault(); closeAutoLateModal(); }
+  if (event.key !== "Tab") return;
+  const buttons = [...el("auto-late-overlay").querySelectorAll("button")];
+  const next = event.shiftKey ? buttons.at(-1) : buttons[0];
+  if (document.activeElement === (event.shiftKey ? buttons[0] : buttons.at(-1))) {
+    event.preventDefault(); next.focus();
+  }
 });
 
 async function loadYearContext(dateStr) {
@@ -491,7 +548,7 @@ function renderRoster() {
     const inactive = isInactiveForSelectedYear(p);
     const inactiveLabel = student.status || "กำลังศึกษา";
     return `<div class="student-row${inactive ? " inactive" : ""}" data-status="${esc(item.status)}">
-      <div class="student-name"><span class="student-meta">${esc(student.student_no || "—")}</span>${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${esc(inactiveLabel)})</span>` : ""}</div>
+      <div class="student-name"><span class="student-meta">${esc(student.student_no || "—")}</span>${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${esc(inactiveLabel)})</span>` : ""}${typeof autoLateByStudent !== "undefined" && autoLateByStudent.has(p.student_id) ? `<span class="auto-late-label"${item.status === "มาสาย" ? "" : " hidden"}>${esc(autoLateByStudent.get(p.student_id))}</span>` : ""}</div>
       ${inactive ? `<span class="inactive-label">เช็คไม่ได้ — ${esc(inactiveLabel)}</span>` : `
       <div class="status-group" role="radiogroup" aria-label="สถานะของ ${esc(student.name || "นักเรียน")}">
         ${STATUS_OPTIONS.map(status => `<button type="button" class="status-button" role="radio" aria-checked="${status === item.status}" tabindex="${status === item.status ? 0 : -1}" data-student="${esc(p.student_id)}" data-status="${esc(status)}">${esc(status)}</button>`).join("")}
@@ -515,6 +572,30 @@ async function loadRoom(index) {
   const existing = (dailyData.rows || []).filter(row =>
     row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom
   );
+  try {
+    const { data: autoRows, error: autoError } = await sb.from("daily_attendance")
+      .select("student_id,auto_late_session_id,auto_late_by,auto_late_at")
+      .eq("attend_date", dateStr)
+      .eq("grade_level", selectedRoom.grade_level)
+      .eq("classroom", selectedRoom.classroom)
+      .not("auto_late_session_id", "is", null);
+    if (autoError) throw autoError;
+    const sessionIds = [...new Set((autoRows || []).map(row => row.auto_late_session_id))];
+    if (sessionIds.length) {
+      const { data: sessions, error: sessionError } = await sb.from("attendance_sessions")
+        .select("id,subjects(name)").in("id", sessionIds);
+      if (sessionError) throw sessionError;
+      const subjectBySession = new Map((sessions || []).map(row => [row.id, row.subjects?.name || "ไม่ระบุวิชา"]));
+      const recorderIds = [...new Set(autoRows.map(row => row.auto_late_by).filter(Boolean))];
+      const recorderNames = new Map(await Promise.all(recorderIds.map(async id => [id, await recorderLabel(id)])));
+      autoLateByStudent = new Map(autoRows.map(row => [row.student_id,
+        `ปรับเป็นมาสายอัตโนมัติ — วิชา${subjectBySession.get(row.auto_late_session_id) || "ไม่ระบุวิชา"} · ${recorderNames.get(row.auto_late_by) || "ไม่ระบุผู้บันทึก"} · ${formatTime(row.auto_late_at)}`
+      ]));
+    }
+  } catch (error) {
+    autoLateByStudent.clear();
+    console.warn("โหลดป้ายมาสายอัตโนมัติไม่สำเร็จ", error);
+  }
   currentDailyData = dailyData;
   currentExisting = existing;
   roster = placements.filter(p =>
@@ -566,6 +647,8 @@ function selectStatus(button) {
   item.status = button.dataset.status;
   const row = button.closest(".student-row");
   row.dataset.status = item.status;
+  const autoLabel = row.querySelector?.(".auto-late-label");
+  if (autoLabel) autoLabel.hidden = item.status !== "มาสาย";
   row.querySelectorAll('[role="radio"]').forEach(option => {
     option.setAttribute("aria-checked", String(option === button));
     option.tabIndex = option === button ? 0 : -1;
@@ -614,6 +697,64 @@ el("attend-date").addEventListener("change", async () => {
   try { await loadYearContext(el("attend-date").value); }
   catch (error) { showAccess(`<b>โหลดข้อมูลไม่สำเร็จ</b><br>${esc(error.message)}`, "bad"); }
 });
+
+async function findSubjectAttendance(absentPlacements, dateStr) {
+  const ids = absentPlacements.map(p => p.student_id);
+  const subjectNames = new Map();
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await sb.from("attendance_records")
+      .select("student_id,status,attendance_sessions!inner(session_date,subjects(name))")
+      .in("student_id", ids.slice(i, i + 150))
+      .in("status", ["มา", "มาสาย"])
+      .eq("attendance_sessions.session_date", dateStr);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (!subjectNames.has(row.student_id)) subjectNames.set(row.student_id, new Set());
+      const name = row.attendance_sessions?.subjects?.name;
+      if (name) subjectNames.get(row.student_id).add(name);
+    }
+  }
+  return absentPlacements.filter(p => subjectNames.has(p.student_id)).map(placement => ({
+    placement, subjects:[...subjectNames.get(placement.student_id)]
+  }));
+}
+
+let checkingSubjectAttendance = false;
+let skipSubjectCheckOnce = false;
+el("save-attendance").addEventListener("click", async event => {
+  if (skipSubjectCheckOnce) { skipSubjectCheckOnce = false; return; }
+  if (checkingSubjectAttendance) { event.stopImmediatePropagation(); return; }
+  if (!selectedRoom || !roster.length) return;
+  const dateStr = el("attend-date").value;
+  if (!dateStr || dateStr > today) return;
+  const absent = checkablePlacements(roster).filter(p => stateByStudent.get(p.student_id)?.status === "ขาด");
+  if (!absent.length) return;
+  event.stopImmediatePropagation();
+  checkingSubjectAttendance = true;
+  const room = selectedRoom;
+  let proceed = true;
+  try {
+    const matches = await findSubjectAttendance(absent, dateStr);
+    if (matches.length) {
+      const choice = await askAutoLate(matches);
+      if (!choice) proceed = false;
+      if (choice === "change") {
+        for (const { placement } of matches) stateByStudent.get(placement.student_id).status = "มาสาย";
+        renderRoster();
+      }
+    }
+  } catch (error) {
+    console.warn("ตรวจคาบวิชาไม่สำเร็จ", error);
+    toast("ตรวจคาบวิชาไม่สำเร็จ");
+  } finally {
+    checkingSubjectAttendance = false;
+  }
+  if (proceed && selectedRoom === room && el("attend-date").value === dateStr) {
+    skipSubjectCheckOnce = true;
+    el("save-attendance").click();
+  }
+}, { capture:true });
+
 el("save-attendance").addEventListener("click", async () => {
   if (!selectedRoom || !roster.length) return;
   const dateStr = el("attend-date").value;
