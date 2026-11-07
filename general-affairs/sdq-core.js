@@ -141,6 +141,28 @@ export function sdqGradeRank(grade) {
   const rank = SDQ_GRADE_ORDER.indexOf(grade);
   return rank < 0 ? Number.MAX_SAFE_INTEGER : rank;
 }
+export function sdqNextStudent(rosterIds, filledIds, currentId) {
+  return rosterIds.slice(rosterIds.indexOf(currentId) + 1).find(id => !filledIds.has(id)) ?? null;
+}
+export function sdqCareList(placements, responsesByKey) {
+  const people = new Map();
+  for (const p of placements) {
+    if (people.has(p.student_id)) continue;
+    const totals = { T:null, P:null, S:null }, problemScales = new Set();
+    let flagged = false;
+    for (const form of sdqFormsForGrade(p.grade_level)) {
+      const row = responsesByKey.get(`${p.student_id}:${form}`);
+      if (!row) continue;
+      const score = computeSdq(form, row);
+      totals[form] = score.total;
+      if (score.bands.total === "มีปัญหา") flagged = true;
+      for (const scale of ["emotional", "conduct", "hyper", "peer"])
+        if (score.bands[scale] === "มีปัญหา") problemScales.add(scale);
+    }
+    people.set(p.student_id, flagged ? { student_id:p.student_id, totals, problemScales:[...problemScales], maxTotal:Math.max(...Object.values(totals).filter(n => n != null)) } : null);
+  }
+  return [...people.values()].filter(Boolean).sort((a,b) => b.maxTotal - a.maxTotal);
+}
 const COLUMNS = "id,student_id,year,grade_level,classroom,form,answers,impact_overall,impact_chronic,impact_distress,impact_home,impact_peer,impact_class,impact_leisure,impact_burden,teacher_hours,relation,remark,assessed_on,updated_at";
 export async function loadSdqRoom(year, grade, classroom) {
   const { data, error } = await sb.from("sdq_responses").select(COLUMNS).eq("year",year).eq("grade_level",grade).eq("classroom",classroom);
