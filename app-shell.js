@@ -530,12 +530,13 @@ function syncFinanceKpiTones() {
       moduleHome: ["index.html", "ภาพรวมบริหารทั่วไป"],
       // รายงานนี้มีข้อมูลการทำงานรายครู — ซ่อนไว้ก่อน แล้วให้หน้าเว็บเปิดเฉพาะ
       // admin / ฝ่ายบริหารทั่วไป / ฝ่ายบุคลากรผ่าน applyRestrictedMenuAccess()
-      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html"],
+      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html", "sdq-report.html"],
       groups: [
         {
           label: "บันทึก",
           items: [
             ["daily-attendance.html", "เช็คชื่อรายวัน"],
+            ["sdq.html", "บันทึก SDQ"],
             ["special-order.html", "สั่งพิเศษ (วัดตัว)"]
           ]
         },
@@ -549,11 +550,14 @@ function syncFinanceKpiTones() {
           label: "รายงาน",
           items: [
             ["homeroom-audit.html", "รายงานการเช็คชื่อประจำชั้น"],
-            ["absence-follow.html", "นักเรียนขาดเรียนติดต่อกัน"]
+            ["absence-follow.html", "นักเรียนขาดเรียนติดต่อกัน"],
+            ["sdq-report.html", "รายงาน SDQ"]
           ]
         }
       ],
       workflows: {
+        "sdq.html": { title:"บันทึก SDQ", description:"เลือกห้อง แล้วกรอกแบบประเมินจุดแข็งและจุดอ่อนทีละคน ทั้งฉบับครู ผู้ปกครอง และนักเรียน", steps:["เลือกห้อง","เลือกนักเรียนและฉบับ","กรอกและบันทึก"] },
+        "sdq-report.html": { title:"รายงาน SDQ", description:"ดูผลคัดกรองทั้งโรงเรียน รายห้อง และรายคน", steps:["เลือกปีและฉบับ","ดูภาพรวมและห้อง","ดูรายคน"] },
         "special-order.html": { title:"สั่งพิเศษ (วัดตัว)", description:"วัดขนาดนักเรียนเพื่อส่งรายการให้ฝ่ายการเงินสั่งร้าน", steps:["เลือกนักเรียน","กรอกขนาด","บันทึก"] },
         "daily-attendance.html": {
           title: "เช็คชื่อประจำวัน",
