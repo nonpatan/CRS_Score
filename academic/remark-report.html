@@ -25,8 +25,8 @@
   .card { background: var(--white); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
   .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .field label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-  select { width: 100%; min-height: 44px; font: inherit; font-size: 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); color: var(--ink); }
-  select:focus, button:focus-visible, a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  select, input[type="date"], input[type="time"] { width: 100%; min-height: 44px; font: inherit; font-size: 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); color: var(--ink); }
+  select:focus, input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
   .hint { font-size: 14px; margin: 12px 0 0; padding: 8px 12px; background: var(--bg); border-radius: 8px; }
   .hint a { color: var(--teal); }
   .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; }
@@ -38,12 +38,21 @@
   button.primary { color: var(--white); background: var(--teal); }
   button.ghost { color: var(--teal); background: var(--teal-soft); }
   button:disabled { opacity: .55; cursor: wait; }
+  .letter-settings h2 { margin: 0 0 12px; font-size: 17px; }
+  .letter-settings .row2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .letter-settings .hint { font-size: 13px; margin-top: 4px; font-weight: 400; }
+  .signer-picker-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
   .room { padding: 0; overflow: hidden; }
   .room-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 14px; background: var(--bg); box-shadow: inset 4px 0 0 var(--teal); }
   .room-head .name { font-size: 17px; font-weight: 600; }
   .room-head .meta { flex: 1 1 260px; font-size: 14px; }
   .student { border-top: 1px solid var(--line); padding: 10px 14px; }
-  .student .who { font-weight: 600; }
+  .student .who { font-weight: 600; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .student-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-weight: 400; }
+  .issued-badge { display: inline-block; padding: 5px 9px; border-radius: 8px; background: var(--teal-soft); color: var(--teal); font-size: 13px; font-weight: 600; }
+  .invite-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px 8px; cursor: pointer; }
+  .invite-toggle input { width: 18px; height: 18px; accent-color: var(--teal); }
+  .print-letter-btn { color: var(--teal); background: var(--teal-soft); }
   .subject { margin-top: 6px; padding-left: 12px; border-left: 3px solid var(--danger); overflow-wrap: anywhere; }
   .subject.auto { border-left-color: var(--amber); }
   .subject-name { font-size: 15px; font-weight: 600; }
@@ -72,8 +81,11 @@
   .sheet-summary { margin-top: 4mm; }
   .sheet-signatures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6mm; margin-top: 12mm; text-align: center; }
   .sheet-foot { margin-top: 6mm; font-size: 11px; }
+  .remark-table { table-layout: fixed; }
+  .letter-table.remark-table th:last-child, .letter-table.remark-table td:last-child { width: auto; text-align: left; overflow-wrap: anywhere; }
   @media (max-width: 640px) {
     .filters { grid-template-columns: 1fr; }
+    .letter-settings .row2, .signer-picker-list { grid-template-columns: 1fr; }
     .stat { flex: 1 1 28%; min-width: 0; }
     .room-head .ghost, .toolbar .primary { width: 100%; }
   }
@@ -84,6 +96,7 @@
     html body .wrap, .academic-content { display: block !important; width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
     header, #screen-report { display: none !important; }
     #print-area { position: static; width: 100%; height: auto; overflow: visible; }
+    .retention-letter { width: 100%; }
     .card { box-shadow: none; border: 0; padding: 0; }
     tr, .avoid-break { break-inside: avoid; }
     a[href]::after { content: ""; }
@@ -109,6 +122,15 @@
         </div>
         <p class="hint">ประถมไม่มี ร. · วิชาที่ติด มส. ไม่อยู่ในรายงานนี้ (มส. ชนะ ร.) — ดูที่หน้า <a href="warning.html">เฝ้าระวัง มส.</a></p>
       </div>
+      <div class="card letter-settings" id="letter-settings" hidden>
+        <h2>ตั้งค่าหนังสือเชิญผู้ปกครอง</h2>
+        <div class="row2">
+          <div class="field"><label for="meet-date">วันนัดพบครูประจำชั้น</label><input type="date" id="meet-date"><div class="hint" id="meet-date-hint"></div></div>
+          <div class="field"><label for="meet-time">เวลานัดพบ</label><input type="time" id="meet-time"><div class="hint" id="meet-time-hint"></div></div>
+        </div>
+        <div class="hint">วันและเวลานัดใช้กับนักเรียนที่ติ๊ก ‘เชิญมาพบ’ เท่านั้น</div>
+        <div id="letter-signers"></div>
+      </div>
       <div id="report-state" class="card empty" role="status">กำลังโหลดข้อมูล...</div>
       <div id="report-content" hidden></div>
     </div>
@@ -120,8 +142,12 @@
 import {
   sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
   computeStudentSubjectResults, getStudentPlacements, homeroomAuditRoomLabel,
-  loadLetterSigners, getSetting, bangkokNow, toDateStr, thaiLetterDateText
+  loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
+  SCHOOL_LETTER_CSS, renderSchoolLetter, bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE,
+  getSetting, bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText
 } from "../supabase-client.js?v=20261104-1";
+
+document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
 const elYear = document.getElementById("filter-year");
 const elTerm = document.getElementById("filter-term");
@@ -129,8 +155,20 @@ const elGrade = document.getElementById("filter-grade");
 const elState = document.getElementById("report-state");
 const elContent = document.getElementById("report-content");
 const elPrintArea = document.getElementById("print-area");
+const elLetterSettings = document.getElementById("letter-settings");
+const elMeetDate = document.getElementById("meet-date");
+const elMeetTime = document.getElementById("meet-time");
+const elSigners = document.getElementById("letter-signers");
+const elToast = document.getElementById("toast");
 let schoolName = "";
+let schoolAddress = "";
 let currentRooms = [];
+let issuedLettersByStudent = new Map();
+let teachersByRoom = new Map();
+let signerByRoom = new Map();
+let inviteByStudent = new Map();
+let inviteContext = "";
+let reportYear = "", reportTerm = "", reportGrade = "";
 let loadedAt = null;
 let printing = false;
 let loadToken = 0;
@@ -183,10 +221,61 @@ function roomCounts(room) {
   const items = room.students.flatMap(item => item.subjects);
   return { students: room.students.length, subjects: items.length, manual: items.filter(item => item.manual).length, auto: items.filter(item => !item.manual).length };
 }
+function showToast(message) {
+  elToast.textContent = message;
+  elToast.classList.add("show");
+  setTimeout(() => elToast.classList.remove("show"), 4000);
+}
+function issuedBadgeHtml(letter) {
+  if (!letter) return "";
+  return `<span class="issued-badge" data-issued-letter>ออกหนังสือแล้ว ที่ ${escapeHtml(letter.doc_no)}/${escapeHtml(letter.year)} · ${escapeHtml(thaiShortDateText(letter.issued_date))}${letter.invite_meeting === true ? " · เชิญพบ" : ""}</span>`;
+}
+function updateIssuedCard(studentId, letter) {
+  issuedLettersByStudent.set(String(studentId), letter);
+  const button = [...elContent.querySelectorAll("[data-print-student]")].find(item => item.dataset.printStudent === String(studentId));
+  if (!button) return;
+  button.textContent = "พิมพ์ซ้ำ";
+  const badge = button.parentElement.querySelector("[data-issued-letter]");
+  if (badge) badge.outerHTML = issuedBadgeHtml(letter);
+  else button.insertAdjacentHTML("beforebegin", issuedBadgeHtml(letter));
+}
+function latestHomeroomStaffId(room, letters) {
+  const studentIds = new Set(room.students.map(item => String(item.student.id)));
+  const latest = letters.filter(letter => studentIds.has(String(letter.student_id)))
+    .reduce((current, letter) => !current || Number(letter.doc_no) > Number(current.doc_no) ? letter : current, null);
+  return latest?.homeroom_staff_id || null;
+}
+async function loadSignerChoices(rooms, letters, year, grade) {
+  const entries = await Promise.all(rooms.map(async room => ({
+    room, teachers: await listHomeroomTeachers(year, grade, room.classroom)
+  })));
+  const teachers = new Map(), selected = new Map();
+  for (const { room, teachers: choices } of entries) {
+    teachers.set(room.classroom, choices);
+    if (choices.length < 2) continue;
+    const previousId = latestHomeroomStaffId(room, letters);
+    const initial = choices.find(item => String(item.staffId) === String(previousId)) || choices[0];
+    selected.set(room.classroom, String(initial.staffId));
+  }
+  return { teachers, selected };
+}
+function signerPickerHtml() {
+  const rooms = [...teachersByRoom.entries()].filter(([, teachers]) => teachers.length >= 2);
+  if (!rooms.length) return "";
+  return `<div class="signer-picker-list">${rooms.map(([classroom, teachers], index) => {
+    const id = `signer-${index + 1}`;
+    const roomLabel = homeroomAuditRoomLabel({ grade_level: reportGrade, classroom });
+    return `<div class="field"><label for="${id}">ครูประจำชั้นผู้ลงนาม · ${escapeHtml(roomLabel)}</label><select id="${id}" data-signer-room="${escapeHtml(classroom)}">${teachers.map(teacher => `<option value="${escapeHtml(teacher.staffId)}"${String(teacher.staffId) === String(signerByRoom.get(classroom)) ? " selected" : ""}>${escapeHtml(teacher.fullName)}</option>`).join("")}</select></div>`;
+  }).join("")}</div>`;
+}
 function screenRoomHtml(room, index) {
   const counts = roomCounts(room);
   const label = homeroomAuditRoomLabel({ grade_level: elGrade.value, classroom: room.classroom });
-  const rows = room.students.map((item, i) => `<div class="student"><div class="who">${i + 1}. เลขที่ ${escapeHtml(item.student.student_no)} · ${escapeHtml(item.student.name)}</div>${item.subjects.map(subject => `<div class="subject${subject.manual ? "" : " auto"}"><div class="subject-name">${escapeHtml(subject.label)}<span class="pill ${subject.manual ? "manual" : "auto"}">${subject.manual ? "ร." : "ร. ขาดสอบ"}</span></div><div class="meta">ครูผู้สอน: ${escapeHtml(subject.teacher)}</div>${subject.manual ? reasonList(subject.reason) : "<ul><li>ไม่มีคะแนนสอบปลายภาค/ปลายปี</li></ul>"}</div>`).join("")}</div>`).join("");
+  const rows = room.students.map((item, i) => {
+    const studentId = String(item.student.id);
+    const issued = issuedLettersByStudent.get(studentId);
+    return `<div class="student"><div class="who"><span>${i + 1}. เลขที่ ${escapeHtml(item.student.student_no)} · ${escapeHtml(item.student.name)}</span><div class="student-actions no-print">${issuedBadgeHtml(issued)}<label class="invite-toggle"><input type="checkbox" data-invite-student="${escapeHtml(studentId)}"${inviteByStudent.get(studentId) === true ? " checked" : ""}> เชิญมาพบ</label><button type="button" class="print-letter-btn no-print" data-print-student="${escapeHtml(studentId)}">${issued ? "พิมพ์ซ้ำ" : "พิมพ์หนังสือผู้ปกครอง"}</button></div></div>${item.subjects.map(subject => `<div class="subject${subject.manual ? "" : " auto"}"><div class="subject-name">${escapeHtml(subject.label)}<span class="pill ${subject.manual ? "manual" : "auto"}">${subject.manual ? "ร." : "ร. ขาดสอบ"}</span></div><div class="meta">ครูผู้สอน: ${escapeHtml(subject.teacher)}</div>${subject.manual ? reasonList(subject.reason) : "<ul><li>ไม่มีคะแนนสอบปลายภาค/ปลายปี</li></ul>"}</div>`).join("")}</div>`;
+  }).join("");
   return `<section class="card room"><div class="room-head"><span class="name">${escapeHtml(label)}</span><span class="meta">${counts.students} คน · ${counts.subjects} วิชา · ครูประจำชั้น: ${escapeHtml(room.signers.homeroomName || "—")}</span><button type="button" class="ghost no-print" data-print-room="${index}">พิมพ์ห้องนี้</button></div>${rows}</section>`;
 }
 function renderRoomSheet(room, index) {
@@ -196,8 +285,38 @@ function renderRoomSheet(room, index) {
   const bodies = room.students.map((item, i) => `<tbody class="sheet-student">${item.subjects.map((subject, j) => `<tr>${j === 0 ? `<td class="sheet-center" rowspan="${item.subjects.length}">${i + 1}</td><td rowspan="${item.subjects.length}">${escapeHtml(item.student.student_no)}</td><td rowspan="${item.subjects.length}">${escapeHtml(item.student.name)}</td>` : ""}<td>${escapeHtml(subject.label)}</td><td>${escapeHtml(subject.teacher)}</td><td>${subject.manual ? reasonList(subject.reason) : "ขาดสอบปลายภาค — ติดต่อครูผู้สอนเพื่อสอบ"}</td></tr>`).join("")}</tbody>`).join("");
   return `<article class="report-sheet" data-sheet="${index}"><div class="sheet-head"><img class="sheet-logo" src="../logo.png" alt="ตราโรงเรียน"><div class="sheet-school">${escapeHtml(schoolName)}</div><h1 class="sheet-title">รายชื่อนักเรียนที่ได้ผลการเรียน “ร.” (รอการตัดสิน)</h1><div>ชั้น ${escapeHtml(label)} · ภาคเรียนที่ ${escapeHtml(elTerm.value)} ปีการศึกษา ${escapeHtml(elYear.value)} · ข้อมูล ณ วันที่ ${escapeHtml(dateText)}</div></div><table class="sheet-table"><colgroup><col style="width:6%"><col style="width:11%"><col style="width:20%"><col style="width:22%"><col style="width:13%"><col style="width:28%"></colgroup><thead><tr><th>ที่</th><th>เลขประจำตัว</th><th>ชื่อ–สกุล</th><th>รายวิชา</th><th>ครูผู้สอน</th><th>สิ่งที่ต้องทำ</th></tr></thead>${bodies}</table><div class="sheet-summary">สรุป: นักเรียนติด ร. ${counts.students} คน · รวม ${counts.subjects} รายวิชา (ร. งานค้าง ${counts.manual} · ร. ขาดสอบ ${counts.auto}) จากนักเรียนทั้งห้อง ${room.total} คน</div><div class="sheet-signatures"><div>ลงชื่อ ....................................... ครูประจำชั้น<br>(${escapeHtml(room.signers.homeroomName || "......................................")})</div><div>ลงชื่อ ....................................... หัวหน้าฝ่ายวิชาการ<br>(${escapeHtml(room.signers.academicHeadName || "......................................")})</div></div><div class="sheet-foot">หมายเหตุ: นักเรียนต้องแก้ ร. ตามระเบียบการวัดและประเมินผลของโรงเรียน · วิชาที่ติด มส. มีใบรายชื่อแยก</div></article>`;
 }
+function renderRemarkLetter(item, classroom, context, letter, signers) {
+  const { student, subjects } = item;
+  const room = homeroomAuditRoomLabel({ grade_level: context.grade, classroom });
+  const inviteMeeting = letter.invite_meeting === true;
+  const meetDateText = thaiShortDateText(letter.meet_date);
+  const meetTime = String(letter.meet_time || "").slice(0, 5);
+  const rows = subjects.map((subject, index) => {
+    const action = subject.manual ? reasonLines(subject.reason).join(" · ") || "ติดต่อครูผู้สอนเพื่อสอบถามงานที่ค้าง" : "ขาดสอบปลายภาค — ติดต่อครูผู้สอนเพื่อสอบ";
+    return `<tr class="avoid-break"><td>${index + 1}</td><td>${escapeHtml(subject.label)}</td><td>${escapeHtml(subject.teacher)}</td><td>${escapeHtml(action)}</td></tr>`;
+  }).join("");
+  const closingHtml = inviteMeeting
+    ? `<p class="letter-body">จึงเรียนมาเพื่อขอความร่วมมือจากท่านในการกำกับดูแลให้นักเรียนแก้ไขผลการเรียน “ร.” ให้เรียบร้อย และขอเชิญท่านมาพบครูประจำชั้นในวันที่ ${escapeHtml(meetDateText)} เวลา ${escapeHtml(meetTime)} น. ณ โรงเรียน เพื่อร่วมกันวางแนวทางช่วยเหลือนักเรียน</p>`
+    : `<p class="letter-body">จึงเรียนมาเพื่อทราบ และขอความร่วมมือจากท่านในการกำกับดูแลให้นักเรียนแก้ไขผลการเรียน “ร.” ให้เรียบร้อย</p>`;
+  const replyOptionsHtml = inviteMeeting
+    ? `<div class="letter-check">☐ รับทราบ และจะไปพบครูประจำชั้นในวันที่ ${escapeHtml(meetDateText)} เวลา ${escapeHtml(meetTime)} น.</div><div class="letter-check">☐ รับทราบ แต่ไม่สะดวกตามวันเวลาดังกล่าว ขอนัดวันที่ ............ เวลา ......... น.</div>`
+    : `<div class="letter-check">☐ รับทราบและจะกำกับดูแลให้นักเรียนแก้ไขผลการเรียน</div><div class="letter-check">☐ ประสงค์จะพบครูประจำชั้น (โรงเรียนจะติดต่อกลับเพื่อนัดวันและเวลา)</div>`;
+  return renderSchoolLetter({
+    schoolName, schoolAddress, logoSrc: "../logo.png",
+    subject: "แจ้งผลการเรียน “ร.” (รอการตัดสิน) และขอความร่วมมือติดตามนักเรียน",
+    recipientName: student.name,
+    bodyHtml: `<p class="letter-body">ด้วย${escapeHtml(schoolName || "โรงเรียน")}ได้ตรวจสอบผลการเรียนของนักเรียนในความปกครองของท่าน คือ ${escapeHtml(student.name)} เลขประจำตัว ${escapeHtml(student.student_no)} ชั้น ${escapeHtml(room)} ภาคเรียนที่ ${escapeHtml(context.term)} ปีการศึกษา ${escapeHtml(context.year)} พบว่ามีผลการเรียน “ร.” (รอการตัดสิน) จำนวน ${subjects.length} รายวิชา ดังนี้</p>`,
+    tableHtml: `<table class="letter-table remark-table"><colgroup><col style="width:8%"><col style="width:31%"><col style="width:20%"><col style="width:41%"></colgroup><thead><tr><th>ที่</th><th>รายวิชา</th><th>ครูผู้สอน</th><th>สิ่งที่ต้องทำ</th></tr></thead><tbody>${rows}</tbody></table>`,
+    summaryHtml: `<div class="letter-summary avoid-break"><b>สิ่งที่นักเรียนต้องดำเนินการ</b><br>นักเรียนต้องติดต่อครูผู้สอนแต่ละรายวิชา เพื่อส่งงานที่ค้างหรือสอบแก้ตัวให้เรียบร้อย ภายในระยะเวลาที่โรงเรียนกำหนด หากไม่ดำเนินการ ผลการเรียนรายวิชานั้นจะถูกตัดสินตามระเบียบการวัดและประเมินผลของโรงเรียน</div>`,
+    closingHtml, replyOptionsHtml,
+    docNoText: `${letter.doc_no}/${letter.year}`,
+    issuedDateText: thaiLetterDateText(letter.issued_date),
+    ...signers
+  });
+}
 function renderReport() {
   if (!currentRooms.length) {
+    elLetterSettings.hidden = true;
     elContent.hidden = true;
     elState.hidden = false;
     elState.className = "card empty";
@@ -208,12 +327,15 @@ function renderReport() {
   const subjects = currentRooms.reduce((sum, room) => sum + roomCounts(room).subjects, 0);
   const timestamp = new Intl.DateTimeFormat("th-TH", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(loadedAt);
   elState.hidden = true;
+  elLetterSettings.hidden = false;
+  elSigners.innerHTML = signerPickerHtml();
   elContent.hidden = false;
   elContent.innerHTML = `<div class="stats"><div class="stat"><b>${total}</b><span>นักเรียนติด ร.</span></div><div class="stat"><b>${subjects}</b><span>รายวิชา (คน×วิชา)</span></div><div class="stat"><b>${currentRooms.length}</b><span>ห้อง</span></div></div><div class="toolbar"><span class="meta">ข้อมูล ณ ${escapeHtml(timestamp)} น.</span><button type="button" class="primary no-print" id="print-all">พิมพ์ทุกห้อง (${currentRooms.length} ห้อง)</button></div>${currentRooms.map(screenRoomHtml).join("")}`;
 }
 async function loadReport() {
   const token = ++loadToken;
   currentRooms = [];
+  elLetterSettings.hidden = true;
   elContent.hidden = true;
   elState.hidden = false;
   elState.className = "card empty";
@@ -243,14 +365,37 @@ async function loadReport() {
     if (profileResponse.error) throw new Error("อ่านชื่อครูผู้สอนไม่สำเร็จ: " + profileResponse.error.message);
     const profiles = new Map((profileResponse.data || []).map(p => [String(p.id), p.name || p.email || "—"]));
     const candidateRooms = [...new Set(relevant.filter(([, entry]) => entry.subjects.some(item => item.result?.type === "ร.")).map(([id]) => placements.find(p => String(p.student_id) === String(id))?.classroom).filter(Boolean))];
-    const signerPairs = await Promise.all(candidateRooms.map(async classroom => [classroom, await loadLetterSigners(year, grade, classroom)]));
+    const [signerPairs, issuedLetters] = await Promise.all([
+      Promise.all(candidateRooms.map(async classroom => [classroom, await loadLetterSigners(year, grade, classroom)])),
+      loadIssuedLetters(year, "ร.", grade)
+    ]);
     if (token !== loadToken) return;
-    currentRooms = buildRemarkRooms(studentResults, placements, remarkResponse.data || [], profiles, new Map(signerPairs));
+    const rooms = buildRemarkRooms(studentResults, placements, remarkResponse.data || [], profiles, new Map(signerPairs));
+    const termLetters = issuedLetters.filter(letter => String(letter.term || "") === String(term));
+    const choices = await loadSignerChoices(rooms, termLetters, year, grade);
+    if (token !== loadToken) return;
+    const context = `${year}|${term}|${grade}`;
+    if (inviteContext !== context) {
+      inviteByStudent = new Map();
+      inviteContext = context;
+    }
+    issuedLettersByStudent = new Map(termLetters.map(letter => [String(letter.student_id), letter]));
+    for (const room of rooms) for (const item of room.students) {
+      const id = String(item.student.id);
+      if (!inviteByStudent.has(id)) inviteByStudent.set(id, issuedLettersByStudent.get(id)?.invite_meeting === true);
+    }
+    teachersByRoom = choices.teachers;
+    signerByRoom = choices.selected;
+    reportYear = year;
+    reportTerm = term;
+    reportGrade = grade;
+    currentRooms = rooms;
     loadedAt = bangkokNow();
     renderReport();
   } catch (error) {
     if (token !== loadToken) return;
     elContent.hidden = true;
+    elLetterSettings.hidden = true;
     elState.hidden = false;
     elState.className = "card error";
     elState.textContent = error.message || "โหลดรายงานไม่สำเร็จ — ลองใหม่อีกครั้ง";
@@ -280,6 +425,67 @@ async function printRooms(rooms, button) {
     buttons.forEach(item => { if (item.isConnected) item.disabled = false; });
   }
 }
+async function printStudentLetter(studentId, button) {
+  if (printing) return;
+  const room = currentRooms.find(item => item.students.some(entry => String(entry.student.id) === studentId));
+  const item = room?.students.find(entry => String(entry.student.id) === studentId);
+  if (!item) return;
+  const context = { year: reportYear, term: reportTerm, grade: reportGrade };
+  if (!context.term) {
+    showToast("เลือกภาคเรียนก่อนออกหนังสือ ร.");
+    elTerm.focus();
+    return;
+  }
+  const inviteMeeting = inviteByStudent.get(studentId) === true;
+  if (inviteMeeting && (!elMeetDate.value || !elMeetTime.value)) {
+    (!elMeetDate.value ? elMeetDate : elMeetTime).focus();
+    showToast("กรุณาระบุวันและเวลานัดพบครูประจำชั้นให้ครบ");
+    return;
+  }
+  const meetDate = elMeetDate.value, meetTime = elMeetTime.value;
+  const staffId = signerByRoom.get(room.classroom) || null;
+  const signerChoices = teachersByRoom.get(room.classroom) || [];
+  printing = true;
+  const buttons = [...elContent.querySelectorAll("button")];
+  buttons.forEach(item => { item.disabled = true; });
+  const oldLabel = button.textContent;
+  button.textContent = "กำลังเตรียมหนังสือ...";
+  try {
+    const letter = await issueStudentLetter({
+      studentId: item.student.id, year: context.year, kind: "ร.",
+      gradeLevel: context.grade, classroom: room.classroom, term: context.term,
+      meetDate, meetTime, homeroomStaffId: staffId, inviteMeeting
+    });
+    if (reportYear === context.year && reportTerm === context.term && reportGrade === context.grade) updateIssuedCard(studentId, letter);
+    const signers = await loadLetterSigners(context.year, context.grade, room.classroom);
+    const actualStaffId = letter.homeroom_staff_id || staffId;
+    const chosenName = signerChoices.find(teacher => String(teacher.staffId) === String(actualStaffId))?.fullName;
+    elPrintArea.innerHTML = renderRemarkLetter(item, room.classroom, context, letter, {
+      ...signers, homeroomName: chosenName || signers.homeroomName
+    });
+    await document.fonts.ready;
+    try { await Promise.all([...elPrintArea.querySelectorAll("img")].map(img => img.decode())); } catch { /* โลโก้เสียยังพิมพ์ข้อความได้ */ }
+    window.print();
+  } catch (error) {
+    showToast(error.message || "ออกหนังสือไม่สำเร็จ");
+  } finally {
+    elPrintArea.innerHTML = "";
+    printing = false;
+    button.textContent = issuedLettersByStudent.has(studentId) ? "พิมพ์ซ้ำ" : oldLabel;
+    buttons.forEach(item => { if (item.isConnected) item.disabled = false; });
+  }
+}
+elContent.addEventListener("change", event => {
+  const invite = event.target.closest("[data-invite-student]");
+  if (invite) {
+    inviteByStudent.set(String(invite.dataset.inviteStudent), invite.checked);
+    return;
+  }
+});
+elSigners.addEventListener("change", event => {
+  const select = event.target.closest("[data-signer-room]");
+  if (select) signerByRoom.set(String(select.dataset.signerRoom), select.value);
+});
 elContent.addEventListener("click", event => {
   const button = event.target.closest("button");
   if (!button) return;
@@ -287,22 +493,30 @@ elContent.addEventListener("click", event => {
   else if (button.hasAttribute("data-print-room")) {
     const room = currentRooms[Number(button.dataset.printRoom)];
     if (room) printRooms([room], button);
-  }
+  } else if (button.hasAttribute("data-print-student")) printStudentLetter(String(button.dataset.printStudent), button);
 });
 
 async function init() {
   const session = await requireAuth();
   if (!session) return;
+  elMeetDate.value = addDaysStr(toDateStr(bangkokNow()), 7);
+  elMeetTime.value = "09:00";
+  bindDatePickOnly(elMeetDate);
+  bindDatePickOnly(elMeetTime);
+  document.getElementById("meet-date-hint").textContent = DATE_PICK_ONLY_NOTE;
+  document.getElementById("meet-time-hint").textContent = TIME_PICK_ONLY_NOTE;
   document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
-    const [subjectsResponse, name, profileCheck] = await Promise.all([
+    const [subjectsResponse, name, address, profileCheck] = await Promise.all([
       sb.from("subjects").select("grade_level,year,term"),
       getSetting("receipt_school_name").catch(() => ""),
+      getSetting("receipt_address").catch(() => ""),
       sb.from("profiles").select("id,name,email").limit(1)
     ]);
     if (subjectsResponse.error) throw new Error("โหลดปีและชั้นไม่สำเร็จ: " + subjectsResponse.error.message);
     if (profileCheck.error) throw new Error("อ่านชื่อครูผู้สอนไม่สำเร็จ: " + profileCheck.error.message);
     schoolName = String(name || "").trim();
+    schoolAddress = String(address || "").trim();
     const subjects = subjectsResponse.data || [];
     const years = distinctYears(subjects.filter(s => String(s.grade_level || "").startsWith("ม.")));
     elYear.innerHTML = years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
