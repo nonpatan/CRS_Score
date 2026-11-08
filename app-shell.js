@@ -530,13 +530,14 @@ function syncFinanceKpiTones() {
       moduleHome: ["index.html", "ภาพรวมบริหารทั่วไป"],
       // รายงานนี้มีข้อมูลการทำงานรายครู — ซ่อนไว้ก่อน แล้วให้หน้าเว็บเปิดเฉพาะ
       // admin / ฝ่ายบริหารทั่วไป / ฝ่ายบุคลากรผ่าน applyRestrictedMenuAccess()
-      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html", "sdq-report.html"],
+      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html", "sdq-report.html", "home-visit-report.html"],
       groups: [
         {
           label: "บันทึก",
           items: [
             ["daily-attendance.html", "เช็คชื่อรายวัน"],
             ["sdq.html", "บันทึก SDQ"],
+            ["home-visit.html", "บันทึกเยี่ยมบ้าน"],
             ["special-order.html", "สั่งพิเศษ (วัดตัว)"]
           ]
         },
@@ -551,11 +552,14 @@ function syncFinanceKpiTones() {
           items: [
             ["homeroom-audit.html", "รายงานการเช็คชื่อประจำชั้น"],
             ["absence-follow.html", "นักเรียนขาดเรียนติดต่อกัน"],
-            ["sdq-report.html", "รายงาน SDQ"]
+            ["sdq-report.html", "รายงาน SDQ"],
+            ["home-visit-report.html", "รายงานเยี่ยมบ้าน"]
           ]
         }
       ],
       workflows: {
+        "home-visit.html": { title:"บันทึกเยี่ยมบ้าน", description:"เลือกห้องและนักเรียน แล้วบันทึกผลเยี่ยมบ้าน", steps:["เลือกห้อง","เลือกนักเรียน","กรอกและบันทึก"] },
+        "home-visit-report.html": { title:"รายงานเยี่ยมบ้าน", description:"ดูความคืบหน้า ผลเยี่ยม และกำหนดขอบเขตประจำปี", steps:["เลือกปี","ดูรายห้อง","ดูรายคน"] },
         "sdq.html": { title:"บันทึก SDQ", description:"เลือกห้อง แล้วกรอกแบบประเมินจุดแข็งและจุดอ่อนทีละคน ทั้งฉบับครู ผู้ปกครอง และนักเรียน", steps:["เลือกห้อง","เลือกนักเรียนและฉบับ","กรอกและบันทึก"] },
         "sdq-report.html": { title:"รายงาน SDQ", description:"ดูผลคัดกรองทั้งโรงเรียน รายห้อง และรายคน", steps:["เลือกปีและฉบับ","ดูภาพรวมและห้อง","ดูรายคน"] },
         "special-order.html": { title:"สั่งพิเศษ (วัดตัว)", description:"วัดขนาดนักเรียนเพื่อส่งรายการให้ฝ่ายการเงินสั่งร้าน", steps:["เลือกนักเรียน","กรอกขนาด","บันทึก"] },
