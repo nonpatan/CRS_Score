@@ -134,6 +134,7 @@
   .toast {
     position: sticky; bottom: 12px; text-align: center; font-size: 14px;
     padding: 10px; border-radius: 8px; margin-top: 12px; display: none;
+    overflow-wrap: anywhere;
   }
   .toast.ok  { display: block; background: var(--teal-soft); color: var(--teal); }
   .toast.err { display: block; background: var(--danger-soft); color: var(--danger); }
@@ -374,7 +375,7 @@
 
   </section>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-atomic="true"></div>
   </main>
 </div>
 
@@ -760,6 +761,29 @@ function placementYear() {
   return year;
 }
 
+// อ่านใหม่ก่อนบันทึกทุกครั้ง รวมทุกสถานะ ไม่ใช้รายชื่อที่โหลดค้างไว้บนหน้า
+async function loadExistingStudentNos() {
+  const current = new Map();
+  try {
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await sb.from("students")
+        .select("student_no,name,grade_level,classroom").order("student_no").range(from, from + 999);
+      if (error) throw error;
+      for (const row of data || []) {
+        const studentNo = String(row.student_no ?? "").trim();
+        if (studentNo) current.set(studentNo, row);
+      }
+      if ((data || []).length < 1000) break;
+    }
+  } catch (error) { throw new Error("ตรวจรหัสซ้ำไม่สำเร็จ: " + error.message); }
+  return current;
+}
+
+function existingStudentLabel(student) {
+  const room = [student.grade_level, student.classroom].filter(Boolean).join("/");
+  return `${student.name || "ไม่ระบุชื่อ"}${room ? ` (${room})` : ""}`;
+}
+
 // สร้างนักเรียนและประวัติชั้น/ห้องของปีเดียวกัน
 // ถ้าบันทึก placement ไม่สำเร็จ จะลบนักเรียนที่เพิ่งสร้างกลับทันที เพื่อไม่ให้ข้อมูลค้างคนละตาราง
 async function insertStudentsWithPlacements(rows, year) {
@@ -789,7 +813,9 @@ async function insertStudentsWithPlacements(rows, year) {
   const { data: created, error: studentError } = await sb.from("students")
     .insert(payload)
     .select("id,grade_level,classroom");
-  if (studentError) return { error: studentError };
+  if (studentError) return { error: studentError.code === "23505"
+    ? new Error("รหัสนักเรียนซ้ำกับที่มีในระบบ — โหลดหน้าใหม่แล้วตรวจอีกครั้ง")
+    : studentError };
 
   const placementRows = (created || []).map(student => ({
     student_id: student.id,
@@ -1012,13 +1038,7 @@ regisEl("regis-add-save").addEventListener("click",async () => {
   regisSetBusy(true);
   let addedCount = 0;
   try {
-    const current = new Set();
-    for (let from=0;;from+=1000) {
-      const {data,error} = await sb.from("students").select("student_no").order("student_no").range(from,from+999);
-      if (error) throw new Error("ตรวจรหัสซ้ำไม่สำเร็จ: " + error.message);
-      for (const row of data || []) current.add(String(row.student_no).trim());
-      if ((data || []).length < 1000) break;
-    }
+    const current = await loadExistingStudentNos();
     const fresh = picked.filter(item => !current.has(item.studentNo));
     const skipped = picked.length - fresh.length;
     if (!fresh.length) { regisEl("regis-result").textContent = `ไม่ได้เพิ่ม: ${skipped} คนมีรหัสอยู่ในระบบแล้ว`; await regisReload(); return; }
@@ -1174,6 +1194,8 @@ delModalConfirm.addEventListener("click", async () => {
 
 // ---------- เพิ่มทีละคน ----------
 document.getElementById("btn-add-one").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-add-one");
+  if (btn.disabled) return;
   const year = placementYear();
   if (!year) return;
   const grade = document.getElementById("f-grade").value;
@@ -1192,66 +1214,104 @@ document.getElementById("btn-add-one").addEventListener("click", async () => {
   if (!first) { showToast("กรอกชื่อก่อน", false); return; }
   if (/\s/.test(first)) { showToast("ชื่อต้องไม่มีช่องว่าง", false); return; }
 
-  const { error } = await insertStudentsWithPlacements([{
-    grade, classroom, studentNo, prefix, first, last
-  }], year);
-  if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
-  showToast("เพิ่มนักเรียนแล้ว", true);
-  document.getElementById("f-studentno").value = "";
-  document.getElementById("f-prefix").value = "";
-  document.getElementById("f-firstname").value = "";
-  document.getElementById("f-lastname").value = "";
-  await loadStudents();
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "กำลังตรวจและบันทึก…";
+  try {
+    if (studentNo) {
+      const current = await loadExistingStudentNos();
+      if (current.has(studentNo)) {
+        showToast(`รหัส ${studentNo} มีในระบบแล้ว: ${existingStudentLabel(current.get(studentNo))}`, false, 8000);
+        return;
+      }
+    }
+    const { error } = await insertStudentsWithPlacements([{
+      grade, classroom, studentNo, prefix, first, last
+    }], year);
+    if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false, 8000); return; }
+    showToast("เพิ่มนักเรียนแล้ว", true);
+    document.getElementById("f-studentno").value = "";
+    document.getElementById("f-prefix").value = "";
+    document.getElementById("f-firstname").value = "";
+    document.getElementById("f-lastname").value = "";
+    await loadStudents();
+  } catch (error) { showToast(error.message, false, 8000); }
+  finally { btn.disabled = false; btn.textContent = label; }
 });
 
 // ---------- วางจาก Excel ----------
 let parsedRows = [];
 document.getElementById("btn-preview").addEventListener("click", () => {
+  if (document.getElementById("btn-import-save").disabled) return;
   const raw = document.getElementById("import-text").value;
   parsedRows = parseStudentImportRows(raw);
   renderPreview();
 });
 
-function renderPreview() {
+function renderPreview(current = new Map()) {
   const area = document.getElementById("preview-area");
   if (parsedRows.length === 0) { area.innerHTML = "<div class='hint'>ยังไม่มีข้อมูล ลองวางแล้วกดตรวจสอบอีกครั้ง</div>"; document.getElementById("btn-import-save").style.display = "none"; return; }
 
   let html = "<table class='preview'><tr><th>ชั้น</th><th>ห้อง</th><th>รหัส</th><th>คำนำหน้า</th><th>ชื่อ</th><th>นามสกุล</th><th>สถานะ</th></tr>";
   let errCount = 0;
+  const seen = new Set();
   for (const r of parsedRows) {
-    const isErr = r.errors.length > 0;
+    const studentNo = String(r.studentNo || "").trim();
+    r.duplicateError = studentNo && current.has(studentNo)
+      ? `รหัสนี้มีในระบบแล้ว (${existingStudentLabel(current.get(studentNo))})`
+      : studentNo && seen.has(studentNo) ? "รหัสซ้ำในข้อมูลที่วาง" : "";
+    if (!r.errors.length && studentNo) seen.add(studentNo);
+    const errors = [...r.errors, ...(r.duplicateError ? [r.duplicateError] : [])];
+    const isErr = errors.length > 0;
     if (isErr) errCount++;
     html += "<tr class='" + (isErr ? "err" : "") + "'><td>" + escapeHtml(r.grade) + "</td><td>" + escapeHtml(r.classroom) +
       "</td><td>" + escapeHtml(r.studentNo || (r.grade === PRE_SCHOOL_GRADE ? "(ออกให้อัตโนมัติ)" : "")) + "</td><td>" + escapeHtml(r.prefix || "") + "</td><td>" + escapeHtml(r.first) + "</td><td>" + escapeHtml(r.last) +
-      "</td><td>" + (isErr ? escapeHtml(r.errors.join(", ")) : "โอเค") + "</td></tr>";
+      "</td><td>" + (isErr ? escapeHtml(errors.join(", ")) : "โอเค") + "</td></tr>";
   }
   html += "</table>";
   html += "<div class='field-note' style='margin-top:8px'>รวม " + parsedRows.length + " แถว — ผิด " + errCount + " แถว (แถวที่ผิดจะไม่ถูกบันทึก)</div>";
   area.innerHTML = html;
-  document.getElementById("btn-import-save").style.display = parsedRows.some(r => r.errors.length === 0) ? "block" : "none";
+  document.getElementById("btn-import-save").style.display = parsedRows.some(r => r.errors.length === 0 && !r.duplicateError) ? "block" : "none";
 }
 
 document.getElementById("btn-import-save").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-import-save");
+  if (btn.disabled) return;
   const year = placementYear();
   if (!year) return;
   const validRows = parsedRows.filter(r => r.errors.length === 0);
   if (validRows.length === 0) { showToast("ไม่มีแถวที่ถูกต้องให้บันทึก", false); return; }
 
-  const payload = validRows.map(r => ({
-    grade: r.grade, classroom: r.classroom, studentNo: r.studentNo,
-    prefix: r.prefix, first: r.first, last: r.last
-  }));
-
-  const btn = document.getElementById("btn-import-save");
   btn.disabled = true;
-  const { count, error } = await insertStudentsWithPlacements(payload, year);
-  btn.disabled = false;
-  if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false); return; }
-  showToast("เพิ่มนักเรียนแล้ว " + count + " คน", true);
-  document.getElementById("import-text").value = "";
-  parsedRows = [];
-  renderPreview();
-  await loadStudents();
+  document.getElementById("btn-preview").disabled = true;
+  document.getElementById("import-text").readOnly = true;
+  const label = btn.textContent;
+  btn.textContent = "กำลังตรวจและบันทึก…";
+  try {
+    const current = await loadExistingStudentNos();
+    renderPreview(current);
+    const fresh = validRows.filter(r => !r.duplicateError);
+    const skipped = parsedRows.filter(r => r.duplicateError).length;
+    if (!fresh.length) { showToast(`เพิ่มนักเรียนแล้ว 0 คน · ข้ามรหัสซ้ำ ${skipped} คน`, false, 8000); return; }
+    const payload = fresh.map(r => ({
+      grade: r.grade, classroom: r.classroom, studentNo: r.studentNo,
+      prefix: r.prefix, first: r.first, last: r.last
+    }));
+    const { count, error } = await insertStudentsWithPlacements(payload, year);
+    if (error) { showToast("บันทึกไม่สำเร็จ: " + error.message, false, 8000); return; }
+    showToast(`เพิ่มนักเรียนแล้ว ${count} คน · ข้ามรหัสซ้ำ ${skipped} คน`, true, 8000);
+    if (!skipped) {
+      document.getElementById("import-text").value = "";
+      parsedRows = [];
+      renderPreview();
+    }
+    await loadStudents();
+  } catch (error) { showToast(error.message, false, 8000); }
+  finally {
+    btn.disabled = false; btn.textContent = label;
+    document.getElementById("btn-preview").disabled = false;
+    document.getElementById("import-text").readOnly = false;
+  }
 });
 
 // ---------- สร้างตัวเลือกชั้น "ชั้นปี" (ตอนเพิ่มนักเรียน) จาก highest_grade ----------
