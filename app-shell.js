@@ -530,7 +530,7 @@ function syncFinanceKpiTones() {
       moduleHome: ["index.html", "ภาพรวมบริหารทั่วไป"],
       // รายงานนี้มีข้อมูลการทำงานรายครู — ซ่อนไว้ก่อน แล้วให้หน้าเว็บเปิดเฉพาะ
       // admin / ฝ่ายบริหารทั่วไป / ฝ่ายบุคลากรผ่าน applyRestrictedMenuAccess()
-      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html", "sdq-report.html", "home-visit-report.html"],
+      reportOnly: ["homeroom-audit.html", "absence-follow.html", "special-order.html", "sdq-report.html", "home-visit-report.html", "home-visit-settings.html"],
       groups: [
         {
           label: "บันทึก",
@@ -544,7 +544,8 @@ function syncFinanceKpiTones() {
         {
           label: "กำหนดค่า",
           items: [
-            ["homeroom.html", "ครูประจำชั้น"]
+            ["homeroom.html", "ครูประจำชั้น"],
+            ["home-visit-settings.html", "ขอบเขตเยี่ยมบ้าน"]
           ]
         },
         {
@@ -558,8 +559,9 @@ function syncFinanceKpiTones() {
         }
       ],
       workflows: {
+        "home-visit-settings.html": { title:"ขอบเขตเยี่ยมบ้าน", description:"กำหนดกลุ่มนักเรียนที่ต้องเยี่ยมในแต่ละปีการศึกษา", steps:["เลือกปี","กำหนดกลุ่มเป้าหมาย","บันทึกขอบเขต"] },
         "home-visit.html": { title:"บันทึกเยี่ยมบ้าน", description:"เลือกห้องและนักเรียน แล้วบันทึกผลเยี่ยมบ้าน", steps:["เลือกห้อง","เลือกนักเรียน","กรอกและบันทึก"] },
-        "home-visit-report.html": { title:"รายงานเยี่ยมบ้าน", description:"ดูความคืบหน้า ผลเยี่ยม และกำหนดขอบเขตประจำปี", steps:["เลือกปี","ดูรายห้อง","ดูรายคน"] },
+        "home-visit-report.html": { title:"รายงานเยี่ยมบ้าน", description:"ดูความคืบหน้าและผลเยี่ยมบ้านรายปี รายห้อง และรายคน", steps:["เลือกปี","ดูรายห้อง","ดูรายคน"] },
         "sdq.html": { title:"บันทึก SDQ", description:"เลือกห้อง แล้วกรอกแบบประเมินจุดแข็งและจุดอ่อนทีละคน ทั้งฉบับครู ผู้ปกครอง และนักเรียน", steps:["เลือกห้อง","เลือกนักเรียนและฉบับ","กรอกและบันทึก"] },
         "sdq-report.html": { title:"รายงาน SDQ", description:"ดูผลคัดกรองทั้งโรงเรียน รายห้อง และรายคน", steps:["เลือกปีและฉบับ","ดูภาพรวมและห้อง","ดูรายคน"] },
         "special-order.html": { title:"สั่งพิเศษ (วัดตัว)", description:"วัดขนาดนักเรียนเพื่อส่งรายการให้ฝ่ายการเงินสั่งร้าน", steps:["เลือกนักเรียน","กรอกขนาด","บันทึก"] },
