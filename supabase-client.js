@@ -1,6 +1,9 @@
 // ============================================================
 // ตั้งค่า Supabase ที่เดียว ใช้ร่วมกันทุกหน้า (index/attendance/summary/manage)
 // ============================================================
+import { computeSavingsBalance } from "./shared/money.js?v=20261109-1";
+export { computeSavingsBalance };
+
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
 const SUPABASE_URL = "https://cbfblvsasamxuwgcpmtj.supabase.co";
@@ -1204,18 +1207,6 @@ export function bahtText(value) {
 }
 
 // ---------- ออมทรัพย์นักเรียน ----------
-// ยอดคงเหลือ = ยอดยกมา + ฝาก − ถอน − หักค่ารถ − หักค่าใช้จ่าย
-// รับ txns ทั้งก้อนของนักเรียนคนหนึ่ง (หรือทั้งห้องแล้วกรองเอง)
-export function computeSavingsBalance(txns) {
-  return (Array.isArray(txns) ? txns : []).reduce((balance, txn) => {
-    const amount = Number(txn?.amount);
-    if (!Number.isFinite(amount)) return balance;
-    if (txn.kind === "ยอดยกมา" || txn.kind === "ฝาก") return balance + amount;
-    if (txn.kind === "ถอน" || txn.kind === "หักค่ารถ" || txn.kind === "หักค่าใช้จ่าย") return balance - amount;
-    return balance;
-  }, 0);
-}
-
 // จัดกลุ่มยอดคงเหลือทั้งห้อง → Map(student_id -> ยอด) เรียกครั้งเดียวไม่ต้องวน query รายคน
 export function summarizeSavingsByStudent(txns) {
   const grouped = new Map();

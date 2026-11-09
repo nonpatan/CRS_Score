@@ -238,6 +238,18 @@ button:disabled {
   border-radius:6px;
   padding:2px 6px
 }
+.guardian-app { grid-column:1/-1; min-width:0; margin-top:8px }
+.guardian-app .badge { display:inline-block; overflow-wrap:anywhere }
+.guardian-app .badge.waiting { background:var(--amber-soft); color:var(--amber) }
+.guardian-app .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px }
+.guardian-app button { max-width:100%; white-space:normal }
+.invite-code { font-size:clamp(28px,8vw,40px); font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:.12em; text-align:center; color:var(--teal); margin:16px 0 }
+#invite-modal .modal-card { overflow-wrap:anywhere }
+#invite-message { width:100%; min-height:180px; font:inherit; font-size:16px; line-height:1.6; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); resize:vertical }
+#invite-message:focus { outline:2px solid var(--teal); outline-offset:1px }
+.invite-warning { padding:10px 12px; border-radius:8px; background:var(--amber-soft); color:var(--amber) }
+#invite-modal .modal-actions { flex-wrap:wrap }
+#invite-modal button { max-width:100%; white-space:normal }
 .modal-overlay {
   display:none;
   position:fixed;
@@ -286,6 +298,7 @@ button:disabled {
   background:var(--danger-soft);
   color:var(--danger)
 }
+.toast.invite-feedback { position:fixed; z-index:70; left:16px; right:16px; width:fit-content; max-width:calc(100% - 32px); margin:0 auto; overflow-wrap:anywhere }
 [hidden] {
   display:none!important
 }
@@ -345,7 +358,7 @@ button:disabled {
   </div>
 </div>
 </form>
-<div id="toast" class="toast" role="status">
+<div id="toast" class="toast" role="status" aria-atomic="true">
 </div>
 </main>
 </div>
@@ -370,15 +383,27 @@ button:disabled {
 </div>
 </div>
 </div>
+<div id="invite-modal" class="modal-overlay">
+<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="invite-modal-title" aria-describedby="invite-warning">
+<h2 id="invite-modal-title">รหัสเข้าแอปผู้ปกครอง</h2>
+<div id="invite-code" class="invite-code"></div>
+<p id="invite-expiry" class="hint"></p>
+<p id="invite-warning" class="invite-warning">ปิดหน้าต่างนี้แล้วจะดูรหัสนี้อีกไม่ได้ — ต้องออกรหัสใหม่</p>
+<label for="invite-message">ข้อความส่งผู้ปกครอง (เลือกคัดลอกเองได้)</label>
+<textarea id="invite-message" readonly spellcheck="false"></textarea>
+<div class="modal-actions"><button type="button" class="ghost" id="close-invite">ปิด</button><button type="button" class="primary" id="copy-invite">คัดลอกข้อความส่งผู้ปกครอง</button></div>
+</div>
+</div>
 <script type="module">
 import {
   sb,
   requireAuth,
   signOut,
   checkDepartment,
+  getSetting,
   PRE_SCHOOL_GRADE,
   isTempStudentNo
-} from "../supabase-client.js?v=20261104-1";
+} from "../supabase-client.js?v=20261109-1";
 import {
   STUDENT_PREFIXES,
   normalizeNamePart,
@@ -401,6 +426,8 @@ const id=new URLSearchParams(location.search).get("id"),$=x=>document.getElement
   "'":"&#39;"
 }[c]));
 let student=null,profile=null,guardians=[],sourceNames=new Map(),canEdit=false,isAcademic=false,dirty=false,guardianDirty=false,snapshot="",editingGuardian=null;
+let guardianAppStatus=null,parentAppUrl="",guardianStatusRequest=0;
+const guardianAppBusy=new Set();
 const fields={
   personal:[["nickname",
       "ชื่อเล่น"],
@@ -571,7 +598,7 @@ function fieldHtml([name,
 function toast(text,ok){
   const el=$("toast");
   el.textContent=text;
-  el.className="toast "+(ok?"ok":"err");
+  el.className="toast "+(ok?"ok":"err")+($("invite-modal").classList.contains("show")?" invite-feedback":"");
   setTimeout(()=>el.className="toast",4000);
 }
 function err(name,msg,group="p"){
@@ -833,7 +860,9 @@ function collect(){
 async function loadPrivate(){
   const [pr,
     gu]=await Promise.all([sb.from("student_profiles").select("*").eq("student_id",id).maybeSingle(),
-    sb.from("student_guardians").select("*").eq("student_id",id).order("sort_order")]);
+    sb.from("student_guardians").select("*").eq("student_id",id).order("sort_order"),
+    loadGuardianAppStatus(),
+    getSetting("parent_app_url").then(value=>parentAppUrl=value||"").catch(()=>parentAppUrl="")]);
   if(pr.error)throw pr.error;
   if(gu.error)throw gu.error;
   profile=pr.data;
@@ -985,38 +1014,161 @@ $("profile-form").addEventListener("submit",async e=>{
     setSaveStatus(dirty?"dirty":"saved");
   }
 });
+// สถานะแอปล้มได้โดยไม่ขวางประวัติ และไม่เก็บรหัสเชิญไว้ในสถานะหน้านี้
+async function loadGuardianAppStatus(){
+  const request=++guardianStatusRequest;
+  let statuses=null;
+  try{
+    const r=await sb.rpc("guardian_app_status",{p_student_id:student.id});
+    if(!r.error)statuses=new Map((r.data||[]).map(row=>[row.guardian_id,row]));
+  }catch{}
+  if(request===guardianStatusRequest)guardianAppStatus=statuses;
+}
+function guardianInvitePending(status){
+  return !!status?.invite_expires_at&&new Date(status.invite_expires_at).getTime()>Date.now();
+}
+function guardianAppDate(value,withTime=false){
+  const date=new Date(value);
+  if(!value||!Number.isFinite(date.getTime()))return "";
+  return new Intl.DateTimeFormat("th-TH",{timeZone:"Asia/Bangkok",day:"numeric",month:"short",year:"numeric",...(withTime?{hour:"2-digit",minute:"2-digit"}:{})}).format(date);
+}
+function guardianAppHtml(g){
+  if(!guardianAppStatus)return "";
+  const status=guardianAppStatus.get(g.id),busy=guardianAppBusy.has(g.id);
+  const badge=status?.linked?'<span class="badge">ใช้แอปแล้ว</span>':guardianInvitePending(status)?`<span class="badge waiting">มีรหัสรอใช้ ถึง ${esc(guardianAppDate(status.invite_expires_at))}</span>`:"";
+  const buttons=canEdit&&student.status==="กำลังศึกษา"?`<div class="actions"><button type="button" class="ghost" data-invite="${esc(g.id)}" ${busy?'disabled aria-busy="true"':""}>${busy?"กำลังดำเนินการ…":status?.linked?"ออกรหัสใหม่":"ออกรหัสแอป"}</button>${status?.linked?`<button type="button" class="danger" data-revoke="${esc(g.id)}" ${busy?'disabled aria-busy="true"':""}>ยกเลิกการใช้แอป</button>`:""}</div>`:"";
+  return badge||buttons?`<div class="guardian-app">${badge}${buttons}</div>`:"";
+}
+function syncGuardianAppButtons(guardianId,loading=""){
+  for(const button of $("guardians").querySelectorAll("[data-invite],[data-revoke]")){
+    if((button.dataset.invite||button.dataset.revoke)!==guardianId)continue;
+    button.disabled=guardianAppBusy.has(guardianId);
+    if(button.disabled)button.setAttribute("aria-busy","true");
+    else button.removeAttribute("aria-busy");
+    button.textContent=button.disabled&&loading?loading:button.dataset.revoke?"ยกเลิกการใช้แอป":guardianAppStatus?.get(guardianId)?.linked?"ออกรหัสใหม่":"ออกรหัสแอป";
+  }
+}
+async function refreshGuardianAppStatus(){
+  await loadGuardianAppStatus();
+  const active=document.activeElement,guardianId=active?.dataset?.invite||active?.dataset?.revoke;
+  renderGuardians();
+  if(guardianId&&!active.isConnected)focusGuardianAppButton(guardianId);
+}
+function focusGuardianAppButton(guardianId){
+  [...$("guardians").querySelectorAll("[data-invite]")].find(button=>button.dataset.invite===guardianId)?.focus();
+}
+function guardianAppError(error,revoking=false){
+  if(error?.code==="42501")return revoking?"ไม่มีสิทธิ์ยกเลิกการใช้แอปให้นักเรียนคนนี้":"ไม่มีสิทธิ์ออกรหัสให้นักเรียนคนนี้";
+  if(error?.code==="P0001")return "ออกรหัสไม่ได้ นักเรียนต้องมีสถานะกำลังศึกษา";
+  return (revoking?"ยกเลิกการใช้แอปไม่สำเร็จ":"ออกรหัสไม่สำเร็จ")+" · ลองใหม่อีกครั้ง";
+}
+function guardianInviteMessage(code,expiresAt){
+  const lines=["รหัสเข้าแอปผู้ปกครอง โรงเรียนเจริญศึกษา",`นักเรียน: ${student.name}`,`รหัส: ${code} (ใช้ได้ถึง ${guardianAppDate(expiresAt,true)})`];
+  // รองรับลิงก์ที่มี query อยู่แล้ว และแทนค่าตัวเลือกเดิมโดยไม่ต่อ ? ซ้ำ
+  try{
+    if(parentAppUrl){
+      const url=new URL(parentAppUrl);
+      if(["https:","http:"].includes(url.protocol)){
+        url.searchParams.set("openExternalBrowser","1");
+        lines.push("เปิดแอป: "+url.href);
+      }
+    }
+  }catch{}
+  return lines.join("\n");
+}
+async function changeGuardianApp(guardianId,revoking=false){
+  const g=guardians.find(row=>row.id===guardianId);
+  if(!g||!canEdit||student.status!=="กำลังศึกษา"||!guardianAppStatus||guardianAppBusy.has(guardianId))return;
+  const status=guardianAppStatus.get(guardianId);
+  if(revoking&&!status?.linked)return;
+  const opener=[...$("guardians").querySelectorAll("[data-invite],[data-revoke]")].find(button=>(button.dataset.invite||button.dataset.revoke)===guardianId);
+  guardianAppBusy.add(guardianId);
+  syncGuardianAppButtons(guardianId,"กำลังรอยืนยัน…");
+  let opened=false;
+  try{
+    const warnings=[];
+    if(revoking)warnings.push("ผู้ปกครองคนนี้จะเข้าแอปดูข้อมูลนักเรียนไม่ได้จนกว่าจะออกรหัสใหม่");
+    else{
+      if(guardianInvitePending(status))warnings.push("รหัสเดิมจะใช้ไม่ได้");
+      if(status?.linked)warnings.push("บัญชีเดิมจะถูกย้ายไปบัญชีใหม่เมื่อผู้ปกครองกรอกรหัสนี้");
+    }
+    if(warnings.length&&!await window.crsAskConfirm({title:revoking?"ยกเลิกการใช้แอป":"ออกรหัสแอปใหม่",message:[g.first_name,...warnings].join("\n"),okLabel:revoking?"ยกเลิกการใช้แอป":"ออกรหัสใหม่",danger:revoking}))return;
+    syncGuardianAppButtons(guardianId,revoking?"กำลังยกเลิก…":"กำลังออกรหัส…");
+    const r=await sb.rpc(revoking?"revoke_guardian_link":"create_guardian_invite",{p_guardian_id:guardianId});
+    if(r.error)throw r.error;
+    if(revoking){
+      await refreshGuardianAppStatus();
+      toast("ยกเลิกการใช้แอปแล้ว",true);
+    }else{
+      const invite=r.data?.[0];
+      if(!invite?.code||!guardianAppDate(invite.expires_at))throw new Error("invalid_invite");
+      $("invite-code").textContent=invite.code;
+      $("invite-expiry").textContent="ใช้ได้ครั้งเดียว ถึง "+guardianAppDate(invite.expires_at,true);
+      $("invite-message").value=guardianInviteMessage(invite.code,invite.expires_at);
+      showModal("invite-modal","#copy-invite",opener);
+      opened=true;
+    }
+  }catch(error){
+    toast(guardianAppError(error,revoking),false);
+  }finally{
+    guardianAppBusy.delete(guardianId);
+    syncGuardianAppButtons(guardianId);
+    if(!opened)focusGuardianAppButton(guardianId);
+  }
+}
+$("copy-invite").addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText($("invite-message").value);
+    toast("คัดลอกข้อความแล้ว",true);
+  }catch{
+    if(!$("invite-modal").classList.contains("show"))return;
+    $("invite-message").focus();
+    $("invite-message").select();
+    toast("คัดลอกไม่ได้ กรุณาเลือกข้อความในกล่องแล้วคัดลอกเอง",false);
+  }
+});
+$("close-invite").addEventListener("click",()=>closeModal("invite-modal"));
 function renderGuardians(){
   const box=$("guardians");
-  const cards=guardians.map(g=>`<div class="guardian ${g.is_primary?"primary-contact":""}"><span class="guardian-avatar" aria-hidden="true">${esc(initials(g.first_name,""))||personSvg}</span><div class="guardian-name">${esc([g.prefix,g.first_name,g.last_name].filter(Boolean).join(" "))} ${g.is_primary?'<span class="badge">ผู้ติดต่อหลัก</span>':""}</div><div class="guardian-rel">${esc(g.relation)}${g.occupation?" · "+esc(g.occupation):""}</div><div class="guardian-row">${g.phone?`<a href="tel:${esc(normalizePhone(g.phone))}">${esc(formatPhone(g.phone))}</a>`:'<span class="no-tel">ยังไม่มีเบอร์โทร</span>'}${canEdit?`<button type="button" class="ghost" data-edit="${esc(g.id)}">แก้ไข</button>`:""}</div>${g.copied_from_student_id?`<small class="hint" style="grid-column:1/-1">คัดลอกจาก ${esc(sourceNames.get(g.copied_from_student_id)||"พี่น้อง")}</small>`:""}</div>`).join("");
+  const cards=guardians.map(g=>`<div class="guardian ${g.is_primary?"primary-contact":""}"><span class="guardian-avatar" aria-hidden="true">${esc(initials(g.first_name,""))||personSvg}</span><div class="guardian-name">${esc([g.prefix,g.first_name,g.last_name].filter(Boolean).join(" "))} ${g.is_primary?'<span class="badge">ผู้ติดต่อหลัก</span>':""}</div><div class="guardian-rel">${esc(g.relation)}${g.occupation?" · "+esc(g.occupation):""}</div><div class="guardian-row">${g.phone?`<a href="tel:${esc(normalizePhone(g.phone))}">${esc(formatPhone(g.phone))}</a>`:'<span class="no-tel">ยังไม่มีเบอร์โทร</span>'}${canEdit?`<button type="button" class="ghost" data-edit="${esc(g.id)}">แก้ไข</button>`:""}</div>${g.copied_from_student_id?`<small class="hint" style="grid-column:1/-1">คัดลอกจาก ${esc(sourceNames.get(g.copied_from_student_id)||"พี่น้อง")}</small>`:""}${guardianAppHtml(g)}</div>`).join("");
   box.innerHTML=cards+(canEdit?`<div class="guardian-add"><span>${guardians.length?"เพิ่มผู้ปกครองอีกคน":"ยังไม่มีข้อมูลผู้ปกครอง"}</span><div class="actions"><button type="button" class="ghost" id="add-guardian">+ เพิ่มผู้ปกครอง</button><button type="button" class="ghost" id="copy-sibling">คัดลอกจากพี่น้อง</button></div></div>`:guardians.length?"":'<div class="guardian-add">ยังไม่มีข้อมูลผู้ปกครอง</div>');
 }
 $("guardians").addEventListener("click",e=>{
   const edit=e.target.closest("[data-edit]"),
   add=e.target.closest("#add-guardian"),copy=e.target.closest("#copy-sibling");
+  const invite=e.target.closest("[data-invite]"),revoke=e.target.closest("[data-revoke]");
+  if(invite)changeGuardianApp(invite.dataset.invite);
+  if(revoke)changeGuardianApp(revoke.dataset.revoke,true);
   if(edit)openGuardian(guardians.find(g=>g.id===edit.dataset.edit));
   if(add)openGuardian();
   if(copy)copySibling();
 });
 let modalOpener=null;
-function showModal(name,focusSelector){
-  modalOpener=document.activeElement;
+function showModal(name,focusSelector,opener=document.activeElement){
+  modalOpener=opener;
   $(name).classList.add("show");
   $(name).querySelector(focusSelector)?.focus();
 }
 function closeModal(name){
   $(name).classList.remove("show");
+  if(name==="invite-modal"){
+    $("invite-code").textContent="";
+    $("invite-expiry").textContent="";
+    $("invite-message").value="";
+  }
   if(name==="guardian-modal")guardianDirty=false;
   modalOpener?.focus();
   modalOpener=null;
+  if(name==="invite-modal")void refreshGuardianAppStatus();
 }
 for(const modal of [$("guardian-modal"),
-  $("sibling-modal")])modal.addEventListener("keydown",e=>{
+  $("sibling-modal"),$("invite-modal")])modal.addEventListener("keydown",e=>{
   if(e.key==="Escape"){
     e.preventDefault();
     closeModal(modal.id);
   }
   if(e.key==="Tab"){
-    const items=[...modal.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled)")].filter(x=>x.offsetParent!==null);
+    const items=[...modal.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)")].filter(x=>x.offsetParent!==null);
     if(!items.length)return;
     const first=items[0],
     last=items.at(-1);
@@ -1104,7 +1256,7 @@ async function deleteGuardian(g){
     g.last_name].filter(Boolean).join(" ");
   if(!await window.crsAskConfirm({
     title:"ลบผู้ปกครอง",
-    message:`ข้อมูลผู้ปกครอง ${name} 1 คนจะหายจากประวัตินักเรียน`,
+    message:`ข้อมูลผู้ปกครอง ${name} 1 คนจะหายจากประวัตินักเรียน`+(guardianAppStatus?.get(g.id)?.linked?"\nผู้ปกครองคนนี้ใช้แอปอยู่ การลบจะตัดสิทธิ์ในแอปด้วย":""),
     okLabel:"ลบผู้ปกครอง",
     danger:true
   }))return;
