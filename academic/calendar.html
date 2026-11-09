@@ -49,6 +49,9 @@
   #public-warning { margin:6px 0 0; padding:8px 10px; border-radius:8px; color:var(--amber); background:var(--amber-soft); font-size:14px; }
   .public-chip { gap:4px; color:var(--teal); background:var(--teal-soft); }
   .public-chip svg { flex:none; width:14px; height:14px; }
+  #grade-release-list .calendar-row { padding:12px 0; }
+  #grade-release-form { margin-top:16px; border-top:1px solid var(--line); }
+  #grade-release-list .meta { margin:4px 0; color:var(--muted); font-size:14px; }
   .field-note, .muted { color:var(--muted); font-size:13px; }
   .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:14px; }
   button {
@@ -222,6 +225,26 @@
     </div>
     </section>
 
+    <section class="card" id="grade-release-card" hidden aria-labelledby="grade-release-heading">
+      <div class="section-head"><div>
+        <h2 id="grade-release-heading">ประกาศผลการเรียนให้ผู้ปกครอง</h2>
+        <p>ตั้งวันประกาศรายภาคเรียน เลื่อนวันได้ที่งานในปฏิทิน</p>
+      </div></div>
+      <div id="grade-release-list" role="status">กำลังโหลดประกาศ…</div>
+      <form id="grade-release-form">
+        <p class="muted">กรอกทุกช่องเพื่อตั้งวันประกาศ</p>
+        <div class="form-grid">
+          <div class="field"><label for="release-year">ปีการศึกษา</label><select id="release-year" required></select></div>
+          <div class="field"><label for="release-term">ภาคเรียน</label><select id="release-term" required></select></div>
+          <div class="field wide"><label for="release-date">วันประกาศ</label><input id="release-date" type="date" required aria-describedby="release-date-note"></div>
+        </div>
+        <p class="muted" id="release-date-note">เลือกวันนี้หรือวันถัดไป ผู้ปกครองจะเห็นผลตั้งแต่วันประกาศ</p>
+        <p class="muted" id="release-open-exams" role="status"></p>
+        <p id="release-error" class="banner warn" role="alert" tabindex="-1" hidden></p>
+        <div class="toolbar"><button type="submit" class="ghost" id="create-release" disabled>ตั้งวันประกาศ</button></div>
+      </form>
+    </section>
+
     <details class="card" id="setting-card" hidden>
       <summary>ตั้งค่าการแจ้งเตือน · <span id="setting-summary">ยังไม่ได้ตั้งค่ากลาง</span></summary>
       <p class="muted">รายการที่เว้นช่อง “แจ้งล่วงหน้า” จะใช้ค่านี้</p>
@@ -298,8 +321,8 @@ import {
   sb, requireAuth, signOut, getProfile, checkDepartment,
   getActiveYear, setActiveYear, getAcademicYears,
   getSetting, setSetting, loadAcademicCalendar, pickCalendarUpcoming,
-  bangkokNow, toDateStr
-} from "../supabase-client.js?v=20261109-1";
+  bangkokNow, toDateStr, academicYearOf, fetchAllRows
+} from "../supabase-client.js?v=20261109-2";
 
 const session = await requireAuth();
 if (session) {
@@ -332,8 +355,15 @@ if (session) {
   let rows = [];
   let editingId = null;
   let defaultLeadDays = null;
+  let gradeReleases = [];
+  let releaseSubjects = [];
+  let releaseBusy = false;
+  const thaiToday = () => toDateStr(bangkokNow());
+  const linkedRelease = id => gradeReleases.find(release => release.calendar_id === id);
+
 
   if (canEdit) {
+    el("grade-release-card").hidden = false;
     el("setting-card").hidden = false;
     el("add-item").hidden = false;
   } else {
@@ -463,12 +493,13 @@ if (session) {
       const status = calendarStatus(row, upcoming);
       return heading + `<article class="calendar-row ${status.kind}" id="calendar-item-${esc(row.id)}" tabindex="-1">
         <div class="row-head"><div class="row-title">${esc(row.title)}</div><span class="chip status-chip ${status.kind}">${esc(status.text)}</span></div>
-        <div class="row-meta">${esc(dateText)} · <span class="chip category-chip">${esc(row.category)}</span>${row.is_public ? ' <span class="chip public-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>ผู้ปกครองเห็น</span>' : ""}${row.owner_note ? ` · ${esc(row.owner_note)}` : ""} · ${esc(leadText)}</div>
+        <div class="row-meta">${esc(dateText)} · <span class="chip category-chip">${esc(row.category)}</span>${linkedRelease(row.id) ? ' <span class="chip public-chip">ประกาศผลการเรียน</span>' : ""}${row.is_public ? ' <span class="chip public-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>ผู้ปกครองเห็น</span>' : ""}${row.owner_note ? ` · ${esc(row.owner_note)}` : ""} · ${esc(leadText)}</div>
+        ${linkedRelease(row.id) && canEdit ? '<p class="field-note">ยกเลิกได้ที่การ์ด “ประกาศผลการเรียนให้ผู้ปกครอง”</p>' : ""}
         <div class="row-bottom">
           ${row.detail ? `<details class="task-detail"><summary aria-label="ดู/ย่อรายละเอียด · ${esc(row.title)}"><span class="detail-text">${esc(row.detail)}</span><span class="detail-toggle">ย่อรายละเอียด</span></summary></details>` : '<span></span>'}
           <div class="actions">
             ${canEdit ? `<button class="ghost" data-edit="${row.id}">แก้ไข</button>` : ""}
-            ${isAdmin ? `<button class="danger" data-delete="${row.id}">ลบ</button>` : ""}
+            ${isAdmin && !linkedRelease(row.id) ? `<button class="danger" data-delete="${row.id}">ลบ</button>` : ""}
           </div>
         </div>
       </article>`;
@@ -500,21 +531,25 @@ if (session) {
     const year = el("filter-year").value;
     if (!year) {
       rows = [];
+      await loadGradeReleases().catch(error => releaseError(error.message));
       render();
       return;
     }
     el("calendar-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
     try {
-      rows = await loadAcademicCalendar(year);
+      const [calendarRows] = await Promise.all([loadAcademicCalendar(year), loadGradeReleases()]);
+      rows = calendarRows;
       render();
     } catch (error) {
       el("calendar-list").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+      if (canEdit) el("grade-release-list").innerHTML = `<p role="alert">${esc(error.message)}</p><button type="button" class="ghost" data-retry-release>ลองโหลดอีกครั้ง</button>`;
     }
   }
 
   function updatePublicWarning() {
     el("public-warning").textContent = el("f-public").checked
-      ? "ผู้ปกครองและนักเรียนจะเห็นหัวข้อ วันที่ และรายละเอียดนี้" : "";
+      ? "ผู้ปกครองและนักเรียนจะเห็นหัวข้อ วันที่ และรายละเอียดนี้" +
+        (linkedRelease(editingId) ? " · ประกาศผลการเรียนต้องแสดงให้ผู้ปกครองเห็นเสมอ เลื่อนวันเริ่มเพื่อเปลี่ยนวันประกาศ" : "") : "";
   }
   el("f-public").addEventListener("change", updatePublicWarning);
 
@@ -529,7 +564,9 @@ if (session) {
     el("f-owner").value = row?.owner_note || "";
     el("f-lead").value = row?.lead_days ?? "";
     el("f-detail").value = row?.detail || "";
-    el("f-public").checked = row?.is_public === true;
+    const release = linkedRelease(editingId);
+    el("f-public").checked = Boolean(release) || row?.is_public === true;
+    el("f-public").disabled = Boolean(release);
     updatePublicWarning();
     el("form-card").hidden = false;
     el("form-card").scrollIntoView({ behavior:"smooth", block:"start" });
@@ -539,6 +576,7 @@ if (session) {
   function closeForm() {
     editingId = null;
     el("calendar-form").reset();
+    el("f-public").disabled = false;
     updatePublicWarning();
     el("form-card").hidden = true;
   }
@@ -592,10 +630,14 @@ if (session) {
       owner_note: el("f-owner").value.trim() || null,
       lead_days: leadDays,
       detail: el("f-detail").value.trim() || null,
-      is_public: el("f-public").checked,
+      is_public: Boolean(linkedRelease(editingId)) || el("f-public").checked,
       updated_at: new Date().toISOString()
     };
     if (!payload.title) return toast("กรุณากรอกชื่องาน", true);
+    const release = linkedRelease(editingId);
+    if (release && start !== release.calendar.start_date && start <= thaiToday() && !await window.crsAskConfirm({
+      title:"เลื่อนวันประกาศผลการเรียน", message:"ผู้ปกครองจะเห็นผลทันที", okLabel:"เลื่อนวันประกาศ", danger:false
+    })) return;
     const button = el("save-item");
     button.disabled = true;
     const query = editingId
@@ -615,7 +657,7 @@ if (session) {
     const remove = event.target.closest("[data-delete]");
     if (!remove) return;
     const row = rows.find(item => item.id === remove.dataset.delete);
-    if (!row || !await window.crsAskConfirm({
+    if (!isAdmin || !row || linkedRelease(row.id) || !await window.crsAskConfirm({
       title: "ลบกำหนดการ",
       message: `ลบ “${row.title}” ใช่ไหม? การลบกู้คืนไม่ได้`,
       okLabel: "ลบกำหนดการ"
@@ -630,10 +672,125 @@ if (session) {
     await loadRows();
   });
 
+  function releaseError(message = "") {
+    el("release-error").textContent = message;
+    el("release-error").hidden = !message;
+    if (message) el("release-error").focus();
+  }
+
+  function updateReleaseTerms() {
+    const terms = [...new Set(releaseSubjects.filter(subject => subject.year === el("release-year").value)
+      .map(subject => subject.term).filter(term => term !== null && term !== ""))].sort();
+    el("release-term").innerHTML = terms.length ? terms.map(term => `<option value="${esc(term)}">ภาคเรียน ${esc(term)}</option>`).join("")
+      : '<option value="">— ไม่มีรายวิชาของปีนี้ —</option>';
+    updateReleaseInfo();
+  }
+
+  function updateReleaseInfo() {
+    const year = el("release-year").value, term = el("release-term").value;
+    const subjects = releaseSubjects.filter(subject => subject.year === year && subject.term === term);
+    const open = subjects.filter(subject => subject.exam_closed_at === null).length;
+    el("release-open-exams").textContent = subjects.length ? `ยังไม่ปิดคะแนนสอบ ${open} วิชา` : "ยังไม่มีรายวิชาของปีและภาคเรียนนี้";
+    for (const id of ["release-year", "release-term", "release-date"]) el(id).disabled = releaseBusy;
+    el("create-release").disabled = releaseBusy || !year || !term;
+  }
+
+  function renderGradeReleases() {
+    if (!canEdit) return;
+    const today = thaiToday();
+    el("grade-release-list").innerHTML = gradeReleases.length ? gradeReleases.map(release => {
+      const date = release.calendar.start_date, released = date <= today;
+      return `<div class="calendar-row"><div class="row-title">ปีการศึกษา ${esc(release.year)} · ภาคเรียน ${esc(release.term)}</div>
+        <p class="meta">${esc(fmtDate(date))} · <span class="chip status-chip ${released ? "active" : "soon"}">${released ? "ประกาศแล้ว" : "รอประกาศ"}</span></p>
+        <div class="toolbar">${!released || isAdmin ? `<button type="button" class="danger" data-cancel-release="${esc(release.id)}" ${releaseBusy ? "disabled" : ""}>ยกเลิกประกาศ</button>`
+          : '<span class="muted">ประกาศแล้ว ยกเลิกได้เฉพาะ admin</span>'}</div></div>`;
+    }).join("") : '<p class="empty">ยังไม่ได้ตั้งวันประกาศผลการเรียน</p>';
+  }
+
+  async function loadGradeReleases() {
+    const { data, error } = await fetchAllRows(() => sb.from("grade_releases")
+      .select("id,year,term,calendar_id,calendar:academic_calendar!calendar_id(start_date)"), ["year", "term", "id"]);
+    if (error) throw new Error(error.message);
+    gradeReleases = data || [];
+    renderGradeReleases();
+  }
+
+  async function initGradeReleaseForm() {
+    if (!canEdit) return;
+    el("release-date").min = thaiToday();
+    el("release-year").innerHTML = '<option value="">— เลือกปีการศึกษา —</option>' + [...years].reverse()
+      .map(row => `<option value="${esc(row.year)}">${esc(row.year)}</option>`).join("");
+    el("release-year").value = academicYearOf(thaiToday(), years) || "";
+    try {
+      const { data, error } = await fetchAllRows(() => sb.from("subjects").select("id,year,term,exam_closed_at"), "id");
+      if (error) throw new Error(error.message);
+      releaseSubjects = data || [];
+      updateReleaseTerms();
+    } catch (error) { releaseError(error.message); }
+  }
+
+  el("release-year").addEventListener("change", () => { releaseError(); updateReleaseTerms(); });
+  el("release-term").addEventListener("change", () => { releaseError(); updateReleaseInfo(); });
+  el("release-date").addEventListener("focus", () => { el("release-date").min = thaiToday(); });
+  el("grade-release-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!canEdit || releaseBusy) return;
+    releaseError();
+    const date = el("release-date").value;
+    if (!date || date < thaiToday()) return releaseError("วันประกาศต้องเป็นวันนี้หรือวันถัดไป");
+    if (date === thaiToday() && !await window.crsAskConfirm({ title:"ประกาศผลการเรียนวันนี้",
+      message:"ผู้ปกครองจะเห็นผลทันที", okLabel:"ตั้งวันประกาศ", danger:false })) return;
+    releaseBusy = true;
+    updateReleaseInfo();
+    el("create-release").textContent = "กำลังบันทึก…";
+    el("grade-release-form").setAttribute("aria-busy", "true");
+    try {
+      const { error } = await sb.rpc("create_grade_release", {
+        p_year:el("release-year").value, p_term:el("release-term").value, p_date:date
+      });
+      if (error) throw new Error(error.message);
+      toast("ตั้งวันประกาศผลการเรียนแล้ว");
+      el("release-date").value = "";
+      await loadRows();
+    } catch (error) { releaseError(error.message); }
+    finally {
+      releaseBusy = false;
+      el("create-release").textContent = "ตั้งวันประกาศ";
+      el("grade-release-form").setAttribute("aria-busy", "false");
+      updateReleaseInfo();
+      renderGradeReleases();
+    }
+  });
+
+  el("grade-release-list").addEventListener("click", async event => {
+    if (event.target.closest("[data-retry-release]")) return loadRows();
+    const button = event.target.closest("[data-cancel-release]");
+    if (!canEdit || releaseBusy || !button) return;
+    const release = gradeReleases.find(row => row.id === button.dataset.cancelRelease);
+    if (!release || (release.calendar.start_date <= thaiToday() && !isAdmin)) return;
+    const name = `${release.term}/${release.year}`;
+    if (!await window.crsAskConfirm({ title:"ยกเลิกประกาศผลการเรียน",
+      message:`ยกเลิกภาคเรียน ${name} จะลบวันประกาศและงานในปฏิทิน 1 รายการ ผู้ปกครองจะดูผลของภาคเรียนนี้ไม่ได้`,
+      requireText:name, okLabel:"ยกเลิกประกาศ" })) return;
+    releaseBusy = true;
+    button.disabled = true;
+    button.textContent = "กำลังยกเลิก…";
+    updateReleaseInfo();
+    try {
+      const { error } = await sb.rpc("cancel_grade_release", { p_id:release.id });
+      if (error) throw new Error(error.message);
+      if (editingId === release.calendar_id) closeForm();
+      toast("ยกเลิกประกาศผลการเรียนแล้ว");
+      await loadRows();
+    } catch (error) { releaseError(error.message); }
+    finally { releaseBusy = false; updateReleaseInfo(); renderGradeReleases(); }
+  });
+
   const today = toDateStr(bangkokNow());
   el("filter-month").value = today.slice(0,7);
   await loadSetting();
   await loadYears();
+  await initGradeReleaseForm();
   await loadRows();
 }
 </script>

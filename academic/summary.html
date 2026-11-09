@@ -715,8 +715,9 @@ import {
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting,
   loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
-  listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade
-} from "../supabase-client.js?v=20261109-1";
+  listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
+  subjectTotalScore, subjectCurrentScore,
+} from "../supabase-client.js?v=20261109-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1352,12 +1353,7 @@ function scoringStructureReason(scoring) {
 
 // คะแนนตอนนี้ใช้ส่วนคะแนนที่สูตรกลางคืนมาแล้ว ไม่เปลี่ยนเกณฑ์ผลการเรียน
 function subjectNowScore(r) {
-  if (r.halves) {
-    const half = r.halves[currentReportHalf];
-    return half.hasStructure && !half.examOverCap ? half.score : null;
-  }
-  return r.scoring.examOverCap || !r.scoring.hasCollectStructure ? null :
-    r.collectPart + (r.scoring.examScored ? r.examPart : 0);
+  return subjectCurrentScore(r, currentReportHalf);
 }
 
 // คะแนนที่แสดงระหว่างปีคิดเฉพาะวิชาย่อยที่มีโครงสร้างในช่วงนั้น; เกรดทางการยังใช้สูตรกลางเดิม
@@ -3944,7 +3940,7 @@ function pp6SubjectCells(item) {
   if (result.type === "มส.") return { score:"—", level:"มส.", pending:true };
   if (result.type === "ร.") return { score:"—", level:"ร.", pending:true };
   if (scoring && !scoring.complete) return { score:"—", level:"รอผล", pending:true };
-  return { score:Number(result.percentScore).toFixed(2), level:String(result.grade), pending:false };
+  return { score:subjectTotalScore(item).toFixed(2), level:String(result.grade), pending:false };
 }
 
 function pp6ZeroNotes(subjects) {
