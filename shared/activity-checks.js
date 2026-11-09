@@ -1,7 +1,7 @@
 // ตรวจข้อมูลล้วน ๆ ไม่แก้ข้อมูลและไม่ผูกกับการเชื่อมต่อฐานข้อมูล
 export function findActivityDataIssues({
   assessments = [], members = [], sessions = [], passResults = [],
-  students = [], termDates = {}, today = ""
+  students = [], termDates = {}, today = "", requiredGrades = [], requiredCategories = []
 } = {}) {
   const compare = (a, b) => String(a ?? "").localeCompare(String(b ?? ""), "th", { numeric: true });
   const rows = [...assessments].sort((a, b) => compare(a.name, b.name) || compare(a.id, b.id));
@@ -62,17 +62,10 @@ export function findActivityDataIssues({
           { relatedIds: [a.id, b.id] });
       }
     }
-    const represented = new Set(group.flatMap(row => [...membersById.get(row.id)]));
-    const grades = new Set([...represented].map(id => studentsById.get(id)?.grade_level).filter(Boolean));
-    for (const grade of [...grades].sort(compare)) {
-      const missing = students.filter(student => student.left_school !== true &&
-        student.grade_level === grade && !represented.has(student.id)).map(student => student.id);
-      if (missing.length) add("NOT_IN_CATEGORY", "info", null, missing,
-        `นักเรียนชั้น ${grade} ${missing.length} คนไม่อยู่${category(group[0])}ใดเลยในภาค ${term(group[0])}`,
-        { assessmentName: category(group[0]), term: term(group[0]), gradeLevel: grade });
-    }
   }
-  if (today && termDates.term2Start && today >= termDates.term2Start) {
+  const term2Started = !!(today && termDates.term2Start && today >= termDates.term2Start);
+  const missingTerm2ByCategory = new Map();
+  if (term2Started) {
     const assigned = new Map();
     for (const row of rows) {
       if (term(row) !== "1" || !category(row)) continue;
@@ -85,6 +78,23 @@ export function findActivityDataIssues({
       for (const id of membersById.get(row.id)) seen.add(id);
       if (missing.length) add("MISSING_TERM2", "error", row, missing,
         `นักเรียน ${missing.length} คนยังไม่มี${type}ภาค 2 — ปพ.6 ปลายปีจะยึดผลภาค 1 อย่างเดียว`);
+      if (!missingTerm2ByCategory.has(type)) missingTerm2ByCategory.set(type, new Set());
+      for (const id of missing) missingTerm2ByCategory.get(type).add(id);
+    }
+  }
+  for (const type of [...new Set(requiredCategories)].sort(compare)) {
+    for (const currentTerm of term2Started ? ["1", "2"] : ["1"]) {
+      const group = groups.get(JSON.stringify([type, currentTerm])) || [];
+      const represented = new Set(group.flatMap(row => [...membersById.get(row.id)]));
+      const alreadyReported = currentTerm === "2" ? missingTerm2ByCategory.get(type) : null;
+      for (const grade of [...new Set(requiredGrades)].sort(compare)) {
+        const missing = students.filter(student => student.left_school !== true &&
+          student.grade_level === grade && !represented.has(student.id) &&
+          !alreadyReported?.has(student.id)).map(student => student.id);
+        if (missing.length) add("NOT_IN_CATEGORY", "error", null, missing,
+          `นักเรียนชั้น ${grade} ${missing.length} คนไม่อยู่${type}ใดเลยในภาค ${currentTerm} — ปพ. จะไม่มีผล${type}`,
+          { assessmentName: type, term: currentTerm, gradeLevel: grade });
+      }
     }
   }
   const rank = { error: 0, warn: 1, info: 2 };

@@ -385,7 +385,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment } from "../supabase-client.js?v=20261109-2";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment, GRADE_ORDER } from "../supabase-client.js?v=20261109-2";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -399,6 +399,7 @@ const CM_SPLIT_MQ=matchMedia("(min-width:1024px)");
 let cmTerm="1", cmListScroll=0;
 let profilesById = new Map();
 let allowedCompetencyStages = [];
+let highestGrade = null;
 const $ = id => document.getElementById(id);
 function esc(v) { return String(v || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function toast(msg, ok=true) { const el=$("toast"); el.textContent=msg; el.className="toast "+(ok?"ok":"err"); setTimeout(()=>{el.className="toast";},4500); }
@@ -553,7 +554,7 @@ async function loadActivityCheckRows(table, columns, ids) {
   return rows;
 }
 function loadActivityCheckModule() {
-  return import("../shared/activity-checks.js?v=20261109-1");
+  return import("../shared/activity-checks.js?v=20261109-2");
 }
 async function runActivityCheck() {
   const year = $("filter-assessment-year").value;
@@ -589,11 +590,18 @@ async function runActivityCheck() {
     }
     for (const student of studentsAtAssessmentYear(placementResult.data || [])) studentMap.set(student.id, student);
     const checkStudents = [...studentMap.values()];
+    const firstGradeIndex = GRADE_ORDER.indexOf("ป.1");
+    const highestGradeIndex = GRADE_ORDER.indexOf(highestGrade);
+    const requiredGrades = highestGradeIndex >= firstGradeIndex
+      ? GRADE_ORDER.slice(firstGradeIndex, highestGradeIndex + 1) : [];
+    const requiredCategories = activityCategories.filter(row => row.active !== false).map(row => row.code);
     const today = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
     const issues = checkModule.findActivityDataIssues({ assessments:yearAssessments, members:checkMembers,
-      sessions:checkSessions, passResults:checkPass, students:checkStudents,
+      sessions:checkSessions, passResults:checkPass, students:checkStudents, requiredGrades, requiredCategories,
       termDates:{term1End:dates.term1_end_date, term2Start:dates.term2_start_date, term2End:dates.term2_end_date}, today });
     renderActivityIssues(visibleActivityIssues(issues, yearAssessments, teacherResult.data || [], canSeeAll), yearAssessments, checkStudents, canSeeAll);
+    if (!requiredGrades.length) $("activity-check-status").textContent +=
+      " · ยังไม่ได้ตั้งชั้นสูงสุดที่เปิดสอน — ข้ามการตรวจ 'นักเรียนไม่อยู่ในกิจกรรม'";
   } catch (error) {
     if (request !== activityCheckRequest) return;
     $("activity-check-status").className = "activity-check-load-error";
@@ -629,7 +637,7 @@ function refreshTeacherRoomFilter() {
 }
 
 async function init() {
-  const [a,c,e,p,categoryResult,highestGrade] = await Promise.all([
+  const [a,c,e,p,categoryResult,highestGradeSetting] = await Promise.all([
     sb.from("competency_assessments").select("*").order("created_at",{ascending:false}),
     sb.from("core_competencies").select("*").order("seq"),
     sb.from("core_competency_elements").select("*").order("stage").order("seq"),
@@ -639,6 +647,7 @@ async function init() {
   ]);
   assessments=a.data||[]; competencies=c.data||[]; elements=e.data||[];
   activityCategories=categoryResult.error?[]:(categoryResult.data||[]);
+  highestGrade=highestGradeSetting;
   allowedCompetencyStages=availableCompetencyStages(highestGrade);
   allProfiles=p.data||[];
   profilesById = new Map(allProfiles.map(person => [person.id, person]));
