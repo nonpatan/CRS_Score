@@ -4177,19 +4177,21 @@ async function renderPp6Panel(student) {
 }
 
 // รวมผลของกิจกรรมในแต่ละประเภทตามลำดับหลักสูตร
-function pp6ActivityRows(categories, assessments, memberIds, resultById) {
+function pp6ActivityRows(categories, assessments, memberIds, resultById, requiredTerms) {
   const mine = new Map();
   for (const row of assessments) {
     if (!memberIds.has(row.id)) continue;
     if (!mine.has(row.activity_category)) mine.set(row.activity_category, []);
-    mine.get(row.activity_category).push(row.id);
+    mine.get(row.activity_category).push(row);
   }
   return categories.slice().sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
     .filter(category => category.active || mine.has(category.code))
     .map(category => {
-      const ids = mine.get(category.code) || [];
-      const result = !ids.length ? "—" : ids.some(id => resultById.get(id) === false) ? "ไม่ผ่าน" :
-        ids.some(id => !resultById.has(id)) ? "รอผล" : "ผ่าน";
+      const rows = mine.get(category.code) || [];
+      // ประเภทที่เปิดใช้ต้องมีรายการครบทุกภาคของใบ โดยรายการเดิมไม่ระบุภาคนับได้ทุกภาค
+      const missingTerm = category.active && requiredTerms.some(term => !rows.some(row => row.term === null || row.term === term));
+      const result = rows.some(row => resultById.get(row.id) === false) ? "ไม่ผ่าน" :
+        missingTerm || rows.some(row => !resultById.has(row.id)) ? "รอผล" : "ผ่าน";
       return { name:category.code, result };
     });
 }
@@ -4204,7 +4206,7 @@ async function pp6LoadActivities(studentId, year, terms) {
   ]);
   if (list.error || categories.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (list.error || categories.error).message);
   const ids = (list.data || []).map(row => row.id);
-  if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map());
+  if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map(), terms);
   const [members, results] = await Promise.all([
     sb.from("competency_assessment_members").select("assessment_id").eq("student_id", studentId).in("assessment_id", ids),
     sb.from("activity_pass_results").select("assessment_id,passed").eq("student_id", studentId).in("assessment_id", ids)
@@ -4212,7 +4214,7 @@ async function pp6LoadActivities(studentId, year, terms) {
   if (members.error || results.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (members.error || results.error).message);
   const mine = new Set((members.data || []).map(row => row.assessment_id));
   const resultById = new Map((results.data || []).map(row => [row.assessment_id, row.passed]));
-  return pp6ActivityRows(categories.data || [], list.data || [], mine, resultById);
+  return pp6ActivityRows(categories.data || [], list.data || [], mine, resultById, terms);
 }
 
 async function pp6LoadCompetencies(student, year, grade, term) {
