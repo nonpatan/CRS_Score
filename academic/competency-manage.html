@@ -186,6 +186,25 @@
     .cm-actions { gap:8px; }
     .manage-head { top:56px; }
   }
+  /* การ์ดตรวจความครบใช้โทนสถานะกลาง และเปิดรายชื่อเมื่อผู้ใช้ขอ */
+  #activity-check-card { min-width:0; }
+  main:has(.cm-show-detail) #activity-check-card { display:none; }
+  .activity-check-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+  .activity-check-head h2 { font-size:18px; margin:0; }
+  #activity-check-card h3 { font-size:16px; margin:16px 0 8px; }
+  #activity-check-card button, #activity-check-card summary { min-height:44px; min-width:44px; }
+  #activity-check-card summary { cursor:pointer; padding:10px 0; font-weight:600; }
+  #activity-check-card :is(button,summary):focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #activity-check-card :is(button,summary) { scroll-margin-top:220px; }
+  #activity-check-card button { white-space:normal; overflow-wrap:anywhere; }
+  #activity-check-card p { margin:8px 0; }
+  .activity-check-issue { border-top:1px solid var(--line); padding:12px 0; overflow-wrap:anywhere; }
+  .activity-check-badge { display:inline-block; border-radius:6px; padding:2px 8px; font-size:14px; background:var(--bg); color:var(--muted); }
+  .activity-check-badge.error { background:var(--danger-soft); color:var(--danger); }
+  .activity-check-badge.warn { background:var(--amber-soft); color:var(--amber); }
+  .activity-check-link { display:block; text-align:left; margin:8px 0; max-width:100%; }
+  .activity-check-students { padding-left:24px; }
+  .activity-check-load-error { color:var(--danger); }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -272,6 +291,12 @@
   </div>
 
   <div class="card" id="cm-workflow-card"></div>
+  <section class="card" id="activity-check-card" aria-labelledby="activity-check-title">
+    <div class="activity-check-head"><h2 id="activity-check-title">ตรวจความครบ</h2><button type="button" class="ghost" id="activity-check-run" disabled>ตรวจความครบ</button></div>
+    <p class="hint" id="activity-check-context">เลือกปีการศึกษาในตัวกรองรายการก่อนตรวจ</p>
+    <p id="activity-check-status" role="status" aria-atomic="true"></p>
+    <div id="activity-check-results" aria-busy="false"></div>
+  </section>
   <div class="cm-layout" id="cm-layout">
   <div class="card" id="list-card">
     <div class="cm-list-head"><h2 id="list-title">รายการ</h2><button type="button" class="primary" id="show-create">+ สร้าง<span class="cm-create-long">รายการใหม่</span></button></div>
@@ -360,7 +385,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears } from "../supabase-client.js?v=20261109-2";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment } from "../supabase-client.js?v=20261109-2";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -429,6 +454,161 @@ function studentsAtAssessmentYear(placementRows) {
     applyYearPlacement(placement.student, placement)
   );
 }
+// เริ่มตัวตรวจความครบ — โหลดเฉพาะเมื่อกดปุ่ม และไม่เขียนฐานข้อมูล
+let activityCheckRequest = 0, activityCheckYear = "";
+function resetActivityCheck() {
+  activityCheckRequest++;
+  activityCheckYear = $("filter-assessment-year").value;
+  $("activity-check-run").disabled = !activityCheckYear;
+  $("activity-check-run").textContent = "ตรวจความครบ";
+  $("activity-check-context").textContent = activityCheckYear
+    ? `ปีการศึกษา ${activityCheckYear} · ตรวจทั้งสองภาคเรียนเมื่อกดปุ่ม`
+    : "เลือกปีการศึกษาในตัวกรองรายการก่อนตรวจ";
+  $("activity-check-status").textContent = "";
+  $("activity-check-status").className = "";
+  $("activity-check-results").replaceChildren();
+  $("activity-check-results").setAttribute("aria-busy", "false");
+}
+function visibleActivityIssues(issues, yearAssessments, teachers, canSeeAll = isAdmin) {
+  if (canSeeAll) return issues;
+  const ownIds = new Set(yearAssessments.filter(row => row.owner_id === session.user.id).map(row => row.id));
+  for (const row of teachers) if (row.user_id === session.user.id) ownIds.add(row.assessment_id);
+  return issues.filter(issue => issue.assessmentId !== null &&
+    [issue.assessmentId, ...(issue.relatedIds || [])].some(id => ownIds.has(id)));
+}
+function renderActivityIssues(issues, yearAssessments, checkStudents, canSeeAll = isAdmin) {
+  const host = $("activity-check-results");
+  host.replaceChildren();
+  const labels = { error: "ต้องแก้", warn: "ควรตรวจ", info: "รับทราบ" };
+  const counts = Object.keys(labels).map(level => `${labels[level]} ${issues.filter(row => row.severity === level).length}`);
+  $("activity-check-status").textContent = issues.length ? counts.join(" · ")
+    : canSeeAll ? "ครบตามเกณฑ์ — ไม่พบข้อที่ต้องตรวจ" : "รายการของคุณครบตามเกณฑ์";
+  const byId = new Map(yearAssessments.map(row => [row.id, row]));
+  const studentsById = new Map(checkStudents.map(row => [row.id, row]));
+  for (const level of Object.keys(labels)) {
+    const group = issues.filter(row => row.severity === level);
+    if (!group.length) continue;
+    const section = document.createElement(level === "info" ? "details" : "section");
+    const heading = document.createElement(level === "info" ? "summary" : "h3");
+    heading.textContent = `${labels[level]} ${group.length}`;
+    section.appendChild(heading);
+    for (const issue of group) {
+      const row = document.createElement("div");
+      row.className = "activity-check-issue";
+      const badge = document.createElement("span");
+      badge.className = "activity-check-badge " + level;
+      badge.textContent = labels[level];
+      row.appendChild(badge);
+      const ids = issue.relatedIds || (issue.assessmentId ? [issue.assessmentId] : []);
+      for (const id of ids) {
+        const assessment = byId.get(id);
+        if (!assessment) continue;
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "ghost activity-check-link";
+        link.textContent = assessment.name + (assessment.term == null ? " · ทั้งปี" : " · ภาค " + assessment.term);
+        link.addEventListener("click", () => openDetail(id));
+        row.appendChild(link);
+      }
+      if (!ids.length) {
+        const name = document.createElement("p");
+        name.textContent = issue.assessmentName + " · ภาค " + issue.term;
+        row.appendChild(name);
+      }
+      const detail = document.createElement("p");
+      detail.textContent = issue.detail;
+      row.appendChild(detail);
+      const names = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = `ดูรายชื่อ (${issue.studentIds.length})`;
+      names.appendChild(summary);
+      const list = document.createElement("ul");
+      list.className = "activity-check-students";
+      const studentRows = issue.studentIds.map(id => studentsById.get(id) || { id, name:"ไม่พบชื่อนักเรียน" })
+        .sort((a, b) => String(a.grade_level || "").localeCompare(String(b.grade_level || ""), "th", {numeric:true}) ||
+          String(a.classroom || "").localeCompare(String(b.classroom || ""), "th", {numeric:true}) ||
+          String(a.student_no || "").localeCompare(String(b.student_no || ""), "th", {numeric:true}) ||
+          String(a.name || "").localeCompare(String(b.name || ""), "th"));
+      for (const student of studentRows) {
+        const item = document.createElement("li");
+        const room = student.grade_level ? student.grade_level + "/" + (student.classroom || "—") : "ไม่มีชั้นปีนี้";
+        item.textContent = `เลขที่ ${student.student_no ?? "—"} · ${student.name || "ไม่พบชื่อนักเรียน"} · ${room}`;
+        list.appendChild(item);
+      }
+      names.appendChild(list);
+      row.appendChild(names);
+      section.appendChild(row);
+    }
+    host.appendChild(section);
+  }
+}
+async function loadActivityCheckRows(table, columns, ids) {
+  const rows = [];
+  for (let offset = 0; offset < ids.length; offset += 150) {
+    const chunk = ids.slice(offset, offset + 150);
+    const result = await fetchAllRows(() => sb.from(table).select(columns).in("assessment_id", chunk));
+    if (result.error) throw result.error;
+    rows.push(...result.data);
+  }
+  return rows;
+}
+function loadActivityCheckModule() {
+  return import("../shared/activity-checks.js?v=20261109-1");
+}
+async function runActivityCheck() {
+  const year = $("filter-assessment-year").value;
+  if (!year || $("activity-check-run").disabled) return;
+  const request = ++activityCheckRequest;
+  const yearAssessments = assessments.filter(row => String(row.year) === year);
+  const ids = yearAssessments.map(row => row.id);
+  $("activity-check-run").disabled = true;
+  $("activity-check-status").className = "";
+  $("activity-check-status").textContent = "กำลังตรวจความครบ…";
+  $("activity-check-results").replaceChildren();
+  $("activity-check-results").setAttribute("aria-busy", "true");
+  try {
+    const [checkMembers, checkSessions, checkPass, placementResult, years, teacherResult, checkModule, canSeeAll] = await Promise.all([
+      loadActivityCheckRows("competency_assessment_members", "assessment_id,student_id,student:student_id(id,student_no,name,left_school)", ids),
+      loadActivityCheckRows("competency_assessment_sessions", "assessment_id", ids),
+      loadActivityCheckRows("activity_pass_results", "assessment_id,student_id", ids),
+      getStudentPlacements(year),
+      getAcademicYears(),
+      isAdmin ? { data:[], error:null } : fetchAllRows(() => sb.from("competency_assessment_teachers")
+        .select("assessment_id,user_id").eq("user_id", session.user.id), ["assessment_id", "user_id"]),
+      loadActivityCheckModule(),
+      canUseDepartment(session.user.id, "วิชาการ", profile)
+    ]);
+    if (request !== activityCheckRequest) return;
+    if (placementResult.error || teacherResult.error) throw placementResult.error || teacherResult.error;
+    const dates = years.find(row => String(row.year) === year);
+    if (!dates?.term1_end_date || !dates?.term2_start_date || !dates?.term2_end_date)
+      throw new Error("ยังไม่มีวันสิ้นภาค 1 / วันเปิดและสิ้นภาค 2 ของปีนี้ กรุณาตรวจการตั้งค่าปีการศึกษา");
+    const studentMap = new Map();
+    for (const member of checkMembers) {
+      if (member.student) studentMap.set(member.student_id, { ...member.student, id:member.student_id, grade_level:"", classroom:"" });
+    }
+    for (const student of studentsAtAssessmentYear(placementResult.data || [])) studentMap.set(student.id, student);
+    const checkStudents = [...studentMap.values()];
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+    const issues = checkModule.findActivityDataIssues({ assessments:yearAssessments, members:checkMembers,
+      sessions:checkSessions, passResults:checkPass, students:checkStudents,
+      termDates:{term1End:dates.term1_end_date, term2Start:dates.term2_start_date, term2End:dates.term2_end_date}, today });
+    renderActivityIssues(visibleActivityIssues(issues, yearAssessments, teacherResult.data || [], canSeeAll), yearAssessments, checkStudents, canSeeAll);
+  } catch (error) {
+    if (request !== activityCheckRequest) return;
+    $("activity-check-status").className = "activity-check-load-error";
+    $("activity-check-status").textContent = "ตรวจไม่สำเร็จ: " + (error.message || "โหลดข้อมูลไม่ได้") + " · กดตรวจใหม่เพื่อลองอีกครั้ง";
+  } finally {
+    if (request === activityCheckRequest) {
+      $("activity-check-run").disabled = false;
+      $("activity-check-run").textContent = "ตรวจใหม่";
+      $("activity-check-results").setAttribute("aria-busy", "false");
+    }
+  }
+}
+$("activity-check-run").addEventListener("click", runActivityCheck);
+// จบตัวตรวจความครบ
+
 function resetMemberFilters() {
   const grades = [...new Set(students.map(student => student.grade_level).filter(Boolean))].sort();
   fill($("filter-grade"), grades, grade => grade, "— ทุกชั้น —");
@@ -503,6 +683,7 @@ function renderAssessments() {
   const el=$("assessment-list");
   el.innerHTML="";
   const yearFilter=$("filter-assessment-year").value;
+  if (activityCheckYear !== yearFilter) resetActivityCheck();
   const term=cmTerm;
   const query=$("filter-assessment-q").value.trim().toLocaleLowerCase("th");
   const rows=assessments
