@@ -94,7 +94,7 @@
   @media (min-width:1200px) { .save-bar { bottom:12px; } }
   .empty { padding:28px 10px; color:var(--muted); text-align:center; }
   #toast {
-    position:fixed; z-index:80; bottom:20px; left:50%; max-width:calc(100vw - 32px);
+    position:fixed; z-index:80; bottom:20px; left:50%; width:max-content; max-width:calc(100vw - 32px);
     padding:11px 18px; border-radius:10px; color:#fff; background:#1f2a2e;
     font-weight:600; opacity:0; pointer-events:none; transform:translateX(-50%);
     transition:opacity .18s;
@@ -118,6 +118,18 @@
   .modal-actions .ghost { color:var(--teal); background:var(--teal-soft); }
   .auto-late-list { margin:0; padding-left:24px; max-height:40vh; overflow:auto; overflow-wrap:anywhere; }
   .auto-late-actions { flex-wrap:wrap; }
+  .leave-panel h2 { margin:0; font-size:18px; }
+  .leave-request { padding:14px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+  .leave-request h3 { margin:0 0 4px; font-size:16px; }
+  .leave-request p { margin:4px 0; white-space:pre-wrap; }
+  .leave-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .leave-actions .ghost { color:var(--teal); background:var(--teal-soft); }
+  .leave-label { display:block; color:var(--amber); font-size:13px; font-weight:400; }
+  .leave-request, .leave-actions button { scroll-margin-block:160px; }
+  #leave-decision-field { margin-top:16px; }
+  #leave-decision-note { width:100%; min-height:96px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; color:var(--ink); background:var(--white); font:inherit; font-size:16px; resize:vertical; }
+  #leave-decision-note:focus { outline:2px solid var(--teal); outline-offset:1px; }
+  #crs-confirm-message { overflow-wrap:anywhere; }
   [hidden] { display:none !important; }
   @media (max-width:639px) {
     .filters { gap:8px; }
@@ -143,7 +155,7 @@
 <div class="wrap">
   <header>
     <h1>เช็คชื่อรายวัน</h1>
-    <p>ครูประจำชั้นเช็ควันละครั้ง — ทุกคนตั้งต้นเป็น “มา” เปลี่ยนเฉพาะคนที่ไม่ได้มา</p>
+    <p>ครูประจำชั้นเช็ควันละครั้ง — เริ่มต้นเป็น “มา” หรือสถานะตามใบลา เปลี่ยนได้ก่อนบันทึก</p>
     <div class="nav"></div>
     <script src="../app-shell.js?v=20261108-2"></script>
   </header>
@@ -168,10 +180,17 @@
     <section id="placement-warning" class="card" hidden></section>
     <section id="access-message" class="card" hidden></section>
 
+    <section id="leave-panel" class="card leave-panel" aria-labelledby="leave-title" hidden>
+      <h2 id="leave-title" tabindex="-1">ใบลาจากผู้ปกครอง</h2>
+      <p class="room-note">ตรวจใบลาแล้วบันทึกเช็คชื่อตามปกติ · สถานะที่เคยบันทึกไว้จะไม่ถูกตั้งใหม่</p>
+      <div id="leave-list"></div>
+    </section>
+    <div id="leave-feedback" class="banner warn" role="status" hidden></div>
+
     <section id="attendance-card" class="card" hidden>
       <div class="section-head">
         <div>
-          <h2 id="room-title">รายชื่อนักเรียน</h2>
+          <h2 id="room-title" tabindex="-1">รายชื่อนักเรียน</h2>
         </div>
       </div>
       <div class="student-list" id="student-list"></div>
@@ -188,7 +207,7 @@
     </section>
   </main>
 </div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 <div id="late-reason-overlay" class="overlay" hidden>
   <section class="modal" role="dialog" aria-modal="true" aria-labelledby="late-reason-title">
     <h2 id="late-reason-title">บอกเหตุผลการเช็คหลังเวลา</h2>
@@ -267,6 +286,17 @@ let selectedRoom = null;
 let currentDailyData = null;
 let currentExisting = [];
 let autoLateByStudent = new Map();
+let leaveRequests = [];
+let leaveByStudent = new Map();
+let touchedStatuses = new Set();
+let roomLoadVersion = 0;
+let decidingLeave = false;
+let leavesChannel = null;
+let leavesSyncTimer = null;
+let leaveLoadVersion = 0;
+let lastLeavesLoadedAt = null;
+let seenLeaveIds = null;
+let attendancePageHidden = false;
 let cutoff = null;
 // เวลาที่ใช้ตัดสินของ "ห้องที่เลือกอยู่" — อนุบาลกับประถมใช้คนละเส้นได้ในหน้าเดียวกัน
 // โดยไม่ต้องรีโหลด · คืน null เมื่อยังไม่เปิดเกณฑ์ ทำให้ classifyCheckTiming() ได้ "off"
@@ -296,6 +326,17 @@ function clearAccess() {
   el("access-message").innerHTML = "";
 }
 function hideAttendance() {
+  stopLeavesRealtime();
+  roomLoadVersion++;
+  leaveLoadVersion++;
+  lastLeavesLoadedAt = null;
+  seenLeaveIds = null;
+  leaveRequests = [];
+  leaveByStudent.clear();
+  touchedStatuses.clear();
+  el("leave-panel").hidden = true;
+  el("leave-feedback").hidden = true;
+  el("leave-list").innerHTML = "";
   clearInterval(timingTimer);
   timingTimer = null;
   el("attendance-card").hidden = true;
@@ -520,6 +561,246 @@ async function recorderLabel(userId) {
   return data?.name || data?.email || "บัญชีผู้ใช้";
 }
 
+// ใบลาเป็นส่วนเสริม: อ่านล้ม/ตอบช้าแล้วครูยังเช็คชื่อได้ตามปกติ
+function leaveDateRange(request) {
+  const format = value => new Intl.DateTimeFormat("th-TH", {
+    day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Bangkok"
+  }).format(new Date(value + "T00:00:00+07:00"));
+  return request.start_date === request.end_date ? format(request.start_date)
+    : `${format(request.start_date)} – ${format(request.end_date)}`;
+}
+
+function renderLeavePanel() {
+  const pending = leaveRequests.filter(row => row.status === "รออนุมัติ");
+  el("leave-panel").hidden = pending.length === 0;
+  el("leave-title").textContent = `ใบลารออนุมัติ ${pending.length} ใบ`;
+  const students = new Map(roster.map(p => [p.student_id, p.student?.name || "ไม่พบชื่อนักเรียน"]));
+  el("leave-list").innerHTML = pending.map(row => `<article class="leave-request">
+    <h3>${esc(students.get(row.student_id))}</h3>
+    <p>${esc(row.leave_type)} · ${esc(leaveDateRange(row))}</p>
+    <p>${esc(row.reason)}</p>
+    <p class="room-note">ยื่นเมื่อ ${esc(formatRecordedDate(row.created_at))} ${esc(formatTime(row.created_at))}</p>
+    <div class="leave-actions">
+      <button type="button" class="primary" data-leave-id="${esc(row.id)}" data-approve="true" aria-label="อนุมัติใบลาของ ${esc(students.get(row.student_id))}"${decidingLeave ? " disabled" : ""}>อนุมัติ</button>
+      <button type="button" class="ghost" data-leave-id="${esc(row.id)}" data-approve="false" aria-label="ไม่อนุมัติใบลาของ ${esc(students.get(row.student_id))}"${decidingLeave ? " disabled" : ""}>ไม่อนุมัติ</button>
+    </div>
+  </article>`).join("");
+}
+
+function applyLeaveDefaults(dateStr) {
+  leaveByStudent = new Map();
+  // อนุมัติก่อนรออนุมัติ หากพบหลายใบในวันเดียวกันให้ผลคงที่
+  const applicable = leaveRequests.filter(row =>
+    ["รออนุมัติ", "อนุมัติ"].includes(row.status) &&
+    ["ลาป่วย", "ลากิจ"].includes(row.leave_type) && row.start_date <= dateStr && row.end_date >= dateStr
+  ).sort((a, b) => (a.status === "อนุมัติ" ? 0 : 1) - (b.status === "อนุมัติ" ? 0 : 1) ||
+    String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+  for (const row of applicable) if (!leaveByStudent.has(row.student_id)) leaveByStudent.set(row.student_id, row);
+  const recorded = new Set(currentExisting.map(row => row.student_id));
+  for (const badge of el("student-list").querySelectorAll("[data-leave-student]")) {
+    const id = badge.dataset.leaveStudent;
+    const request = leaveByStudent.get(id);
+    badge.hidden = !request;
+    badge.textContent = request ? `มีใบลา · ${request.leave_type}` : "";
+    if (!request || recorded.has(id) || touchedStatuses.has(id) || (el("save-attendance").disabled && !decidingLeave)) continue;
+    const placement = roster.find(p => p.student_id === id);
+    if (!placement || isInactiveForSelectedYear(placement)) continue;
+    const item = stateByStudent.get(id);
+    if (!item) continue;
+    item.status = request.leave_type;
+    const row = badge.closest(".student-row");
+    row.dataset.status = item.status;
+    row.querySelectorAll('[role="radio"]').forEach(button => {
+      const checked = button.dataset.status === item.status;
+      button.setAttribute("aria-checked", String(checked));
+      button.tabIndex = checked ? 0 : -1;
+    });
+  }
+  renderSummary();
+}
+
+function stopLeavesRealtime() {
+  clearTimeout(leavesSyncTimer);
+  leavesSyncTimer = null;
+  const channel = leavesChannel;
+  leavesChannel = null;
+  if (channel) {
+    try { Promise.resolve(sb.removeChannel(channel)).catch(() => {}); }
+    catch (_) { /* Realtime ล้มแล้วหน้าเช็คชื่อยังทำงานได้ */ }
+  }
+}
+
+function startLeavesRealtime(room, dateStr, version) {
+  stopLeavesRealtime();
+  if (attendancePageHidden || version !== roomLoadVersion || selectedRoom !== room) return;
+  try {
+    const channel = sb.channel("attendance-leaves");
+    leavesChannel = channel;
+    channel.on("postgres_changes", {
+      event:"*", schema:"public", table:"leave_requests"
+    }, () => {
+      if (leavesChannel !== channel || attendancePageHidden || version !== roomLoadVersion || selectedRoom !== room) return;
+      clearTimeout(leavesSyncTimer);
+      leavesSyncTimer = setTimeout(() => {
+        leavesSyncTimer = null;
+        if (leavesChannel !== channel || attendancePageHidden || version !== roomLoadVersion || selectedRoom !== room) return;
+        void loadRoomLeaves(room, dateStr, version, true);
+      }, 400);
+    }).subscribe();
+  } catch (_) { stopLeavesRealtime(); }
+}
+
+function refreshLeavesIfStale() {
+  if (attendancePageHidden || !selectedRoom || !roster.length) return;
+  if (lastLeavesLoadedAt !== null && Date.now() - lastLeavesLoadedAt <= 60000) return;
+  void loadRoomLeaves(selectedRoom, el("attend-date").value, roomLoadVersion, true);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshLeavesIfStale();
+});
+window.addEventListener("pagehide", () => {
+  attendancePageHidden = true;
+  leaveLoadVersion++;
+  stopLeavesRealtime();
+});
+window.addEventListener("pageshow", event => {
+  attendancePageHidden = false;
+  if (!event.persisted || !selectedRoom || !roster.length) return;
+  startLeavesRealtime(selectedRoom, el("attend-date").value, roomLoadVersion);
+  refreshLeavesIfStale();
+});
+
+async function loadRoomLeaves(room, dateStr, version, background = false) {
+  const ids = roster.map(p => p.student_id);
+  const loadVersion = ++leaveLoadVersion;
+  const isCurrent = () => loadVersion === leaveLoadVersion && !attendancePageHidden && version === roomLoadVersion && selectedRoom === room && el("attend-date").value === dateStr;
+  if (!ids.length) return;
+  if (!background) {
+    el("leave-feedback").hidden = false;
+    el("leave-feedback").textContent = "กำลังโหลดใบลาจากผู้ปกครอง… · เช็คชื่อต่อได้";
+  }
+  try {
+    const { data, error } = await sb.from("leave_requests")
+      .select("id,student_id,leave_type,start_date,end_date,reason,status,created_at")
+      .in("student_id", ids)
+      .or(`and(start_date.lte.${dateStr},end_date.gte.${dateStr}),status.eq.รออนุมัติ`)
+      .order("created_at", { ascending:true });
+    if (error) throw error;
+    if (!isCurrent()) return;
+    leaveRequests = (data || []).filter(row => ids.includes(row.student_id));
+    const newRequests = seenLeaveIds === null ? [] : leaveRequests.filter(row =>
+      row.status === "รออนุมัติ" && !seenLeaveIds.has(row.id)
+    );
+    if (seenLeaveIds === null) seenLeaveIds = new Set();
+    for (const row of leaveRequests) seenLeaveIds.add(row.id);
+    lastLeavesLoadedAt = Date.now();
+    renderLeavePanel();
+    applyLeaveDefaults(dateStr);
+    el("leave-feedback").hidden = true;
+    if (background && newRequests.length) {
+      const names = [...new Set(newRequests.map(row =>
+        roster.find(p => p.student_id === row.student_id)?.student?.name || "นักเรียน"
+      ))];
+      toast(`มีใบลาใหม่ · ${names[0]}${names.length > 1 ? ` และอีก ${names.length - 1} คน` : ""}`);
+    }
+  } catch (error) {
+    if (!isCurrent()) return;
+    if (background && seenLeaveIds !== null) return; // คงใบลา/สถานะเดิมไว้ และให้ visibility fallback ลองใหม่
+    leaveRequests = [];
+    leaveByStudent.clear();
+    el("leave-panel").hidden = true;
+    el("leave-feedback").hidden = false;
+    el("leave-feedback").textContent = "โหลดใบลาไม่สำเร็จ · เช็คชื่อและบันทึกได้ตามปกติ · เลือกห้องหรือวันที่อีกครั้งเพื่อลองใหม่";
+  }
+}
+
+async function askRejectLeave(request) {
+  const name = roster.find(p => p.student_id === request.student_id)?.student?.name || "นักเรียน";
+  const confirmation = window.crsAskConfirm({
+    title:"ไม่อนุมัติใบลา",
+    message:`${name} · ${request.leave_type} · ${leaveDateRange(request)}`,
+    okLabel:"ไม่อนุมัติ", danger:false
+  });
+  // เพิ่มเฉพาะช่องข้อความในกล่องกลาง ไม่เปลี่ยน app-shell หรือสร้างกล่องยืนยันซ้ำ
+  const field = document.createElement("div");
+  field.id = "leave-decision-field";
+  field.className = "field";
+  field.innerHTML = '<label for="leave-decision-note">ข้อความถึงผู้ปกครอง (ไม่บังคับ)</label><textarea id="leave-decision-note" maxlength="300" aria-describedby="leave-decision-hint"></textarea><p id="leave-decision-hint" class="room-note">ไม่เกิน 300 ตัวอักษร</p>';
+  const dialog = el("crs-confirm-overlay").querySelector('[role="dialog"]');
+  dialog.insertBefore(field, dialog.querySelector(".crs-confirm-actions"));
+  const input = el("leave-decision-note");
+  input.addEventListener("keydown", event => { if (event.key === "Enter") event.stopPropagation(); });
+  const trapFocus = event => {
+    if (event.key !== "Tab") return;
+    const controls = [input, el("crs-confirm-cancel"), el("crs-confirm-ok")];
+    const index = controls.indexOf(document.activeElement);
+    event.preventDefault();
+    controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus();
+  };
+  dialog.addEventListener("keydown", trapFocus);
+  try {
+    return await confirmation ? { note:input.value.trim() || null } : null;
+  } finally {
+    dialog.removeEventListener("keydown", trapFocus);
+    field.remove();
+  }
+}
+
+async function decideLeave(button) {
+  if (decidingLeave || checkingSubjectAttendance || el("save-attendance").disabled || !el("late-reason-overlay").hidden || !el("auto-late-overlay").hidden) return;
+  const request = leaveRequests.find(row => row.id === button.dataset.leaveId && row.status === "รออนุมัติ");
+  if (!request) return;
+  decidingLeave = true;
+  const room = selectedRoom, dateStr = el("attend-date").value, version = roomLoadVersion;
+  const isCurrent = () => version === roomLoadVersion && selectedRoom === room && el("attend-date").value === dateStr;
+  const label = button.textContent;
+  const saveButton = el("save-attendance");
+  saveButton.disabled = true;
+  el("leave-list").querySelectorAll("button").forEach(item => { item.disabled = true; });
+  button.setAttribute("aria-busy", "true");
+  const approve = button.dataset.approve === "true";
+  button.textContent = approve ? "กำลังอนุมัติ…" : "กำลังพิจารณา…";
+  let succeeded = false;
+  try {
+    const rejection = approve ? null : await askRejectLeave(request);
+    if (!approve && !rejection) return;
+    if (!isCurrent()) return;
+    if ((rejection?.note || "").length > 300) throw new Error("ข้อความถึงผู้ปกครองยาวเกิน 300 ตัวอักษร");
+    button.textContent = approve ? "กำลังอนุมัติ…" : "กำลังบันทึก…";
+    const { data, error } = await sb.rpc("decide_leave_request", {
+      p_id:request.id, p_approve:approve, p_note:rejection?.note || null
+    });
+    if (error) throw error;
+    succeeded = true;
+    toast(approve ? (Number(data) > 0
+      ? `อนุมัติแล้ว · ปรับเช็คชื่อ ${Number(data)} วันจาก ขาด เป็น ${request.leave_type}`
+      : "อนุมัติแล้ว") : "ไม่อนุมัติแล้ว");
+    if (isCurrent()) {
+      try { await loadRoom(el("room-select").value); }
+      catch (error) { toast("บันทึกผลใบลาแล้ว แต่โหลดเช็คชื่อล่าสุดไม่สำเร็จ กรุณาเลือกห้องหรือวันที่อีกครั้ง", true); }
+    }
+  } catch (error) {
+    const message = error.code === "42501" ? "อนุมัติได้เฉพาะครูประจำชั้นหรือฝ่ายบริหารทั่วไป"
+      : error.code === "PGRST202" ? "ระบบใบลายังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ"
+      : /[ก-๙]/.test(error.message || "") ? error.message : "ไม่สามารถติดต่อระบบได้ กรุณาลองใหม่";
+    toast("บันทึกผลใบลาไม่สำเร็จ: " + message, true);
+  } finally {
+    decidingLeave = false;
+    saveButton.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.textContent = label;
+    el("leave-list").querySelectorAll("button").forEach(item => { item.disabled = false; });
+    if (button.isConnected && !succeeded) button.focus();
+    else if (succeeded && selectedRoom === room && el("attend-date").value === dateStr) el("room-title").focus();
+  }
+}
+
+el("leave-list").addEventListener("click", event => {
+  const button = event.target.closest("[data-leave-id]");
+  if (button) void decideLeave(button);
+});
+
 function renderSummary() {
   if (!selectedRoom) return;
   const checkableRoster = checkablePlacements(roster);
@@ -545,10 +826,11 @@ function renderRoster() {
   el("student-list").innerHTML = roster.map(p => {
     const student = p.student || {};
     const item = stateByStudent.get(p.student_id) || { status:"มา", note:"" };
+    const leave = leaveByStudent.get(p.student_id);
     const inactive = isInactiveForSelectedYear(p);
     const inactiveLabel = student.status || "กำลังศึกษา";
     return `<div class="student-row${inactive ? " inactive" : ""}" data-status="${esc(item.status)}">
-      <div class="student-name"><span class="student-meta">${esc(student.student_no || "—")}</span>${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${esc(inactiveLabel)})</span>` : ""}${typeof autoLateByStudent !== "undefined" && autoLateByStudent.has(p.student_id) ? `<span class="auto-late-label"${item.status === "มาสาย" ? "" : " hidden"}>${esc(autoLateByStudent.get(p.student_id))}</span>` : ""}</div>
+      <div class="student-name"><span class="student-meta">${esc(student.student_no || "—")}</span>${esc(student.name || "ไม่พบชื่อนักเรียน")}${inactive ? ` <span class="inactive-label">(${esc(inactiveLabel)})</span>` : ""}${typeof autoLateByStudent !== "undefined" && autoLateByStudent.has(p.student_id) ? `<span class="auto-late-label"${item.status === "มาสาย" ? "" : " hidden"}>${esc(autoLateByStudent.get(p.student_id))}</span>` : ""}<span class="leave-label" data-leave-student="${esc(p.student_id)}"${leave ? "" : " hidden"}>${leave ? esc(`มีใบลา · ${leave.leave_type}`) : ""}</span></div>
       ${inactive ? `<span class="inactive-label">เช็คไม่ได้ — ${esc(inactiveLabel)}</span>` : `
       <div class="status-group" role="radiogroup" aria-label="สถานะของ ${esc(student.name || "นักเรียน")}">
         ${STATUS_OPTIONS.map(status => `<button type="button" class="status-button" role="radio" aria-checked="${status === item.status}" tabindex="${status === item.status ? 0 : -1}" data-student="${esc(p.student_id)}" data-status="${esc(status)}">${esc(status)}</button>`).join("")}
@@ -568,7 +850,10 @@ async function loadRoom(index) {
   selectedRoom = availableRooms[Number(index)] || null;
   if (!selectedRoom) return;
   const dateStr = el("attend-date").value;
+  const version = roomLoadVersion;
+  const room = selectedRoom;
   const dailyData = await loadDailyAttendanceToday(currentYear, dateStr, years);
+  if (version !== roomLoadVersion || selectedRoom !== room) return;
   const existing = (dailyData.rows || []).filter(row =>
     row.grade_level === selectedRoom.grade_level && row.classroom === selectedRoom.classroom
   );
@@ -588,14 +873,17 @@ async function loadRoom(index) {
       const subjectBySession = new Map((sessions || []).map(row => [row.id, row.subjects?.name || "ไม่ระบุวิชา"]));
       const recorderIds = [...new Set(autoRows.map(row => row.auto_late_by).filter(Boolean))];
       const recorderNames = new Map(await Promise.all(recorderIds.map(async id => [id, await recorderLabel(id)])));
+      if (version !== roomLoadVersion || selectedRoom !== room) return;
       autoLateByStudent = new Map(autoRows.map(row => [row.student_id,
         `ปรับเป็นมาสายอัตโนมัติ — วิชา${subjectBySession.get(row.auto_late_session_id) || "ไม่ระบุวิชา"} · ${recorderNames.get(row.auto_late_by) || "ไม่ระบุผู้บันทึก"} · ${formatTime(row.auto_late_at)}`
       ]));
     }
   } catch (error) {
+    if (version !== roomLoadVersion || selectedRoom !== room) return;
     autoLateByStudent.clear();
     console.warn("โหลดป้ายมาสายอัตโนมัติไม่สำเร็จ", error);
   }
+  if (version !== roomLoadVersion || selectedRoom !== room) return;
   currentDailyData = dailyData;
   currentExisting = existing;
   roster = placements.filter(p =>
@@ -619,6 +907,7 @@ async function loadRoom(index) {
       String(b.updated_at || b.recorded_at).localeCompare(String(a.updated_at || a.recorded_at))
     )[0];
     const who = await recorderLabel(latest.recorded_by);
+    if (version !== roomLoadVersion || selectedRoom !== room) return;
     const firstRecordedAt = firstCheckTimeByRoom(existing).get(roomKey(selectedRoom)) || "";
     const timing = classifyCheckTiming(firstRecordedAt, dateStr, roomCutoff());
     let timingText = "";
@@ -628,7 +917,7 @@ async function loadRoom(index) {
     el("checked-note").textContent = `ห้องนี้เช็คแล้วเมื่อ ${formatTime(latest.updated_at || latest.recorded_at)} โดย ${who} — แก้แล้วบันทึกทับได้${timingText}`;
     startTimingClock(firstRecordedAt);
   } else {
-    el("checked-note").textContent = "ยังไม่เคยเช็คห้องนี้ในวันที่เลือก — ทุกคนตั้งต้นเป็น “มา”";
+    el("checked-note").textContent = "ยังไม่เคยเช็คห้องนี้ในวันที่เลือก — เริ่มต้นเป็น “มา” หรือสถานะตามใบลา";
     startTimingClock("");
   }
   el("save-note").textContent = dailyData.isHoliday
@@ -639,11 +928,14 @@ async function loadRoom(index) {
   renderRoster();
   el("attendance-card").hidden = false;
   el("check-strip").hidden = false;
+  startLeavesRealtime(room, dateStr, version);
+  void loadRoomLeaves(room, dateStr, version);
 }
 
 function selectStatus(button) {
   const item = stateByStudent.get(button.dataset.student);
   if (!item) return;
+  touchedStatuses.add(button.dataset.student);
   item.status = button.dataset.status;
   const row = button.closest(".student-row");
   row.dataset.status = item.status;
