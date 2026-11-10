@@ -120,6 +120,10 @@
   .cm-term small { display:block; font-size:12px; font-weight:400; }
   .cm-item { width:100%; min-height:60px; display:flex; align-items:center; gap:8px; text-align:left; background:var(--white); color:var(--ink); border:1px solid var(--line); margin:6px 0; }
   .cm-item .grow { overflow-wrap:anywhere; }
+  /* ป้ายเหตุผลต้องไม่จางตามชื่อ: opacity .65 ทั้งแถวทำให้ contrast เหลือ 2.73:1 */
+  .student-row.overlap .title,.student-row.overlap .meta { opacity:.65; }
+  .student-row .overlap-note{color:var(--amber);background:var(--amber-soft);font-size:13px;font-weight:600;border-radius:6px;padding:2px 6px;margin-top:3px;display:inline-block;overflow-wrap:anywhere}
+
   .cm-item[aria-current=true] { background:var(--teal-soft); border-left:4px solid var(--teal); }
   .cm-item svg { width:18px; height:18px; flex:none; }
   .cm-year-tag { display:inline-block; background:var(--amber-soft); color:var(--amber); padding:1px 7px; border-radius:999px; font-size:12px; margin-left:5px; }
@@ -400,6 +404,8 @@ let cmTerm="1", cmListScroll=0;
 let profilesById = new Map();
 let allowedCompetencyStages = [];
 let highestGrade = null;
+let categoryOverlaps = new Map(), categoryOverlapError = false;
+let addingMembers = false;
 const $ = id => document.getElementById(id);
 function esc(v) { return String(v || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function toast(msg, ok=true) { const el=$("toast"); el.textContent=msg; el.className="toast "+(ok?"ok":"err"); setTimeout(()=>{el.className="toast";},4500); }
@@ -725,15 +731,43 @@ function renderAssessments() {
     wrap.append(heading,body);el.appendChild(wrap);
   }
 }
+async function loadCategoryOverlaps(assessment, studentIds) {
+  const overlaps = new Map();
+  if (!assessment.activity_category || assessment.term == null || (studentIds && !studentIds.length)) return overlaps;
+  const {data:others,error} = await sb.from("competency_assessments").select("id,name").eq("year",assessment.year).eq("term",assessment.term).eq("activity_category",assessment.activity_category).neq("id",assessment.id);
+  if (error) throw error;
+  if (!others.length) return overlaps;
+  const byId = new Map(others.map(row=>[row.id,row]));
+  const {data:rows,error:memberError} = await fetchAllRows(()=>sb.from("competency_assessment_members").select("assessment_id,student_id").in("assessment_id",[...byId.keys()]));
+  if (memberError) throw memberError;
+  const wanted = studentIds ? new Set(studentIds) : null;
+  for (const row of rows) {
+    if (wanted && !wanted.has(row.student_id)) continue;
+    const other = byId.get(row.assessment_id);
+    if (!other) continue;
+    if (!overlaps.has(row.student_id)) overlaps.set(row.student_id,[]);
+    overlaps.get(row.student_id).push({id:other.id,name:other.name});
+  }
+  for (const items of overlaps.values()) items.sort((a,b)=>a.name.localeCompare(b.name,"th",{numeric:true}));
+  return overlaps;
+}
 async function selectAssessment(id) {
   current=assessments.find(a=>a.id===id); if(!current)return;
+  const selectedAssessment=current;
   const [t,m,teacherResult,placementResult]=await Promise.all([
     sb.from("competency_assessment_targets").select("*, competency:competency_id(*), element:element_id(*)").eq("assessment_id",id).order("seq"),
     sb.from("competency_assessment_members").select("*, student:student_id(*)").eq("assessment_id",id),
     sb.from("competency_assessment_teachers").select("assessment_id,user_id,created_at").eq("assessment_id",id).order("created_at"),
     getStudentPlacements(current.year)
   ]);
+  if(current?.id!==id)return;
   if(t.error||m.error||teacherResult.error||placementResult.error){toast("โหลดองค์ประกอบ ผู้เข้าร่วม ครูผู้ดูแล หรือชั้น/ห้องตามปีการศึกษาไม่สำเร็จ: "+(t.error||m.error||teacherResult.error||placementResult.error).message,false);return;}
+  let overlaps=new Map(), overlapError=false;
+  try{
+    overlaps=await loadCategoryOverlaps(selectedAssessment,studentsAtAssessmentYear(placementResult.data||[]).map(s=>s.id));
+  }catch(error){overlapError=true;}
+  if(current?.id!==id)return;
+  categoryOverlaps=overlaps;categoryOverlapError=overlapError;
   const placements=placementResult.data||[];
   targets=t.data||[];
   members=membersAtAssessmentYear(m.data,placements);
@@ -841,7 +875,7 @@ function renderAssessmentTeachers() {
 function renderElements(){const id=$("sel-competency").value;const rows=elements.filter(e=>e.competency_id===id&&e.active!==false&&allowedCompetencyStages.includes(e.stage));const el=$("element-options");if(!rows.length){el.textContent="ไม่มีองค์ประกอบที่เปิดให้เลือกในช่วงชั้นที่โรงเรียนเปิดสอน";return;}let html="";for(const stage of allowedCompetencyStages){const list=rows.filter(e=>e.stage===stage);if(!list.length)continue;html+="<div class='element-group'><h4>"+stage+"</h4>";for(const e of list){if(targets.some(t=>t.element_id===e.id))continue;html+="<label class='element-option'><input type='checkbox' data-element='"+e.id+"'><span>"+esc(e.name)+"</span><input type='number' min='0.01' step='0.01' value='10' data-score='"+e.id+"' disabled></label>";}html+="</div>";}el.innerHTML=html||"<div class='empty'>เลือกองค์ประกอบของสมรรถนะนี้ครบแล้ว</div>";el.querySelectorAll("input[type=checkbox]").forEach(c=>c.addEventListener("change",()=>{el.querySelector("[data-score='"+c.dataset.element+"']").disabled=!c.checked;}));}
 // ช่วงชั้นที่มีองค์ประกอบรองรับอยู่จริงในรายการนี้ (รวมทุกสมรรถนะ) — ใช้บล็อกนักเรียนช่วงชั้นที่ไม่มีองค์ประกอบรองรับ
 function targetStageSet(){return new Set(targets.map(t=>t.element&&t.element.stage).filter(Boolean));}
-function renderStudents(){if(!current)return;const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";const stages=targetStageSet();for(const s of rows){const stage=competencyStageForGrade(s.grade_level);const blocked=!stage||!stages.has(stage);const label=document.createElement("label");label.className="student-row"+(blocked?" blocked":"");label.innerHTML="<input type='checkbox' value='"+s.id+"'"+(blocked?" disabled":"")+"><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div>"+(blocked?"<div class='block-note'>ไม่มีองค์ประกอบรองรับ"+esc(stage||"ช่วงชั้นนี้")+" — เพิ่มองค์ประกอบก่อนจึงเพิ่มนักเรียนคนนี้ได้</div>":"")+"</div>";el.appendChild(label);}}
+function renderStudents(){if(!current)return;const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";if(categoryOverlapError){const note=document.createElement("div");note.className="empty-note";note.setAttribute("role","status");note.textContent="ตรวจรายชื่อที่อยู่"+current.activity_category+"อื่นไม่สำเร็จ — ระบบจะตรวจอีกครั้งตอนกดเพิ่ม";el.prepend(note);}const stages=targetStageSet();for(const s of rows){const stage=competencyStageForGrade(s.grade_level);const blocked=!stage||!stages.has(stage);const overlaps=categoryOverlaps.get(s.id)||[];const overlap=overlaps.length>0;const label=document.createElement("label");label.className="student-row"+(overlap?" overlap":blocked?" blocked":"");label.innerHTML="<input type='checkbox' value='"+s.id+"'"+((blocked||overlap)?" disabled":"")+"><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div>"+(overlap?"<div class='overlap-note'>อยู่ใน"+overlaps.map(a=>esc(a.name)).join(", ")+" ("+esc(current.activity_category)+" ภาค "+esc(current.term)+") แล้ว — ต้องเอาออกจากรายการนั้นก่อนจึงเพิ่มที่นี่ได้</div>":"")+(blocked?"<div class='block-note'>ไม่มีองค์ประกอบรองรับ"+esc(stage||"ช่วงชั้นนี้")+" — เพิ่มองค์ประกอบก่อนจึงเพิ่มนักเรียนคนนี้ได้</div>":"")+"</div>";el.appendChild(label);}}
 
 $("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,termChoice=$("f-term").value;const sourceType=$("f-type").value;if(!name||!year||!termChoice){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const term=termChoice==="all"?null:termChoice;const ownerId=isAdmin?($("f-owner").value||session.user.id):session.user.id;const payload={name,year,term,source_type:sourceType,owner_id:ownerId,activity_category:sourceType==="กิจกรรม"?($("f-activity-category").value||null):null};if(!activityCategories.length)delete payload.activity_category;const {data,error}=await sb.from("competency_assessments").insert(payload).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year)){assessmentYears.push(year);refreshAssessmentYearFilter();}$("f-name").value="";$("f-activity-category").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
 $("sel-competency").onchange=renderElements;
@@ -938,10 +972,87 @@ async function removeAssessment(assessment){
   renderAssessments(); toast("ลบรายการและข้อมูลที่เกี่ยวข้องแล้ว");
 }
 $("filter-grade").onchange=renderStudents;$("filter-room").onchange=renderStudents;
-async function addMembers(ids){if(!ids.length){toast("เลือกรายชื่อนักเรียนก่อน",false);return;}const {error}=await sb.from("competency_assessment_members").insert(ids.map(student_id=>({assessment_id:current.id,student_id})));if(error){toast("เพิ่มไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มผู้เข้าร่วมแล้ว");}
+async function addMembers(ids){if(!ids.length){toast("เลือกรายชื่อนักเรียนก่อน",false);return;}if(addingMembers)return;
+  addingMembers=true;
+  const assessment=current;
+  const buttons=[$("btn-add-selected"),$("btn-add-room")];
+  const disabled=buttons.map(button=>button.disabled);
+  buttons.forEach(button=>button.disabled=true);
+  try{
+    let overlaps;
+    try{overlaps=await loadCategoryOverlaps(assessment,ids);}
+    catch(error){toast("ตรวจรายชื่อที่อยู่"+assessment.activity_category+"อื่นไม่สำเร็จ — ยังไม่ได้เพิ่ม ลองกดอีกครั้ง: "+error.message,false);return;}
+    const allowed=ids.filter(id=>!overlaps.has(id));
+    const skipped=ids.filter(id=>overlaps.has(id));
+    if(!allowed.length){toast("ไม่ได้เพิ่ม — นักเรียนที่เลือกอยู่"+assessment.activity_category+"อื่นในภาคนี้แล้วทุกคน",false);await selectAssessment(assessment.id);return;}
+const {error}=await sb.from("competency_assessment_members").insert(allowed.map(student_id=>({assessment_id:assessment.id,student_id})));if(error){toast("เพิ่มไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(assessment.id);if(skipped.length){const names=skipped.slice(0,3).map(id=>students.find(s=>s.id===id)?.name||id).join(", ");toast("เพิ่ม "+allowed.length+" คน · ข้าม "+skipped.length+" คนที่อยู่"+assessment.activity_category+"อื่นแล้ว: "+names+(skipped.length>3?" และอีก "+(skipped.length-3)+" คน":""));}else toast("เพิ่มผู้เข้าร่วมแล้ว");
+  }finally{addingMembers=false;buttons.forEach((button,index)=>button.disabled=disabled[index]);}
+}
 $("btn-add-selected").onclick=()=>addMembers([...$("student-picker").querySelectorAll("input:checked:not(:disabled)")].map(i=>i.value));
 $("btn-add-room").onclick=()=>addMembers([...$("student-picker").querySelectorAll("input:not(:disabled)")].map(i=>i.value));
-async function removeMember(m){if(!await window.crsAskConfirm({title:"เอาผู้เรียนออกจากรายการ",message:"นักเรียน "+m.student.name,okLabel:"เอาออก"}))return;const {error}=await sb.from("competency_assessment_members").delete().eq("id",m.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เอาออกแล้ว");}
+async function removeMember(m){
+  if(current.activity_category){
+    // เก็บรายการที่กดไว้: ระหว่างนับหรือยืนยัน ครูอาจสลับไปดูรายการอื่น
+    const assessment=current;
+    const studentName=m.student.name;
+    const busyKey=assessment.id+":"+m.student_id;
+    const busy=removeMember.busy||(removeMember.busy=new Set());
+    if(busy.has(busyKey))return;
+    busy.add(busyKey);
+    try{
+      let sessionIds,scoreCount=0,snapshotCount=0,passCount=0;
+      try{
+        const {data:sessions,error}=await sb.from("competency_assessment_sessions").select("id").eq("assessment_id",assessment.id);
+        if(error)throw error;
+        sessionIds=sessions.map(row=>row.id);
+        const counts=[];
+        if(sessionIds.length){
+          counts.push(await sb.from("competency_assessment_scores").select("*",{count:"exact",head:true}).eq("student_id",m.student_id).in("session_id",sessionIds));
+          counts.push(await sb.from("competency_assessment_session_students").select("*",{count:"exact",head:true}).eq("student_id",m.student_id).in("session_id",sessionIds));
+        }
+        const pass=await sb.from("activity_pass_results").select("*",{count:"exact",head:true}).eq("assessment_id",assessment.id).eq("student_id",m.student_id);
+        for(const result of [...counts,pass]){
+          if(result.error)throw result.error;
+          if(!Number.isInteger(result.count)||result.count<0)throw new Error("ไม่ได้รับจำนวนข้อมูลที่แน่นอน — ลองใหม่อีกครั้ง");
+        }
+        if(sessionIds.length){scoreCount=counts[0].count;snapshotCount=counts[1].count;}
+        passCount=pass.count;
+      }catch(error){toast("ตรวจคะแนนก่อนเอาออกไม่สำเร็จ: "+error.message,false);return;}
+      const message=scoreCount||snapshotCount||passCount
+        ?"คะแนนสมรรถนะ "+scoreCount+" ช่อง"+(passCount?" และผลผ่าน/ไม่ผ่าน":"")+" ในรายการนี้จะถูกลบไปด้วย กู้คืนไม่ได้\nรายการภาคอื่นไม่ถูกแตะ"
+        :"ยังไม่มีคะแนนในรายการนี้";
+      if(!await window.crsAskConfirm({title:"เอา "+studentName+" ออกจาก "+assessment.name,message,okLabel:"เอาออก",danger:true}))return;
+      // ลบสมาชิกเป็นขั้นสุดท้ายเสมอ เพื่อให้ครูกดซ้ำได้ถ้าข้อมูลผูกลบไม่ครบ
+      const steps=[];
+      if(sessionIds.length){
+        steps.push({label:"คะแนน",expected:scoreCount,run:()=>sb.from("competency_assessment_scores").delete({count:"exact"}).eq("student_id",m.student_id).in("session_id",sessionIds)});
+        steps.push({label:"รายชื่อในครั้งประเมิน",expected:snapshotCount,run:()=>sb.from("competency_assessment_session_students").delete({count:"exact"}).eq("student_id",m.student_id).in("session_id",sessionIds)});
+      }
+      steps.push({label:"ผลผ่าน/ไม่ผ่าน",expected:passCount,run:()=>sb.from("activity_pass_results").delete({count:"exact"}).eq("assessment_id",assessment.id).eq("student_id",m.student_id)});
+      steps.push({label:"ผู้เข้าร่วม",expected:1,run:()=>sb.from("competency_assessment_members").delete({count:"exact"}).eq("id",m.id)});
+      const completed=[];
+      for(const step of steps){
+        const progress=completed.length?" · ลบ"+completed.join(", ")+"แล้ว":" · ยังไม่มีขั้นตอนที่ลบสำเร็จ";
+        try{
+          const {error,count}=await step.run();
+          if(error)throw error;
+          if(count!==step.expected){
+            toast("ลบ"+step.label+"ได้ไม่ครบ ("+(count??"ไม่ทราบ")+"/"+step.expected+") — ตรวจสิทธิ์/ล็อกอินใหม่"+progress+" · ลองกดเอาออกอีกครั้ง",false);
+            await selectAssessment(assessment.id);return;
+          }
+        }catch(error){
+          toast("เอาออกไม่สำเร็จขณะลบ"+step.label+": "+error.message+progress+" · ลองกดเอาออกอีกครั้ง",false);
+          await selectAssessment(assessment.id);return;
+        }
+        completed.push(step.label);
+      }
+      await selectAssessment(assessment.id);
+      toast(scoreCount?"เอาออกแล้ว · ลบคะแนน "+scoreCount+" ช่อง":"เอาออกแล้ว");
+    }finally{busy.delete(busyKey);}
+    return;
+  }
+  if(!await window.crsAskConfirm({title:"เอาผู้เรียนออกจากรายการ",message:"นักเรียน "+m.student.name,okLabel:"เอาออก"}))return;const {error}=await sb.from("competency_assessment_members").delete().eq("id",m.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เอาออกแล้ว");
+}
 
 $("teacher-filter-grade").onchange=refreshTeacherRoomFilter;
 $("btn-add-assessment-teacher").onclick=async()=>{
@@ -1172,6 +1283,7 @@ async function copyAssessment(){
   if(!year||!term){toast("เลือกปีการศึกษาและภาคเรียนก่อน",false);return;}
   copyBusy=true;const button=$("copy-save");button.disabled=true;button.textContent="กำลังคัดลอก…";
   let created=null;
+  let skippedMembers=0;
   try{
     const {data:src,error:sourceError}=await sb.from("competency_assessments").select("id,name,year,term,source_type,activity_category").eq("id",copySourceId).single();
     if(sourceError)throw sourceError;
@@ -1191,12 +1303,15 @@ async function copyAssessment(){
     if($("copy-members").checked&&year===src.year){
       const {data:sourceMembers,error:memberError}=await sb.from("competency_assessment_members").select("student_id").eq("assessment_id",src.id);
       if(memberError)throw memberError;
-      if(sourceMembers.length){const {error:writeError}=await sb.from("competency_assessment_members").insert(sourceMembers.map(row=>({assessment_id:created.id,student_id:row.student_id})));if(writeError)throw writeError;}
+      const overlaps=await loadCategoryOverlaps(created,sourceMembers.map(row=>row.student_id));
+      const allowedMembers=sourceMembers.filter(row=>!overlaps.has(row.student_id));
+      skippedMembers=sourceMembers.length-allowedMembers.length;
+      if(allowedMembers.length){const {error:writeError}=await sb.from("competency_assessment_members").insert(allowedMembers.map(row=>({assessment_id:created.id,student_id:row.student_id})));if(writeError)throw writeError;}
     }
     assessments.unshift(created);
     if(!assessmentYears.includes(year)){assessmentYears.push(year);assessmentYears.sort((a,b)=>b.localeCompare(a,"th",{numeric:true}));refreshAssessmentYearFilter();}
     copyBusy=false;closeCopy();
-    await openDetail(created.id);renderAssessments();toast("คัดลอกแล้ว");
+    await openDetail(created.id);renderAssessments();toast(skippedMembers?"คัดลอกแล้ว · ไม่ได้คัดลอกผู้เข้าร่วม "+skippedMembers+" คนที่อยู่"+created.activity_category+"อื่นในภาคนี้แล้ว":"คัดลอกแล้ว");
   }catch(error){
     if(created){
       const {error:deleteError}=await sb.from("competency_assessments").delete().eq("id",created.id);
