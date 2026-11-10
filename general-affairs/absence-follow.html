@@ -84,6 +84,27 @@
   #absence-kpis .tone-amber b { color:var(--amber); }
   #absence-kpis .tone-muted { background:var(--bg); }
   #absence-kpis .tone-muted b { color:var(--muted); }
+  #absence-kpis { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  #absence-kpis b, .episodes, .view-bar .n { font-variant-numeric:tabular-nums; }
+  .view-bar { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0; }
+  .view-bar button { max-width:100%; min-height:44px; border:1px solid var(--line); border-radius:99px; color:var(--ink); background:var(--white); }
+  .view-bar button[aria-pressed="true"] { color:var(--white); background:var(--teal); border-color:var(--teal); }
+  .view-bar button:hover { border-color:var(--teal); }
+  .view-bar button:focus-visible { outline:3px solid var(--teal); outline-offset:2px; }
+  #history-list { margin-top:12px; overflow-wrap:anywhere; }
+  #history-list .audit-row { margin-bottom:12px; }
+  #history-list .audit-head > div { min-width:0; }
+  .history-name { font-size:17px; font-weight:700; }
+  .kind-group { margin:18px 0 8px; padding-left:12px; border-left:3px solid var(--line); }
+  .episodes { list-style:none; margin:10px 0 0; padding:0; border-top:1px dashed var(--line); }
+  .episodes li { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; padding:8px 0; border-bottom:1px dashed var(--line); }
+  .episodes li:last-child { border-bottom:0; }
+  .ep-end { grid-column:1; color:var(--muted); font-size:13px; }
+  .ep-letter { grid-column:2; grid-row:1 / span 2; align-self:center; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+  #history-list .badge.ok { color:var(--teal); background:var(--teal-soft); }
+  #history-list .badge.todo { color:var(--amber); background:var(--amber-soft); }
+  .now-line { margin-top:8px; font-size:14px; }
+  .now-line.warn { color:var(--danger); font-weight:600; }
   .issued-summary { margin-top:8px; font-size:13px; color:var(--muted); }
   .issued-summary summary { min-height:44px; cursor:pointer; color:var(--teal); }
   #meeting-fields { margin-top:8px; padding:12px; background:var(--teal-soft); border-radius:10px; }
@@ -104,6 +125,11 @@
     .filters { grid-template-columns:1fr; }
     .print-letter-btn { width:100%; }
   }
+  @media (max-width:640px) {
+    #absence-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .episodes li { grid-template-columns:minmax(0,1fr); }
+    .ep-letter { grid-column:1; grid-row:auto; justify-content:flex-start; }
+  }
   @media (max-width:520px) {
     .audit-head { display:block; }
     .streak-count { display:block; margin-top:4px; white-space:normal; }
@@ -116,7 +142,7 @@
     .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print { display:none !important; }
     html body { display:block !important; padding:0 !important; margin:0; background:#fff !important; font-size:14px; }
     html body .wrap, .academic-content { display:block !important; width:100% !important; max-width:none !important; margin:0 !important; padding:0 !important; }
-    header, .card, #report-state { display:none !important; }
+    header, .card, #report-state, .view-bar, #history-list { display:none !important; }
     #print-area { position:static; width:100%; height:auto; overflow:visible; }
     tr, .avoid-break { break-inside:avoid; }
     a[href]::after { content:""; }
@@ -165,9 +191,14 @@
       </div>
       <section class="card" id="report-card">
         <div class="section">รายชื่อนักเรียนที่เข้าเกณฑ์</div>
-        <div id="report-state" class="hint">กำลังโหลด…</div>
         <div id="absence-kpis" class="summary-grid" aria-label="สรุปนักเรียนขาดเรียน"></div>
+        <div class="view-bar" role="group" aria-label="เลือกมุมมอง">
+          <button type="button" data-view="now" aria-pressed="true" aria-controls="absence-list">ยังขาดอยู่ <span class="n">(—)</span></button>
+          <button type="button" data-view="past" aria-pressed="false" aria-controls="history-list">เคยถึงเกณฑ์ กลับมาแล้ว <span class="n">(—)</span></button>
+        </div>
+        <div id="report-state" class="hint" role="status" aria-live="polite" aria-atomic="true">กำลังโหลด…</div>
         <div id="absence-list" class="audit-list"></div>
+        <div id="history-list" hidden></div>
       </section>
     </div>
     <div id="toast" class="toast"></div>
@@ -179,12 +210,12 @@
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, addDaysStr,
-  loadAbsenceStreaks, loadMyHomeroomRooms, MIN_ABSENT_DAYS,
+  loadAbsenceStreaks, loadAbsenceHistory, loadMyHomeroomRooms, MIN_ABSENT_DAYS,
   issueAbsenceLetter, loadIssuedAbsenceLetters,
   loadLetterSigners, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter, thaiLetterDateText, thaiShortDateText,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20261109-2";
+} from "../supabase-client.js?v=20261110-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -208,6 +239,12 @@ let years = [];
 let canGeneral = false;
 let homeroomRoomsByYear = new Map();
 let reportRows = [];
+let historyRows = [];
+let historyError = null;
+let reportError = null;
+let reportLoaded = false;
+let reportMessage = "";
+let activeView = "now";
 let issuedByStudent = new Map();
 let printing = false;
 let schoolName = "";
@@ -269,14 +306,111 @@ function absenceDateChips(row) {
   ).join("");
 }
 
+// หนังสือผูกกับช่วงด้วยวันเริ่มขาดที่บันทึกไว้ รวมขอบต้นและขอบท้าย
+function episodeLetters(studentId, episode) {
+  return (issuedByStudent.get(String(studentId)) || []).filter(letter =>
+    letter.absent_from >= episode.fromDate && letter.absent_from <= episode.toDate
+  );
+}
+
+function missingHistoryLetters() {
+  return historyRows.reduce((count, row) => count + row.episodes.filter(episode =>
+    !episodeLetters(row.studentId, episode).length
+  ).length, 0);
+}
+
+function renderKpis() {
+  const neverIssued = reportRows.filter(row => !(issuedByStudent.get(String(row.studentId)) || []).length).length;
+  const knownHistory = reportLoaded && !historyError;
+  el("absence-kpis").innerHTML = [
+    [reportLoaded ? reportRows.length : null, "ยังขาดอยู่ตอนนี้", "danger"],
+    [reportLoaded ? neverIssued : null, "ยังขาดอยู่ · ยังไม่เคยออกหนังสือ", "amber"],
+    [knownHistory ? historyRows.length : null, "เคยถึงเกณฑ์ กลับมาเรียนแล้ว", "muted"],
+    [knownHistory ? missingHistoryLetters() : null, "ช่วงที่ถึงเกณฑ์แต่ไม่มีหนังสือ", "amber"]
+  ].map(([value, label, tone]) => `<div class="summary-item tone-${value > 0 ? tone : "muted"}"><b>${value ?? "—"}</b><span>${label}</span></div>`).join("");
+  document.querySelector('[data-view="now"] .n').textContent = `(${reportLoaded ? reportRows.length : "—"})`;
+  document.querySelector('[data-view="past"] .n').textContent = `(${knownHistory ? historyRows.length : "—"})`;
+}
+
+function renderHistoryRow(row) {
+  const trailing = row.trailingAbsent;
+  const nowText = trailing.days >= MIN_ABSENT_DAYS
+    ? 'อยู่ในรายชื่อ “ยังขาดอยู่” ด้วย'
+    : trailing.days > 0
+      ? `⚠ ตอนนี้ขาดอีก ${trailing.days} วันติด (${fmtDate(trailing.dates[0])}–${fmtDate(trailing.dates[trailing.dates.length - 1])})`
+      : `ล่าสุด ${fmtDate(row.latest.date)}: ${row.latest.status}`;
+  return `<article class="audit-row">
+    <div class="audit-head">
+      <div><div class="history-name">${esc(row.name)}</div><div class="meta">เลขประจำตัว ${esc(row.studentNo)} · ${esc(homeroomAuditRoomLabel({ grade_level:row.gradeLevel, classroom:row.classroom }))}</div></div>
+      <div class="meta">ถึงเกณฑ์ ${esc(row.episodes.length)} ช่วง</div>
+    </div>
+    <ul class="episodes">${row.episodes.map(episode => {
+      const letters = episodeLetters(row.studentId, episode);
+      const endText = episode.endStatus === "มา"
+        ? `กลับมาเรียน ${fmtDate(episode.endDate)}`
+        : `กลับมาด้วย “${episode.endStatus}” ${fmtDate(episode.endDate)}`;
+      return `<li><span class="ep-range">${esc(fmtDate(episode.fromDate))} – ${esc(fmtDate(episode.toDate))} · <b>ขาด ${esc(episode.days)} วัน</b></span>
+        <span class="ep-end">${esc(endText)}</span>
+        <span class="ep-letter">${letters.length ? letters.map(letter => `<span class="badge ok">บร.${esc(letter.doc_no)} ครั้งที่ ${esc(letter.letter_round)}</span>`).join("") : '<span class="badge todo">ไม่มีหนังสือ</span>'}</span></li>`;
+    }).join("")}</ul>
+    <div class="now-line${trailing.days > 0 && trailing.days < MIN_ABSENT_DAYS ? " warn" : ""}">${esc(nowText)}</div>
+  </article>`;
+}
+
+function renderHistory() {
+  const list = el("history-list");
+  if (historyError) {
+    list.innerHTML = `<div class="banner bad"><b>โหลดประวัติไม่สำเร็จ</b><br>${esc(historyError.message)}<br>กรุณาเลือกปีใหม่หรือรีเฟรชหน้าเพื่อลองอีกครั้ง</div>`;
+    return;
+  }
+  if (!reportLoaded) { list.innerHTML = ""; return; }
+  const intro = '<div class="banner warn">นักเรียนกลุ่มนี้กลับมาเรียนแล้ว จึงไม่อยู่ในรายชื่อพิมพ์หนังสือ · แสดงไว้ให้ตรวจว่าช่วงที่ถึงเกณฑ์ได้ติดตามแล้วหรือยัง</div>';
+  if (!historyRows.length) {
+    list.innerHTML = intro + '<div class="empty">ปีนี้ยังไม่มีนักเรียนที่เคยขาดถึงเกณฑ์แล้วกลับมาเรียน</div>';
+    return;
+  }
+  const sorted = [...historyRows].sort((a, b) => b.episodes[0].toDate.localeCompare(a.episodes[0].toDate));
+  const missing = [], complete = [];
+  for (const row of sorted) {
+    (row.episodes.some(episode => !episodeLetters(row.studentId, episode).length) ? missing : complete).push(row);
+  }
+  list.innerHTML = intro + [
+    ["มีช่วงที่ยังไม่มีหนังสือ", missing],
+    ["ออกหนังสือครบทุกช่วงแล้ว", complete]
+  ].map(([label, rows]) => `<div class="kind-group"><h2 class="section">${label} (${rows.length} คน)</h2></div>${rows.length ? rows.map(renderHistoryRow).join("") : '<div class="empty">ปีนี้ยังไม่มีใครอยู่กลุ่มนี้</div>'}`).join("");
+}
+
+function updateView() {
+  // เก็บ node วัน/เวลาชุดเดิมก่อนซ่อนรายชื่อ แล้วนำกลับตำแหน่งที่ติ๊กเมื่อกลับมา
+  if (activeView !== "now") el("meeting-parking").appendChild(el("meeting-fields"));
+  el("absence-list").hidden = activeView !== "now";
+  el("history-list").hidden = activeView !== "past";
+  if (activeView === "now") moveMeetingFields();
+  document.querySelectorAll(".view-bar button").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.view === activeView));
+  });
+  if (reportError) {
+    el("report-state").innerHTML = `<div class="banner bad" style="margin:0"><b>โหลดรายงานไม่สำเร็จ</b><br>${esc(reportError.message)}</div>`;
+  } else if (reportMessage || !reportLoaded) {
+    el("report-state").textContent = reportMessage || "กำลังโหลด…";
+  } else if (activeView === "past") {
+    el("report-state").textContent = historyError ? "โหลดประวัติไม่สำเร็จ · กรุณาเลือกปีใหม่หรือรีเฟรชหน้าเพื่อลองอีกครั้ง"
+      : `พบ ${historyRows.length} คน · ${missingHistoryLetters()} ช่วงที่ถึงเกณฑ์ยังไม่มีหนังสือ`;
+  } else {
+    el("report-state").textContent = reportRows.length
+      ? `พบ ${reportRows.length} คน · แสดงช่วงวันที่จริงเพื่อให้ตรวจสอบได้`
+      : "ตรวจครบแล้ว";
+  }
+}
+
 function renderReport() {
   const list = el("absence-list");
   el("meeting-parking").appendChild(el("meeting-fields"));
-  const neverIssued = reportRows.filter(row => !(issuedByStudent.get(String(row.studentId)) || []).length).length;
-  el("absence-kpis").innerHTML = [[reportRows.length, "เข้าเกณฑ์", "danger"], [neverIssued, "ยังไม่เคยออกหนังสือ", "amber"]]
-    .map(([value, label, tone]) => `<div class="summary-item tone-${value > 0 ? tone : "muted"}"><b>${value}</b><span>${label}</span></div>`).join("");
+  renderKpis();
+  renderHistory();
   if (!reportRows.length) {
     list.innerHTML = '<div class="empty">ไม่มีนักเรียนที่ขาดเรียนติดต่อกันถึงเกณฑ์</div>';
+    updateView();
     return;
   }
 
@@ -310,6 +444,7 @@ function renderReport() {
       </div>
     </article>`;
   }).join("");
+  updateView();
 }
 
 function showGate(message) {
@@ -321,48 +456,62 @@ function showGate(message) {
 
 async function loadReport() {
   el("meeting-parking").appendChild(el("meeting-fields"));
-  el("absence-kpis").innerHTML = "";
   const requestSeq = ++loadRequestSeq;
   const yearSelect = el("year-select");
   const year = yearSelect.value;
+  reportRows = [];
+  historyRows = [];
+  issuedByStudent = new Map();
+  historyError = null;
+  reportError = null;
+  reportLoaded = false;
+  reportMessage = "";
+  el("absence-list").innerHTML = "";
+  renderKpis();
+  renderHistory();
   if (!year) {
-    el("report-state").textContent = "ยังไม่มีปีการศึกษาให้เลือก";
-    el("absence-list").innerHTML = "";
+    reportMessage = "ยังไม่มีปีการศึกษาให้เลือก";
+    updateView();
     yearSelect.disabled = false;
     return;
   }
   const allowedRooms = canGeneral ? null : (homeroomRoomsByYear.get(String(year)) || new Set());
   if (!canGeneral && allowedRooms.size === 0) {
-    reportRows = [];
-    issuedByStudent = new Map();
-    el("report-state").textContent = "ปีการศึกษานี้คุณไม่ได้เป็นครูประจำชั้น จึงไม่มีรายงานที่เปิดให้ดู";
+    reportLoaded = true;
+    reportMessage = "ปีการศึกษานี้คุณไม่ได้เป็นครูประจำชั้น จึงไม่มีรายงานที่เปิดให้ดู";
     renderReport();
     yearSelect.disabled = false;
     return;
   }
 
   yearSelect.disabled = true;
-  el("report-state").textContent = "กำลังโหลด…";
-  el("absence-list").innerHTML = "";
+  updateView();
   try {
-    const [streaks, issued] = await Promise.all([
+    const [streaks, issued, history] = await Promise.all([
       loadAbsenceStreaks(year, { years }),
-      loadIssuedAbsenceLetters(year)
+      loadIssuedAbsenceLetters(year),
+      loadAbsenceHistory(year, { years }).catch(error => ({ error }))
     ]);
     if (requestSeq !== loadRequestSeq) return;
     reportRows = canGeneral
       ? streaks
       : streaks.filter(row => allowedRooms.has(roomKey(row.gradeLevel, row.classroom)));
+    historyError = history.error || null;
+    historyRows = historyError ? [] : canGeneral
+      ? history
+      : history.filter(row => allowedRooms.has(roomKey(row.gradeLevel, row.classroom)));
     issuedByStudent = groupIssuedLetters(issued);
-    el("report-state").textContent = reportRows.length
-      ? `พบ ${reportRows.length} คน · แสดงช่วงวันที่จริงเพื่อให้ตรวจสอบได้`
-      : "ตรวจครบแล้ว";
+    reportLoaded = true;
     renderReport();
   } catch (error) {
     if (requestSeq !== loadRequestSeq) return;
     reportRows = [];
+    historyRows = [];
     issuedByStudent = new Map();
-    el("report-state").innerHTML = `<div class="banner bad" style="margin:0"><b>โหลดรายงานไม่สำเร็จ</b><br>${esc(error.message)}</div>`;
+    reportError = error;
+    renderKpis();
+    renderHistory();
+    updateView();
   } finally {
     if (requestSeq === loadRequestSeq) yearSelect.disabled = false;
   }
@@ -534,6 +683,10 @@ el("absence-list").addEventListener("click", async event => {
 });
 
 el("year-select").addEventListener("change", loadReport);
+document.querySelectorAll(".view-bar button").forEach(button => button.addEventListener("click", () => {
+  activeView = button.dataset.view;
+  updateView();
+}));
 
 const session = await requireAuth();
 if (session) {

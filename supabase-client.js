@@ -1114,6 +1114,108 @@ export async function loadAbsenceStreaks(year, {
   });
 }
 
+// ประวัติเฉพาะช่วงขาดที่มีสถานะอื่นตามหลังแล้ว — ช่วงท้ายที่ยังขาดเป็นของรายงานเดิม
+export function buildAbsenceEpisodes(rows, { minDays = MIN_ABSENT_DAYS } = {}) {
+  const byStudent = new Map();
+  for (const row of rows || []) {
+    const studentId = String(row?.student_id || "");
+    if (!studentId || !row?.attend_date) continue;
+    if (!byStudent.has(studentId)) byStudent.set(studentId, []);
+    byStudent.get(studentId).push(row);
+  }
+
+  const history = [];
+  for (const [studentId, studentRows] of byStudent) {
+    const ordered = [...studentRows].sort((a, b) =>
+      String(a.attend_date).localeCompare(String(b.attend_date))
+    );
+    const latest = ordered[ordered.length - 1];
+    const episodes = [];
+    let dates = [];
+    for (const row of ordered) {
+      if (row.status === "ขาด") {
+        dates.push(row.attend_date);
+        continue;
+      }
+      if (dates.length >= minDays) {
+        episodes.push({
+          fromDate: dates[0],
+          toDate: dates[dates.length - 1],
+          days: dates.length,
+          endDate: row.attend_date,
+          endStatus: row.status
+        });
+      }
+      dates = [];
+    }
+    if (!episodes.length) continue;
+    history.push({
+      studentId,
+      gradeLevel: latest.grade_level,
+      classroom: latest.classroom,
+      episodes: episodes.reverse(),
+      latest: { date: latest.attend_date, status: latest.status },
+      trailingAbsent: { days: dates.length, dates }
+    });
+  }
+  return history;
+}
+
+export async function loadAbsenceHistory(year, {
+  minDays = MIN_ABSENT_DAYS,
+  asOf = toDateStr(bangkokNow()),
+  years = null
+} = {}) {
+  try {
+    const range = academicYearRange(year, years ?? await getAcademicYears());
+    if (!range) throw new Error("ไม่พบช่วงปีการศึกษาที่เลือก");
+    const to = range.end < asOf ? range.end : asOf;
+    if (to < range.start) return [];
+
+    const candidateResult = await fetchAllRows(() => sb.from("daily_attendance")
+      .select("student_id,attend_date")
+      .eq("status", "ขาด")
+      .gte("attend_date", range.start)
+      .lte("attend_date", to), ["student_id", "attend_date"]);
+    if (candidateResult.error) throw candidateResult.error;
+    const absentCounts = new Map();
+    for (const row of candidateResult.data || []) {
+      absentCounts.set(row.student_id, (absentCounts.get(row.student_id) || 0) + 1);
+    }
+    const candidateIds = [...absentCounts]
+      .filter(([, count]) => count >= minDays)
+      .map(([studentId]) => studentId);
+    if (!candidateIds.length) return [];
+
+    const detailResult = await fetchAllRows(() => sb.from("daily_attendance")
+      .select("student_id,attend_date,status,grade_level,classroom")
+      .gte("attend_date", range.start)
+      .lte("attend_date", to)
+      .in("student_id", candidateIds), ["student_id", "attend_date"]);
+    if (detailResult.error) throw detailResult.error;
+    const episodes = buildAbsenceEpisodes(detailResult.data || [], { minDays });
+    if (!episodes.length) return [];
+    const activeStudents = await getActiveStudents();
+    const activeById = new Map(activeStudents.map(student => [String(student.id), student]));
+    return episodes.flatMap(item => {
+      const student = activeById.get(item.studentId);
+      if (!student) return [];
+      return [{
+        studentId: item.studentId,
+        name: student.name,
+        studentNo: student.student_no,
+        gradeLevel: item.gradeLevel,
+        classroom: item.classroom,
+        episodes: item.episodes,
+        latest: item.latest,
+        trailingAbsent: item.trailingAbsent
+      }];
+    });
+  } catch (error) {
+    throw new Error("โหลดประวัติการขาดเรียนไม่สำเร็จ: " + (error.message || error));
+  }
+}
+
 // ห้องประจำชั้นของบัญชี แยกตามปี — ใช้ร่วมกันทั้งหน้ารายงานเต็มและการ์ดภาพรวม
 // ค่าใน Set ใช้รูป grade_level + NUL + classroom ให้ตรงกับคีย์ห้องของทั้งสองหน้า
 export async function loadMyHomeroomRooms(userId) {
