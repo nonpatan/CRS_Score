@@ -132,7 +132,31 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
   saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
-  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts } from "../supabase-client.js?v=20261111-1";
+  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts, sb, evalRound2 } from "../supabase-client.js?v=20261111-1";
+
+// ข้อมูลประกอบเท่านั้น: ร่างไม่เปิดคะแนน/เหตุผล และเพื่อนครูไม่แยกรายคน
+function buildEvalInsight({ form, domainCode, assignments = [], responses = [] }) {
+  const selfSection = form.sections.find(section => section.kind === "self");
+  const peerSection = form.sections.find(section => section.kind === "peer");
+  const selfItem = domainCode === "1.3" && selfSection?.domains.flatMap(domain => domain.items)
+    .find(item => item.text.startsWith(domainCode + " "));
+  const selfAssignment = selfItem && assignments.find(row => row.section_code === selfSection.code);
+  let self = null;
+  if (selfAssignment) {
+    const submitted = selfAssignment.status === "submitted";
+    const response = submitted && responses.find(row => row.assignment_id === selfAssignment.id && row.item_id === selfItem.id);
+    self = { status:submitted ? "submitted" : "draft", score:response?.score ?? null, evidence:response?.evidence || "" };
+  }
+  const peers = peerSection ? assignments.filter(row => row.section_code === peerSection.code) : [];
+  const submittedPeers = peers.filter(row => row.status === "submitted");
+  const peerStars = (peerSection?.domains || []).flatMap(domain => domain.items.filter(item => item.is_star).map(item => {
+    const scores = submittedPeers.map(assignment => responses.find(row => row.assignment_id === assignment.id && row.item_id === item.id)?.score)
+      .filter(score => score != null && score !== "" && Number.isFinite(Number(score))).map(Number);
+    return { code:`${domain.code}(${item.no})`, text:item.text, submitted:submittedPeers.length, total:peers.length,
+      avg:scores.length ? evalRound2(scores.reduce((sum, score) => sum + score, 0) / scores.length) : null };
+  }));
+  return { self, peerStars };
+}
 
 const session = await requireAuth();
 if (!session) {
@@ -176,6 +200,63 @@ if (!session) {
       const directorView = section.kind === "committee" && assignment.rater_staff_id === round.director_staff_id;
       const showWorkFacts = section.kind === "dept_head" || directorView;
       let workFacts = null, workFactsState = showWorkFacts ? "loading" : "none";
+      let insight = null, insightState = directorView ? "loading" : "none";
+      const peerInsightDomain = domains.some(domain => domain.code === "1.4") ? "1.4" : "1.3";
+      const hasSelfInsight = form.sections.some(section => section.kind === "self" &&
+        section.domains.some(domain => domain.items.some(item => item.text.startsWith("1.3 "))));
+      const hasPeerInsight = form.sections.some(section => section.kind === "peer" &&
+        section.domains.some(domain => domain.items.some(item => item.is_star)));
+      const insightMessageDomain = hasSelfInsight && domains.some(domain => domain.code === "1.3") ? "1.3" : peerInsightDomain;
+      const insightHtml = domainCode => {
+        if (!directorView) return "";
+        const showSelf = domainCode === "1.3" && hasSelfInsight;
+        const showPeer = domainCode === peerInsightDomain && hasPeerInsight;
+        if (!showSelf && !showPeer) return "";
+        if (insightState === "loading" || insightState === "error") return domainCode === insightMessageDomain
+          ? `<div class="facts"><div class="fact na"><span class="fact-ctx" role="status">${insightState === "error" ? "โหลดข้อมูลประเมินตนเอง/เพื่อนครูไม่สำเร็จ" : "กำลังโหลดข้อมูลประเมินตนเอง/เพื่อนครู…"}</span></div></div>` : "";
+        if (insightState !== "ready") return "";
+        let html = "";
+        if (showSelf && insight.self) {
+          const submitted = insight.self.status === "submitted";
+          const scaleLabel = insight.self.score == null ? "" : form.rules.scale?.find(value => Number(value.score) === Number(insight.self.score))?.label;
+          const lines = submitted
+            ? `<li>ให้ตัวเอง ${esc(insight.self.score ?? "–")}${scaleLabel ? ` · ${esc(scaleLabel)}` : ""}</li><li>${insight.self.evidence.trim() ? `เหตุผลของครู: ${esc(insight.self.evidence)}` : "ครูไม่ได้เขียนเหตุผล"}</li>`
+            : "<li>ครูยังไม่ส่งประเมินตนเอง</li>";
+          html += `<div class="facts"><div class="fact${submitted ? "" : " na"}"><details><summary>ครูประเมินตนเองด้านนี้</summary><div class="fact-ctx"><ul>${lines}</ul></div></details></div></div>`;
+        }
+        if (showPeer) html += insight.peerStars.map(star => {
+          const lines = star.submitted
+            ? `<li>${esc(star.text)}</li><li>เฉลี่ย ${esc(star.avg ?? "–")} จากเพื่อนครู ${star.submitted} คน${star.submitted < star.total ? ` (ส่งแล้ว ${star.submitted}/${star.total})` : ""}</li>`
+            : `<li>ยังไม่มีเพื่อนครูส่ง (0/${star.total})</li>`;
+          return `<div class="facts"><div class="fact${star.submitted ? "" : " na"}"><details><summary>เพื่อนครูประเมินข้อ ★ ${esc(star.code)}</summary><div class="fact-ctx"><ul>${lines}</ul></div></details></div></div>`;
+        }).join("");
+        return html;
+      };
+      const paintEvalInsight = () => {
+        app.querySelectorAll("[data-insight]").forEach(box => { box.innerHTML = insightHtml(box.dataset.insight); });
+      };
+      const fetchEvalInsight = async () => {
+        if (!directorView) return;
+        const peerSection = form.sections.find(section => section.kind === "peer");
+        const selfSection = form.sections.find(section => section.kind === "self");
+        const sectionCodes = [peerSection?.code, selfSection?.code].filter(code => code != null);
+        if (!sectionCodes.length) return;
+        try {
+          const { data:assignments, error:assignmentError } = await sb.from("eval_assignments")
+            .select("id,section_code,status").eq("target_id", target.id).in("section_code", sectionCodes);
+          if (assignmentError) throw assignmentError;
+          let responses = [];
+          if (assignments.length) {
+            const result = await sb.from("eval_responses").select("assignment_id,item_id,score,evidence")
+              .in("assignment_id", assignments.map(row => row.id));
+            if (result.error) throw result.error;
+            responses = result.data;
+          }
+          insight = buildEvalInsight({ form, domainCode:"1.3", assignments, responses });
+          insightState = "ready";
+        } catch (error) { insightState = "error"; }
+        paintEvalInsight();
+      };
       const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date()).map(part => [part.type, part.value]));
       const todayBangkok = `${todayParts.year}-${todayParts.month}-${todayParts.day}`;
       const factPeriod = () => workFacts ? `${thaiShortDateText(workFacts.period.from)} – ${thaiShortDateText(workFacts.period.to)}` :
@@ -345,6 +426,7 @@ if (!session) {
           <div class="meta" id="save-status" aria-live="polite">${esc(statusText())}</div></div></div>
           ${readonly ? `<div class="card ${assignment.status === "submitted" ? "success" : "warn"}">${assignment.status === "submitted" ? "ส่งแล้ว " + esc(submittedText(assignment.submitted_at)) : "ปิดรับคะแนนแล้ว"}</div>` : ""}
           ${selected.map((domain, index) => `<section class="card domain" id="domain-${esc(domain.code)}"><h3>ด้าน ${esc(domain.code)} · ${esc(domain.title)}</h3>
+            ${directorView && ["1.3", "1.4"].includes(domain.code) ? `<div data-insight="${esc(domain.code)}">${insightHtml(domain.code)}</div>` : ""}
             ${showWorkFacts && index === 0 ? factIntroHtml() + `<div data-facts-box>${factBoxHtml()}</div>` : ""}
             ${domain.items.map(item => renderItem(item, domain)).join("")}
             ${domain === domains[domains.length - 1] ? renderTexts() : ""}</section>`).join("")}
@@ -418,6 +500,7 @@ if (!session) {
       });
       render();
       if (showWorkFacts) fetchWorkFacts();
+      if (directorView) fetchEvalInsight();
     }
   } catch (error) {
     app.textContent = error.message;
