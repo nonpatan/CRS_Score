@@ -7969,6 +7969,28 @@ export function buildEvalWorkFacts(loaded) {
         const dateText = project.start_date ? `${date(project.start_date)}${project.end_date && project.end_date !== project.start_date ? "–" + date(project.end_date) : ""}` : "ไม่ระบุวันจัด";
         return `${name} — ${project.status || "ไม่ระบุสถานะ"} · ${dateText}${projectTime(project) ? " · " + projectTime(project) : ""}${project.own === false ? ` · ลงโดย ${project.responsible_name || "ครูคนอื่น"}` : ""}`;
       })) } : { na:true }) });
+    // ข้อมูลประกอบเพิ่ม 2026-11-11: สมรรถนะใช้ช่องคะแนนจาก RPC ไม่คำนวณคะแนนประเมินซ้ำ
+    if (!dueTerms.length) add("academic", { label:"ประเมินสมรรถนะ", value:"ยังไม่ถึงสิ้นภาคในช่วงรอบ", na:true });
+    for (const term of dueTerms) {
+      const assessments = rows(raw.competency).filter(item => item.term == null || String(item.term) === term);
+      const complete = item => Number(item.cells) > 0 && Number(item.filled) >= Number(item.cells);
+      const cells = assessments.reduce((sum, item) => sum + Number(item.cells || 0), 0);
+      const filled = assessments.reduce((sum, item) => sum + Number(item.filled || 0), 0);
+      const shared = assessments.some(item => rows(item.co_teachers).length);
+      const sorted = [...assessments].sort((a, b) => Number(complete(a)) - Number(complete(b)) ||
+        String(a.name || "").localeCompare(String(b.name || ""), "th"));
+      add("academic", { label:`ประเมินสมรรถนะ ภาค ${term}`,
+        value:assessments.length ? `กรอกแล้ว ${assessments.filter(complete).length} / ${assessments.length} รายการ` :
+          "ไม่ได้รับผิดชอบรายการสมรรถนะ",
+        ...(assessments.length ? {
+          context:`ช่องคะแนน ${filled} / ${cells}${shared ? " · รายการที่ดูแลร่วมกับครูอื่นนับให้ทุกคนเท่ากัน" : ""}`,
+          details:detail("ดูรายการ", sorted.map(item =>
+            `${item.name || ""}${item.term == null ? " (รายปี)" : ""} — ${Number(item.cells) > 0 ?
+              `${Number(item.filled || 0)} / ${Number(item.cells)} ช่อง · ${complete(item) ? "ครบ" : "ยังไม่ครบ"}` :
+              "ยังไม่มีครั้งประเมิน"}${rows(item.co_teachers).length ? ` (ร่วมกับ ${item.co_teachers.join(", ")})` : ""}`))
+        } : { na:true }) });
+    }
+    // จบข้อมูลสมรรถนะเพิ่ม 2026-11-11
   }
 
   if (active.has("general")) {
@@ -8089,6 +8111,63 @@ export function buildEvalWorkFacts(loaded) {
       context:[median("trainings"), "ไม่นับไปปฏิบัติหน้าที่นอกสถานที่"].filter(Boolean).join(" · "),
       details:detail(`ดูรายการ ${trainings.length} ครั้ง`, trainings.map(row => `${date(row.start_date)} · ${row.kind || ""} · ${row.title || ""}`)) });
   }
+
+  // ข้อมูลประกอบเพิ่ม 2026-11-11: ใช้สูตรวันลาและสอนชดเดิมกับข้อมูล RPC เท่านั้น
+  if (active.has("personnel")) {
+    const year = raw.round?.academic_year || "";
+    const calendar = raw.work_calendar || {};
+    // RPC ส่งเฉพาะใบลาของเป้าหมายและไม่ส่ง staff_id/เหตุผล จึงผูกเจ้าของก่อนเข้าสูตรกลาง
+    const leaveContext = leaves => ({
+      leaves:rows(leaves).map(leave => ({ ...leave, staff_id:raw.target_staff_id })),
+      holidays:new Set(rows(calendar.holidays).map(day => day.holiday_date)),
+      schedule:new Map(rows(calendar.schedule).map(day => [Number(day.weekday), day]))
+    });
+    const daysText = value => Number(Number(value).toFixed(1));
+    const leaves = rows(raw.leaves);
+    const canCountLeave = Boolean(from && to && rows(calendar.schedule).length);
+    const used = canCountLeave ? countLeaveDaysByType(raw.target_staff_id, from, to, leaveContext(leaves)) : {};
+    const types = Object.keys(used).sort((a, b) => a.localeCompare(b, "th"));
+    const yearFrom = raw.academic_year?.start_date;
+    const yearTo = raw.academic_year?.term2_end_date;
+    const yearUsed = canCountLeave && yearFrom && yearTo ?
+      countLeaveDaysByType(raw.target_staff_id, yearFrom, yearTo, leaveContext(raw.leave_year_leaves)) : {};
+    const quotaText = rows(raw.leave_quotas).filter(quota => yearUsed[quota.leave_type] > 0 && quota.days != null)
+      .sort((a, b) => a.leave_type.localeCompare(b.leave_type, "th"))
+      .map(quota => `${quota.leave_type} ${daysText(yearUsed[quota.leave_type])} / ${daysText(quota.days)} วัน`);
+    add("personnel", { label:"การลา",
+      value:!canCountLeave ? "ยังไม่มีข้อมูลวันทำงานสำหรับนับการลา" : types.length ?
+        types.map(type => `${type} ${daysText(used[type])} วัน`).join(" · ") : "ไม่มีการลา",
+      ...(!types.length ? { na:true } : {}),
+      context:`นับเฉพาะวันทำงานในช่วงรอบ · ลาตามสิทธิ์ ไม่ใช่ข้อบกพร่อง${quotaText.length ? ` · ทั้งปี ${year}: ${quotaText.join(" · ")}` : ""}`,
+      details:detail(`ดูรายการ ${leaves.length} ใบ`, leaves.map(leave =>
+        `${date(leave.start_date)}${leave.end_date !== leave.start_date ? "–" + date(leave.end_date) : ""} · ${leave.leave_type} · ${
+          leave.day_portion === "full" ? "เต็มวัน" : leave.day_portion === "morning" ? "ครึ่งเช้า" : "ครึ่งบ่าย"}`)) });
+
+    const gap = raw.teaching_gap;
+    const settingValue = gap?.percent;
+    const parsedPercent = Number(settingValue);
+    const hasPercent = settingValue !== null && settingValue !== undefined && settingValue !== "" &&
+      Number.isInteger(parsedPercent) && parsedPercent >= 1 && parsedPercent <= 100;
+    const percent = hasPercent ? parsedPercent : null;
+    const gapTypes = new Set(rows(gap?.gap_types));
+    const gapRows = rows(gap?.subjects).map(subject => computeTeachingGapRow({
+      subject, staff:{ id:raw.target_staff_id },
+      coverRows:rows(gap?.coverage).filter(row => row.subject_id === subject.id),
+      makeupRows:rows(gap?.makeups).filter(row => row.subject_id === subject.id),
+      gapTypes, percent, hasPercent
+    })).filter(row => row.overCap && row.required > 0);
+    const sum = key => gapRows.reduce((total, row) => total + row[key], 0);
+    const pending = sum("pendingMakeup");
+    add("personnel", { label:`สอนชดเชย ปีการศึกษา ${year}`,
+      value:!hasPercent ? "ฝ่ายบุคคลยังไม่ได้ตั้งเกณฑ์" : !gapRows.length ? "ไม่มีวิชาที่ต้องสอนชด" :
+        `ต้องสอนชด ${gapRows.length} วิชา · คงเหลือ ${sum("remaining")} คาบ`,
+      ...(!hasPercent || !gapRows.length ? { na:true } : {
+        context:`ต้องสอนชดเมื่อขาดสอนเกิน ${percent}% ของคาบทั้งวิชา · ชดแล้ว ${sum("madeUp")} คาบ${pending ? ` · รออนุมัติ ${pending} คาบ` : ""}`,
+        details:detail("ดูรายวิชา", gapRows.map(row =>
+          `${row.subject.code || ""} ${row.subject.name || ""} — ต้องชด ${row.required} · ชดแล้ว ${row.madeUp} · รออนุมัติ ${row.pendingMakeup} · คงเหลือ ${row.remaining}`))
+      }) });
+  }
+  // จบข้อมูลบุคคลเพิ่ม 2026-11-11
 
   return { period:{ from, to }, departments, groups };
 }
