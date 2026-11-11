@@ -132,7 +132,7 @@
 <script type="module">
 import { requireAuth, signOut, myStaffId, loadEvalFillData, listStaffPicker, saveEvalResponse,
   saveEvalTexts, submitEvalAssignment, evalItemRequirement, evalFillProgress,
-  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts, sb, evalRound2 } from "../supabase-client.js?v=20261111-1";
+  thaiShortDateText, loadEvalWorkFacts, buildEvalWorkFacts, evalRound2 } from "../supabase-client.js?v=20261111-1";
 
 // ข้อมูลประกอบเท่านั้น: ร่างไม่เปิดคะแนน/เหตุผล และเพื่อนครูไม่แยกรายคน
 function buildEvalInsight({ form, domainCode, assignments = [], responses = [] }) {
@@ -235,26 +235,14 @@ if (!session) {
       const paintEvalInsight = () => {
         app.querySelectorAll("[data-insight]").forEach(box => { box.innerHTML = insightHtml(box.dataset.insight); });
       };
-      const fetchEvalInsight = async () => {
+      // 🔻 Log Ingestion: ข้อมูลมากับ RPC eval_work_facts ตัวเดิม (คีย์ insight · เฉพาะ ผอ. ของรอบ) — ห้ามยิง request เพิ่ม
+      const applyEvalInsight = raw => {
         if (!directorView) return;
-        const peerSection = form.sections.find(section => section.kind === "peer");
-        const selfSection = form.sections.find(section => section.kind === "self");
-        const sectionCodes = [peerSection?.code, selfSection?.code].filter(code => code != null);
-        if (!sectionCodes.length) return;
-        try {
-          const { data:assignments, error:assignmentError } = await sb.from("eval_assignments")
-            .select("id,section_code,status").eq("target_id", target.id).in("section_code", sectionCodes);
-          if (assignmentError) throw assignmentError;
-          let responses = [];
-          if (assignments.length) {
-            const result = await sb.from("eval_responses").select("assignment_id,item_id,score,evidence")
-              .in("assignment_id", assignments.map(row => row.id));
-            if (result.error) throw result.error;
-            responses = result.data;
-          }
-          insight = buildEvalInsight({ form, domainCode:"1.3", assignments, responses });
+        const data = raw?.insight;
+        if (data && Array.isArray(data.assignments) && Array.isArray(data.responses)) {
+          insight = buildEvalInsight({ form, domainCode:"1.3", assignments:data.assignments, responses:data.responses });
           insightState = "ready";
-        } catch (error) { insightState = "error"; }
+        } else insightState = "error";
         paintEvalInsight();
       };
       const todayParts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date()).map(part => [part.type, part.value]));
@@ -293,9 +281,11 @@ if (!session) {
       const fetchWorkFacts = async () => {
         if (!showWorkFacts) return;
         workFactsState = "loading"; paintWorkFacts();
-        try { workFacts = buildEvalWorkFacts(await loadEvalWorkFacts(assignment.id)); workFactsState = "ready"; }
+        let raw = null;
+        try { raw = await loadEvalWorkFacts(assignment.id); workFacts = buildEvalWorkFacts(raw); workFactsState = "ready"; }
         catch (error) { workFactsState = "error"; }
         paintWorkFacts();
+        applyEvalInsight(raw);
       };
       const getProgress = () => evalFillProgress({ section, responses:[...responses.values()], rules:form.rules, snapshot });
       const statusText = () => readonly ? assignment.status === "submitted" ? "ส่งแล้ว" : "อ่านอย่างเดียว" :
@@ -500,7 +490,6 @@ if (!session) {
       });
       render();
       if (showWorkFacts) fetchWorkFacts();
-      if (directorView) fetchEvalInsight();
     }
   } catch (error) {
     app.textContent = error.message;
