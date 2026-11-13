@@ -1958,6 +1958,9 @@ export async function saveLessonLog({ logId = null, subjectId, sessionIds, field
     assigned_work: textOrNull(fields.assigned_work)
   };
 
+  // ใบเก่าที่ไม่ได้เลือกแผนไม่ส่งคีย์นี้ เพื่อไม่ล้างแผนที่ฐานผูกไว้แล้ว
+  if (fields.plan_id) payload.plan_id = fields.plan_id;
+
   let savedLog;
   let created = false;
   if (logId) {
@@ -1995,6 +1998,17 @@ export async function saveLessonLog({ logId = null, subjectId, sessionIds, field
     }
   }
   return { ...savedLog, sessionIds:selectedIds };
+}
+
+// แผนที่ส่งแล้วของวิชาในบันทึก — สิทธิ์อ่านคุมด้วย RLS เดิม
+export async function loadLessonPlanChoices(subjectIds) {
+  const ids = [...new Set((Array.isArray(subjectIds) ? subjectIds : []).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data, error } = await sb.from("lesson_plans")
+    .select("id,subject_id,seq,title,planned_periods,plan_url,plan_status,assessment_status")
+    .in("subject_id", ids).order("subject_id").order("seq");
+  if (error) throw new Error("โหลดแผนการสอนไม่สำเร็จ: " + error.message);
+  return data || [];
 }
 
 // ============================================================
