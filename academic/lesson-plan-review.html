@@ -61,12 +61,13 @@ import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, queueLabe
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
+  const MAX_STARS = 4;
   $('btn-signout')?.addEventListener('click', event => { event.preventDefault(); signOut(); });
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const check = result => { if (result.error) throw new Error(result.error.message); return result.data ?? []; };
   const date = value => value ? new Date(value).toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'}) : '—';
   const badge = status => `<span class="st ${status === 'ผ่าน' ? 'ok' : status === 'ขอให้แก้' ? 'fix' : 'wait'}">${status === 'ผ่าน' ? '✓' : status === 'ขอให้แก้' ? '⚠' : '◷'} ${esc(status)}</span>`;
-  const stars = value => value ? `<span class="stars" role="img" aria-label="${Number(value)} จาก 5 ดาว">${'★'.repeat(Number(value))}${'☆'.repeat(5-Number(value))}</span>` : '';
+  const stars = value => { const count = Math.min(Number(value),MAX_STARS); return count ? `<span class="stars" role="img" aria-label="${count} จาก ${MAX_STARS} ดาว">${'★'.repeat(count)}${'☆'.repeat(MAX_STARS-count)}</span>` : ''; };
   const docLink = (url,label = 'เปิดไฟล์ PDF') => `<a href="${esc(url)}" target="_blank" rel="noopener">${label} ↗ (แท็บใหม่)</a>`;
   let isReviewer = false, isAdmin = false, queue = [], queueSubjects = new Map(), selectedId = '', queueLoaded = false, queuePromise = null, coveragePromise = null, coverage = null, years = [], year = '', term = '', chip = 'all', currentTab = '', busy = false, toastTimer;
   const histories = new Map(), reviewedUpdates = new Map();
@@ -82,7 +83,7 @@ if (!session) {} else {
     const waiting = plan[key+'_status'] === 'รอตรวจ', editable = waiting && isReviewer && (isAdmin || plan.created_by !== session.user.id);
     return `<fieldset class="rv-part"><legend>${label}</legend>${docLink(plan[key+'_url'])}
       ${editable ? `${plan[key+'_reviewed_at'] ? `<p class="hint">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${esc(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
-      <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-rating"><div class="star-options">${[1,2,3,4,5].map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"><label for="${key}-star-${n}" aria-hidden="true">☆</label></span>`).join('')}</div><span class="star-value" aria-hidden="true">ยังไม่ได้ให้ดาว</span></div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
+      <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-rating"><div class="star-options">${Array.from({length:MAX_STARS},(_,i) => i+1).map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"><label for="${key}-star-${n}" aria-hidden="true">☆</label></span>`).join('')}</div><span class="star-value" aria-hidden="true">ยังไม่ได้ให้ดาว</span></div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
       <fieldset class="verdict" aria-describedby="${key}-verdict-error"><legend>ผลตรวจ *</legend><label><input type="radio" name="${key}-verdict" value="ผ่าน" aria-describedby="${key}-verdict-error">✓ ผ่าน</label><label><input type="radio" name="${key}-verdict" value="ขอให้แก้" aria-describedby="${key}-verdict-error">⚠ ขอให้แก้</label><div class="err" id="${key}-verdict-error" role="alert"></div></fieldset>
       <div class="field"><label for="${key}-comment">ข้อเสนอแนะ (บังคับเมื่อขอให้แก้)</label><textarea id="${key}-comment" name="${key}-comment" aria-describedby="${key}-comment-error"></textarea><div class="err" id="${key}-comment-error" role="alert"></div></div>` : `<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment ${plan[key+'_status'] === 'ขอให้แก้' ? 'fix' : ''}">${esc(plan[key+'_comment'])}</p>` : ''}${!waiting ? '<p class="hint">ครูไม่ได้เปลี่ยนลิงก์นี้ — ไม่ต้องตรวจซ้ำ</p>' : ''}`}</fieldset>`;
   }
@@ -92,7 +93,7 @@ if (!session) {} else {
       const on = Number(option.querySelector('input').value) <= shown, label = option.querySelector('label');
       label.classList.toggle('on',on); label.textContent = on ? '★' : '☆';
     });
-    options.closest('.star-rating').querySelector('.star-value').textContent = value ? value+' จาก 5 ดาว' : 'ยังไม่ได้ให้ดาว';
+    options.closest('.star-rating').querySelector('.star-value').textContent = value ? value+' จาก '+MAX_STARS+' ดาว' : 'ยังไม่ได้ให้ดาว';
   }
   function renderSelected(moveFocus = false) {
     const plan = queue.find(row => row.id === selectedId);
@@ -148,7 +149,7 @@ if (!session) {} else {
     for (const [key,doc] of [['plan','แผน'],['assessment','วัดผล']]) {
       if (plan[key+'_status'] !== 'รอตรวจ') continue;
       const starsValue = form.querySelector(`[name="${key}-stars"]:checked`), verdict = form.querySelector(`[name="${key}-verdict"]:checked`), comment = $(key+'-comment');
-      const fields = [ ['stars',starsValue ? '' : 'เลือก 1–5 ดาว',form.querySelector(`[name="${key}-stars"]`)], ['verdict',verdict ? '' : 'เลือกผ่านหรือขอให้แก้',form.querySelector(`[name="${key}-verdict"]`)], ['comment',verdict?.value === 'ขอให้แก้' && !comment.value.trim() ? 'ระบุสิ่งที่ต้องแก้ก่อนบันทึก' : '',comment] ];
+      const fields = [ ['stars',starsValue ? '' : 'เลือก 1–'+MAX_STARS+' ดาว',form.querySelector(`[name="${key}-stars"]`)], ['verdict',verdict ? '' : 'เลือกผ่านหรือขอให้แก้',form.querySelector(`[name="${key}-verdict"]`)], ['comment',verdict?.value === 'ขอให้แก้' && !comment.value.trim() ? 'ระบุสิ่งที่ต้องแก้ก่อนบันทึก' : '',comment] ];
       for (const [field,message,input] of fields) { $(key+'-'+field+'-error').textContent = message; if (field === 'comment') input.setAttribute('aria-invalid',message ? 'true' : 'false'); else form.querySelectorAll(`[name="${key}-${field}"]`).forEach(node => node.setAttribute('aria-invalid',message ? 'true' : 'false')); if (message && !firstInvalid) firstInvalid = input; }
       reviews.push({doc,stars:Number(starsValue?.value),verdict:verdict?.value,comment:comment.value.trim()});
     }
