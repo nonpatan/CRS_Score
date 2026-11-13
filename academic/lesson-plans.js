@@ -10,7 +10,8 @@ export function pdfUrlError(url) {
 }
 export function planOverallStatus(plan) {
   if ([plan.plan_status, plan.assessment_status].includes('ขอให้แก้')) return 'ขอให้แก้';
-  return plan.plan_status === 'ผ่าน' && plan.assessment_status === 'ผ่าน' ? 'ผ่าน' : 'รอตรวจ';
+  if ([plan.plan_status, plan.assessment_status].includes('รอตรวจ')) return 'รอตรวจ';
+  return plan.plan_status === 'ผ่าน' && plan.assessment_status === 'ผ่าน' ? 'ผ่าน' : 'ส่งแล้ว';
 }
 export function isIntegratedParent(subject, integrationMembers = []) {
   return subject.subject_type === 'บูรณาการ' || integrationMembers.some(row => String(row.integrated_subject_id) === String(subject.id));
@@ -20,10 +21,17 @@ export function summarizeSubjectPlans({ target, plans = [] }) {
   const submitted = plans.length;
   const passed = plans.filter(plan => planOverallStatus(plan) === 'ผ่าน').length;
   const fix = plans.filter(plan => planOverallStatus(plan) === 'ขอให้แก้').length;
-  const waiting = submitted - passed - fix;
+  const waiting = plans.filter(plan => planOverallStatus(plan) === 'รอตรวจ').length;
+  const sent = plans.filter(plan => planOverallStatus(plan) === 'ส่งแล้ว').length;
   const complete = count > 0 && submitted >= count;
-  return { target:count, submitted, passed, waiting, fix, missing:Math.max(0, count - submitted),
-    state:!submitted ? 'none' : complete ? passed === submitted ? 'allPassed' : 'complete' : 'partial' };
+  return { target:count, submitted, passed, waiting, sent, fix, missing:Math.max(0, count - submitted),
+    state:!submitted ? 'none' : complete ? 'complete' : 'partial' };
+}
+export function samplingSummary({ plans = [], sampleCount, defaultCount }) {
+  const sampled = plans.filter(plan => plan.plan_reviewed_at || plan.assessment_reviewed_at).length;
+  const target = Math.min(Number(sampleCount ?? defaultCount) || 0,plans.length);
+  const remaining = Math.max(0,target-sampled);
+  return {sampled,target,remaining,done:remaining === 0};
 }
 export function planSlots(target, plans = []) {
   const count = Math.max(Number(target?.plan_count ?? target) || 0, ...plans.map(plan => Number(plan.seq)), 0);
@@ -36,9 +44,9 @@ export function sortPlansForTeacher(slots) {
 }
 export function queueLabel(plan) {
   const docs = [];
-  if (plan.plan_status === 'รอตรวจ' && plan.plan_reviewed_at) docs.push('แผน');
-  if (plan.assessment_status === 'รอตรวจ' && plan.assessment_reviewed_at) docs.push('วัดผล');
-  return docs.length ? 'ส่งแก้: ' + docs.join(' + ') : 'ใหม่';
+  if (plan.plan_status === 'รอตรวจ') docs.push('แผน');
+  if (plan.assessment_status === 'รอตรวจ') docs.push('วัดผล');
+  return docs.length ? 'ส่งแก้: ' + docs.join(' + ') : '';
 }
 export function subjectsForPlanTerm(subjects, { year, term }) {
   return subjects.filter(subject => String(subject.year) === String(year) && (subject.term == null || String(subject.term) === String(term)));
@@ -62,6 +70,7 @@ export function lessonPlanAlertRows(data) {
   }
   const passed = list('passed');
   if (passed.length) rows.push(row('รอคุณ',passed.length > 1 ? 'แผนการสอนผ่านการตรวจแล้ว '+passed.length+' แผน' : 'แผนการสอนผ่านการตรวจแล้ว · '+passed[0].name+' แผนที่ '+passed[0].seq,'academic/lesson-plans.html?ack=1'+(passed.length === 1 ? '&'+planQuery(passed[0]) : ''),'ดูผล'));
-  if (data.review?.waiting > 0) rows.push(row('รอคุณ','แผนการสอนรอตรวจ '+data.review.waiting+' แผน · จากครู '+data.review.teachers+' คน','academic/lesson-plan-review.html?tab=queue','ไปตรวจ'));
+  if (data.review?.waiting > 0) rows.push(row('รอคุณ','แผนการสอนรอตรวจซ้ำ '+data.review.waiting+' แผน · จากครู '+data.review.teachers+' คน','academic/lesson-plan-review.html?tab=queue','ไปตรวจ'));
+  if (data.review?.subjects_to_sample > 0) rows.push(row('รอคุณ','วิชาที่ยังสุ่มตรวจแผนไม่ครบ '+data.review.subjects_to_sample+' วิชา','academic/lesson-plan-review.html?tab=queue','ไปตรวจ'));
   return rows;
 }
