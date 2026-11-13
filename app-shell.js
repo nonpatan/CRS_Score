@@ -225,7 +225,8 @@ function syncFinanceKpiTones() {
             ["attendance.html", "เช็คชื่อ"],
             ["entry.html", "กรอกคะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
-            ["theme-works.html", "ส่งผลงานตามธีม"]
+            ["theme-works.html", "ส่งผลงานตามธีม"],
+            ["lesson-plans.html", "แผนการสอนของฉัน"]
           ]
         },
         {
@@ -266,7 +267,8 @@ function syncFinanceKpiTones() {
             ["okr.html", "OKR ของโรงเรียน"],
             ["project-approval.html", "อนุมัติโครงการ/กิจกรรม"],
             ["project-report.html", "รายงานโครงการ/กิจกรรม"],
-            ["makeup-approval.html", "อนุมัติคำขอสอนชด"]
+            ["makeup-approval.html", "อนุมัติคำขอสอนชด"],
+            ["lesson-plan-review.html", "ตรวจแผนการสอน"]
           ]
         }
       ],
@@ -393,6 +395,16 @@ function syncFinanceKpiTones() {
           title: "กรอกคะแนนกิจกรรม/กิจวัตร",
           description: "เลือกรายการเพื่อกรอกคะแนนสมรรถนะ และบันทึกผลผ่าน/ไม่ผ่านสำหรับกิจกรรมพัฒนาผู้เรียน",
           steps: ["เลือกรายการ", "กรอกคะแนน", "บันทึกผลกิจกรรม"]
+        },
+        "lesson-plans.html": {
+          title: "แผนการสอนของฉัน",
+          description: "กำหนดจำนวนแผนของแต่ละวิชา แล้วส่งลิงก์ PDF แผนการสอนและเอกสารวัดผล",
+          steps: ["เลือกวิชา", "ตั้งจำนวนแผน", "ส่งแผน"]
+        },
+        "lesson-plan-review.html": {
+          title: "ตรวจแผนการสอน",
+          description: "ตรวจแผนและเอกสารวัดผลที่ครูส่ง ให้ดาวและข้อเสนอแนะ และดูว่าวิชาไหนยังไม่มีแผน",
+          steps: ["เลือกแผน", "ตรวจสองเอกสาร", "บันทึกผล"]
         },
         "theme-works.html": {
           title: "ส่งผลงานตามธีม",
