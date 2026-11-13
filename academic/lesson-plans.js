@@ -50,18 +50,18 @@ export const SUBJECT_COLUMNS = 'id,name,code,level,grade_level,term,year,subject
 export function lessonPlanAlertRows(data) {
   if (!data || typeof data !== 'object') return [];
   const rows = [], list = key => Array.isArray(data[key]) ? data[key] : [];
-  const row = (text, href, linkLabel) => ({kind:'แผนการสอน',text,href,linkLabel});
+  const row = (kind, text, href, linkLabel) => ({kind,text,href,linkLabel});
+  const planQuery = plan => 'year='+encodeURIComponent(data.year ?? '')+'&term='+encodeURIComponent(plan.term ?? '')+'&plan='+encodeURIComponent(plan.plan_id ?? '');
   for (const plan of list('fix')) {
-    const query = 'year='+encodeURIComponent(data.year ?? '')+'&term='+encodeURIComponent(plan.term ?? '')+'&plan='+encodeURIComponent(plan.plan_id ?? '');
-    rows.push(row('แผนถูกขอให้แก้ · '+plan.name+' แผนที่ '+plan.seq+' · '+(plan.docs || []).join(' + '),'academic/lesson-plans.html?'+query,'ไปแก้'));
+    rows.push(row('ค้าง','แผนการสอนถูกขอให้แก้ · '+plan.name+' แผนที่ '+plan.seq+' · '+(plan.docs || []).join(' + '),'academic/lesson-plans.html?'+planQuery(plan),'ไปแก้'));
   }
   const incomplete = list('incomplete');
   if (incomplete.length) {
     const subject = incomplete[0];
-    rows.push(row(incomplete.length > 1 ? 'แผนการสอนยังไม่ครบ '+incomplete.length+' วิชา' : subject.name+' · '+(subject.plan_count == null ? 'ยังไม่มีแผน' : 'ส่งแผนแล้ว '+subject.submitted+'/'+subject.plan_count),'academic/lesson-plans.html','ส่งแผน'));
+    rows.push(row('ค้าง',incomplete.length > 1 ? 'แผนการสอนยังไม่ครบ '+incomplete.length+' วิชา' : subject.plan_count == null ? 'ยังไม่มีแผนการสอน · '+subject.name : 'แผนการสอนส่งแล้ว '+subject.submitted+'/'+subject.plan_count+' · '+subject.name,'academic/lesson-plans.html','ส่งแผน'));
   }
   const passed = list('passed');
-  if (passed.length) rows.push(row(passed.length > 1 ? 'แผนผ่านการตรวจแล้ว '+passed.length+' แผน' : 'แผนผ่านการตรวจแล้ว · '+passed[0].name+' แผนที่ '+passed[0].seq,'academic/lesson-plans.html?ack=1','ดูผล'));
-  if (data.review?.waiting > 0) rows.push(row('แผนการสอนรอตรวจ '+data.review.waiting+' แผน · จากครู '+data.review.teachers+' คน','academic/lesson-plan-review.html?tab=queue','ไปตรวจ'));
+  if (passed.length) rows.push(row('รอคุณ',passed.length > 1 ? 'แผนการสอนผ่านการตรวจแล้ว '+passed.length+' แผน' : 'แผนการสอนผ่านการตรวจแล้ว · '+passed[0].name+' แผนที่ '+passed[0].seq,'academic/lesson-plans.html?ack=1'+(passed.length === 1 ? '&'+planQuery(passed[0]) : ''),'ดูผล'));
+  if (data.review?.waiting > 0) rows.push(row('รอคุณ','แผนการสอนรอตรวจ '+data.review.waiting+' แผน · จากครู '+data.review.teachers+' คน','academic/lesson-plan-review.html?tab=queue','ไปตรวจ'));
   return rows;
 }
