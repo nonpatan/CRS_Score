@@ -43,5 +43,25 @@ export function queueLabel(plan) {
 export function subjectsForPlanTerm(subjects, { year, term }) {
   return subjects.filter(subject => String(subject.year) === String(year) && (subject.term == null || String(subject.term) === String(term)));
 }
-export const PLAN_COLUMNS = 'id,subject_id,seq,title,planned_periods,plan_url,assessment_url,plan_status,plan_stars,plan_comment,plan_reviewed_at,assessment_status,assessment_stars,assessment_comment,assessment_reviewed_at,submitted_at,created_by,created_by_name';
+export const PLAN_COLUMNS = 'id,subject_id,seq,title,planned_periods,plan_url,assessment_url,plan_status,plan_stars,plan_comment,plan_reviewed_at,assessment_status,assessment_stars,assessment_comment,assessment_reviewed_at,teacher_seen_at,submitted_at,created_by,created_by_name';
 export const SUBJECT_COLUMNS = 'id,name,code,level,grade_level,term,year,subject_type,owner_id';
+
+// คืนข้อมูลแถวข้อความล้วนให้การ์ดงานของฉันใช้ renderer/escape เดิม
+export function lessonPlanAlertRows(data) {
+  if (!data || typeof data !== 'object') return [];
+  const rows = [], list = key => Array.isArray(data[key]) ? data[key] : [];
+  const row = (text, href, linkLabel) => ({kind:'แผนการสอน',text,href,linkLabel});
+  for (const plan of list('fix')) {
+    const query = 'year='+encodeURIComponent(data.year ?? '')+'&term='+encodeURIComponent(plan.term ?? '')+'&plan='+encodeURIComponent(plan.plan_id ?? '');
+    rows.push(row('แผนถูกขอให้แก้ · '+plan.name+' แผนที่ '+plan.seq+' · '+(plan.docs || []).join(' + '),'academic/lesson-plans.html?'+query,'ไปแก้'));
+  }
+  const incomplete = list('incomplete');
+  if (incomplete.length) {
+    const subject = incomplete[0];
+    rows.push(row(incomplete.length > 1 ? 'แผนการสอนยังไม่ครบ '+incomplete.length+' วิชา' : subject.name+' · '+(subject.plan_count == null ? 'ยังไม่มีแผน' : 'ส่งแผนแล้ว '+subject.submitted+'/'+subject.plan_count),'academic/lesson-plans.html','ส่งแผน'));
+  }
+  const passed = list('passed');
+  if (passed.length) rows.push(row(passed.length > 1 ? 'แผนผ่านการตรวจแล้ว '+passed.length+' แผน' : 'แผนผ่านการตรวจแล้ว · '+passed[0].name+' แผนที่ '+passed[0].seq,'academic/lesson-plans.html?ack=1','ดูผล'));
+  if (data.review?.waiting > 0) rows.push(row('แผนการสอนรอตรวจ '+data.review.waiting+' แผน · จากครู '+data.review.teachers+' คน','academic/lesson-plan-review.html?tab=queue','ไปตรวจ'));
+  return rows;
+}

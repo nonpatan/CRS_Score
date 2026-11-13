@@ -43,6 +43,7 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 <h1>แผนการสอนของฉัน</h1><p class="hint">กำหนดจำนวนแผนของแต่ละวิชา แล้วส่งลิงก์ PDF แผนการสอนและเอกสารวัดผล</p>
 <div class="nav"><a href="index.html">ภาพรวมวิชาการ</a> · <a href="lesson-plans.html">แผนการสอนของฉัน</a> · <a href="lesson-plan-review.html">ตรวจแผนการสอน</a> · <a href="#" id="btn-signout">ออกจากระบบ</a></div>
 <script src="../app-shell.js?v=20261113-1"></script></header><main class="academic-content">
+<section id="ack-banner" class="card" hidden><div class="head"><p id="ack-count" role="status" aria-atomic="true"></p><button id="ack-all" class="ghost" type="button">รับทราบทั้งหมด</button></div></section>
 <section id="filters" class="card"><div class="filters"><div class="field"><label for="year">ปีการศึกษา</label><select id="year" aria-label="ปีการศึกษา"></select></div><div id="term-field" class="field"><label for="term">ภาคเรียน (มัธยม)</label><select id="term"><option value="1">ภาค 1</option><option value="2">ภาค 2</option></select></div></div><p class="hint">วิชาประถมไม่มีภาคเรียน — แสดงทั้งปีเสมอ</p></section>
 <div id="subjects"><div class="card" role="status">กำลังโหลดวิชาและแผนการสอน…</div></div>
 <div id="editor-overlay" class="overlay" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title"><div class="head"><h2 id="editor-title">ส่งแผน</h2><button id="close-editor" type="button">ปิด</button></div>
@@ -55,7 +56,7 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { sb, requireAuth, signOut, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, GRADE_ORDER } from '../supabase-client.js?v=20261113-1';
-import { pdfUrlError, planOverallStatus, isIntegratedParent, summarizeSubjectPlans, planSlots, sortPlansForTeacher, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=1';
+import { pdfUrlError, planOverallStatus, isIntegratedParent, summarizeSubjectPlans, planSlots, sortPlansForTeacher, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=2';
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
@@ -65,6 +66,8 @@ if (!session) {} else {
   const badge = status => `<span class="st ${status === 'ผ่าน' ? 'ok' : status === 'ขอให้แก้' ? 'fix' : 'wait'}">${status === 'ผ่าน' ? '✓' : status === 'ขอให้แก้' ? '⚠' : '◷'} ${status}</span>`;
   const stars = value => value ? `<span class="stars" role="img" aria-label="${Number(value)} จาก 5 ดาว">${'★'.repeat(Number(value))}${'☆'.repeat(5-Number(value))}</span>` : '';
   const check = result => { if (result.error) throw new Error(result.error.message); return result.data || []; };
+  const pageParams = new URLSearchParams(location.search);
+  let linkedPlanId = pageParams.get('plan');
   let subjects = [], targets = [], plans = [], year = '', term = '', loadToken = 0, busy = false, editing = null, opener = null, toastTimer;
   function toast(message, ok = true) { $('toast').textContent = message; $('toast').className = 'toast show ' + (ok ? 'ok' : 'err'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 5000); }
   function setBusy(value) { busy = value; document.querySelectorAll('button,input,select').forEach(node => node.disabled = value); }
@@ -79,18 +82,60 @@ if (!session) {} else {
     return `<article class="card" data-subject="${esc(subject.id)}"><div class="head"><div><h2>${esc(subject.name)} ${subject.code ? '('+esc(subject.code)+')' : ''}</h2><p class="meta">${esc(subject.grade_level)} · ${subject.term == null ? 'ทั้งปี '+esc(year) : 'ภาค '+esc(subject.term)+'/'+esc(year)}</p></div>${!summary.submitted ? '<span class="st none">✕ ยังไม่มีแผน</span>' : ''}</div>
       ${!target ? '<p class="hint">ตั้งจำนวนแผนของวิชานี้ก่อน แล้วค่อยส่งแผนทีละรายการ</p>' : ''}
       <form class="target" data-subject="${esc(subject.id)}" novalidate><label for="count-${esc(subject.id)}">จำนวนแผนทั้ง${subject.term == null ? 'ปี' : 'ภาค'}</label><input id="count-${esc(subject.id)}" name="plan_count" type="number" inputmode="numeric" min="1" max="60" step="1" required value="${target?.plan_count || ''}" aria-describedby="count-error-${esc(subject.id)}"><button class="ghost" type="submit">บันทึก</button><span id="count-error-${esc(subject.id)}" class="err" role="alert"></span></form>
-      ${target ? `<div class="prog"><div class="bar" role="img" aria-label="ส่งแล้ว ${summary.submitted} จาก ${summary.target} แผน ผ่าน ${summary.passed} รอตรวจ ${summary.waiting} ขอให้แก้ ${summary.fix}"><i class="b-ok" style="width:${summary.passed/Math.max(summary.target,summary.submitted)*100}%"></i><i class="b-wait" style="width:${summary.waiting/Math.max(summary.target,summary.submitted)*100}%"></i><i class="b-fix" style="width:${summary.fix/Math.max(summary.target,summary.submitted)*100}%"></i></div><b>ส่งแล้ว ${summary.submitted}/${summary.target}</b></div><p class="legend">✓ ผ่าน ${summary.passed} · ◷ รอตรวจ ${summary.waiting} · ⚠ ขอให้แก้ ${summary.fix} · ยังไม่ส่ง ${summary.missing}</p><ul class="plans">${slots.map(({seq,plan}) => plan ? `<li class="plan"><div class="head"><div><h3>แผนที่ ${seq} · ${esc(plan.title)}</h3><p class="meta">${esc(plan.planned_periods)} คาบ · ส่ง ${esc(date(plan.submitted_at))}</p></div>${badge(planOverallStatus(plan))}</div><div class="docs">${docBox(plan,'plan','แผนการสอน')}${docBox(plan,'assessment','การวัดและประเมินผล')}</div><div class="actions"><button class="ghost" data-action="edit" data-plan="${esc(plan.id)}">แก้ไข</button>${!plan.plan_reviewed_at && !plan.assessment_reviewed_at ? `<button class="danger" data-action="delete" data-plan="${esc(plan.id)}">ลบ</button>` : ''}</div></li>` : `<li class="plan"><div class="head"><span>แผนที่ ${seq} — ยังไม่ส่ง</span><button class="ghost" data-action="add" data-subject="${esc(subject.id)}" data-seq="${seq}">+ ส่งแผนที่ ${seq}</button></div></li>`).join('')}</ul>` : ''}</article>`;
+      ${target ? `<div class="prog"><div class="bar" role="img" aria-label="ส่งแล้ว ${summary.submitted} จาก ${summary.target} แผน ผ่าน ${summary.passed} รอตรวจ ${summary.waiting} ขอให้แก้ ${summary.fix}"><i class="b-ok" style="width:${summary.passed/Math.max(summary.target,summary.submitted)*100}%"></i><i class="b-wait" style="width:${summary.waiting/Math.max(summary.target,summary.submitted)*100}%"></i><i class="b-fix" style="width:${summary.fix/Math.max(summary.target,summary.submitted)*100}%"></i></div><b>ส่งแล้ว ${summary.submitted}/${summary.target}</b></div><p class="legend">✓ ผ่าน ${summary.passed} · ◷ รอตรวจ ${summary.waiting} · ⚠ ขอให้แก้ ${summary.fix} · ยังไม่ส่ง ${summary.missing}</p><ul class="plans">${slots.map(({seq,plan}) => plan ? `<li class="plan" data-plan-row="${esc(plan.id)}"><div class="head"><div><h3>แผนที่ ${seq} · ${esc(plan.title)}</h3><p class="meta">${esc(plan.planned_periods)} คาบ · ส่ง ${esc(date(plan.submitted_at))}</p></div><div>${badge(planOverallStatus(plan))}${planOverallStatus(plan) === 'ผ่าน' && !plan.teacher_seen_at ? ' <span class="st ok">ใหม่</span>' : ''}</div></div><div class="docs">${docBox(plan,'plan','แผนการสอน')}${docBox(plan,'assessment','การวัดและประเมินผล')}</div><div class="actions">${planOverallStatus(plan) === 'ผ่าน' && !plan.teacher_seen_at ? `<button class="ghost" data-action="ack" data-plan="${esc(plan.id)}">รับทราบผล</button>` : ''}<button class="ghost" data-action="edit" data-plan="${esc(plan.id)}">แก้ไข</button>${!plan.plan_reviewed_at && !plan.assessment_reviewed_at ? `<button class="danger" data-action="delete" data-plan="${esc(plan.id)}">ลบ</button>` : ''}</div></li>` : `<li class="plan"><div class="head"><span>แผนที่ ${seq} — ยังไม่ส่ง</span><button class="ghost" data-action="add" data-subject="${esc(subject.id)}" data-seq="${seq}">+ ส่งแผนที่ ${seq}</button></div></li>`).join('')}</ul>` : ''}</article>`;
   }
   function render() {
     const visible = subjectsForPlanTerm(subjects, {year, term}).sort((a,b) => GRADE_ORDER.indexOf(a.grade_level) - GRADE_ORDER.indexOf(b.grade_level) || a.name.localeCompare(b.name,'th'));
     $('subjects').innerHTML = visible.length ? visible.map(subjectCard).join('') : `<div class="card empty">${subjects.length ? 'ภาคเรียนนี้ไม่มีวิชาที่เป็นเจ้าของ' : 'ปีการศึกษานี้คุณยังไม่มีวิชาที่เป็นเจ้าของ'}</div>`;
     $('term-field').hidden = !subjects.some(subject => subject.term != null);
+    renderAckBanner();
   }
   function renderSubject(id) {
     const card = [...$('subjects').children].find(node => node.dataset.subject === id);
     const subject = subjects.find(row => row.id === id);
     if (card && subject) card.outerHTML = subjectCard(subject);
+    renderAckBanner();
   }
+  function unseenPassedPlans() {
+    return plans.filter(plan => planOverallStatus(plan) === 'ผ่าน' && !plan.teacher_seen_at && subjects.some(subject => subject.id === plan.subject_id));
+  }
+  function renderAckBanner() {
+    const count = unseenPassedPlans().length;
+    $('ack-banner').hidden = pageParams.get('ack') !== '1' || count === 0;
+    $('ack-count').textContent = count ? 'มีแผนผ่านการตรวจแล้ว '+count+' แผน' : '';
+  }
+  function focusLinkedPlan() {
+    const id = linkedPlanId; linkedPlanId = null;
+    if (!id) return;
+    const row = [...$('subjects').querySelectorAll('[data-plan-row]')].find(node => node.dataset.planRow === id);
+    if (!row) return;
+    requestAnimationFrame(() => {
+      row.scrollIntoView({block:'center'});
+      row.querySelector('[data-action="edit"]')?.focus({preventScroll:true});
+    });
+  }
+  async function acknowledgePlans(plan = null) {
+    if (busy) return;
+    const pending = plan ? unseenPassedPlans().filter(row => row.id === plan.id) : unseenPassedPlans();
+    if (!pending.length) return;
+    const button = plan ? [...$('subjects').querySelectorAll('[data-action="ack"]')].find(node => node.dataset.plan === plan.id) : $('ack-all');
+    setBusy(true); if (button) button.textContent = 'กำลังรับทราบ…';
+    try {
+      const timestamp = new Date().toISOString();
+      const query = sb.from('lesson_plans').update({teacher_seen_at:timestamp});
+      const result = plan ? await query.eq('id',plan.id).select(PLAN_COLUMNS).single() : await query.in('id',pending.map(row => row.id)).select(PLAN_COLUMNS);
+      const data = check(result), rows = plan ? [data] : data;
+      const updated = new Map(rows.map(row => [row.id,row]));
+      plans = plans.map(row => updated.get(row.id) || row);
+      for (const id of new Set(pending.map(row => row.subject_id))) renderSubject(id);
+      setBusy(false);
+      toast(plan ? 'รับทราบผลแผนที่ '+plan.seq+' แล้ว' : 'รับทราบผลแล้ว '+rows.length+' แผน');
+      const edit = [...$('subjects').querySelectorAll('[data-action="edit"]')].find(node => node.dataset.plan === pending[0].id);
+      (edit || $('year')).focus();
+    } catch (error) { toast(error.message,false); }
+    finally { setBusy(false); if (button?.isConnected) button.textContent = plan ? 'รับทราบผล' : 'รับทราบทั้งหมด'; }
+  }
+  $('ack-all').addEventListener('click', () => acknowledgePlans());
   async function loadYear() {
     const token = ++loadToken, selectedYear = year;
     $('subjects').innerHTML = '<div class="card" role="status">กำลังโหลดวิชาและแผนการสอน…</div>';
@@ -107,8 +152,8 @@ if (!session) {} else {
         [members,targetRows,planRows] = results.map(check);
       }
       if (token !== loadToken) return;
-      subjects = rows.filter(subject => !isIntegratedParent(subject,members)); targets = targetRows; plans = planRows; render();
-    } catch (error) { if (token !== loadToken) return; subjects = []; targets = []; plans = []; $('subjects').innerHTML = '<div class="card empty">โหลดข้อมูลไม่สำเร็จ ลองเปิดหน้านี้ใหม่อีกครั้ง</div>'; toast(error.message,false); }
+      subjects = rows.filter(subject => !isIntegratedParent(subject,members)); targets = targetRows; plans = planRows; render(); focusLinkedPlan();
+    } catch (error) { if (token !== loadToken) return; subjects = []; targets = []; plans = []; renderAckBanner(); $('subjects').innerHTML = '<div class="card empty">โหลดข้อมูลไม่สำเร็จ ลองเปิดหน้านี้ใหม่อีกครั้ง</div>'; toast(error.message,false); }
   }
   async function refreshSubject(id) {
     const [targetResult,planResult] = await Promise.all([
@@ -122,7 +167,7 @@ if (!session) {} else {
     if (opener?.isConnected) opener.focus();
     else { const card = [...$('subjects').children].find(node => node.dataset.subject === editing?.subject_id); (card?.querySelector('[data-plan="'+editing?.id+'"]') || card?.querySelector('button') || $('year')).focus(); }
   }
-  function closeEditor() { if (busy) return; $('editor-overlay').hidden = true; document.querySelectorAll('.wrap > header,.wrap > .sidebar').forEach(node => node.inert = false); $('filters').inert = false; $('subjects').inert = false; restoreFocus(); editing = null; }
+  function closeEditor() { if (busy) return; $('editor-overlay').hidden = true; document.querySelectorAll('.wrap > header,.wrap > .sidebar,#ack-banner').forEach(node => node.inert = false); $('filters').inert = false; $('subjects').inert = false; restoreFocus(); editing = null; }
   function showError(id,message) { $(id+'-error').textContent = message || ''; $(id).setAttribute('aria-invalid',message ? 'true' : 'false'); }
   function linkChanges() {
     const changed = !editing?.id || ['plan','assessment'].some(key => $(key+'-url').value.trim() !== editing[key+'_url']);
@@ -137,7 +182,7 @@ if (!session) {} else {
     for (const key of ['plan','assessment']) $(key+'-url').value = plan[key+'_url'] || '';
     for (const id of ['plan-title','periods','plan-url','assessment-url','pdf-check']) showError(id,'');
     linkChanges(); $('editor-overlay').hidden = false;
-    document.querySelectorAll('.wrap > header,.wrap > .sidebar').forEach(node => node.inert = true); $('filters').inert = true; $('subjects').inert = true; $('plan-title').focus();
+    document.querySelectorAll('.wrap > header,.wrap > .sidebar,#ack-banner').forEach(node => node.inert = true); $('filters').inert = true; $('subjects').inert = true; $('plan-title').focus();
   }
   $('close-editor').onclick = closeEditor;
   $('editor-overlay').addEventListener('click',event => { if (event.target === $('editor-overlay')) closeEditor(); });
@@ -168,6 +213,7 @@ if (!session) {} else {
   $('subjects').addEventListener('click',async event => {
     const button = event.target.closest('[data-action]'); if (!button || busy) return;
     const action = button.dataset.action, plan = plans.find(row => row.id === button.dataset.plan);
+    if (action === 'ack' && plan) { await acknowledgePlans(plan); return; }
     if (action === 'add') openEditor({subject_id:button.dataset.subject,seq:Number(button.dataset.seq)},button);
     else if (action === 'edit' && plan) openEditor(plan,button);
     else if (action === 'delete' && plan) {
@@ -199,6 +245,9 @@ if (!session) {} else {
     const years = await getAcademicYears();
     const today = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'});
     year = String(getActiveYear() || academicYearOf(today,years) || years.at(-1)?.year || ''); term = String(academicTermOf(today,years) || '1');
+    const requestedYear = pageParams.get('year'), requestedTerm = pageParams.get('term');
+    if (years.some(row => String(row.year) === requestedYear)) year = requestedYear;
+    if (['1','2'].includes(requestedTerm)) term = requestedTerm;
     if (!year) throw new Error('ยังไม่พบปีการศึกษา');
     $('year').innerHTML = [...new Set([year,...years.map(row => String(row.year))])].sort().reverse().map(value => `<option value="${esc(value)}">${esc(value)}</option>`).join(''); $('year').value = year; $('term').value = term; await loadYear();
   } catch (error) { $('subjects').textContent = 'เปิดหน้านี้ไม่สำเร็จ: '+error.message; toast(error.message,false); }
