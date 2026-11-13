@@ -34,7 +34,7 @@ textarea { min-height:90px; resize:vertical; } .row2,.docs { display:grid; grid-
 .rv-parts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 @media(max-width:1199px) { .rv-parts { grid-template-columns:1fr; } }
 .rv-part { border:1px solid var(--line); border-radius:10px; padding:12px; margin:12px 0; } legend { font-weight:600; padding:0 4px; }
-.star-input { border:0; padding:0; margin:8px 0 0; } .star-options { display:flex; flex-wrap:wrap; gap:4px; } .star-option { position:relative; } .star-option input { position:absolute; width:1px; height:1px; opacity:0; } .star-option label { display:grid; place-items:center; width:44px; height:44px; font-size:28px; cursor:pointer; border:1px solid var(--line); border-radius:8px; color:var(--muted); } .star-option input:checked + label { color:var(--amber); background:var(--amber-soft); border-color:var(--amber); } .star-option input:focus-visible + label { outline:3px solid var(--teal); outline-offset:2px; }
+.star-input { border:0; padding:0; margin:8px 0 0; } .star-rating { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; } .star-options { display:flex; gap:4px; } .star-value { color:var(--muted); font-size:14px; } .star-option { position:relative; } .star-option input { position:absolute; width:1px; height:1px; opacity:0; } .star-option label { display:grid; place-items:center; width:44px; height:44px; font-size:28px; cursor:pointer; border:0; border-radius:8px; color:var(--muted); } .star-option label.on { color:var(--amber); } .star-option label:active { background:var(--amber-soft); } .star-option input:focus-visible + label { outline:3px solid var(--teal); outline-offset:2px; }
 .verdict { padding:0; margin:12px 0; border:0; } .verdict label { display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:6px 10px; margin:4px 8px 4px 0; border:1px solid var(--line); border-radius:8px; cursor:pointer; } .verdict input { width:20px; height:20px; } summary { cursor:pointer; min-height:44px; padding:8px 0; } .hist { margin:12px 0; }
 .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:16px 0; } .kpi { border:1px solid var(--line); border-radius:12px; background:var(--white); padding:12px; } .kpi b { display:block; font-size:24px; } .kpi span { font-size:13px; color:var(--muted); }
 table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:14px; } .cov th,.cov td { text-align:left; padding:10px 6px; border-bottom:1px solid var(--line); overflow-wrap:anywhere; vertical-align:top; } .cov .num { text-align:right; } .cov .grp th { background:var(--bg); } .cov th:first-child { width:25%; } .cov th:nth-child(2) { width:19%; } .cov th:nth-child(3) { width:20%; }
@@ -82,9 +82,17 @@ if (!session) {} else {
     const waiting = plan[key+'_status'] === 'รอตรวจ', editable = waiting && isReviewer && (isAdmin || plan.created_by !== session.user.id);
     return `<fieldset class="rv-part"><legend>${label}</legend>${docLink(plan[key+'_url'])}
       ${editable ? `${plan[key+'_reviewed_at'] ? `<p class="hint">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${esc(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
-      <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-options">${[1,2,3,4,5].map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"><label for="${key}-star-${n}" aria-hidden="true">★</label></span>`).join('')}</div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
+      <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-rating"><div class="star-options">${[1,2,3,4,5].map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"><label for="${key}-star-${n}" aria-hidden="true">☆</label></span>`).join('')}</div><span class="star-value" aria-hidden="true">ยังไม่ได้ให้ดาว</span></div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
       <fieldset class="verdict" aria-describedby="${key}-verdict-error"><legend>ผลตรวจ *</legend><label><input type="radio" name="${key}-verdict" value="ผ่าน" aria-describedby="${key}-verdict-error">✓ ผ่าน</label><label><input type="radio" name="${key}-verdict" value="ขอให้แก้" aria-describedby="${key}-verdict-error">⚠ ขอให้แก้</label><div class="err" id="${key}-verdict-error" role="alert"></div></fieldset>
       <div class="field"><label for="${key}-comment">ข้อเสนอแนะ (บังคับเมื่อขอให้แก้)</label><textarea id="${key}-comment" name="${key}-comment" aria-describedby="${key}-comment-error"></textarea><div class="err" id="${key}-comment-error" role="alert"></div></div>` : `<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment ${plan[key+'_status'] === 'ขอให้แก้' ? 'fix' : ''}">${esc(plan[key+'_comment'])}</p>` : ''}${!waiting ? '<p class="hint">ครูไม่ได้เปลี่ยนลิงก์นี้ — ไม่ต้องตรวจซ้ำ</p>' : ''}`}</fieldset>`;
+  }
+  function renderStarOptions(options,preview = null) {
+    const value = Number(options.querySelector('input:checked')?.value || 0), shown = preview ?? value;
+    options.querySelectorAll('.star-option').forEach(option => {
+      const on = Number(option.querySelector('input').value) <= shown, label = option.querySelector('label');
+      label.classList.toggle('on',on); label.textContent = on ? '★' : '☆';
+    });
+    options.closest('.star-rating').querySelector('.star-value').textContent = value ? value+' จาก 5 ดาว' : 'ยังไม่ได้ให้ดาว';
   }
   function renderSelected(moveFocus = false) {
     const plan = queue.find(row => row.id === selectedId);
@@ -95,6 +103,16 @@ if (!session) {} else {
       ${isReviewer && !own ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewPart(plan,'plan','แผนการสอน','แผน')}${reviewPart(plan,'assessment','การวัดและประเมินผล','วัดผล')}</div>
       ${isReviewer && !own ? '<button id="save-review" class="primary" type="submit">บันทึกผลตรวจ แล้วไปแผนถัดไป</button></form>' : '</div>'}
       <details class="hist" id="history" data-plan="${esc(plan.id)}"><summary>ประวัติการตรวจแผนนี้</summary><div id="history-content" class="hint">เปิดเพื่อดูประวัติการตรวจ</div></details>`;
+    $('review-detail').querySelectorAll('.star-options').forEach(options => {
+      renderStarOptions(options);
+      options.addEventListener('change', () => renderStarOptions(options));
+      // แสดงตัวอย่างเฉพาะอุปกรณ์ที่มี hover โดยไม่เปลี่ยนค่าของ radio
+      options.addEventListener('mouseover', event => {
+        const option = event.target.closest('.star-option'), input = option?.querySelector('input');
+        if (input && !input.disabled && matchMedia('(hover:hover)').matches) renderStarOptions(options,Number(input.value));
+      });
+      options.addEventListener('mouseleave', () => renderStarOptions(options));
+    });
     if (moveFocus) { $('review-heading').focus(); if (matchMedia('(max-width:899px)').matches) $('review-heading').scrollIntoView({block:'start'}); }
   }
   async function loadQueue(force = false) {
