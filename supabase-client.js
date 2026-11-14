@@ -3,14 +3,14 @@ import {
   MS_WARN_PERCENT_SECONDARY, MS_WARN_PERCENT_PRIMARY, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS, computePrimaryDailyAttendance,
   percentToGrade, computeMissedPeriods, computeAttendanceRisk, gradeWeightFor, PRIMARY_HALVES,
   computePrimaryHalves, computeSubjectResult, computeIntegratedResult, pickCountableSubjects, subjectCreditInfo,
-  assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
-} from "./shared/grades.js?v=20261109-2";
+  externalSubjectEntry, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
+} from "./shared/grades.js?v=20261114-2";
 export {
   MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_MAKEUP_GRADE_CAP, msMakeupCutoff, isLateMakeup,
   MS_WARN_PERCENT_SECONDARY, MS_WARN_PERCENT_PRIMARY, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS, computePrimaryDailyAttendance,
   percentToGrade, computeMissedPeriods, computeAttendanceRisk, gradeWeightFor, PRIMARY_HALVES,
   computePrimaryHalves, computeSubjectResult, computeIntegratedResult, pickCountableSubjects, subjectCreditInfo,
-  assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
+  externalSubjectEntry, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
 };
 
 // ============================================================
@@ -2232,10 +2232,20 @@ export async function computeStudentSubjectResults({ grade, year, term } = {}) {
     enrolledBySubject.get(row.subject_id).add(row.student_id);
     if (row.student) studentsMap.set(row.student_id, row.student);
   }
+  const externalBySubject = new Map();
+  const { data: externalRows, error: externalError } = await fetchAllRows(() => sb.from("external_subject_results")
+    .select("id,student_id,subject_id,part,pct,grade,source,student:student_id(*)")
+    .in("subject_id", countableSubjects.map(subject => subject.id)), "id");
+  if (externalError) throw new Error("โหลดผลการเรียนภายนอกไม่สำเร็จ: " + externalError.message);
+  for (const row of externalRows || []) {
+    if (!externalBySubject.has(row.subject_id)) externalBySubject.set(row.subject_id, []);
+    externalBySubject.get(row.subject_id).push(row);
+    if (row.student && !studentsMap.has(row.student_id)) studentsMap.set(row.student_id, row.student);
+  }
   if (studentsMap.size === 0) return out;
 
   return assembleStudentResults({ scopedSubjects:scopedSubj, memberLinks, loadedData,
-    enrolledBySubject, students:studentsMap });
+    enrolledBySubject, students:studentsMap, externalBySubject });
 }
 
 // ---------- ลงทะเบียนครบทั้งปีหรือยัง — ตัวชี้ว่าผลซ้ำชั้นเป็น "คำตัดสิน" ได้ไหม ----------

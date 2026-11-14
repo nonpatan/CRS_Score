@@ -320,6 +320,7 @@
     #competency-report .comp-room-people .student-list { grid-template-columns:1fr; }
   }
   /* ใบ ปพ.6 + ความเห็นครูประจำชั้น (แท็บผลการเรียนรายคน · มัธยม) */
+  .external-result-label { display:inline-block; font-size:13px; color:var(--teal); background:var(--teal-soft); padding:2px 6px; border-radius:6px; }
   #pp6-print-area { display:none; }
   #gpa-report .pp6-panel { border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
   #gpa-report .pp6-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
@@ -568,7 +569,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261113-1"></script>
+    <script src="../app-shell.js?v=20261114-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -731,7 +732,7 @@ import {
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
-} from "../supabase-client.js?v=20261114-1";
+} from "../supabase-client.js?v=20261114-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -2630,6 +2631,50 @@ function applyBlockedSubjects(sources, blockedSubjects, subjectStats) {
     blockedSubjects:blocked.map(([subjectId, value]) => ({ subjectId, ...value })) } };
 }
 
+// โหลดผลภายนอกทั้งชั้นครั้งเดียว ใช้ร่วมรายงานสมรรถนะและพิมพ์ ปพ.6 หลายคน
+const externalCompetencyCache = new Map();
+async function loadExternalCompetencyScope(year, grade) {
+  const key = year + "|" + grade;
+  if (!externalCompetencyCache.has(key)) {
+    const request = (async () => {
+      const placements = await getStudentPlacements(year);
+      if (placements.error) throw new Error("โหลดรายชื่อสำหรับผลสมรรถนะภายนอกไม่สำเร็จ: " + placements.error.message);
+      const ids = (placements.data || []).filter(p => p.grade_level === grade).map(p => p.student_id);
+      if (!ids.length) return [];
+      const result = await fetchAllRows(() => sb.from("external_competency_results")
+        .select("id,student_id,year,term,competency_id,pct,source").eq("year", year).in("student_id", ids), "id");
+      if (result.error) throw new Error("โหลดสมรรถนะภายนอกไม่สำเร็จ: " + result.error.message);
+      return result.data || [];
+    })().catch(error => { externalCompetencyCache.delete(key); throw error; });
+    externalCompetencyCache.set(key, request);
+  }
+  return externalCompetencyCache.get(key);
+}
+
+function externalCompetencyForStudent(studentId, rows, scope) {
+  const mine = (rows || []).filter(row => row.student_id === studentId);
+  if (!mine.length) return null;
+  const primary = scope.grade.startsWith("ป.");
+  const terms = primary && scope.half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : scope.term];
+  const makeHalf = term => ({ results:coreCompetencies.map(competency => {
+    const row = mine.find(row => row.term === term && row.competency_id === competency.id);
+    const score = row ? Number(row.pct) : null;
+    const level = (scope.levels || []).slice().sort((a,b) => Number(b.min_score)-Number(a.min_score)).find(l => score !== null && score >= Number(l.min_score));
+    return { competency, external:true, noSource:false, previousComplete:!!row, weight:null, effectiveWeight:null,
+      skippedSources:new Set(["subject","activity","routine"]),
+      sources:{ subject:computeSubjectCompetencySource(competency.id, [], []),
+        activity:computeAssessmentCompetencySource(competency.id, []), routine:computeAssessmentCompetencySource(competency.id, []) },
+      combined:row ? { complete:true, score, level:level?.label || null, reason:level ? "" : "คะแนนไม่อยู่ในช่วงเกณฑ์แปลผลที่กำหนด" }
+        : { complete:false, reason:"ยังไม่มีผลสมรรถนะภายนอกของช่วงนี้" } };
+  }), half:term === "1" ? "กลางปี" : "ปลายปี", label:term === "1" ? "ครึ่งแรก" : "ครึ่งหลัง" });
+  const halves = terms.map(makeHalf);
+  const results = halves[0].results.map((row,index) => terms.length === 1 ? row : ({ ...row,
+    previousComplete:row.previousComplete && halves[1].results[index].previousComplete,
+    combined:combinePrimaryCompetencyHalves(row, halves[1].results[index], scope.levels) }));
+  return { ok:true, results, ...(primary ? { halves } : {}), subjectNameById:new Map(), plannedByCompetency:new Map(),
+    subjectOwnerById:new Map(), assessmentOwnerByName:new Map(), missingCompetencySubjects:[], blockedSubjects:new Map() };
+}
+
 // คืนผลสูตรกลางเดิมโดยไม่เขียน DOM เพื่อใช้ร่วมรายคนและใบตามงานทั้งห้อง
 // scope: ใบ ปพ.6 ส่งปี/ชั้น/ภาค/เกณฑ์ของตัวเอง · ไม่ส่ง = ใช้ตัวกรองแท็บสมรรถนะเหมือนเดิม
 async function computeCompetencyForStudent(student, blockedResults = new Map(), scope = {}, shared = null, prefetched = null) {
@@ -2638,6 +2683,10 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
   const weights = scope.weights ?? sourceWeights, levels = scope.levels ?? interpretationLevels;
   if (!shared) shared = await loadCompetencyScopeShared(year, grade, term);
   if (!shared.ok) return shared;
+  if (shared.externalRows?.some(row => row.student_id === student.id)) {
+    return externalCompetencyForStudent(student.id, shared.externalRows,
+      { year, grade, term:shared.externalTerm || term, half:scope.half || "กลางปี", levels });
+  }
 
   // ---------- แหล่งที่ 1: คะแนนสมรรถนะจากรายวิชาที่นักเรียนลงทะเบียน ----------
   const enrollmentRows = prefetched ? { data:[...prefetched.enrolledIds].map(subject_id => ({ subject_id })), error:null }
@@ -2832,7 +2881,7 @@ function compEffectiveWeight(weight, sources, competencyId, plannedByCompetency)
 // กรองข้อมูลก่อนเข้าสูตรเดิม · ไม่แตะ shared/batch ต้นฉบับที่ใช้ร่วมสองครึ่ง
 function scopeCompetencySharedToHalf(shared, half) {
   const term = half === "กลางปี" ? "1" : "2";
-  return { ...shared,
+  return { ...shared, externalTerm:term,
     units:shared.units.map(unit => ({ ...unit, indicators:(unit.indicators || []).map(indicator => ({
       ...indicator, collections:(indicator.collections || [])
         // ค่าเผื่อข้อมูลเก่า: collection ที่ยังไม่ระบุ half นับเป็นกลางปี
@@ -2860,6 +2909,10 @@ function combinePrimaryCompetencyHalves(h1Row, h2Row, levels) {
 async function computePrimaryCompetencyForStudent(student, blockedResults, scope, shared = null, prefetched = null) {
   if (!shared) shared = await loadCompetencyScopeShared(scope.year, scope.grade, "");
   if (!shared.ok) return shared;
+  if (shared.externalRows?.some(row => row.student_id === student.id)) {
+    return externalCompetencyForStudent(student.id, shared.externalRows,
+      { ...scope, levels:scope.levels ?? interpretationLevels });
+  }
   if (!prefetched) {
     const batch = await loadCompetencyRoomBatch([student], shared);
     if (!batch.ok) return batch;
@@ -2900,8 +2953,8 @@ async function loadCompetencyScopeShared(year, grade, term) {
     if (term) query = query.eq("term", term);
     return query;
   };
-  const [subjectResult, assessmentResult] = await Promise.all([
-    subjectQuery, fetchAllRows(assessmentQuery, "id")
+  const [subjectResult, assessmentResult, externalRows] = await Promise.all([
+    subjectQuery, fetchAllRows(assessmentQuery, "id"), loadExternalCompetencyScope(year, grade)
   ]);
   if (subjectResult.error) return { ok:false, message:"โหลดข้อมูลรายวิชาไม่สำเร็จ: " + subjectResult.error.message };
   if (assessmentResult.error) return { ok:false, message:"โหลดกิจกรรม/กิจวัตรไม่สำเร็จ: " + assessmentResult.error.message };
@@ -2943,7 +2996,7 @@ async function loadCompetencyScopeShared(year, grade, term) {
   const stage = competencyStageForGrade(grade);
   const stageTargetIds = new Set(plannedRows.filter(row => !stage || !row.element?.stage || row.element.stage === stage).map(row => row.id));
   const sessionTargetIds = new Set((sessionResult.data || []).map(row => row.target_id).filter(id => stageTargetIds.has(id)));
-  return { ok:true, subjectRows, units:unitResult.data || [], assessments, plannedRows, sessionTargetIds,
+  return { ok:true, externalRows, subjectRows, units:unitResult.data || [], assessments, plannedRows, sessionTargetIds,
     targetById:new Map(plannedRows.map(row => [row.id, row])) };
 }
 
@@ -3259,6 +3312,7 @@ async function startCompRoomRun() {
   const issue = competencySettingsIssue();
   if (issue) { writeCompResult(++compRequestSeq, issue); return; }
   compRoomState = null;
+  externalCompetencyCache.delete(elCompYear.value + "|" + elCompGrade.value);
   const token = ++compRoomRunSeq;
   const roster = compVisibleStudents.slice();
   let next = 0, done = 0;
@@ -3602,6 +3656,8 @@ function compDetailHtml(row, plannedByCompetency, subjectNameById) {
   const result = row.combined;
   const resultText = result.complete ? result.score.toFixed(1) + " / 100" + (result.level ? " · " + result.level : "") : "ยังสรุปไม่ได้";
   let html = "<h3>" + escapeHtml(row.competency.name) + "</h3><div class='comp-detail-head'>" + escapeHtml(resultText) + "</div>";
+  if (row.external) return html + "<p class='hint'>ใช้ผลสมรรถนะจากภายนอก</p>" +
+    (!result.complete || !result.level ? "<p class='comp-reason'>" + escapeHtml(result.reason) + "</p>" : "");
   for (const definition of compSources) {
     const source = row.sources[definition.key];
     const weight = (row.weight || {})[definition.weight];
@@ -3668,7 +3724,7 @@ function compResultSectionsHtml(rows, subjectNameById, plannedByCompetency, todo
       "<span class='comp-tile-name'>" + escapeHtml(row.competency.name) + "</span>" +
       (result.complete ? "<span class='comp-tile-score'>" + result.score.toFixed(1) + "</span>" + (result.level ? compChip({ kind:"ok", label:result.level }) : "<span class='hint'>" + escapeHtml(result.reason) + "</span>")
         : "<span class='comp-tile-pending'>ยังสรุปไม่ได้</span>") +
-      "<span class='comp-bars' role='img' aria-label='แหล่งที่ครบ " + completedSources + " จาก " + weighted.length + "'>" + bars + "</span></button>";
+      (row.external ? "<span class='hint'>ผลจากภายนอก</span>" : "<span class='comp-bars' role='img' aria-label='แหล่งที่ครบ " + completedSources + " จาก " + weighted.length + "'>" + bars + "</span>") + "</button>";
   });
   html += "</div><div class='comp-detail' data-comp-detail>" + (rows[selected] ? compDetailHtml(rows[selected], plannedByCompetency, subjectNameById) : "") +
     "</div></section><section class='card'><h2 class='comp-title'>ต้องตามต่อ</h2><p class='hint'>รวมตามรายการ — ตามครูคนเดียวปลดได้หลายด้าน</p>" + compTodoHtml(todo) + "</section>";
@@ -3923,6 +3979,8 @@ function gpaSubjectDisplay(item) {
   const result = item.result, scoring = item.scoring;
   const teacher = gpaOwnerNameById.get(item.subject?.owner_id);
   const follow = teacher ? " · ตาม " + teacher : "";
+  if (item.external && scoring && !scoring.complete) return { group:"incomplete", chip:"รอผล", tone:"wait",
+    reason:"ยังไม่มีผลกลางปีและปลายปีครบทั้งสองช่วง" };
   if (result.type === "มส.") {
     const periods = result.missedPeriods != null && result.maxMissed != null &&
       Number.isFinite(Number(result.missedPeriods)) && Number.isFinite(Number(result.maxMissed))
@@ -3990,6 +4048,7 @@ function renderGpaStudentDetail() {
     if (!members.length) return "";
     return "<div class='kind-group'><div class='section-title'>" + group.title + " (" + members.length + ")</div>" +
       members.map(({ item, display }) => "<div class='gpa-subject-row'><span class='gpa-subject-name'>" + escapeHtml(item.subject.name) +
+        (item.external ? " <small class='external-result-label'>ผลจากระบบ (" + escapeHtml(item.external.source) + ")</small>" : "") +
         "</span><span class='gpa-chip " + display.tone + "'>" + escapeHtml(display.chip) + "</span>" +
         (display.reason ? "<div class='gpa-subject-reason'>" + escapeHtml(display.reason) + "</div>" : "") + "</div>").join("") + "</div>";
   }).join("");
@@ -4083,7 +4142,8 @@ function pp6SubjectCells(item) {
   if (result.type === "มส.") return { score:"—", level:"มส.", pending:true };
   if (result.type === "ร.") return { score:"—", level:"ร.", pending:true };
   if (scoring && !scoring.complete) return { score:"—", level:"รอผล", pending:true };
-  return { score:subjectTotalScore(item).toFixed(2), level:String(result.grade), pending:false };
+  const score = subjectTotalScore(item);
+  return { score:score === null ? "—" : score.toFixed(2), level:String(result.grade), pending:false };
 }
 
 function pp6ZeroNotes(subjects) {
@@ -4188,7 +4248,7 @@ function buildPp6PrimaryHtml(d) {
     const midScore = mid ? Number(mid.score) : null, midOk = Boolean(mid && mid.complete);
     const endScore = end ? Number(end.score) : null, endOk = Boolean(end && end.complete);
     const integrated = item.subject.subject_type === "บูรณาการ";
-    const yearScore = item.halves ? Number(item.result?.percentScore) : null, yearOk = Boolean(item.halves && item.scoring?.complete);
+    const yearScore = item.halves && item.result?.percentScore != null ? Number(item.result.percentScore) : null, yearOk = Boolean(item.halves && item.scoring?.complete);
     const missingMemberPeriods = integrated && Boolean(item.creditInfo?.missing?.length);
     const shown = missingMemberPeriods ? null : isEnd ? yearScore : midScore;
     const shownOk = isEnd ? yearOk : midOk;
@@ -4214,7 +4274,7 @@ function buildPp6PrimaryHtml(d) {
     }).join("") : "";
     return main + members;
   }).join("");
-  const avg = missingPeriods.length || !totalWeight ? null : weightedTotal / totalWeight;
+  const avg = missingPeriods.length || !totalWeight || (isEnd && subjects.some(item => item.external && !item.scoring?.complete)) ? null : weightedTotal / totalWeight;
   const now = side => side === isEnd ? " class='now'" : "";
   return "<article class='pp6-paper'>" +
     pp6HeadHtml(d, "รายงาน" + (isEnd ? "ปลายปี" : "กลางปี") + " ปีการศึกษา " + escapeHtml(d.year)) +
@@ -4340,6 +4400,7 @@ function pp6ActivityRows(categories, assessments, memberIds, resultById, require
 }
 
 async function pp6LoadActivities(studentId, year, terms) {
+  const automatic = gpaResultsMap?.randomizedByYear?.get(year)?.has(studentId) || gpaResultsMap?.get(studentId)?.subjects.some(item => item.subject.year === year && (item.external?.source === "สุ่ม" || item.external?.randomized));
   let query = sb.from("competency_assessments").select("id,term,activity_category")
     .eq("year", year).eq("source_type", "กิจกรรม").not("activity_category", "is", null);
   query = query.or("term.in.(" + terms.join(",") + "),term.is.null");
@@ -4348,6 +4409,8 @@ async function pp6LoadActivities(studentId, year, terms) {
     sb.from("activity_categories").select("code,sort_order,active").order("sort_order")
   ]);
   if (list.error || categories.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (list.error || categories.error).message);
+  if (automatic) return (categories.data || []).filter(c => c.active).sort((a,b) => Number(a.sort_order)-Number(b.sort_order))
+    .map(category => ({ name:category.code, result:"ผ่าน" }));
   const ids = (list.data || []).map(row => row.id);
   if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map(), terms);
   const [members, results] = await Promise.all([
@@ -4372,9 +4435,11 @@ async function pp6LoadCompetencies(student, year, grade, term, half = "กลา
     coreCompetencies = competencies;
   }
   const scope = { year, grade, term, half, weights:settings.weights, levels:settings.levels };
-  const computed = grade.startsWith("ป.")
+  const externalRows = await loadExternalCompetencyScope(year, grade);
+  const external = externalCompetencyForStudent(student.id, externalRows, scope);
+  const computed = external || (grade.startsWith("ป.")
     ? await computePrimaryCompetencyForStudent(student, gpaResultsMap || new Map(), scope)
-    : await computeCompetencyForStudent(student, gpaResultsMap || new Map(), scope);
+    : await computeCompetencyForStudent(student, gpaResultsMap || new Map(), scope));
   if (!computed.ok) throw new Error(computed.message);
   const byId = new Map(computed.results.map(row => [row.competency.id, row.combined]));
   return { levels:settings.levels, rows:competencies.map(c => {

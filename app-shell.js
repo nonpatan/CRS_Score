@@ -244,7 +244,8 @@ function syncFinanceKpiTones() {
             ["competency-manage.html", "กำหนดกิจกรรม/กิจวัตร"],
             ["competency-core.html", "กำหนดสมรรถนะหลัก"],
             ["academic-settings.html", "ตั้งค่างานวิชาการ"],
-            ["timetable-import.html", "นำเข้าตารางสอน"]
+            ["timetable-import.html", "นำเข้าตารางสอน"],
+            ["special-results.html", "ผลการเรียนนักเรียนพิเศษ"]
           ]
         },
         {
@@ -400,6 +401,11 @@ function syncFinanceKpiTones() {
           title: "แผนการสอนของฉัน",
           description: "กำหนดจำนวนแผนของแต่ละวิชา แล้วส่งลิงก์ PDF แผนการสอนและเอกสารวัดผล",
           steps: ["เลือกวิชา", "ตั้งจำนวนแผน", "ส่งแผน"]
+        },
+        "special-results.html": {
+          title: "ผลการเรียนนักเรียนพิเศษ",
+          description: "ตั้งช่วงคะแนน สุ่มและตรวจผลของนักเรียนฝากเรียนและโปรแกรมพิเศษ",
+          steps: ["ตั้งช่วงคะแนน", "เลือกชั้นและภาค", "กดสุ่มและตรวจผล"]
         },
         "lesson-plan-review.html": {
           title: "ตรวจแผนการสอน",
