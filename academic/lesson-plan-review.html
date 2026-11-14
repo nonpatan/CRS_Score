@@ -62,7 +62,7 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { sb, requireAuth, signOut, getProfile, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, GRADE_ORDER, fetchAllRows } from '../supabase-client.js?v=20261113-1';
-import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, samplingSummary, queueLabel, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=4';
+import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, samplingSummary, queueLabel, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=5';
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
@@ -109,7 +109,7 @@ if (!session) {} else {
     const plans = [...subjectPlans(subject.id)].sort((a,b) => a.seq-b.seq), sample = sampleFor(subject.id), count = coverage.sampling.get(subject.id) ?? coverage.defaultCount;
     $('review-detail').innerHTML = `<h2 id="subject-heading" tabindex="-1">${esc(subject.name)}</h2><p class="meta">${subjectMeta(subject)} · ${esc(coverage.profiles.get(subject.owner_id) || 'ไม่ระบุชื่อครู')}</p><p>สุ่มแล้ว ${sample.sampled}/${sample.target} · ส่งแล้ว ${plans.length} แผน</p>
       ${canSetSampling ? samplingForm('subject',count) : `<p class="hint">วิชานี้สุ่ม ${count} แผน${coverage.sampling.has(subject.id) ? ' (กำหนดเฉพาะวิชานี้)' : ' (ใช้ค่ากลาง)'}</p>`}
-      <ul class="sample-plans">${plans.map(plan => `<li><h3>แผนที่ ${plan.seq} · ${esc(plan.title)}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} คาบ</p><div class="docs">${[['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']].map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${esc(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}</div>
+      <ul class="sample-plans">${plans.map(plan => `<li><h3>แผนที่ ${plan.seq} · ${esc(plan.title)}${plan.teacher_note ? ' <span class="st">มีหมายเหตุ</span>' : ''}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} คาบ</p><div class="docs">${[['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']].map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${esc(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}</div>
       ${!canReview(plan) && isReviewer && plan.created_by === session.user.id && !isAdmin ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : !hasReviewed(plan) && canReview(plan) ? `<button type="button" class="ghost" data-review="${esc(plan.id)}">เลือกตรวจแผนนี้</button>` : ''}</li>`).join('')}</ul>`;
     if (moveFocus) { $('subject-heading').focus(); if (matchMedia('(max-width:899px)').matches) $('subject-heading').scrollIntoView({block:'start'}); }
   }
@@ -134,6 +134,7 @@ if (!session) {} else {
     if (!plan) { renderSubject(moveFocus); return; }
     const subject = coverage.subjects.find(row => row.id === plan.subject_id), own = plan.created_by === session.user.id && !isAdmin;
     $('review-detail').innerHTML = `<button id="back-subject" type="button">ดูแผนของวิชานี้</button><h2 id="review-heading" tabindex="-1">${esc(subject?.name || 'ไม่พบวิชา')} · แผนที่ ${plan.seq} · ${esc(plan.title)}</h2><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${subjectMeta(subject)} · ${esc(plan.planned_periods)} คาบ</p>
+      ${plan.teacher_note ? `<p class="comment">หมายเหตุจากครู: ${esc(plan.teacher_note)}</p>` : ''}
       ${own ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : ''}
       ${isReviewer && !own ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewPart(plan,'plan','แผนการสอน','แผน')}${reviewPart(plan,'assessment','การวัดและประเมินผล','วัดผล')}</div>
       ${isReviewer && !own ? '<button id="save-review" class="primary" type="submit">บันทึกผลตรวจ</button></form>' : '</div>'}

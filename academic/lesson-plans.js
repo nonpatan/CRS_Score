@@ -51,7 +51,7 @@ export function queueLabel(plan) {
 export function subjectsForPlanTerm(subjects, { year, term }) {
   return subjects.filter(subject => String(subject.year) === String(year) && (subject.term == null || String(subject.term) === String(term)));
 }
-export const PLAN_COLUMNS = 'id,subject_id,seq,title,planned_periods,plan_url,assessment_url,plan_status,plan_stars,plan_comment,plan_reviewed_at,assessment_status,assessment_stars,assessment_comment,assessment_reviewed_at,teacher_seen_at,submitted_at,created_by,created_by_name';
+export const PLAN_COLUMNS = 'id,subject_id,seq,title,planned_periods,plan_url,assessment_url,plan_status,plan_stars,plan_comment,plan_reviewed_at,assessment_status,assessment_stars,assessment_comment,assessment_reviewed_at,teacher_seen_at,submitted_at,created_by,created_by_name,teacher_note';
 export const SUBJECT_COLUMNS = 'id,name,code,level,grade_level,term,year,subject_type,owner_id';
 
 // คืนข้อมูลแถวข้อความล้วนให้การ์ดงานของฉันใช้ renderer/escape เดิม
