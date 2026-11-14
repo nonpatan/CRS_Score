@@ -1256,7 +1256,7 @@ export async function getStudentPlacements(year, studentIds = null) {
   if (!year) return { data: [], error: null };
 
   let query = sb.from("student_year_placements")
-    .select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school)")
+    .select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)")
     .eq("year", year)
     .order("grade_level")
     .order("classroom");
@@ -2743,20 +2743,35 @@ export function activePlacements(placements) {
   return (placements || []).filter(placement => !isPlacementInactive(placement));
 }
 
-export function roomsFromPlacements(placements, year) {
+export const STUDENT_TYPES = ["ปกติ", "ฝากเรียน", "โปรแกรมพิเศษ", "ไม่มีตัวตน"];
+
+export function isRegularStudent(student) {
+  return (student?.student_type || "ปกติ") === "ปกติ";
+}
+
+export function isAutoPresentStudent(student) {
+  return student?.student_type === "ฝากเรียน" || student?.student_type === "โปรแกรมพิเศษ";
+}
+
+// ค่าเริ่มต้นคงยอดทะเบียนทุกประเภท (การเงิน/สถิติใช้ร่วมกัน)
+// เปิด attendance เฉพาะยอดเช็คชื่อ ตามมติผู้ใช้ 14 พ.ย. 2569
+export function roomsFromPlacements(placements, year, { attendance = false } = {}) {
   const roomMap = new Map();
   for (const p of (placements || [])) {
     if (!p.grade_level || !p.classroom) continue;
+    if (attendance && !isRegularStudent(p.student) && !isAutoPresentStudent(p.student)) continue;
     const key = p.grade_level + "\u0000" + p.classroom;
     if (!roomMap.has(key)) {
       roomMap.set(key, {
         year,
         grade_level: p.grade_level,
         classroom: p.classroom,
-        studentCount: 0
+        studentCount: 0,
+        ...(attendance ? { autoPresentCount: 0 } : {})
       });
     }
     roomMap.get(key).studentCount += 1;
+    if (attendance && isAutoPresentStudent(p.student)) roomMap.get(key).autoPresentCount += 1;
   }
 
   return [...roomMap.values()].sort((a, b) => {
@@ -2802,7 +2817,10 @@ export async function loadDailyAttendanceToday(year, dateStr, academicYears = nu
   const roomPlacements = year === currentAcademicYear
     ? activePlacements(placementsRes.data)
     : placementsRes.data;
-  const rooms = roomsFromPlacements(roomPlacements, year);
+  const rooms = roomsFromPlacements(roomPlacements, year, { attendance:true });
+  // แถวเก่ายังเก็บไว้ แต่ประเภทปัจจุบันที่ไม่ใช่ปกติต้องไม่ถูกนับซ้ำ/นับขาด
+  const excludedIds = new Set((placementsRes.data || [])
+    .filter(p => !isRegularStudent(p.student)).map(p => p.student_id));
   const hasSchedule = !!scheduleRes.data;
   const isBreak = isSchoolBreak(dateStr, yearsRes.data || []);
   const isHoliday = isBreak || !!holidayRes.data || (hasSchedule && scheduleRes.data.is_working_day !== true);
@@ -2810,7 +2828,7 @@ export async function loadDailyAttendanceToday(year, dateStr, academicYears = nu
   return {
     year,
     dateStr,
-    rows: rowsRes.data || [],
+    rows: (rowsRes.data || []).filter(row => !excludedIds.has(row.student_id)),
     rooms,
     isHoliday,
     isBreak
@@ -2882,6 +2900,9 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
   const attendanceRows = Array.isArray(rows) ? rows : [];
   const roomRows = Array.isArray(rooms) ? rooms : [];
   const counts = countAttendanceStatuses(attendanceRows);
+  if (options.isHoliday !== true) {
+    counts.present += roomRows.reduce((sum, room) => sum + (Number(room.autoPresentCount) || 0), 0);
+  }
   const checkedRooms = new Set();
 
   for (const row of attendanceRows) {
@@ -2890,6 +2911,12 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
     }
   }
 
+  // ห้องที่มีแต่เด็กมาอัตโนมัติไม่มีรายชื่อให้ครูบันทึก จึงไม่สร้างงานค้าง
+  if (options.isHoliday !== true) for (const room of roomRows) {
+    if (room.autoPresentCount > 0 && room.studentCount === room.autoPresentCount) {
+      checkedRooms.add(room.grade_level + "\u0000" + room.classroom);
+    }
+  }
   const roomsTotal = roomRows.length;
   const validRoomKeys = new Set(
     roomRows.map(r => r.grade_level + "\u0000" + r.classroom)
@@ -2956,11 +2983,12 @@ export function pickAttendanceRoomIssues({ rooms = [], rows = [], cutoff, dateSt
   rooms.forEach((room, order) => {
     const key = homeroomAuditRoomKey(room);
     const entries = roomRows.get(key) || [];
-    const checked = entries.length > 0;
+    const checked = entries.length > 0 || (room.autoPresentCount > 0 && room.studentCount === room.autoPresentCount);
     const firstAt = firstByRoom.get(key) || null;
     const roomCutoff = cutoffForGrade(cutoff, room.grade_level);
     const timing = classifyCheckTiming(checked ? firstAt : nowIso, dateStr, roomCutoff);
     const counts = countAttendanceStatuses(entries);
+    counts.present += Number(room.autoPresentCount) || 0;
     const issues = [];
     if (!checked && timing === "late") issues.push("unchecked-late");
     if (checked && timing === "late") issues.push("checked-late");
@@ -3063,7 +3091,7 @@ export async function loadNextSchoolDay(today) {
   } catch { return null; }
 }
 
-export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 5 }) {
+export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 5, autoPresentCount = 0 }) {
   const dates = pickSchoolDays({ holidays, workdays, endDate, days });
   const rowsByDate = new Map(dates.map(date => [date, []]));
   for (const row of rows || []) {
@@ -3071,6 +3099,7 @@ export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 
   }
   return dates.map(date => {
     const counts = countAttendanceStatuses(rowsByDate.get(date));
+    counts.present += Number(autoPresentCount) || 0;
     const counted = counts.present + counts.late + counts.leave + counts.absent;
     return {
       date,
@@ -3083,13 +3112,14 @@ export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 
 export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
   if (!year || !endDate) return [];
   const from = addDaysStr(endDate, -120);
-  const [scheduleRes, holidayRes, yearsRes] = await Promise.all([
+  const [scheduleRes, holidayRes, yearsRes, placementsRes] = await Promise.all([
     sb.from("work_schedule").select("weekday,is_working_day"),
     sb.from("work_holidays").select("holiday_date")
       .gte("holiday_date", from).lte("holiday_date", endDate),
-    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year")
+    sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year"),
+    getStudentPlacements(year)
   ]);
-  if (scheduleRes.error || holidayRes.error || yearsRes.error) return [];
+  if (scheduleRes.error || holidayRes.error || yearsRes.error || placementsRes.error) return [];
 
   const workdays = new Map((scheduleRes.data || []).map(row => [row.weekday, row.is_working_day]));
   const holidays = new Set((holidayRes.data || []).map(row => row.holiday_date));
@@ -3098,13 +3128,19 @@ export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
   if (!dates.length) return [];
 
   const rowsRes = await fetchAllRows(() => sb.from("daily_attendance")
-    .select("attend_date,status")
+    .select("attend_date,status,student_id")
     .eq("year", year)
     .in("attend_date", dates), "id");
   if (rowsRes.error) {
     throw new Error("โหลดกราฟการมาเรียนไม่สำเร็จ: " + rowsRes.error.message);
   }
-  return pickAttendanceTrend({ rows:rowsRes.data || [], holidays, workdays, endDate, days });
+  const currentAcademicYear = academicYearOf(toDateStr(bangkokNow()), yearsRes.data || []);
+  const placements = year === currentAcademicYear ? activePlacements(placementsRes.data) : placementsRes.data || [];
+  const autoPresentCount = roomsFromPlacements(placements, year, { attendance:true })
+    .reduce((sum, room) => sum + room.autoPresentCount, 0);
+  const excludedIds = new Set((placementsRes.data || []).filter(p => !isRegularStudent(p.student)).map(p => p.student_id));
+  return pickAttendanceTrend({ rows:(rowsRes.data || []).filter(row => !excludedIds.has(row.student_id)),
+    holidays, workdays, endDate, days, autoPresentCount });
 }
 
 // ============================================================

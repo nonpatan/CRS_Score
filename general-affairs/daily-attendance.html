@@ -193,6 +193,7 @@
           <h2 id="room-title" tabindex="-1">รายชื่อนักเรียน</h2>
         </div>
       </div>
+      <p id="auto-present-note" class="room-note" hidden></p>
       <div class="student-list" id="student-list"></div>
       <div class="save-bar">
       <div class="summary" aria-label="สรุปสถานะปัจจุบัน">
@@ -240,11 +241,11 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
-  getStudentPlacements, getActiveStudents, loadDailyAttendanceToday, roomsFromPlacements,
+  getStudentPlacements, getActiveStudents, isRegularStudent, loadDailyAttendanceToday, roomsFromPlacements,
   summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
   getMyCoverageFor, getSetting, getDailyAttendanceCutoff, firstCheckTimeByRoom,
   classifyCheckTiming, needsLateReason, cutoffForGrade, CHECK_TIMING_LABEL
-} from "../supabase-client.js?v=20261113-1";
+} from "../supabase-client.js?v=20261114-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -308,9 +309,13 @@ let selectedReason = "";
 let autoLateResolver = null;
 let autoLateReturnFocus = null;
 
-function checkablePlacements(list) {
+function placementsForSelectedYear(list) {
   const todayAcademicYear = academicYearOf(today, years);
   return currentYear === todayAcademicYear ? activePlacements(list) : (list || []);
+}
+
+function checkablePlacements(list) {
+  return placementsForSelectedYear(list).filter(p => isRegularStudent(p.student));
 }
 
 function isInactiveForSelectedYear(placement) {
@@ -515,7 +520,7 @@ async function loadYearContext(dateStr) {
       `<a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a></div>`
     : "";
 
-  const allRooms = roomsFromPlacements(checkablePlacements(placements), currentYear);
+  const allRooms = roomsFromPlacements(placementsForSelectedYear(placements), currentYear, { attendance:true });
   const ownStaffId = ownStaffRes.data?.id || null;
   const assignedKeys = new Set(
     (homeroomRes.data || [])
@@ -813,13 +818,15 @@ function renderSummary() {
     year:currentYear,
     grade_level:selectedRoom.grade_level,
     classroom:selectedRoom.classroom,
-    studentCount:checkableRoster.length
-  }]);
+    studentCount:checkableRoster.length + (selectedRoom.autoPresentCount || 0),
+    autoPresentCount:selectedRoom.autoPresentCount || 0
+  }], { isHoliday:currentDailyData?.isHoliday });
   el("sum-present").textContent = summary.present;
   el("sum-absent").textContent = summary.absent;
   el("sum-leave").textContent = summary.leave;
   el("sum-late").textContent = summary.late;
   el("save-attendance").textContent = `บันทึกเช็คชื่อ ${checkableRoster.length} คน`;
+  el("save-attendance").disabled = !checkableRoster.length;
 }
 
 function renderRoster() {
@@ -886,10 +893,11 @@ async function loadRoom(index) {
   if (version !== roomLoadVersion || selectedRoom !== room) return;
   currentDailyData = dailyData;
   currentExisting = existing;
+  selectedRoom.autoPresentCount = dailyData.rooms.find(r => roomKey(r) === roomKey(selectedRoom))?.autoPresentCount || 0;
   roster = placements.filter(p =>
-    p.grade_level === selectedRoom.grade_level && p.classroom === selectedRoom.classroom
+    isRegularStudent(p.student) && p.grade_level === selectedRoom.grade_level && p.classroom === selectedRoom.classroom
   ).sort(studentCompare);
-  if (!roster.length) {
+  if (!roster.length && !selectedRoom.autoPresentCount) {
     showAccess(`<b>${esc(selectedRoom.grade_level)} · ${esc(selectedRoom.classroom)} ไม่มีนักเรียนใน placement ของปี ${esc(currentYear)}</b><br>` +
       `กรุณาตรวจที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a>`);
     return;
@@ -901,6 +909,9 @@ async function loadRoom(index) {
   }));
 
   const checkableCount = checkablePlacements(roster).length;
+  el("auto-present-note").hidden = !selectedRoom.autoPresentCount;
+  el("auto-present-note").textContent = selectedRoom.autoPresentCount
+    ? `ฝากเรียน/โปรแกรมพิเศษ ${selectedRoom.autoPresentCount} คน — นับมาอัตโนมัติ ${selectedRoom.autoPresentCount} คน${dailyData.isHoliday ? " (วันหยุดไม่นับมาอัตโนมัติ)" : ""}` : "";
   el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${checkableCount} คน)`;
   if (existing.length) {
     const latest = [...existing].sort((a, b) =>

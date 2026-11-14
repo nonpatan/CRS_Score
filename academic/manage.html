@@ -557,7 +557,7 @@
 </div>
 
 <script type="module">
-import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261113-1";
+import { isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261114-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -2271,7 +2271,7 @@ async function loadEnrollments() {
   // (รายชื่อที่ลงทะเบียนอยู่แล้วแสดงจาก currentEnrollments ต่างหาก เด็กจบที่เคยลงไว้ยังเห็นได้)
   const { data: students, error: stuErr } = await sb.from("students").select("*").eq("graduated", false).eq("left_school", false).order("grade_level").order("classroom").order("student_no");
   if (stuErr) { showToast("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + stuErr.message, false); return; }
-  allStudentsForEnroll = students || [];
+  allStudentsForEnroll = (students || []).filter(isRegularStudent);
 
   const { data: enrollRows, error } = await sb
     .from("enrollments")
@@ -2418,18 +2418,18 @@ document.getElementById("btn-bulk-add-classroom").addEventListener("click", asyn
   );
   if (toAdd.length === 0) { showToast("ทุกคนในห้องนี้อยู่ในวิชาแล้ว", false); return; }
   const payload = toAdd.map(s => ({ subject_id: currentSubject.id, student_id: s.id }));
-  const { error } = await sb.from("enrollments").insert(payload);
+  const { data: added, error } = await sb.from("enrollments").insert(payload).select("id");
   if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
-  showToast("เพิ่มแล้ว " + toAdd.length + " คน", true);
+  showToast("เพิ่มแล้ว " + (added || []).length + " คน" + ((added || []).length < toAdd.length ? " · บางคนไม่ถูกเพิ่ม กรุณาตรวจประเภทนักเรียน" : ""), (added || []).length > 0);
   await loadEnrollments();
 });
 
 document.getElementById("btn-add-student").addEventListener("click", async () => {
   const studentId = elSelAddStudent.value;
   if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
-  const { error } = await sb.from("enrollments").insert({ subject_id: currentSubject.id, student_id: studentId });
+  const { data: added, error } = await sb.from("enrollments").insert({ subject_id: currentSubject.id, student_id: studentId }).select("id");
   if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
-  showToast("เพิ่มแล้ว", true);
+  showToast((added || []).length ? "เพิ่มแล้ว 1 คน" : "ไม่ได้เพิ่ม — ประเภทนักเรียนอาจเปลี่ยน กรุณาตรวจรายชื่อใหม่", (added || []).length > 0);
   await loadEnrollments();
 });
 

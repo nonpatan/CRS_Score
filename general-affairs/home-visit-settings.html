@@ -16,7 +16,7 @@
 <section class="card" id="scope-card" hidden><p id="scope-readonly" class="hint" hidden></p><p id="scope-readonly-value" hidden></p><div id="scope-editor"><h2 id="scope-title">ขอบเขตการเยี่ยม</h2><p class="hint">ไม่ได้ตั้ง = เยี่ยมทุกคน · เลือกหลายข้อ = อยู่ข้อใดข้อหนึ่งก็นับเป็นเป้า</p><fieldset id="scope-fields"><legend class="sr-only">ขอบเขตการเยี่ยม</legend><div class="opt" id="scope-options"><label><input type="checkbox" id="all_students">ทุกคน <span id="all-count"></span></label><label><input type="checkbox" id="include_new">นักเรียนใหม่ <span id="new-count"></span></label><label><input type="checkbox" id="include_sdq_care">SDQ ควรดูแล <span id="sdq-count"></span></label><label><input type="checkbox" id="pick_rooms">เลือกห้อง…</label></div><div class="opt chips" id="room-options" hidden></div></fieldset><p id="target-preview" class="hint" role="status"></p><p id="missing-profiles" class="warnbox"></p><button class="primary" id="save-target" type="button">บันทึกขอบเขต</button><p class="hint">บันทึกแล้วเป้าของทุกห้องคิดใหม่ทันที · บันทึกเยี่ยมเดิมไม่หาย</p></div><a class="report-link" id="report-link" href="home-visit-report.html">ดูรายงานเยี่ยมบ้าน →</a></section>
 <div id="toast" class="toast" role="status" aria-live="polite"></div></div></main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getMyDepartments, applyRestrictedMenuAccess, getAcademicYears, academicYearOf, fetchAllRows, bangkokNow, toDateStr } from "../supabase-client.js?v=20261113-1";
+import { isRegularStudent, sb, requireAuth, signOut, getProfile, getMyDepartments, applyRestrictedMenuAccess, getAcademicYears, academicYearOf, fetchAllRows, bangkokNow, toDateStr } from "../supabase-client.js?v=20261114-1";
 import { sdqCareList, loadSdqYear, sdqGradeRank } from "./sdq-core.js?v=3";
 import { homeVisitTargets, hvRoomKey, hvIsActive, loadTarget, saveTarget } from "./home-visit-core.js?v=1";
 const el = id => document.getElementById(id), esc = v => String(v ?? "").replace(/[&<>"']/g,c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
@@ -70,12 +70,12 @@ async function loadYear(year = el("year").value) {
   try {
     if (canWriteYear()) {
       const [placementRes,sdqRows,targetRow] = await Promise.all([
-        fetchAllRows(() => sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,graduated,left_school,profile:student_profiles(student_id,admission_type))").eq("year",year)),
+        fetchAllRows(() => sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,graduated,left_school,student_type,profile:student_profiles(student_id,admission_type))").eq("year",year)),
         loadSdqYear(year),loadTarget(year)
       ]);
       if (placementRes.error) throw placementRes.error;
       if (token !== loadToken) return;
-      placements = placementRes.data || []; target = targetRow;
+      placements = (placementRes.data || []).filter(p => isRegularStudent(p.student)); target = targetRow;
       profiles = new Map(placements.flatMap(p => { const row = p.student?.profile; return (Array.isArray(row) ? row : row ? [row] : []).map(r => [p.student_id,r]); }));
       sdqCareIds = new Set(sdqCareList(placements.filter(hvIsActive),new Map(sdqRows.map(r => [`${r.student_id}:${r.form}`,r]))).map(r => r.student_id));
       roomList = [...new Map(placements.map(p => [hvRoomKey(p),{grade_level:p.grade_level,classroom:p.classroom}])).values()].sort((a,b) => sdqGradeRank(a.grade_level)-sdqGradeRank(b.grade_level) || a.classroom.localeCompare(b.classroom,"th",{numeric:true}));

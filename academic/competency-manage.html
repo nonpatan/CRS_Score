@@ -389,7 +389,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment, GRADE_ORDER } from "../supabase-client.js?v=20261113-1";
+import { isRegularStudent, sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment, GRADE_ORDER } from "../supabase-client.js?v=20261114-1";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -457,7 +457,7 @@ function membersAtAssessmentYear(memberRows, placementRows) {
   }));
 }
 function studentsAtAssessmentYear(placementRows) {
-  return (placementRows || []).filter(placement => placement.student).map(placement =>
+  return (placementRows || []).filter(placement => placement.student && isRegularStudent(placement.student)).map(placement =>
     applyYearPlacement(placement.student, placement)
   );
 }
@@ -982,10 +982,10 @@ async function addMembers(ids){if(!ids.length){toast("เลือกราย�
     let overlaps;
     try{overlaps=await loadCategoryOverlaps(assessment,ids);}
     catch(error){toast("ตรวจรายชื่อที่อยู่"+assessment.activity_category+"อื่นไม่สำเร็จ — ยังไม่ได้เพิ่ม ลองกดอีกครั้ง: "+error.message,false);return;}
-    const allowed=ids.filter(id=>!overlaps.has(id));
+    const allowed=ids.filter(id=>!overlaps.has(id) && students.some(s=>s.id===id && isRegularStudent(s)));
     const skipped=ids.filter(id=>overlaps.has(id));
     if(!allowed.length){toast("ไม่ได้เพิ่ม — นักเรียนที่เลือกอยู่"+assessment.activity_category+"อื่นในภาคนี้แล้วทุกคน",false);await selectAssessment(assessment.id);return;}
-const {error}=await sb.from("competency_assessment_members").insert(allowed.map(student_id=>({assessment_id:assessment.id,student_id})));if(error){toast("เพิ่มไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(assessment.id);if(skipped.length){const names=skipped.slice(0,3).map(id=>students.find(s=>s.id===id)?.name||id).join(", ");toast("เพิ่ม "+allowed.length+" คน · ข้าม "+skipped.length+" คนที่อยู่"+assessment.activity_category+"อื่นแล้ว: "+names+(skipped.length>3?" และอีก "+(skipped.length-3)+" คน":""));}else toast("เพิ่มผู้เข้าร่วมแล้ว");
+const {data:added,error}=await sb.from("competency_assessment_members").insert(allowed.map(student_id=>({assessment_id:assessment.id,student_id}))).select("id");if(error){toast("เพิ่มไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(assessment.id);if(skipped.length){const names=skipped.slice(0,3).map(id=>students.find(s=>s.id===id)?.name||id).join(", ");toast("เพิ่ม "+(added||[]).length+" คน · ข้าม "+skipped.length+" คนที่อยู่"+assessment.activity_category+"อื่นแล้ว: "+names+(skipped.length>3?" และอีก "+(skipped.length-3)+" คน":""));}else toast("เพิ่มผู้เข้าร่วม "+(added||[]).length+" คนแล้ว");
   }finally{addingMembers=false;buttons.forEach((button,index)=>button.disabled=disabled[index]);}
 }
 $("btn-add-selected").onclick=()=>addMembers([...$("student-picker").querySelectorAll("input:checked:not(:disabled)")].map(i=>i.value));
@@ -1306,12 +1306,12 @@ async function copyAssessment(){
       const overlaps=await loadCategoryOverlaps(created,sourceMembers.map(row=>row.student_id));
       const allowedMembers=sourceMembers.filter(row=>!overlaps.has(row.student_id));
       skippedMembers=sourceMembers.length-allowedMembers.length;
-      if(allowedMembers.length){const {error:writeError}=await sb.from("competency_assessment_members").insert(allowedMembers.map(row=>({assessment_id:created.id,student_id:row.student_id})));if(writeError)throw writeError;}
+      if(allowedMembers.length){const {data:copied,error:writeError}=await sb.from("competency_assessment_members").insert(allowedMembers.map(row=>({assessment_id:created.id,student_id:row.student_id}))).select("id");if(writeError)throw writeError;skippedMembers+=allowedMembers.length-(copied||[]).length;}
     }
     assessments.unshift(created);
     if(!assessmentYears.includes(year)){assessmentYears.push(year);assessmentYears.sort((a,b)=>b.localeCompare(a,"th",{numeric:true}));refreshAssessmentYearFilter();}
     copyBusy=false;closeCopy();
-    await openDetail(created.id);renderAssessments();toast(skippedMembers?"คัดลอกแล้ว · ไม่ได้คัดลอกผู้เข้าร่วม "+skippedMembers+" คนที่อยู่"+created.activity_category+"อื่นในภาคนี้แล้ว":"คัดลอกแล้ว");
+    await openDetail(created.id);renderAssessments();toast(skippedMembers?"คัดลอกแล้ว · ไม่ได้คัดลอกผู้เข้าร่วม "+skippedMembers+" คน (อยู่หมวดเดียวกันในภาคนี้แล้ว หรือไม่ใช่ประเภทปกติ)":"คัดลอกแล้ว");
   }catch(error){
     if(created){
       const {error:deleteError}=await sb.from("competency_assessments").delete().eq("id",created.id);

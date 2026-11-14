@@ -19,7 +19,7 @@
 <section class="card" id="student-card" hidden><h2 id="people-title"></h2><div class="student-grid"><ul class="people" id="people"></ul><div><h3 id="detail-title">รายละเอียดรายคน</h3><div id="detail" class="empty">เลือกนักเรียนเพื่อดูบันทึกเยี่ยมบ้าน</div></div></div></section></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getMyDepartments, applyRestrictedMenuAccess, getAcademicYears, academicYearOf, fetchAllRows, bangkokNow, toDateStr } from "../supabase-client.js?v=20261113-1";
+import { isRegularStudent, sb, requireAuth, signOut, getProfile, getMyDepartments, applyRestrictedMenuAccess, getAcademicYears, academicYearOf, fetchAllRows, bangkokNow, toDateStr } from "../supabase-client.js?v=20261114-1";
 import { sdqCareList, loadSdqYear, sdqGradeRank } from "./sdq-core.js?v=3";
 import { HV_SECTIONS, homeVisitTargets, latestHomeVisits, compareHomeVisits, medianHomeIncome, hvRoomKey, hvIsActive, loadVisitsYear, loadTarget } from "./home-visit-core.js?v=1";
 document.getElementById("btn-signout")?.addEventListener("click",event => { event.preventDefault(); signOut(); });
@@ -112,14 +112,14 @@ async function loadYear() {
   try {
     // อ่านประเภทนักเรียนผ่าน FK ในก้อน placements เพื่อเหลืองบอ่านชื่อครูผ่าน RPC ที่มีสิทธิ์
     const [placementRes,sdqRows,visitRows,targetRow,homeroomRes,staffRes] = await Promise.all([
-      fetchAllRows(() => sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,profile:student_profiles(student_id,admission_type))").eq("year",year)),
+      fetchAllRows(() => sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type,profile:student_profiles(student_id,admission_type))").eq("year",year)),
       loadSdqYear(year),loadVisitsYear(year),loadTarget(year),
       sb.from("homeroom_teachers").select("staff_id,grade_level,classroom,staff:staff_id(full_name)").eq("year",year),
       sb.rpc("staff_picker")
     ]);
     for (const res of [placementRes,homeroomRes,staffRes]) if (res.error) throw res.error;
     if (token !== loadToken) return;
-    placements = placementRes.data || [];
+    placements = (placementRes.data || []).filter(p => isRegularStudent(p.student));
     if (!placements.length) throw new Error("ไม่พบรายชื่อนักเรียนของปีนี้ · กรุณาตรวจการจัดชั้นเรียนหรือเข้าสู่ระบบใหม่");
     profiles = new Map(placements.flatMap(p => { const row = p.student?.profile; return (Array.isArray(row) ? row : row ? [row] : []).map(r => [p.student_id,r]); }));
     staffNames = new Map((staffRes.data || []).map(r => [r.id,r.full_name]));

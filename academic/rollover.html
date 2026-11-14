@@ -322,11 +322,11 @@
 </div>
 
 <script type="module">
-import {
+import { isRegularStudent,
   sb, requireAuth, signOut, getProfile, isAcademicHead, checkDepartment,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, PRE_SCHOOL_GRADE, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20261113-1";
+} from "../supabase-client.js?v=20261114-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -916,13 +916,13 @@ async function cloneActivity(src,newYear){
 async function autoEnroll(newSubjectId, newGradeLevel, rooms) {
   // rooms = ห้องที่วิชาต้นทางเคยมี (ป้ายห้องปีเก่า = ป้ายห้องปีใหม่ของชั้นเดียวกัน เพราะห้องเลื่อนตามชั้น)
   const targets = activeStudents.filter(s =>
-    s.grade_level === newGradeLevel && (rooms.length === 0 || rooms.indexOf(s.classroom) !== -1)
+    isRegularStudent(s) && s.grade_level === newGradeLevel && (rooms.length === 0 || rooms.indexOf(s.classroom) !== -1)
   );
   if (targets.length === 0) return 0;
   const rows = targets.map(s => ({ subject_id: newSubjectId, student_id: s.id }));
-  const { error } = await sb.from("enrollments").upsert(rows, { onConflict: "subject_id,student_id" });
+  const { data: enrolled, error } = await sb.from("enrollments").upsert(rows, { onConflict: "subject_id,student_id" }).select("id");
   if (error) throw new Error("ลงทะเบียนไม่สำเร็จ: " + error.message);
-  return targets.length;
+  return (enrolled || []).length;
 }
 
 // ---------- คัดลอกอัตราส่วนคะแนนไปปีใหม่ (ทำก่อนแตะนักเรียน/ก๊อปวิชา) ----------
