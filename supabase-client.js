@@ -2769,7 +2769,7 @@ export function activePlacements(placements) {
   return (placements || []).filter(placement => !isPlacementInactive(placement));
 }
 
-export const STUDENT_TYPES = ["ปกติ", "ฝากเรียน", "โปรแกรมพิเศษ", "ไม่มีตัวตน"];
+export const STUDENT_TYPES = ["ปกติ", "ฝากเรียน", "โปรแกรมพิเศษ", "กำลังติดตาม"];
 
 export function isRegularStudent(student) {
   return (student?.student_type || "ปกติ") === "ปกติ";
