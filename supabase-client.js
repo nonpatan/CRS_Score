@@ -1252,21 +1252,37 @@ export async function getActiveStudents() {
 // ประวัติชั้น/ห้องของนักเรียนในปีการศึกษาที่ระบุ
 // ไม่กรอง graduated/left_school เพราะรายงานย้อนหลังต้องเห็นรายชื่อในปีนั้นครบ
 // studentIds ส่งมาเฉพาะเมื่ออยากอ่าน placement ของรายชื่อบางกลุ่ม (เช่น roster ของรายวิชา)
+const studentPlacementsInFlight = new Map();
+
 export async function getStudentPlacements(year, studentIds = null) {
   if (!year) return { data: [], error: null };
 
-  let query = sb.from("student_year_placements")
-    .select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)")
-    .eq("year", year)
-    .order("grade_level")
-    .order("classroom");
-  if (Array.isArray(studentIds)) {
-    if (studentIds.length === 0) return { data: [], error: null };
-    query = query.in("student_id", studentIds);
-  }
+  const load = async () => {
+    let query = sb.from("student_year_placements")
+      .select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)")
+      .eq("year", year)
+      .order("grade_level")
+      .order("classroom");
+    if (Array.isArray(studentIds)) {
+      if (studentIds.length === 0) return { data: [], error: null };
+      query = query.in("student_id", studentIds);
+    }
 
-  const { data, error } = await query;
-  return { data: data || [], error };
+    const { data, error } = await query;
+    return { data: data || [], error };
+  };
+  if (studentIds !== null) return load();
+
+  // รวมเฉพาะคำขอปีเดียวกันที่ยังไม่จบ ไม่เก็บข้อมูลข้ามการโหลดหลังบันทึก
+  const key = String(year);
+  let request = studentPlacementsInFlight.get(key);
+  if (!request) {
+    request = load().finally(() => studentPlacementsInFlight.delete(key));
+    studentPlacementsInFlight.set(key, request);
+  }
+  const { data, error } = await request;
+  // ผู้เรียกแต่ละรายจัดเรียง/เพิ่ม/ลบสมาชิก array ของตัวเองได้
+  return { data: data.slice(), error };
 }
 
 // รูปแบบจำนวนเงินกลาง — หน้าการเงินใช้ทศนิยม 2 ตำแหน่งตามค่าเริ่มต้น
@@ -3119,7 +3135,7 @@ export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 
   });
 }
 
-export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
+export async function loadAttendanceTrend({ year, endDate, days = 5, placements }) {
   if (!year || !endDate) return [];
   const from = addDaysStr(endDate, -120);
   const [scheduleRes, holidayRes, yearsRes, placementsRes] = await Promise.all([
@@ -3127,7 +3143,7 @@ export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
     sb.from("work_holidays").select("holiday_date")
       .gte("holiday_date", from).lte("holiday_date", endDate),
     sb.from("academic_years").select("year,start_date,term2_start_date,term1_end_date,term2_end_date").order("year"),
-    getStudentPlacements(year)
+    placements ?? getStudentPlacements(year)
   ]);
   if (scheduleRes.error || holidayRes.error || yearsRes.error || placementsRes.error) return [];
 
@@ -3145,8 +3161,8 @@ export async function loadAttendanceTrend({ year, endDate, days = 5 }) {
     throw new Error("โหลดกราฟการมาเรียนไม่สำเร็จ: " + rowsRes.error.message);
   }
   const currentAcademicYear = academicYearOf(toDateStr(bangkokNow()), yearsRes.data || []);
-  const placements = year === currentAcademicYear ? activePlacements(placementsRes.data) : placementsRes.data || [];
-  const autoPresentCount = roomsFromPlacements(placements, year, { attendance:true })
+  const roomPlacements = year === currentAcademicYear ? activePlacements(placementsRes.data) : placementsRes.data || [];
+  const autoPresentCount = roomsFromPlacements(roomPlacements, year, { attendance:true })
     .reduce((sum, room) => sum + room.autoPresentCount, 0);
   const excludedIds = new Set((placementsRes.data || []).filter(p => !isRegularStudent(p.student)).map(p => p.student_id));
   return pickAttendanceTrend({ rows:(rowsRes.data || []).filter(row => !excludedIds.has(row.student_id)),

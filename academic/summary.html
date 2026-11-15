@@ -737,7 +737,7 @@ import {
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
-} from "../supabase-client.js?v=20261115-2";
+} from "../supabase-client.js?v=20261115-3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -4177,16 +4177,21 @@ function pp6TraitLevel(rows, traitId, { primary = false, half = "", term = "1" }
   return levels.length ? Math.ceil(levels.reduce((a, b) => a + b, 0) / levels.length) : null;
 }
 
+// รายการข้อใช้ร่วมกันทุกใบในหน้านี้ เก็บเฉพาะเมื่ออ่านสำเร็จ ส่วนผลนักเรียนอ่านใหม่ต่อใบ
+let pp6TraitsCache = null;
+
 async function pp6LoadTraits(studentId, year, grade, term, half) {
   if (!grade?.startsWith("ป.") && !grade?.startsWith("ม.")) return [];
   const primary = grade.startsWith("ป.");
   const terms = primary && half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : term];
   const [traits, results] = await Promise.all([
-    sb.from("core_traits").select("id,name,seq").eq("active", true).order("seq"),
+    pp6TraitsCache !== null ? { data:pp6TraitsCache, error:null }
+      : sb.from("core_traits").select("id,name,seq").eq("active", true).order("seq"),
     fetchAllRows(() => sb.from("student_trait_results").select("id,trait_id,term,level")
       .eq("student_id", studentId).eq("year", year).in("term", terms))
   ]);
   if (traits.error) throw traits.error;
+  pp6TraitsCache = traits.data || [];
   if (results.error) throw results.error;
   return (traits.data || []).map(t => ({ name:t.name, level:pp6TraitLevel(results.data || [], t.id, { primary, half, term }) }));
 }
