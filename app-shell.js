@@ -226,7 +226,8 @@ function syncFinanceKpiTones() {
             ["entry.html", "กรอกคะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
             ["theme-works.html", "ส่งผลงานตามธีม"],
-            ["lesson-plans.html", "แผนการสอนของฉัน"]
+            ["lesson-plans.html", "แผนการสอนของฉัน"],
+            ["traits.html", "ประเมินคุณลักษณะ"]
           ]
         },
         {
@@ -401,6 +402,11 @@ function syncFinanceKpiTones() {
           title: "แผนการสอนของฉัน",
           description: "กำหนดจำนวนแผนของแต่ละวิชา แล้วส่งลิงก์ PDF แผนการสอนและเอกสารวัดผล",
           steps: ["เลือกวิชา", "ตั้งจำนวนแผน", "ส่งแผน"]
+        },
+        "traits.html": {
+          title: "ประเมินคุณลักษณะ",
+          description: "ครูประจำชั้นให้ระดับคุณลักษณะอันพึงประสงค์รายข้อ",
+          steps: ["เลือกห้องและช่วง", "ให้ระดับรายข้อ", "บันทึก"]
         },
         "special-results.html": {
           title: "ผลการเรียนนักเรียนพิเศษ",

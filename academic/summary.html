@@ -358,6 +358,11 @@
   .pp6-table .now { background:#f2f2f2; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .pp6-table .pp6-member td:nth-child(3) { padding-left:12px; font-size:11px; }
   .pp6-table sup { line-height:0; font-size:10px; } /* ดอกจันไม่ดันแถวให้สูงขึ้น */
+  .pp6-outcomes { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:10px; align-items:start; break-inside:avoid; }
+  .pp6-outcomes .pp6-table { font-size:12px; }
+  .pp6-outcomes .pp6-table th { white-space:normal; }
+  .pp6-outcomes .pp6-note { font-size:11px; }
+  .pp6-outcomes .pp6-traits td:first-child { overflow-wrap:anywhere; }
   .pp6-note { font-size:12.5px; margin-top:3px; }
   .pp6-comment { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
   .pp6-line { border-bottom:1px dotted #000; height:24px; }
@@ -569,7 +574,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261114-2"></script>
+    <script src="../app-shell.js?v=20261115-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -4163,6 +4168,28 @@ function pp6HeadHtml(d, subtitle) {
       "<div><b>ชั้น</b> " + escapeHtml(d.student.room) + "</div><div><b>ครูประจำชั้น</b> " + (d.homeroomNames || []).map(escapeHtml).join(", ") + "</div></div>";
 }
 
+// คุณลักษณะรายข้อ: ประถมปลายปีเฉลี่ยสองครั้งปัดขึ้น มีครั้งเดียวใช้ครั้งนั้น
+function pp6TraitLevel(rows, traitId, { primary = false, half = "", term = "1" } = {}) {
+  const terms = primary && half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : String(term)];
+  const levels = terms.map(t => rows.find(r => r.trait_id === traitId && String(r.term) === t)?.level)
+    .filter(v => Number.isInteger(v) && v >= 0 && v <= 3);
+  return levels.length ? Math.ceil(levels.reduce((a, b) => a + b, 0) / levels.length) : null;
+}
+
+async function pp6LoadTraits(studentId, year, grade, term, half) {
+  if (!grade?.startsWith("ป.") && !grade?.startsWith("ม.")) return [];
+  const primary = grade.startsWith("ป.");
+  const terms = primary && half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : term];
+  const [traits, results] = await Promise.all([
+    sb.from("core_traits").select("id,name,seq").eq("active", true).order("seq"),
+    fetchAllRows(() => sb.from("student_trait_results").select("id,trait_id,term,level")
+      .eq("student_id", studentId).eq("year", year).in("term", terms))
+  ]);
+  if (traits.error) throw traits.error;
+  if (results.error) throw results.error;
+  return (traits.data || []).map(t => ({ name:t.name, level:pp6TraitLevel(results.data || [], t.id, { primary, half, term }) }));
+}
+
 // หัวข้อ 2–5 (สมรรถนะ · กิจกรรม · ความเห็นครู/ผู้ปกครอง) + ลายเซ็น (ใช้ร่วมมัธยม/ประถม)
 function pp6TailHtml(d, commentTitle, parentTitle) {
   const comps = d.competencyError
@@ -4175,10 +4202,13 @@ function pp6TailHtml(d, commentTitle, parentTitle) {
     ? d.activities.map((a, i) => "<tr><td class='c'>" + (i + 1) + "</td><td>" + escapeHtml(a.name) + "</td><td class='c" +
       (a.result === "รอผล" ? " pend" : "") + "'>" + escapeHtml(a.result) + "</td></tr>").join("")
     : "<tr class='blank'><td></td><td></td><td></td></tr><tr class='blank'><td></td><td></td><td></td></tr>";
+  const traits = Array.isArray(d.traits) && (d.student?.room?.startsWith("ป.") || d.student?.room?.startsWith("ม."))
+    ? "<section class='pp6-sec'><h2>คุณลักษณะอันพึงประสงค์</h2><table class='pp6-table pp6-traits'><thead><tr><th>ข้อ</th><th>ระดับ</th></tr></thead><tbody>" +
+      d.traits.map(t => "<tr><td>" + escapeHtml(t.name) + "</td><td class='c'>" + (t.level === null ? "—" : escapeHtml(["ไม่ผ่าน", "ผ่าน", "ดี", "ดีเยี่ยม"][t.level] || "—")) + "</td></tr>").join("") + "</tbody></table></section>" : "";
   const comment = String(d.comment || "").trim();
   const parentComment = String(d.parentComment || "").trim();
-  return "<section class='pp6-sec'><h2>2. สมรรถนะหลัก</h2><table class='pp6-table'><thead><tr><th>ด้าน</th><th>คะแนน (เต็ม 100)</th><th>ระดับ</th></tr></thead><tbody>" + comps + "</tbody></table>" +
-      (levelText ? "<div class='pp6-note'>ระดับ: " + levelText + " · ประเมินจากรายวิชา กิจกรรม และกิจวัตรประจำวัน</div>" : "") + "</section>" +
+  return (traits ? "<div class='pp6-outcomes'>" : "") + "<section class='pp6-sec'><h2>2. สมรรถนะหลัก</h2><table class='pp6-table'><thead><tr><th>ด้าน</th><th>คะแนน (เต็ม 100)</th><th>ระดับ</th></tr></thead><tbody>" + comps + "</tbody></table>" +
+      (levelText ? "<div class='pp6-note'>ระดับ: " + levelText + " · ประเมินจากรายวิชา กิจกรรม และกิจวัตรประจำวัน</div>" : "") + "</section>" + traits + (traits ? "</div>" : "") +
     "<section class='pp6-sec'><h2>3. กิจกรรมพัฒนาผู้เรียน</h2><table class='pp6-table'><thead><tr><th>ที่</th><th>กิจกรรม</th><th>ผลการประเมิน</th></tr></thead><tbody>" + acts + "</tbody></table></section>" +
     "<section class='pp6-sec'><h2>4. " + commentTitle + "</h2>" +
       (comment ? "<p class='pp6-comment'>" + escapeHtml(comment) + "</p>" : "<div class='pp6-line'></div><div class='pp6-line'></div>") + "</section>" +
@@ -4472,12 +4502,13 @@ async function printPp6(student, button) {
     catch (error) { competencyError = "โหลดสมรรถนะไม่สำเร็จ"; }
     let activities = [];
     try { activities = await pp6LoadActivities(student.id, year, scope.primary ? (scope.half === "ปลายปี" ? ["1", "2"] : ["1"]) : [term]); } catch (error) { activities = []; }
+    const traits = await pp6LoadTraits(student.id, year, grade, term, scope.half);
     const area = document.getElementById("pp6-print-area");
     const sheet = {
       schoolName:String(school || "").trim(), year, term, half:scope.half,
       student:{ name:student.name, no:student.student_no, room:grade + "/" + classroom },
       homeroomNames:homerooms.map(row => row.fullName), subjects, gpa:computeGpa(subjects).gpa,
-      competencies, levels, competencyError, activities, comment, parentComment,
+      competencies, levels, competencyError, activities, traits, comment, parentComment,
       signHomeroom:pp6PickHomeroomSigner(homerooms, me.data && me.data.id, signers.homeroomName),
       director:signers.directorName || "", printedDate:thaiLetterDateText(toDateStr(bangkokNow()))
     };
