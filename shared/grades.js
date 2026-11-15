@@ -684,6 +684,30 @@ export function externalSubjectEntry(subject, rows, { creditInfo = subjectCredit
     external:{ source:used.some(row => row.source === "โอน") ? "โอน" : "สุ่ม", randomized:used.some(row => row.source === "สุ่ม") } };
 }
 
+// รวมครึ่งแรกจากภายนอกกับครึ่งหลังจริงที่ระดับวิชาที่นับ โดยไม่แตะ entry ต้นฉบับ
+export function mergeExternalHalf(entry, row) {
+  if (entry?.subject?.level !== "ประถม" || row?.part !== "กลางปี" || row.pct == null ||
+      !Number.isFinite(Number(row.pct)) || Number(row.pct) < 0 || Number(row.pct) > 100) return entry;
+  const mid = { hasStructure:true, collectPart:Number(row.pct), examPart:0, score:Number(row.pct),
+    complete:true, partialPercent:Number(row.pct), examScored:true, examOverCap:false,
+    collectScoredCount:1, collectExpectedCount:1 };
+  const end = entry.halves?.["ปลายปี"];
+  // สูตรเดียวกับ computePrimaryHalves: (กลางปี + ปลายปี) / 2; ความครบอิงครึ่งหลังจริง
+  const percentScore = (mid.score + (end?.score ?? 0)) / 2;
+  const blocked = entry.result?.type === "ร." || entry.result?.type === "มส.";
+  const { zeroMembers, ...result } = entry.result || {};
+  const partials = [mid.partialPercent, end?.partialPercent].filter(v => v != null);
+  return { ...entry, halves:{ ...entry.halves, "กลางปี":mid },
+    result:blocked ? { ...entry.result } : { ...result, type:"grade", percentScore, grade:percentToGrade(percentScore) },
+    scoring:{ ...entry.scoring, complete:Boolean(end?.complete), hasCollectStructure:Boolean(end?.hasStructure),
+      examScored:Boolean(end?.examScored), examOverCap:Boolean(end?.examOverCap),
+      expectedCount:1 + (end?.collectExpectedCount || 0) + 1,
+      scoredCount:1 + (end?.collectScoredCount || 0) + Number(Boolean(end?.examScored)),
+      collectExpectedCount:1 + (end?.collectExpectedCount || 0), collectScoredCount:1 + (end?.collectScoredCount || 0),
+      partialPercent:partials.length ? partials.reduce((a,b) => a+b, 0) / partials.length : null },
+    external:{ source:row.source, merged:true, randomized:row.source === "สุ่ม" } };
+}
+
 // ---------- รวมผลทุกวิชาของนักเรียนทุกคน (ชั้นคำนวณบริสุทธิ์) ----------
 // อินพุตใช้ Map ของ loadSubjectsData และรายชื่อ/การลงทะเบียนเดิม ไม่กรองวิชาย่อยตามรายคน
 // เพื่อคงผลเดิมเมื่อเรียนสมาชิกบูรณาการไม่ครบทุกวิชา
@@ -735,7 +759,7 @@ export function assembleStudentResults({ scopedSubjects, memberLinks, loadedData
       }
     }
     const externalRows = externalBySubject.get(subj.id) || [];
-    // กิจกรรมใช้ประวัติแถวสุ่ม แม้ enrollment จะชนะผลรายวิชาหลังเด็กกลับมาเรียนปกติ
+    // เก็บ provenance สำหรับผู้เรียกเดิม; กิจกรรมอ่าน external_activity_results แยกรายภาคแล้ว
     for (const row of externalRows) if (row.source === "สุ่ม") {
       if (!randomizedByYear.has(subj.year)) randomizedByYear.set(subj.year, new Set());
       randomizedByYear.get(subj.year).add(row.student_id);
@@ -748,8 +772,12 @@ export function assembleStudentResults({ scopedSubjects, memberLinks, loadedData
     for (const studentId of ids) {
       const entry = out.get(studentId);
       if (!entry) continue;
-      // TODO รอบ ④: โอนครึ่งปีร่วมกับ enrollments ต้องเสียบครึ่งแรกเข้าสูตร ไม่รวมเองในรอบนี้
-      if (entry.subjects.some(item => item.subject.id === subj.id)) continue;
+      const ownIndex = entry.subjects.findIndex(item => item.subject.id === subj.id);
+      if (ownIndex >= 0) {
+        const mid = externalRows.find(row => row.student_id === studentId && row.part === "กลางปี");
+        if (mid) entry.subjects[ownIndex] = mergeExternalHalf(entry.subjects[ownIndex], mid);
+        continue; // มัธยมยังใช้ผล enrollment จริงเสมอ
+      }
       const external = externalSubjectEntry(subj, externalRows.filter(row => row.student_id === studentId), { creditInfo });
       if (external) { external.attendance.base = base; entry.subjects.push(external); }
     }

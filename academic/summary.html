@@ -737,7 +737,7 @@ import {
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
-} from "../supabase-client.js?v=20261114-2";
+} from "../supabase-client.js?v=20261115-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -2660,7 +2660,8 @@ function externalCompetencyForStudent(studentId, rows, scope) {
   const mine = (rows || []).filter(row => row.student_id === studentId);
   if (!mine.length) return null;
   const primary = scope.grade.startsWith("ป.");
-  const terms = primary && scope.half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : scope.term];
+  const terms = primary && scope.half === "ปลายปี" ? ["1", "2"] : [scope.externalTerm || (primary ? "1" : scope.term)];
+  if (!mine.some(row => terms.includes(row.term))) return null;
   const makeHalf = term => ({ results:coreCompetencies.map(competency => {
     const row = mine.find(row => row.term === term && row.competency_id === competency.id);
     const score = row ? Number(row.pct) : null;
@@ -2688,9 +2689,11 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
   const weights = scope.weights ?? sourceWeights, levels = scope.levels ?? interpretationLevels;
   if (!shared) shared = await loadCompetencyScopeShared(year, grade, term);
   if (!shared.ok) return shared;
-  if (shared.externalRows?.some(row => row.student_id === student.id)) {
-    return externalCompetencyForStudent(student.id, shared.externalRows,
-      { year, grade, term:shared.externalTerm || term, half:scope.half || "กลางปี", levels });
+  // ตัวคำนวณนี้รับทีละช่วง; ผลภายนอกของอีกช่วงไม่ขวางการคำนวณจริง
+  const externalTerm = grade.startsWith("ป.") ? (shared.externalTerm || "1") : term;
+  if (shared.externalRows?.some(row => row.student_id === student.id && row.term === externalTerm)) {
+    return externalCompetencyForStudent(student.id, shared.externalRows.filter(row => row.term === externalTerm),
+      { year, grade, term:externalTerm, externalTerm, half:"กลางปี", levels });
   }
 
   // ---------- แหล่งที่ 1: คะแนนสมรรถนะจากรายวิชาที่นักเรียนลงทะเบียน ----------
@@ -2914,17 +2917,15 @@ function combinePrimaryCompetencyHalves(h1Row, h2Row, levels) {
 async function computePrimaryCompetencyForStudent(student, blockedResults, scope, shared = null, prefetched = null) {
   if (!shared) shared = await loadCompetencyScopeShared(scope.year, scope.grade, "");
   if (!shared.ok) return shared;
-  if (shared.externalRows?.some(row => row.student_id === student.id)) {
-    return externalCompetencyForStudent(student.id, shared.externalRows,
-      { ...scope, levels:scope.levels ?? interpretationLevels });
-  }
-  if (!prefetched) {
-    const batch = await loadCompetencyRoomBatch([student], shared);
-    if (!batch.ok) return batch;
-    prefetched = batch.byStudent.get(student.id);
-  }
   const halves = [];
   for (const half of scope.half === "ปลายปี" ? PRIMARY_HALVES : ["กลางปี"]) {
+    const term = half === "กลางปี" ? "1" : "2";
+    const hasExternal = shared.externalRows?.some(row => row.student_id === student.id && row.term === term);
+    if (!hasExternal && !prefetched) {
+      const batch = await loadCompetencyRoomBatch([student], shared);
+      if (!batch.ok) return batch;
+      prefetched = batch.byStudent.get(student.id);
+    }
     const result = await computeCompetencyForStudent(student, blockedResults, scope,
       scopeCompetencySharedToHalf(shared, half), prefetched);
     if (!result.ok) return result;
@@ -3984,8 +3985,8 @@ function gpaSubjectDisplay(item) {
   const result = item.result, scoring = item.scoring;
   const teacher = gpaOwnerNameById.get(item.subject?.owner_id);
   const follow = teacher ? " · ตาม " + teacher : "";
-  if (item.external && scoring && !scoring.complete) return { group:"incomplete", chip:"รอผล", tone:"wait",
-    reason:"ยังไม่มีผลกลางปีและปลายปีครบทั้งสองช่วง" };
+  if (item.external && result.type === "grade" && scoring && !scoring.complete) return { group:"incomplete", chip:"รอผล", tone:"wait",
+    reason:item.external.merged ? "ผลปลายปียังไม่ครบ" : "ยังไม่มีผลกลางปีและปลายปีครบทั้งสองช่วง" };
   if (result.type === "มส.") {
     const periods = result.missedPeriods != null && result.maxMissed != null &&
       Number.isFinite(Number(result.missedPeriods)) && Number.isFinite(Number(result.maxMissed))
@@ -4053,7 +4054,7 @@ function renderGpaStudentDetail() {
     if (!members.length) return "";
     return "<div class='kind-group'><div class='section-title'>" + group.title + " (" + members.length + ")</div>" +
       members.map(({ item, display }) => "<div class='gpa-subject-row'><span class='gpa-subject-name'>" + escapeHtml(item.subject.name) +
-        (item.external ? " <small class='external-result-label'>ผลจากระบบ (" + escapeHtml(item.external.source) + ")</small>" : "") +
+        (item.external ? " <small class='external-result-label'>" + (item.external.merged ? "รวมผลโอนครึ่งปีแรก" : "ผลจากระบบ (" + escapeHtml(item.external.source) + ")") + "</small>" : "") +
         "</span><span class='gpa-chip " + display.tone + "'>" + escapeHtml(display.chip) + "</span>" +
         (display.reason ? "<div class='gpa-subject-reason'>" + escapeHtml(display.reason) + "</div>" : "") + "</div>").join("") + "</div>";
   }).join("");
@@ -4204,7 +4205,7 @@ function pp6TailHtml(d, commentTitle, parentTitle) {
     : "<tr class='blank'><td></td><td></td><td></td></tr><tr class='blank'><td></td><td></td><td></td></tr>";
   const traits = Array.isArray(d.traits) && (d.student?.room?.startsWith("ป.") || d.student?.room?.startsWith("ม."))
     ? "<section class='pp6-sec'><h2>คุณลักษณะอันพึงประสงค์</h2><table class='pp6-table pp6-traits'><thead><tr><th>ข้อ</th><th>ระดับ</th></tr></thead><tbody>" +
-      d.traits.map(t => "<tr><td>" + escapeHtml(t.name) + "</td><td class='c'>" + (t.level === null ? "—" : escapeHtml(["ไม่ผ่าน", "ผ่าน", "ดี", "ดีเยี่ยม"][t.level] || "—")) + "</td></tr>").join("") + "</tbody></table></section>" : "";
+      (d.traitError ? "<tr><td colspan='2'>" + escapeHtml(d.traitError) + "</td></tr>" : "") + d.traits.map(t => "<tr><td>" + escapeHtml(t.name) + "</td><td class='c'>" + (t.level === null ? "—" : escapeHtml(["ไม่ผ่าน", "ผ่าน", "ดี", "ดีเยี่ยม"][t.level] || "—")) + "</td></tr>").join("") + "</tbody></table></section>" : "";
   const comment = String(d.comment || "").trim();
   const parentComment = String(d.parentComment || "").trim();
   return (traits ? "<div class='pp6-outcomes'>" : "") + "<section class='pp6-sec'><h2>2. สมรรถนะหลัก</h2><table class='pp6-table'><thead><tr><th>ด้าน</th><th>คะแนน (เต็ม 100)</th><th>ระดับ</th></tr></thead><tbody>" + comps + "</tbody></table>" +
@@ -4299,8 +4300,8 @@ function buildPp6PrimaryHtml(d) {
       const score = Number(member.result?.percentScore);
       const ok = Boolean(member.scoring?.complete);
       return "<tr class='pp6-member'><td></td><td>" + escapeHtml(member.subject.code || "") + "</td><td>· " + escapeHtml(member.subject.name || "") +
-        "</td><td></td>" + num(m ? m.score : null, Boolean(m?.complete), false) + (isEnd ? num(e ? e.score : null, Boolean(e?.complete), true) +
-        num(Number.isFinite(score) ? score : null, ok, true) + "<td class='c now'>" + (member.result?.type === "grade" ? member.result.grade : escapeHtml(member.result?.type || "—")) + star(ok) + "</td>" : blank + blank + blank) + "</tr>";
+        "</td><td></td>" + (item.external?.merged ? blank : num(m ? m.score : null, Boolean(m?.complete), false)) + (isEnd ? num(e ? e.score : null, Boolean(e?.complete), true) +
+        (item.external?.merged ? blank + blank : num(Number.isFinite(score) ? score : null, ok, true) + "<td class='c now'>" + (member.result?.type === "grade" ? member.result.grade : escapeHtml(member.result?.type || "—")) + star(ok) + "</td>") : blank + blank + blank) + "</tr>";
     }).join("") : "";
     return main + members;
   }).join("");
@@ -4410,7 +4411,7 @@ async function renderPp6Panel(student) {
 }
 
 // รวมผลของกิจกรรมในแต่ละประเภทตามลำดับหลักสูตร
-function pp6ActivityRows(categories, assessments, memberIds, resultById, requiredTerms) {
+function pp6ActivityRows(categories, assessments, memberIds, resultById, requiredTerms, externalRows = []) {
   const mine = new Map();
   for (const row of assessments) {
     if (!memberIds.has(row.id)) continue;
@@ -4418,31 +4419,32 @@ function pp6ActivityRows(categories, assessments, memberIds, resultById, require
     mine.get(row.activity_category).push(row);
   }
   return categories.slice().sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
-    .filter(category => category.active || mine.has(category.code))
+    .filter(category => category.active || mine.has(category.code) || externalRows.some(r => r.category_code === category.code))
     .map(category => {
       const rows = mine.get(category.code) || [];
-      // ประเภทที่เปิดใช้ต้องมีรายการครบทุกภาคของใบ โดยรายการเดิมไม่ระบุภาคนับได้ทุกภาค
-      const missingTerm = category.active && requiredTerms.some(term => !rows.some(row => row.term === null || row.term === term));
-      const result = rows.some(row => resultById.get(row.id) === false) ? "ไม่ผ่าน" :
-        missingTerm || rows.some(row => !resultById.has(row.id)) ? "รอผล" : "ผ่าน";
-      return { name:category.code, result };
+      const statuses = requiredTerms.map(term => {
+        const external = externalRows.find(r => r.category_code === category.code && r.term === term);
+        if (external) return external.passed ? "ผ่าน" : "ไม่ผ่าน";
+        const current = rows.filter(r => r.term === null || r.term === term);
+        if (current.some(r => resultById.get(r.id) === false)) return "ไม่ผ่าน";
+        return (category.active && !current.length) || current.some(r => !resultById.has(r.id)) ? "รอผล" : "ผ่าน";
+      });
+      return { name:category.code, result:statuses.includes("ไม่ผ่าน") ? "ไม่ผ่าน" : statuses.includes("รอผล") ? "รอผล" : "ผ่าน" };
     });
 }
 
 async function pp6LoadActivities(studentId, year, terms) {
-  const automatic = gpaResultsMap?.randomizedByYear?.get(year)?.has(studentId) || gpaResultsMap?.get(studentId)?.subjects.some(item => item.subject.year === year && (item.external?.source === "สุ่ม" || item.external?.randomized));
   let query = sb.from("competency_assessments").select("id,term,activity_category")
     .eq("year", year).eq("source_type", "กิจกรรม").not("activity_category", "is", null);
   query = query.or("term.in.(" + terms.join(",") + "),term.is.null");
-  const [list, categories] = await Promise.all([
+  const [list, categories, external] = await Promise.all([
     query,
-    sb.from("activity_categories").select("code,sort_order,active").order("sort_order")
+    sb.from("activity_categories").select("code,sort_order,active").order("sort_order"),
+    sb.from("external_activity_results").select("term,category_code,passed").eq("student_id", studentId).eq("year", year).in("term", terms)
   ]);
-  if (list.error || categories.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (list.error || categories.error).message);
-  if (automatic) return (categories.data || []).filter(c => c.active).sort((a,b) => Number(a.sort_order)-Number(b.sort_order))
-    .map(category => ({ name:category.code, result:"ผ่าน" }));
+  if (list.error || categories.error || external.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (list.error || categories.error || external.error).message);
   const ids = (list.data || []).map(row => row.id);
-  if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map(), terms);
+  if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map(), terms, external.data || []);
   const [members, results] = await Promise.all([
     sb.from("competency_assessment_members").select("assessment_id").eq("student_id", studentId).in("assessment_id", ids),
     sb.from("activity_pass_results").select("assessment_id,passed").eq("student_id", studentId).in("assessment_id", ids)
@@ -4450,7 +4452,7 @@ async function pp6LoadActivities(studentId, year, terms) {
   if (members.error || results.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (members.error || results.error).message);
   const mine = new Set((members.data || []).map(row => row.assessment_id));
   const resultById = new Map((results.data || []).map(row => [row.assessment_id, row.passed]));
-  return pp6ActivityRows(categories.data || [], list.data || [], mine, resultById, terms);
+  return pp6ActivityRows(categories.data || [], list.data || [], mine, resultById, terms, external.data || []);
 }
 
 async function pp6LoadCompetencies(student, year, grade, term, half = "กลางปี") {
@@ -4466,7 +4468,9 @@ async function pp6LoadCompetencies(student, year, grade, term, half = "กลา
   }
   const scope = { year, grade, term, half, weights:settings.weights, levels:settings.levels };
   const externalRows = await loadExternalCompetencyScope(year, grade);
-  const external = externalCompetencyForStudent(student.id, externalRows, scope);
+  const requiredTerms = grade.startsWith("ป.") ? (half === "ปลายปี" ? ["1", "2"] : ["1"]) : [term];
+  const external = requiredTerms.every(t => externalRows.some(r => r.student_id === student.id && r.term === t))
+    ? externalCompetencyForStudent(student.id, externalRows, scope) : null;
   const computed = external || (grade.startsWith("ป.")
     ? await computePrimaryCompetencyForStudent(student, gpaResultsMap || new Map(), scope)
     : await computeCompetencyForStudent(student, gpaResultsMap || new Map(), scope));
@@ -4502,13 +4506,18 @@ async function printPp6(student, button) {
     catch (error) { competencyError = "โหลดสมรรถนะไม่สำเร็จ"; }
     let activities = [];
     try { activities = await pp6LoadActivities(student.id, year, scope.primary ? (scope.half === "ปลายปี" ? ["1", "2"] : ["1"]) : [term]); } catch (error) { activities = []; }
-    const traits = await pp6LoadTraits(student.id, year, grade, term, scope.half);
+    let traits = [], traitError = "";
+    try { traits = await pp6LoadTraits(student.id, year, grade, term, scope.half); }
+    catch (error) {
+      traitError = "โหลดคุณลักษณะไม่สำเร็จ";
+      traits = [1,2,3,4,5].map(n => ({ name:"ข้อ " + n, level:null }));
+    }
     const area = document.getElementById("pp6-print-area");
     const sheet = {
       schoolName:String(school || "").trim(), year, term, half:scope.half,
       student:{ name:student.name, no:student.student_no, room:grade + "/" + classroom },
       homeroomNames:homerooms.map(row => row.fullName), subjects, gpa:computeGpa(subjects).gpa,
-      competencies, levels, competencyError, activities, traits, comment, parentComment,
+      competencies, levels, competencyError, activities, traits, traitError, comment, parentComment,
       signHomeroom:pp6PickHomeroomSigner(homerooms, me.data && me.data.id, signers.homeroomName),
       director:signers.directorName || "", printedDate:thaiLetterDateText(toDateStr(bangkokNow()))
     };

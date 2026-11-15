@@ -3,14 +3,14 @@ import {
   MS_WARN_PERCENT_SECONDARY, MS_WARN_PERCENT_PRIMARY, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS, computePrimaryDailyAttendance,
   percentToGrade, computeMissedPeriods, computeAttendanceRisk, gradeWeightFor, PRIMARY_HALVES,
   computePrimaryHalves, computeSubjectResult, computeIntegratedResult, pickCountableSubjects, subjectCreditInfo,
-  externalSubjectEntry, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
-} from "./shared/grades.js?v=20261114-2";
+  externalSubjectEntry, mergeExternalHalf, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
+} from "./shared/grades.js?v=20261115-2";
 export {
   MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_MAKEUP_GRADE_CAP, msMakeupCutoff, isLateMakeup,
   MS_WARN_PERCENT_SECONDARY, MS_WARN_PERCENT_PRIMARY, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS, computePrimaryDailyAttendance,
   percentToGrade, computeMissedPeriods, computeAttendanceRisk, gradeWeightFor, PRIMARY_HALVES,
   computePrimaryHalves, computeSubjectResult, computeIntegratedResult, pickCountableSubjects, subjectCreditInfo,
-  externalSubjectEntry, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
+  externalSubjectEntry, mergeExternalHalf, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
 };
 
 // ============================================================
