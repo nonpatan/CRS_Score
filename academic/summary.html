@@ -737,6 +737,7 @@ import {
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
+  isAutoPresentStudent, isAutoAbsentStudent,
 } from "../supabase-client.js?v=20261116-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -3885,8 +3886,20 @@ async function renderGpaStudentList() {
     elGpaListError.hidden = false;
     elGpaListSummary.textContent = "ยังแสดงสถานะไม่ได้";
   } else {
-    const pending = rows.filter(student => computeGpa(gpaResultsMap.get(student.id)?.subjects || []).pending).length;
-    elGpaListSummary.textContent = "สรุปได้ " + (rows.length - pending) + " คน · ยังสรุปไม่ได้ " + pending + " คน";
+    let complete = 0, pending = 0, waiting = 0, tracking = 0, noSubjects = 0;
+    for (const student of rows) {
+      const subjects = gpaResultsMap.get(student.id)?.subjects || [];
+      if (!subjects.length) {
+        if (isAutoPresentStudent(student)) waiting++;
+        else if (isAutoAbsentStudent(student)) tracking++;
+        else noSubjects++;
+      } else if (computeGpa(subjects).pending) pending++;
+      else complete++;
+    }
+    elGpaListSummary.textContent = "สรุปได้ " + complete + " คน · ยังสรุปไม่ได้ " + pending + " คน" +
+      (waiting ? " · รอสุ่มผล " + waiting + " คน" : "") +
+      (tracking ? " · กำลังติดตาม " + tracking + " คน" : "") +
+      (noSubjects ? " · ยังไม่มีวิชา " + noSubjects + " คน" : "");
   }
   renderGpaStudentButtons();
   if (selectedGpaStudentId) renderGpaStudentDetail();
@@ -3912,8 +3925,12 @@ function gpaPendingText(counts, primary) {
   return "เพราะ " + (parts.join(" · ") || "ยังไม่มีผลครบทุกวิชา");
 }
 
-function gpaStudentChips(subjects, primary) {
-  if (!subjects.length) return "<span class='gpa-chip none'>ยังไม่มีวิชา</span>";
+function gpaStudentChips(subjects, primary, student) {
+  if (!subjects.length) {
+    if (isAutoPresentStudent(student)) return "<span class='gpa-chip wait'>รอสุ่มผล</span>";
+    if (isAutoAbsentStudent(student)) return "<span class='gpa-chip none'>กำลังติดตาม</span>";
+    return "<span class='gpa-chip none'>ยังไม่มีวิชา</span>";
+  }
   const c = gpaStatusCounts(subjects), chips = [];
   if (c.ms) chips.push("<span class='gpa-chip bad'>มส. " + c.ms + "</span>");
   if (c.remark) chips.push("<span class='gpa-chip bad'>ร. " + c.remark + "</span>");
@@ -3934,7 +3951,7 @@ function renderGpaStudentButtons() {
   elGpaStudentList.innerHTML = rows.map(student => {
     const active = selectedGpaStudentId === student.id;
     const subjects = gpaResultsMap?.get(student.id)?.subjects || [];
-    const chips = gpaResultsMap ? gpaStudentChips(subjects, isPrimaryGrade(elGpaGrade.value)) :
+    const chips = gpaResultsMap ? gpaStudentChips(subjects, isPrimaryGrade(elGpaGrade.value), student) :
       "<span class='gpa-chip none'>" + (gpaResultsError ? "คำนวณไม่สำเร็จ" : "กำลังคำนวณ…") + "</span>";
     return "<button type='button' class='student-button" + (active ? " active" : "") + "' data-student-id='" + escapeHtml(student.id) +
       "'" + (active ? " aria-current='true'" : "") + "><span class='student-name'>" + escapeHtml(student.name) +
@@ -4033,9 +4050,14 @@ function renderGpaStudentDetail() {
   const subjList = entry ? entry.subjects : [];
   const noPeriodSubjects = [...new Set(subjList.flatMap(item => item.noPeriodSubjects || []))];
   if (!subjList.length) {
+    const hint = isAutoPresentStudent(student)
+      ? "ยังไม่ได้สุ่มผลของ" + scopeText + " (ปีการศึกษา " + escapeHtml(elGpaYear.value) + ") — ฝ่ายวิชาการสุ่มได้ที่เมนู <a href='special-results.html'>ผลการเรียนจากภายนอก (สุ่ม/โอน)</a>"
+      : isAutoAbsentStudent(student)
+        ? "นักเรียนกำลังติดตาม — ไม่ลงวิชาและไม่สุ่มผล จนกว่าจะเปลี่ยนประเภท"
+        : "ยังไม่มีวิชาที่ลงทะเบียนของ" + scopeText + " (ปีการศึกษา " + escapeHtml(elGpaYear.value) + ")";
     elGpaResult.innerHTML = "<div class='card'><div class='gpa-head'><h2>" + escapeHtml(student.name) + "</h2><div class='meta'>รหัส " +
       escapeHtml(student.student_no) + " · " + escapeHtml(grade) + "/" + escapeHtml(student.classroom || "") + " · 0 วิชา · " + scopeText +
-      "</div></div><div class='hint'>ยังไม่มีวิชาที่ลงทะเบียนของ" + scopeText + " (ปีการศึกษา " + escapeHtml(elGpaYear.value) + ")</div></div>";
+      "</div></div><div class='hint'>" + hint + "</div></div>";
     return;
   }
   const { gpa, pending, pendingReason, provisionalGpa, countedSubjects, total } = computeGpa(subjList);
