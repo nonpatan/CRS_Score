@@ -503,6 +503,24 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
   let makeupApprover = false;
   let pendingMakeups = 0;
   let swapHead = false;
+  // ผลประเมิน 360° ที่ประกาศแล้วแต่ยังไม่กดรับทราบ — โหลดครั้งเดียวตอนเปิดหน้า (ไม่ดึงซ้ำตอน realtime)
+  // กดรับทราบแล้วกลับมาหน้าแรก = โหลดหน้าใหม่ แถวนี้จึงหายเอง
+  let evalAckRows = [];
+
+  async function loadEvalAckAlerts(staffId) {
+    const { data, error } = await sb.from("eval_targets")
+      .select("id, eval_rounds!inner(status, academic_year, round_no), eval_acknowledgements(acknowledged_at)")
+      .eq("staff_id", staffId).eq("eval_rounds.status", "published");
+    if (error) return [];
+    return (data || []).filter(row => {
+      const ack = Array.isArray(row.eval_acknowledgements) ? row.eval_acknowledgements[0] : row.eval_acknowledgements;
+      return !ack?.acknowledged_at;
+    }).map(row => ({
+      kind:"ประเมิน",
+      text:`ผลประเมินครู 360° ปี ${row.eval_rounds.academic_year} ครั้งที่ ${row.eval_rounds.round_no} ประกาศแล้ว · รอคุณกดรับทราบ`,
+      href:"personnel/eval-my.html", linkLabel:"ดูผล"
+    }));
+  }
 
   function hideMyAlerts() {
     myAlerts.hidden = true;
@@ -510,7 +528,8 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
   }
 
   function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver,
-    pendingMakeups = 0, makeupApproverFlag = false, dutyMonths = [], swapAlertsResult = null, lessonPlanAlertsResult = null) {
+    pendingMakeups = 0, makeupApproverFlag = false, dutyMonths = [], swapAlertsResult = null, lessonPlanAlertsResult = null,
+    evalRows = []) {
     try {
       const loaded = resultValue(alertsResult) || {};
       let daily = null;
@@ -540,6 +559,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       }
       const lessonPlanData = lessonPlanAlertsResult?.value?.data;
       if (lessonPlanData && !lessonPlanAlertsResult.value.error) rows.push(...lessonPlanAlertRows(lessonPlanData));
+      if (Array.isArray(evalRows)) rows.unshift(...evalRows);
       if (!rows.length) {
         hideMyAlerts();
         return;
@@ -985,7 +1005,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
     const [dailyResult, calendarResult, projectResult, approverResult, makeupApproverResult,
-      myAlertsResult, dutyMonths, swapAlertsResult, lessonPlanAlertsResult] = await Promise.all([
+      myAlertsResult, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckResult] = await Promise.all([
       capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
@@ -997,8 +1017,10 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       me ? capture(loadMyDashboardAlerts({ staffId:me.id, userId:session.user.id, year, today })) : Promise.resolve({ value:null }),
       loadDutyMonthReminders(today).catch(() => []),
       capture(sb.rpc('my_timetable_swap_alerts')),
-      me ? capture(sb.rpc('my_lesson_plan_alerts')) : Promise.resolve(null)
+      me ? capture(sb.rpc('my_lesson_plan_alerts')) : Promise.resolve(null),
+      me ? loadEvalAckAlerts(me.id).catch(() => []) : Promise.resolve([])
     ]);
+    evalAckRows = evalAckResult || [];
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
     makeupApprover = makeupApproverResult?.value === true;
@@ -1037,7 +1059,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       pendingApprovals = 0;
     }
     renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-      pendingMakeups, makeupApprover, dutyMonths, swapAlertsResult, lessonPlanAlertsResult);
+      pendingMakeups, makeupApprover, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckRows);
 
     let upcomingResult;
     let leadDays = resolveCalendarLeadDays(null);
@@ -1122,7 +1144,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
           }
           renderMyAlerts(
             lastAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-            pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult, lastLessonPlanResult
+            pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult, lastLessonPlanResult, evalAckRows
           );
           if ((!freshProjectsResult || !freshProjectsResult.error) && (!freshAlertsResult || !freshAlertsResult.error)) {
             updateFreshTime();
