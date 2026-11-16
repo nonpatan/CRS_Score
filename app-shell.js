@@ -246,7 +246,7 @@ function syncFinanceKpiTones() {
             ["competency-core.html", "กำหนดสมรรถนะหลัก"],
             ["academic-settings.html", "ตั้งค่างานวิชาการ"],
             ["timetable-import.html", "นำเข้าตารางสอน"],
-            ["special-results.html", "ผลการเรียนนักเรียนพิเศษ"]
+            ["special-results.html", "ผลการเรียนจากภายนอก (สุ่ม/โอน)"]
           ]
         },
         {
@@ -409,8 +409,8 @@ function syncFinanceKpiTones() {
           steps: ["เลือกห้องและช่วง", "ให้ระดับรายข้อ", "บันทึก"]
         },
         "special-results.html": {
-          title: "ผลการเรียนนักเรียนพิเศษ",
-          description: "ตั้งช่วงคะแนน สุ่มและตรวจผลของนักเรียนฝากเรียนและโปรแกรมพิเศษ",
+          title: "ผลการเรียนจากภายนอก (สุ่ม/โอน)",
+          description: "สุ่มผลนักเรียนฝากเรียน/โปรแกรมพิเศษ และโอนผลนักเรียนย้ายเข้า",
           steps: ["ตั้งช่วงคะแนน", "เลือกชั้นและภาค", "กดสุ่มและตรวจผล"]
         },
         "lesson-plan-review.html": {
