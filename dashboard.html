@@ -651,13 +651,13 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     if (ringElement) ringElement.hidden = true;
   }
 
-  function renderMetricRatio({ valueElement, totalElement, chipElement, progressElement, fillElement, value, total, chip, ringElement }) {
+  function renderMetricRatio({ valueElement, totalElement, chipElement, progressElement, fillElement, value, total, chip, ringElement,
+    pct = total > 0 ? Math.max(0, Math.min(100, 100 * value / total)) : 0 }) {
     valueElement.textContent = value;
     totalElement.textContent = `/ ${total}`;
     totalElement.hidden = false;
     chipElement.textContent = chip;
     chipElement.hidden = false;
-    const pct = total > 0 ? Math.max(0, Math.min(100, 100 * value / total)) : 0;
     fillElement.style.width = `${pct}%`;
     progressElement.hidden = false;
     if (ringElement) {
@@ -717,21 +717,23 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       } else {
         const counted = summary.present + summary.late + summary.leave + summary.absent;
         const numerator = summary.present + summary.late;
-        const pct = counted ? Math.round(100 * numerator / counted) : null;
-        if (!counted) {
+        const studentsTotal = summary.studentsTotal;
+        const unchecked = Math.max(0, studentsTotal - counted);
+        const pct = studentsTotal ? Math.min(100, Math.round(100 * numerator / studentsTotal)) : null;
+        if (!studentsTotal) {
           studentTodayValue.textContent = "—";
           clearMetricRatio(studentTodayTotal, studentTodayChip, studentTodayProgress, studentTodayRing);
-          studentTodayNote.textContent = `ยังไม่มีข้อมูลนักเรียน · นับจากห้องที่เช็คแล้ว ${summary.roomsChecked} ห้อง →`;
+          studentTodayNote.textContent = "ยังไม่มีข้อมูลนักเรียน →";
           return;
         }
         renderMetricRatio({
           valueElement:studentTodayValue, totalElement:studentTodayTotal,
           chipElement:studentTodayChip, progressElement:studentTodayProgress,
-          fillElement:studentTodayFill, value:numerator, total:counted, chip:`${pct}%`, ringElement:studentTodayRing
+          fillElement:studentTodayFill, value:numerator, total:studentsTotal, chip:`${pct}%`, ringElement:studentTodayRing, pct
         });
         studentTodayNote.textContent =
-          `ขาด ${summary.absent} · ลา ${summary.leave} · ` +
-          `นับจากห้องที่เช็คแล้ว ${summary.roomsChecked} ห้อง →`;
+          `ขาด ${summary.absent} · ลา ${summary.leave}` +
+          (unchecked > 0 ? ` · ยังไม่เช็ค ${unchecked} คน` : "") + " →";
       }
     } catch (error) {
       setMetricTone(studentTodayCard, "flat");
@@ -1007,9 +1009,9 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     let dailySummaryResult;
     try {
       const daily = resultValue(dailyResult);
-      dailySummaryResult = {
-        value: summarizeDailyAttendance(daily.rows, daily.rooms, { isHoliday: daily.isHoliday })
-      };
+      const summary = summarizeDailyAttendance(daily.rows, daily.rooms, { isHoliday: daily.isHoliday });
+      summary.studentsTotal = (daily.rooms || []).reduce((sum, room) => sum + (Number(room.studentCount) || 0), 0);
+      dailySummaryResult = { value: summary };
     } catch (error) {
       dailySummaryResult = { error };
     }
