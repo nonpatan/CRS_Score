@@ -2779,13 +2779,17 @@ export function isAutoPresentStudent(student) {
   return student?.student_type === "ฝากเรียน" || student?.student_type === "โปรแกรมพิเศษ";
 }
 
+export function isAutoAbsentStudent(student) {
+  return student?.student_type === "กำลังติดตาม";
+}
+
 // ค่าเริ่มต้นคงยอดทะเบียนทุกประเภท (การเงิน/สถิติใช้ร่วมกัน)
-// เปิด attendance เฉพาะยอดเช็คชื่อ ตามมติผู้ใช้ 14 พ.ย. 2569
+// เปิด attendance เฉพาะยอดเช็คชื่อ ตามมติผู้ใช้ 16 พ.ย. 2569
 export function roomsFromPlacements(placements, year, { attendance = false } = {}) {
   const roomMap = new Map();
   for (const p of (placements || [])) {
     if (!p.grade_level || !p.classroom) continue;
-    if (attendance && !isRegularStudent(p.student) && !isAutoPresentStudent(p.student)) continue;
+    if (attendance && !isRegularStudent(p.student) && !isAutoPresentStudent(p.student) && !isAutoAbsentStudent(p.student)) continue;
     const key = p.grade_level + "\u0000" + p.classroom;
     if (!roomMap.has(key)) {
       roomMap.set(key, {
@@ -2793,11 +2797,12 @@ export function roomsFromPlacements(placements, year, { attendance = false } = {
         grade_level: p.grade_level,
         classroom: p.classroom,
         studentCount: 0,
-        ...(attendance ? { autoPresentCount: 0 } : {})
+        ...(attendance ? { autoPresentCount: 0, autoAbsentCount: 0 } : {})
       });
     }
     roomMap.get(key).studentCount += 1;
     if (attendance && isAutoPresentStudent(p.student)) roomMap.get(key).autoPresentCount += 1;
+    if (attendance && isAutoAbsentStudent(p.student)) roomMap.get(key).autoAbsentCount += 1;
   }
 
   return [...roomMap.values()].sort((a, b) => {
@@ -2928,6 +2933,7 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
   const counts = countAttendanceStatuses(attendanceRows);
   if (options.isHoliday !== true) {
     counts.present += roomRows.reduce((sum, room) => sum + (Number(room.autoPresentCount) || 0), 0);
+    counts.absent += roomRows.reduce((sum, room) => sum + (Number(room.autoAbsentCount) || 0), 0);
   }
   const checkedRooms = new Set();
 
@@ -2937,9 +2943,10 @@ export function summarizeDailyAttendance(rows, rooms, options = {}) {
     }
   }
 
-  // ห้องที่มีแต่เด็กมาอัตโนมัติไม่มีรายชื่อให้ครูบันทึก จึงไม่สร้างงานค้าง
+  // ห้องที่มีแต่เด็กนับอัตโนมัติไม่มีรายชื่อให้ครูบันทึก จึงไม่สร้างงานค้าง
   if (options.isHoliday !== true) for (const room of roomRows) {
-    if (room.autoPresentCount > 0 && room.studentCount === room.autoPresentCount) {
+    const autoCount = (Number(room.autoPresentCount) || 0) + (Number(room.autoAbsentCount) || 0);
+    if (autoCount > 0 && room.studentCount === autoCount) {
       checkedRooms.add(room.grade_level + "\u0000" + room.classroom);
     }
   }
@@ -3009,7 +3016,8 @@ export function pickAttendanceRoomIssues({ rooms = [], rows = [], cutoff, dateSt
   rooms.forEach((room, order) => {
     const key = homeroomAuditRoomKey(room);
     const entries = roomRows.get(key) || [];
-    const checked = entries.length > 0 || (room.autoPresentCount > 0 && room.studentCount === room.autoPresentCount);
+    const autoCount = (Number(room.autoPresentCount) || 0) + (Number(room.autoAbsentCount) || 0);
+    const checked = entries.length > 0 || (autoCount > 0 && room.studentCount === autoCount);
     const firstAt = firstByRoom.get(key) || null;
     const roomCutoff = cutoffForGrade(cutoff, room.grade_level);
     const timing = classifyCheckTiming(checked ? firstAt : nowIso, dateStr, roomCutoff);
@@ -3020,7 +3028,8 @@ export function pickAttendanceRoomIssues({ rooms = [], rows = [], cutoff, dateSt
     if (checked && timing === "late") issues.push("checked-late");
     if (counts.absent > 0) issues.push("absent");
     const item = { grade_level:room.grade_level, classroom:room.classroom, checked, firstAt,
-      timing, counts, total:Number(room.studentCount || 0), streakCount:streakCounts.get(key) || 0,
+      timing, counts, total:Number(room.studentCount || 0), autoAbsent:Number(room.autoAbsentCount) || 0,
+      streakCount:streakCounts.get(key) || 0,
       cutoffTime:roomCutoff?.time || null, issues, order };
     (issues.length ? issueRooms : normalRooms).push(item);
   });
@@ -3117,7 +3126,7 @@ export async function loadNextSchoolDay(today) {
   } catch { return null; }
 }
 
-export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 5, autoPresentCount = 0 }) {
+export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 5, autoPresentCount = 0, autoAbsentCount = 0 }) {
   const dates = pickSchoolDays({ holidays, workdays, endDate, days });
   const rowsByDate = new Map(dates.map(date => [date, []]));
   for (const row of rows || []) {
@@ -3126,6 +3135,7 @@ export function pickAttendanceTrend({ rows, holidays, workdays, endDate, days = 
   return dates.map(date => {
     const counts = countAttendanceStatuses(rowsByDate.get(date));
     counts.present += Number(autoPresentCount) || 0;
+    counts.absent += Number(autoAbsentCount) || 0;
     const counted = counts.present + counts.late + counts.leave + counts.absent;
     return {
       date,
@@ -3162,11 +3172,12 @@ export async function loadAttendanceTrend({ year, endDate, days = 5, placements 
   }
   const currentAcademicYear = academicYearOf(toDateStr(bangkokNow()), yearsRes.data || []);
   const roomPlacements = year === currentAcademicYear ? activePlacements(placementsRes.data) : placementsRes.data || [];
-  const autoPresentCount = roomsFromPlacements(roomPlacements, year, { attendance:true })
-    .reduce((sum, room) => sum + room.autoPresentCount, 0);
+  const rooms = roomsFromPlacements(roomPlacements, year, { attendance:true });
+  const autoPresentCount = rooms.reduce((sum, room) => sum + room.autoPresentCount, 0);
+  const autoAbsentCount = rooms.reduce((sum, room) => sum + room.autoAbsentCount, 0);
   const excludedIds = new Set((placementsRes.data || []).filter(p => !isRegularStudent(p.student)).map(p => p.student_id));
   return pickAttendanceTrend({ rows:(rowsRes.data || []).filter(row => !excludedIds.has(row.student_id)),
-    holidays, workdays, endDate, days, autoPresentCount });
+    holidays, workdays, endDate, days, autoPresentCount, autoAbsentCount });
 }
 
 // ============================================================

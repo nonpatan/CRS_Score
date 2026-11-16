@@ -245,7 +245,7 @@ import {
   summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
   getMyCoverageFor, getSetting, getDailyAttendanceCutoff, firstCheckTimeByRoom,
   classifyCheckTiming, needsLateReason, cutoffForGrade, CHECK_TIMING_LABEL
-} from "../supabase-client.js?v=20261115-4";
+} from "../supabase-client.js?v=20261116-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -818,8 +818,9 @@ function renderSummary() {
     year:currentYear,
     grade_level:selectedRoom.grade_level,
     classroom:selectedRoom.classroom,
-    studentCount:checkableRoster.length + (selectedRoom.autoPresentCount || 0),
-    autoPresentCount:selectedRoom.autoPresentCount || 0
+    studentCount:checkableRoster.length + (selectedRoom.autoPresentCount || 0) + (selectedRoom.autoAbsentCount || 0),
+    autoPresentCount:selectedRoom.autoPresentCount || 0,
+    autoAbsentCount:selectedRoom.autoAbsentCount || 0
   }], { isHoliday:currentDailyData?.isHoliday });
   el("sum-present").textContent = summary.present;
   el("sum-absent").textContent = summary.absent;
@@ -894,10 +895,11 @@ async function loadRoom(index) {
   currentDailyData = dailyData;
   currentExisting = existing;
   selectedRoom.autoPresentCount = dailyData.rooms.find(r => roomKey(r) === roomKey(selectedRoom))?.autoPresentCount || 0;
+  selectedRoom.autoAbsentCount = dailyData.rooms.find(r => roomKey(r) === roomKey(selectedRoom))?.autoAbsentCount || 0;
   roster = placements.filter(p =>
     isRegularStudent(p.student) && p.grade_level === selectedRoom.grade_level && p.classroom === selectedRoom.classroom
   ).sort(studentCompare);
-  if (!roster.length && !selectedRoom.autoPresentCount) {
+  if (!roster.length && !selectedRoom.autoPresentCount && !selectedRoom.autoAbsentCount) {
     showAccess(`<b>${esc(selectedRoom.grade_level)} · ${esc(selectedRoom.classroom)} ไม่มีนักเรียนใน placement ของปี ${esc(currentYear)}</b><br>` +
       `กรุณาตรวจที่หน้า <a href="../academic/students.html">นักเรียนฝ่ายวิชาการ</a>`);
     return;
@@ -909,9 +911,11 @@ async function loadRoom(index) {
   }));
 
   const checkableCount = checkablePlacements(roster).length;
-  el("auto-present-note").hidden = !selectedRoom.autoPresentCount;
-  el("auto-present-note").textContent = selectedRoom.autoPresentCount
-    ? `ฝากเรียน/โปรแกรมพิเศษ ${selectedRoom.autoPresentCount} คน — นับมาอัตโนมัติ ${selectedRoom.autoPresentCount} คน${dailyData.isHoliday ? " (วันหยุดไม่นับมาอัตโนมัติ)" : ""}` : "";
+  const autoNotes = [];
+  if (selectedRoom.autoPresentCount) autoNotes.push(`ฝากเรียน/โปรแกรมพิเศษ ${selectedRoom.autoPresentCount} คน — นับมาอัตโนมัติ ${selectedRoom.autoPresentCount} คน`);
+  if (selectedRoom.autoAbsentCount) autoNotes.push(`กำลังติดตาม ${selectedRoom.autoAbsentCount} คน — นับขาดอัตโนมัติ`);
+  el("auto-present-note").hidden = !autoNotes.length;
+  el("auto-present-note").textContent = autoNotes.join(" · ") + (autoNotes.length && dailyData.isHoliday ? " (วันหยุดไม่นับมา/ขาดอัตโนมัติ)" : "");
   el("room-title").textContent = `${selectedRoom.grade_level} · ${selectedRoom.classroom} (${checkableCount} คน)`;
   if (existing.length) {
     const latest = [...existing].sort((a, b) =>
