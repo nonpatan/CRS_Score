@@ -157,7 +157,7 @@
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
   getAcademicYears, academicYearOf,
-  getStudentPlacements, roomsFromPlacements, activePlacements, bangkokNow, toDateStr,
+  getStudentPlacements, roomsFromPlacements, activePlacements, isRegularStudent, bangkokNow, toDateStr,
   getMyCoverageFor, fetchAllRows, summarizeSavingsByStudent, formatMoney
 } from "../supabase-client.js?v=20261115-4";
 
@@ -289,12 +289,16 @@ async function loadRoom(index) {
   selectedRoom = availableRooms[Number(index)] || null;
   if (!selectedRoom) return;
 
-  roster = activePlacements(placements).filter(placement =>
+  const roomPlacements = activePlacements(placements).filter(placement =>
     placement.grade_level === selectedRoom.grade_level && placement.classroom === selectedRoom.classroom
-  ).sort(studentCompare);
+  );
+  roster = roomPlacements.filter(placement => isRegularStudent(placement.student)).sort(studentCompare);
+  const excludedCount = roomPlacements.length - roster.length;
   if (!roster.length) {
     el("access-warning").hidden = false;
-    el("access-warning").innerHTML = '<div class="banner warn"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจ student_year_placements ที่หน้าจัดการนักเรียน</div>';
+    el("access-warning").innerHTML = excludedCount > 0
+      ? '<div class="banner warn"><b>ห้องนี้ไม่มีนักเรียนปกติ — รับฝากออมทรัพย์ได้เฉพาะนักเรียนปกติ</b></div>'
+      : '<div class="banner warn"><b>ห้องนี้ยังไม่มีรายชื่อนักเรียน</b><br>กรุณาตรวจ student_year_placements ที่หน้าจัดการนักเรียน</div>';
     return;
   }
 
@@ -346,6 +350,9 @@ async function loadRoom(index) {
   el("room-note").textContent = roomChecked
     ? "เช็คชื่อครบแล้ว · รับฝากได้เฉพาะนักเรียนสถานะ มา หรือ มาสาย"
     : `เช็คชื่อแล้ว ${roster.length - missingAttendance} / ${roster.length} คน`;
+  if (excludedCount > 0) {
+    el("room-note").textContent += ` · ไม่แสดงนักเรียนฝากเรียน/โปรแกรมพิเศษ/กำลังติดตาม ${excludedCount} คน — รับฝากได้เฉพาะนักเรียนปกติ`;
+  }
   el("save-note").textContent = roomChecked && canWrite
     ? "กรอกเฉพาะคนที่นำเงินมาฝากวันนี้"
     : "ช่องกรอกถูกปิดจนกว่าสิทธิ์และการเช็คชื่อจะพร้อม";
