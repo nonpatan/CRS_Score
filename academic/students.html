@@ -193,6 +193,15 @@
   .student-status-chip { color:var(--amber); background:var(--amber-soft); font-size:12px; border-radius:6px; padding:1px 5px; }
   .student-type-chip { color:var(--teal); background:var(--teal-soft); font-size:13px; border:1px solid var(--line); border-radius:6px; padding:1px 5px; }
   .student-filters { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .type-summary { margin-top:16px; padding-top:16px; border-top:1px solid var(--line); }
+  .type-summary-total { margin:0 0 8px; color:var(--ink); }
+  .type-summary-actions, .type-summary-types { display:flex; flex-wrap:wrap; gap:8px; }
+  .type-summary-inactive { margin-left:8px; }
+  .type-summary-btn { min-height:44px; max-width:100%; padding:8px 12px; border:1px solid var(--line); background:transparent; color:var(--ink); font-weight:400; white-space:normal; overflow-wrap:anywhere; }
+  .type-summary-btn.is-zero { color:var(--muted); }
+  .type-summary-btn[aria-pressed="true"] { background:var(--teal-soft); border-color:var(--teal); font-weight:600; }
+  .type-summary-btn:hover { background:var(--teal-soft); }
+  .type-summary-statuses { margin:8px 0 0; color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
   .type-selection { display:flex; align-items:center; justify-content:center; flex:0 0 44px; min-height:44px; margin:0; cursor:pointer; }
   .type-selection input { width:18px; height:18px; accent-color:var(--teal); }
   .type-bulk-bar { position:sticky; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:10; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px; background:var(--white); border:1px solid var(--line); border-radius:10px; }
@@ -313,6 +322,14 @@
       <input type="checkbox" id="filter-show-graduated" style="width:18px; height:18px">
       <span>แสดงนักเรียนที่ไม่ได้กำลังศึกษาด้วย</span>
     </label>
+    <div id="student-type-summary" class="type-summary" role="group" aria-label="สรุปจำนวนนักเรียนตามประเภท" hidden>
+      <p id="type-summary-total" class="type-summary-total"></p>
+      <div class="type-summary-actions">
+        <div id="type-summary-types" class="type-summary-types"></div>
+        <div class="type-summary-inactive"><button type="button" id="type-summary-inactive" class="type-summary-btn" aria-pressed="false">ไม่ได้กำลังศึกษา 0</button></div>
+      </div>
+      <p id="type-summary-statuses" class="type-summary-statuses" hidden></p>
+    </div>
   </div>
 
   <div class="card" id="list-card">
@@ -626,7 +643,74 @@ document.getElementById("filter-show-graduated").addEventListener("change", rend
 const expandedStudentRooms = new Set();
 document.getElementById("student-search").addEventListener("input", renderList);
 
+// ยอดตามชั้น/ห้องเท่านั้น ไม่ลดตามประเภท คำค้น หรือการเปิดดูผู้ไม่ได้กำลังศึกษา
+function summarizeStudentTypes(students, { grade = "", room = "" } = {}) {
+  const byType = Object.fromEntries(STUDENT_TYPES.map(type => [type, 0]));
+  const statuses = new Map();
+  let active = 0, inactive = 0;
+  for (const student of students) {
+    if (grade && student.grade_level !== grade) continue;
+    if (room && student.classroom !== room) continue;
+    if (student.graduated || student.left_school) {
+      inactive++;
+      const status = student.status || "(ไม่ระบุสถานะ)";
+      statuses.set(status, (statuses.get(status) || 0) + 1);
+    } else {
+      active++;
+      const type = student.student_type || "ปกติ";
+      if (Object.hasOwn(byType, type)) byType[type]++;
+    }
+  }
+  return { active, byType, inactive, byStatus: Object.fromEntries(statuses) };
+}
+
+function renderStudentTypeSummary() {
+  const summary = summarizeStudentTypes(allStudents, {
+    grade: document.getElementById("filter-grade").value,
+    room: document.getElementById("filter-classroom").value
+  });
+  const filter = document.getElementById("filter-type");
+  const checkbox = document.getElementById("filter-show-graduated");
+  const types = document.getElementById("type-summary-types");
+  // สร้างปุ่มครั้งเดียวเพื่อรักษา focus เมื่อกดปุ่มแล้ว render รายชื่อใหม่
+  if (!types.childElementCount) {
+    for (const type of STUDENT_TYPES) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "type-summary-btn";
+      button.addEventListener("click", () => {
+        filter.value = filter.value === type ? "" : type;
+        renderList();
+      });
+      types.appendChild(button);
+    }
+    document.getElementById("type-summary-inactive").addEventListener("click", () => {
+      checkbox.checked = !checkbox.checked;
+      renderList();
+    });
+  }
+  STUDENT_TYPES.forEach((type, index) => {
+    const button = types.children[index];
+    button.textContent = `${type} ${summary.byType[type]}`;
+    button.setAttribute("aria-pressed", String(filter.value === type));
+    button.classList.toggle("is-zero", summary.byType[type] === 0);
+  });
+  const inactive = document.getElementById("type-summary-inactive");
+  inactive.textContent = `ไม่ได้กำลังศึกษา ${summary.inactive}`;
+  inactive.setAttribute("aria-pressed", String(checkbox.checked));
+  inactive.classList.toggle("is-zero", summary.inactive === 0);
+  const statusOrder = [...document.getElementById("student-status").options].map(option => option.value);
+  const rank = status => { const index = statusOrder.indexOf(status); return index < 0 ? statusOrder.length : index; };
+  const statuses = Object.entries(summary.byStatus).sort(([a, ac], [b, bc]) => bc - ac || rank(a) - rank(b) || a.localeCompare(b, "th"));
+  const detail = document.getElementById("type-summary-statuses");
+  detail.textContent = statuses.map(([status, count]) => `${status} ${count}`).join(" · ");
+  detail.hidden = summary.inactive === 0;
+  document.getElementById("type-summary-total").textContent = `กำลังศึกษา ${summary.active} คน`;
+  document.getElementById("student-type-summary").hidden = false;
+}
+
 function renderList() {
+  renderStudentTypeSummary();
   const gradeFilter = document.getElementById("filter-grade").value;
   const roomFilter = document.getElementById("filter-classroom").value;
   const typeFilter = document.getElementById("filter-type").value;
