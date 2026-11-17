@@ -557,7 +557,7 @@
 </div>
 
 <script type="module">
-import { isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261116-1";
+import { isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261117-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -643,11 +643,14 @@ if (!canEditAcademicSettings) {
   document.getElementById("btn-new-subject").style.display = "none";
 }
 
-// หัวหน้าวิชาการและ admin เห็น/แก้ "เจ้าของวิชา" ได้
+// ทุกคนอ่านชื่อครูเพื่อแยกวิชารหัสเดียวกัน; ใช้ชุดเดียวกับฟอร์มเจ้าของวิชาของหัวหน้า
 let allProfiles = [];
+try {
+  const { data, error } = await sb.from("profiles").select("*").order("email");
+  if (!error) allProfiles = data || [];
+} catch { /* อ่านชื่อไม่ได้ ยังใช้ป้ายไม่ระบุครู/ของฉันได้ */ }
+// หัวหน้าวิชาการและ admin เห็น/แก้ "เจ้าของวิชา" ได้
 if (canEditAcademicSettings) {
-  const { data } = await sb.from("profiles").select("*").order("email");
-  allProfiles = data || [];
   fieldOwner.style.display = "block";
   fOwner.innerHTML = "<option value='' disabled selected>— เลือกอีเมลครูเจ้าของวิชา —</option>";
   for (const p of allProfiles) {
@@ -1129,7 +1132,39 @@ function subjectLabel(s) {
   if (s.grade_level) parts.push("ชั้น " + s.grade_level);
   if (s.term) parts.push("เทอม " + s.term);
   if (s.subject_type === "บูรณาการ") parts.push("บูรณาการ");
+  if (sameCodeSiblings(s).length) parts.push(s.owner_id === myUserId ? "ของฉัน" : "ครู " + subjectOwnerName(s));
   return parts.join("  ·  ");
+}
+
+// พี่น้องของหน้าจัดการต้องตรงทั้งภาคและประเภท (ประถมก็ไม่ข้ามภาค)
+function sameCodeSiblings(subject) {
+  return allSubjects.filter(s => s.id !== subject.id && subjectCodeKey(s) === subjectCodeKey(subject) &&
+    s.year === subject.year && s.grade_level === subject.grade_level &&
+    (s.term ?? "") === (subject.term ?? "") && s.subject_type === subject.subject_type);
+}
+
+function subjectOwnerName(subject) {
+  const owner = allProfiles.find(p => p.id === subject.owner_id);
+  return owner?.name?.trim() || owner?.email || "ไม่ระบุครู";
+}
+
+// อ่านใหม่ก่อนเพิ่มทุกครั้งและแบ่งทั้งสองรายการเป็นก้อน ไม่เก็บ cache
+async function siblingEnrollments(subject, students) {
+  const siblings = sameCodeSiblings(subject), rows = [];
+  for (let start = 0; start < siblings.length; start += 40) {
+    const subjectIds = siblings.slice(start, start + 40).map(s => s.id);
+    for (let offset = 0; offset < students.length; offset += 40) {
+      const studentIds = students.slice(offset, offset + 40).map(s => s.id);
+      const { data, error } = await fetchAllRows(() => sb.from("enrollments")
+        .select("student_id, subject_id").in("subject_id", subjectIds).in("student_id", studentIds));
+      if (error) throw error;
+      rows.push(...(data || []));
+    }
+  }
+  const blockedIds = new Set(rows.map(row => row.student_id));
+  const matchedSubjects = new Set(rows.map(row => row.subject_id));
+  const ownerNames = [...new Set(siblings.filter(s => matchedSubjects.has(s.id)).map(subjectOwnerName))].join(" / ");
+  return { blockedIds, ownerNames };
 }
 
 // ---------- ก๊อปโครงสร้างจากวิชาอื่น ----------
@@ -2417,16 +2452,37 @@ document.getElementById("btn-bulk-add-classroom").addEventListener("click", asyn
     s.grade_level === currentSubject.grade_level && s.classroom === classroom && !enrolledIds.has(s.id)
   );
   if (toAdd.length === 0) { showToast("ทุกคนในห้องนี้อยู่ในวิชาแล้ว", false); return; }
-  const payload = toAdd.map(s => ({ subject_id: currentSubject.id, student_id: s.id }));
+  const subject = currentSubject;
+  let checked;
+  try { checked = await siblingEnrollments(subject, toAdd); }
+  catch (error) { showToast("ตรวจวิชารหัสเดียวกันไม่สำเร็จ: " + error.message + " · ลองอีกครั้ง", false); return; }
+  if (currentSubject?.id !== subject.id) return;
+  const candidates = toAdd.filter(s => !checked.blockedIds.has(s.id));
+  const skipped = toAdd.length - candidates.length;
+  if (!candidates.length) {
+    showToast("ไม่ได้เพิ่ม · ทุกคนในห้องนี้อยู่ในวิชารหัสเดียวกันของ ครู " + checked.ownerNames + " แล้ว", false);
+    return;
+  }
+  const payload = candidates.map(s => ({ subject_id: subject.id, student_id: s.id }));
   const { data: added, error } = await sb.from("enrollments").insert(payload).select("id");
   if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
-  showToast("เพิ่มแล้ว " + (added || []).length + " คน" + ((added || []).length < toAdd.length ? " · บางคนไม่ถูกเพิ่ม กรุณาตรวจประเภทนักเรียน" : ""), (added || []).length > 0);
+  showToast("เพิ่มแล้ว " + (added || []).length + " คน" + (skipped ? " · ข้าม " + skipped + " คน เพราะอยู่ในวิชารหัสเดียวกันของ ครู " + checked.ownerNames + " แล้ว" : "") + ((added || []).length < payload.length ? " · บางคนไม่ถูกเพิ่ม กรุณาตรวจประเภทนักเรียน" : ""), (added || []).length > 0);
   await loadEnrollments();
 });
 
 document.getElementById("btn-add-student").addEventListener("click", async () => {
   const studentId = elSelAddStudent.value;
   if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
+  const subject = currentSubject;
+  let checked;
+  try { checked = await siblingEnrollments(subject, [{ id: studentId }]); }
+  catch (error) { showToast("ตรวจวิชารหัสเดียวกันไม่สำเร็จ: " + error.message + " · ลองอีกครั้ง", false); return; }
+  if (currentSubject?.id !== subject.id) return;
+  if (checked.blockedIds.has(studentId)) {
+    const student = allStudentsForEnroll.find(s => s.id === studentId);
+    showToast((student?.name || "นักเรียน") + " อยู่ในวิชารหัสเดียวกันของ ครู " + checked.ownerNames + " แล้ว · เพิ่มซ้ำจะขึ้น 2 แถวใน ปพ.6/เกรดเฉลี่ย", false);
+    return;
+  }
   const { data: added, error } = await sb.from("enrollments").insert({ subject_id: currentSubject.id, student_id: studentId }).select("id");
   if (error) { showToast("เพิ่มไม่สำเร็จ: " + error.message, false); return; }
   showToast((added || []).length ? "เพิ่มแล้ว 1 คน" : "ไม่ได้เพิ่ม — ประเภทนักเรียนอาจเปลี่ยน กรุณาตรวจรายชื่อใหม่", (added || []).length > 0);

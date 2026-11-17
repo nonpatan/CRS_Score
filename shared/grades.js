@@ -619,6 +619,31 @@ export function pickCountableSubjects(subjects, memberLinks) {
   return (subjects || []).filter(s => s.subject_type === "บูรณาการ" || !memberIds.has(s.id));
 }
 
+// รหัสว่างไม่รวมกับวิชาอื่น แม้ชื่อเหมือนกัน
+export function subjectCodeKey(subject) {
+  return String(subject.code ?? "").trim() || "id:" + subject.id;
+}
+
+// ใช้เฉพาะหน้าสุ่มผล ให้เลือกตรงกับ RPC; ห้ามกรองผลเด็กปกติเพื่อซ่อนการลงทะเบียนซ้ำ
+export function pickOnePerCode(subjects) {
+  const groupKey = s => JSON.stringify([s.year, s.grade_level,
+    s.grade_level?.startsWith("ป.") ? "" : (s.term ?? ""), subjectCodeKey(s)]);
+  const createdTime = s => {
+    const time = Date.parse(s.created_at);
+    return Number.isFinite(time) ? time : Infinity;
+  };
+  const chosen = new Map();
+  for (const subject of (subjects || [])) {
+    const key = groupKey(subject), prior = chosen.get(key);
+    if (!prior || createdTime(subject) < createdTime(prior) ||
+        (createdTime(subject) === createdTime(prior) &&
+          String(subject.id).toLowerCase() < String(prior.id).toLowerCase())) {
+      chosen.set(key, subject);
+    }
+  }
+  return (subjects || []).filter(subject => chosen.get(groupKey(subject)) === subject);
+}
+
 // หน่วยกิตมัธยมและคาบประถมของวิชาบูรณาการมาจากวิชาย่อยเท่านั้น
 export function subjectCreditInfo(subject, memberSubjects = []) {
   if (subject?.level === "ประถม" || subject?.grade_level?.startsWith("ป.")) {

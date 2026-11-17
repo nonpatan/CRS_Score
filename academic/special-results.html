@@ -18,7 +18,7 @@
 </div></main></div>
 <script type="module">
 import {sb,requireAuth,signOut,getProfile,checkDepartment,getAcademicYears,getActiveYear,getStudentPlacements,
-  fetchAllRows,pickCountableSubjects,percentToGrade,isAutoPresentStudent,GRADE_ORDER} from "../supabase-client.js?v=20261116-1";
+  fetchAllRows,pickCountableSubjects,pickOnePerCode,percentToGrade,isAutoPresentStudent,GRADE_ORDER} from "../supabase-client.js?v=20261117-1";
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TYPES=["ฝากเรียน","โปรแกรมพิเศษ"];
@@ -87,7 +87,7 @@ async function loadYear(){
     for(const result of [s,p,r,c,e,t,tr,a,ac])if(result.error)throw result.error;
     const integrated=(s.data||[]).filter(s=>s.subject_type==="บูรณาการ").map(s=>s.id);
     const links=integrated.length?await sb.from("integration_members").select("integrated_subject_id,member_subject_id").in("integrated_subject_id",integrated):{data:[]};if(links.error)throw links.error;
-    const countable=pickCountableSubjects(s.data||[],links.data||[]);
+    const countable=pickOnePerCode(pickCountableSubjects(s.data||[],links.data||[]));
     const external=countable.length?await fetchAllRows(()=>sb.from("external_subject_results").select("id,student_id,subject_id,part,pct,grade,source").in("subject_id",countable.map(s=>s.id))):{data:[]};if(external.error)throw external.error;
     if(token!==loadSeq)return;
     traits=t.data||[];traitRows=tr.data||[];activityRows=a.data||[];activityCategories=ac.data||[];
@@ -135,7 +135,7 @@ el("generate").addEventListener("click",async()=>{
     const {data,error}=await sb.rpc("generate_special_results",{p_year:el("year").value,p_grade:el("grade").value,p_term:el("term").value});if(error)throw error;
     const result=typeof data==="string"?JSON.parse(data):data;
     await loadYear();
-    message(`สุ่มแล้ว: นักเรียน ${result.students} คน · ${result.subjects} วิชา · ${result.part}\nบันทึกผลวิชา ${result.subject_rows} แถว · สมรรถนะ ${result.competency_rows} แถว · คุณลักษณะ ${result.trait_rows??0} แถว · กิจกรรม ${result.activity_rows??0} แถว${result.locked?"\nถึงวันประกาศผลแล้ว ผลเดิมไม่ถูกเปลี่ยน (สุ่มเฉพาะคนที่ยังไม่มีผล)":""}`,false,result.locked);
+    message(`สุ่มแล้ว: นักเรียน ${result.students} คน · ${result.subjects} วิชา · ${result.part}\nบันทึกผลวิชา ${result.subject_rows} แถว · สมรรถนะ ${result.competency_rows} แถว · คุณลักษณะ ${result.trait_rows??0} แถว · กิจกรรม ${result.activity_rows??0} แถว${result.cleared_rows>0?` · ล้างผลสุ่มซ้ำบนวิชารหัสเดียวกัน ${result.cleared_rows} แถว`:""}${result.locked?"\nถึงวันประกาศผลแล้ว ผลเดิมไม่ถูกเปลี่ยน (สุ่มเฉพาะคนที่ยังไม่มีผล)":""}`,false,result.locked);
   }catch(error){message("สุ่มไม่สำเร็จ: "+error.message+" · ตรวจช่วงคะแนนแล้วลองอีกครั้ง",true);}
   finally{el("generate").textContent="สุ่มผลและบันทึก";lock(false);}
 });
