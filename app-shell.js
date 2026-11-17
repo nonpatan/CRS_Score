@@ -235,7 +235,8 @@ function syncFinanceKpiTones() {
           items: [
             ["student-registry.html", "ระเบียนนักเรียน"],
             ["students.html", "รายชื่อนักเรียน"],
-            ["rollover.html", "ขึ้นปีใหม่"]
+            ["rollover.html", "ขึ้นปีใหม่"],
+            ["transfer-results.html", "โอนผลนักเรียนย้ายเข้า"]
           ]
         },
         {
@@ -246,7 +247,7 @@ function syncFinanceKpiTones() {
             ["competency-core.html", "กำหนดสมรรถนะหลัก"],
             ["academic-settings.html", "ตั้งค่างานวิชาการ"],
             ["timetable-import.html", "นำเข้าตารางสอน"],
-            ["special-results.html", "ผลการเรียนจากภายนอก (สุ่ม/โอน)"]
+            ["special-results.html", "สุ่มผลนักเรียนพิเศษ"]
           ]
         },
         {
@@ -409,9 +410,14 @@ function syncFinanceKpiTones() {
           steps: ["เลือกห้องและช่วง", "ให้ระดับรายข้อ", "บันทึก"]
         },
         "special-results.html": {
-          title: "ผลการเรียนจากภายนอก (สุ่ม/โอน)",
-          description: "สุ่มผลนักเรียนฝากเรียน/โปรแกรมพิเศษ และโอนผลนักเรียนย้ายเข้า",
+          title: "สุ่มผลนักเรียนพิเศษ",
+          description: "ตั้งช่วงคะแนน สุ่มและตรวจผลของนักเรียนฝากเรียน/โปรแกรมพิเศษ",
           steps: ["ตั้งช่วงคะแนน", "เลือกชั้นและภาค", "กดสุ่มและตรวจผล"]
+        },
+        "transfer-results.html": {
+          title: "โอนผลนักเรียนย้ายเข้า",
+          description: "กรอกผลการเรียนจากโรงเรียนเดิมของนักเรียนปกติที่ย้ายเข้า",
+          steps: ["ค้นหานักเรียน", "กรอกผลจากโรงเรียนเดิม", "บันทึก"]
         },
         "lesson-plan-review.html": {
           title: "ตรวจแผนการสอน",
