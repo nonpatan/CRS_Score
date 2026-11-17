@@ -143,6 +143,8 @@
   .plan-okr-group { display:inline-flex; width:auto; }
   .plan-okr-label { font-size:12px; }
   .plan-row .actions { justify-content:flex-end; }
+  .okr-kr.is-editing, .okr-objective.is-editing, .plan-row.is-editing { border-left: 4px solid var(--teal); padding-left: 12px; }
+  .subform.is-inline { margin: 12px 0 16px; padding: 12px; border: 1px solid var(--line); border-left: 4px solid var(--teal); border-radius: 8px; min-width: 0; }
   @media(max-width:620px) { .okr-objective { padding:12px; } .plan-child { margin-left:10px; padding-left:8px; } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
@@ -173,6 +175,7 @@
       </details>
       <div id="okr-list"><div class="empty">กำลังโหลด…</div></div>
 
+      <div id="okr-form-home" hidden></div>
       <div class="subform" id="okr-form-box" hidden>
         <h3 id="okr-form-title">เพิ่ม Objective</h3>
         <form id="okr-form">
@@ -197,6 +200,7 @@
         </form>
       </div>
 
+      <div id="checkin-form-home" hidden></div>
       <div class="subform" id="checkin-form-box" hidden>
         <h3 id="checkin-form-title">บันทึกผลวัด</h3>
         <form id="checkin-form">
@@ -224,6 +228,7 @@
       </details>
       <div id="plan-coverage" class="banner info plan-coverage"><div>กำลังตรวจช่องโหว่ของแผน…</div></div>
       <details class="fold-details" id="plan-registry"><summary id="plan-registry-summary">ดูทะเบียนทั้งหมด (กำลังโหลด…)</summary><div id="plan-list"><div class="empty">กำลังโหลด…</div></div></details>
+      <div id="plan-form-home" hidden></div>
       <div class="subform" id="plan-form-box" hidden>
         <h3 id="plan-form-title">เพิ่มรายการในทะเบียน</h3>
         <form id="plan-form">
@@ -305,9 +310,93 @@ if (!session) {
   let lineageByKr = new Map();
   let coverageByKr = new Map();
   let editingOkrId = null;
+  let addingKrParentId = null;
   let editingCheckinKrId = null;
   let carriedFromId = null;
   let currentSuggestion = null;
+
+  // พัก node เดิมพร้อมค่าและ listener ก่อนเขียน innerHTML ทับรายการ
+  function homeForm(box) {
+    box._editingRow?.classList.remove("is-editing");
+    box._editingRow = null;
+    box.classList.remove("is-inline");
+    el(box.id.replace("-box", "-home")).after(box);
+  }
+
+  function placeForm(box, anchor, position = "after", row = anchor) {
+    homeForm(box);
+    if (!anchor) return;
+    if (position === "append") anchor.append(box);
+    else if (position === "before") anchor.before(box);
+    else anchor.after(box);
+    box.classList.add("is-inline");
+    row?.classList.add("is-editing");
+    box._editingRow = row;
+  }
+
+  function formScroll(target) {
+    target?.scrollIntoView({ behavior:window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block:"nearest" });
+  }
+
+  function focusForm(box) {
+    box.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled])")?.focus({ preventScroll:true });
+    formScroll(box);
+  }
+
+  function findRow(listId, attribute, id) {
+    return [...el(listId).querySelectorAll(`[${attribute}]`)].find(row => row.getAttribute(attribute) === id);
+  }
+
+  function revealOkr(id) {
+    const objective = okrTree.objectives.find(row => row.id === id || row.keyResults.some(kr => kr.id === id));
+    const group = objective?.id || (okrTree.orphans.some(row => row.id === id) ? "__orphans__" : null);
+    if (group) expandedObjectives.add(group);
+  }
+
+  function restoreOkrForms() {
+    const box = el("okr-form-box");
+    if (!box.hidden) {
+      const kr = findRow("okr-list", "data-okr-row", editingOkrId);
+      const objective = findRow("okr-list", "data-objective-row", editingOkrId || addingKrParentId);
+      const body = objective?.querySelector(".objective-body");
+      if (kr) placeForm(box, kr);
+      else if (body) placeForm(box, addingKrParentId ? body : body.querySelector(".actions"), addingKrParentId ? "append" : "after", objective);
+      else if (!editingOkrId && !addingKrParentId) placeForm(box, el("okr-list"), "before", null);
+      else homeForm(box);
+    }
+    const checkin = el("checkin-form-box");
+    if (!checkin.hidden) placeForm(checkin, findRow("okr-list", "data-okr-row", editingCheckinKrId));
+  }
+
+  function restorePlanForm() {
+    const box = el("plan-form-box");
+    if (box.hidden) return;
+    if (!editingPlanId) return placeForm(box, el("plan-registry"), "before", null);
+    const row = findRow("plan-list", "data-plan-row", editingPlanId);
+    // แถวกิจกรรมลูกอาจอยู่ในกลุ่มที่พับไว้ จึงต้องเปิด details แม่ด้วย
+    if (row) {
+      for (let parent = row.parentElement; parent && parent !== el("plan-card"); parent = parent.parentElement) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+      }
+    }
+    placeForm(box, row);
+  }
+
+  function scrollToOkr(id) {
+    if (!id) return;
+    revealOkr(id); renderOkrs();
+    formScroll(findRow("okr-list", "data-okr-row", id) || findRow("okr-list", "data-objective-row", id));
+  }
+
+  function scrollToPlan(id) {
+    const row = findRow("plan-list", "data-plan-row", id);
+    if (row) {
+      for (let parent = row.parentElement; parent && parent !== el("plan-card"); parent = parent.parentElement) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+      }
+      formScroll(row);
+    }
+  }
 
   if (canEditAll) {
     el("add-plan").hidden = false;
@@ -363,7 +452,7 @@ if (!session) {
     const ownerHtml = members.length
       ? `<details class="plan-team"><summary title="ผู้ร่วม: ${esc(memberNames.join(", "))}">${ownerLabel} <span class="chip">+${members.length}</span></summary><div class="hint">ผู้ร่วม: ${memberNames.map(esc).join(" · ")}</div></details>`
       : `<div class="meta">${ownerLabel}</div>`;
-    return `<div class="plan-row${row.parent_id ? " plan-child" : ""}${row.active === false ? " plan-retired" : ""}">
+    return `<div class="plan-row${row.parent_id ? " plan-child" : ""}${row.active === false ? " plan-retired" : ""}" data-plan-row="${esc(row.id)}">
       <div class="okr-heading"><div><b>${row.parent_id ? "└ " : "▸ "}${esc(row.name)}</b>
       ${row.active === false ? '<span class="chip retired">ปลดระวางแล้ว</span>' : ""}
       ${row.active !== false && projectRowsReady && !hasProject ? '<span class="chip warn">ยังไม่มีใครสร้าง</span>' : ""}
@@ -420,7 +509,11 @@ if (!session) {
 
   function renderPlanList(version = planLoadVersion) {
     if (version !== planLoadVersion || !planRows.length) return;
+    const focused = el("plan-form-box").contains(document.activeElement) ? document.activeElement : null;
+    homeForm(el("plan-form-box"));
     el("plan-list").innerHTML = projectPlanListHtml(planRows, projects, projectsLoaded);
+    restorePlanForm();
+    focused?.focus({ preventScroll:true });
   }
 
   function activityPlanKrGuard(rows, parentId, selectedIds) {
@@ -526,6 +619,7 @@ if (!session) {
     planRows = [];
     el("add-plan").disabled = true;
     el("carry-plan").disabled = true;
+    homeForm(el("plan-form-box"));
     el("plan-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
     try {
       const rows = year ? await loadProjectPlan(year) : [];
@@ -621,7 +715,8 @@ if (!session) {
     el("p-active").checked = row?.active !== false;
     syncPlanKind(planOkrIds(row)); planOwnerWarning(); renderPlanMembers();
     el("plan-form-box").hidden = false;
-    el("plan-form-box").scrollIntoView({ behavior:"smooth", block:"start" });
+    restorePlanForm();
+    focusForm(el("plan-form-box"));
   }
 
   function closePlanForm() {
@@ -631,6 +726,7 @@ if (!session) {
     el("plan-okr-pick").innerHTML = "";
     el("plan-member-chips").innerHTML = "";
     el("plan-form-box").hidden = true;
+    homeForm(el("plan-form-box"));
   }
 
   function setPlanBusy(busy) {
@@ -683,14 +779,16 @@ if (!session) {
     }
     const payload = { id:editingPlanId, year:el("filter-year").value, kind, parent_id:parentId, name,
       responsible_staff_id:ownerId, responsible_name:ownerName, sort_order:sort, note:el("p-note").value.trim() || null, active:el("p-active").checked };
+    let savedPlanId = null;
     setPlanBusy(true);
     try {
       const saved = await saveProjectPlan(payload);
       await replaceProjectPlanOkrs(saved.id, selectedOkrs);
       await replaceProjectPlanMembers(saved.id, memberPayload);
+      savedPlanId = saved.id;
       toast("บันทึกทะเบียนแล้ว"); closePlanForm();
     } catch (error) { toast(error.message, true); }
-    finally { setPlanBusy(false); await loadPlanData(); }
+    finally { setPlanBusy(false); await loadPlanData(); if (savedPlanId) scrollToPlan(savedPlanId); }
   });
 
   el("plan-list").addEventListener("click", async event => {
@@ -803,15 +901,20 @@ if (!session) {
     }
     const warnings = `${!checkin ? '<span>⚠ ยังไม่ได้วัดผลปีนี้</span>' : ""}${coverage.isUncovered ? '<span>⚠ ยังไม่มีโครงการรองรับ</span>' : ""}`;
     const coverageList = coverageProjectsHtml(coverage.projects, projects);
-    return `<div class="okr-kr"><div class="kr-title" title="${esc(kr.key_result)}"><span class="okr-code">${esc(kr.code || "KR")}</span> ${esc(kr.key_result)}${kr.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</div>${result}<div class="meta">รองรับด้วย ${coverage.projects.length} รายการ · งบ ${fmtMoney(coverage.plannedBudget)}</div>${warnings ? `<div class="okr-warnings">${warnings}</div>` : ""}<div class="actions">
+    return `<div class="okr-kr" data-okr-row="${esc(kr.id)}"><div class="kr-title" title="${esc(kr.key_result)}"><span class="okr-code">${esc(kr.code || "KR")}</span> ${esc(kr.key_result)}${kr.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</div>${result}<div class="meta">รองรับด้วย ${coverage.projects.length} รายการ · งบ ${fmtMoney(coverage.plannedBudget)}</div>${warnings ? `<div class="okr-warnings">${warnings}</div>` : ""}<div class="actions">
       ${canEditAll ? `<button class="ghost checkin-action" data-checkin="${kr.id}">บันทึกผลวัด</button><button class="ghost" data-edit-okr="${kr.id}">แก้ไข</button>` : ""}
       ${isAdmin ? `<button class="danger" data-delete-okr="${kr.id}">ลบ</button>` : ""}
     </div>${coverageList}${trendHtml(kr)}</div>`;
   }
 
   function renderOkrs() {
+    const focused = [el("okr-form-box"), el("checkin-form-box")].some(box => box.contains(document.activeElement)) ? document.activeElement : null;
+    homeForm(el("okr-form-box")); homeForm(el("checkin-form-box"));
+    if (!el("okr-form-box").hidden) revealOkr(editingOkrId || addingKrParentId);
+    if (!el("checkin-form-box").hidden) revealOkr(editingCheckinKrId);
     if (!okrTree.objectives.length && !okrTree.orphans.length) {
       el("okr-list").innerHTML = `<div class="empty">ยังไม่มี OKR ของปีนี้${canEditAll ? " — กด “เพิ่ม Objective” เพื่อเริ่มต้น" : ""}</div>`;
+      restoreOkrForms();
       return;
     }
     const objectives = okrTree.objectives.map(objective => {
@@ -820,13 +923,15 @@ if (!session) {
       const missing = summary.total - summary.measured;
       const uncovered = objective.keyResults.filter(kr => coverageByKr.get(kr.id)?.isUncovered).length;
       const expanded = expandedObjectives.has(objective.id);
-      return `<article class="okr-objective"><button type="button" class="objective-toggle" data-toggle-objective="${objective.id}" aria-expanded="${expanded}" aria-controls="objective-body-${objective.id}"><span class="objective-title"><span class="fold-arrow" aria-hidden="true"></span><span class="okr-code">${esc(objective.code || "O")}</span> <b>${esc(objective.objective)}</b>${objective.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</span><span class="okr-objective-score">คะแนน ${esc(objective.code || "O")} = ${score} · วัดแล้ว ${summary.measured} จาก ${summary.total} KR · ${objectiveStatus(summary)}</span><span class="okr-warnings">${missing > 0 ? `<span>ยังไม่วัด ${missing} KR</span>` : ""}${uncovered > 0 ? `<span>ไม่มีโครงการรองรับ ${uncovered} KR</span>` : ""}</span></button><div class="objective-body" id="objective-body-${objective.id}" ${expanded ? "" : "hidden"}><div class="actions">
+      return `<article class="okr-objective" data-objective-row="${esc(objective.id)}"><button type="button" class="objective-toggle" data-toggle-objective="${objective.id}" aria-expanded="${expanded}" aria-controls="objective-body-${objective.id}"><span class="objective-title"><span class="fold-arrow" aria-hidden="true"></span><span class="okr-code">${esc(objective.code || "O")}</span> <b>${esc(objective.objective)}</b>${objective.active ? "" : ' <span class="chip cancel">ปิดใช้งาน</span>'}</span><span class="okr-objective-score">คะแนน ${esc(objective.code || "O")} = ${score} · วัดแล้ว ${summary.measured} จาก ${summary.total} KR · ${objectiveStatus(summary)}</span><span class="okr-warnings">${missing > 0 ? `<span>ยังไม่วัด ${missing} KR</span>` : ""}${uncovered > 0 ? `<span>ไม่มีโครงการรองรับ ${uncovered} KR</span>` : ""}</span></button><div class="objective-body" id="objective-body-${objective.id}" ${expanded ? "" : "hidden"}><div class="actions">
         ${canEditAll ? `<button class="ghost" data-add-kr="${objective.id}">+ เพิ่ม KR</button>` : ""}${canEditAll ? `<button class="ghost" data-edit-okr="${objective.id}">แก้ไข</button>` : ""}
         ${isAdmin ? `<button class="danger" data-delete-okr="${objective.id}">ลบ</button>` : ""}
       </div>${objective.keyResults.map(renderKr).join("")}</div></article>`;
     }).join("");
     const orphans = okrTree.orphans.length ? `<section class="okr-objective"><button type="button" class="objective-toggle" data-toggle-objective="__orphans__" aria-expanded="${expandedObjectives.has("__orphans__")}" aria-controls="objective-orphans"><span class="objective-title"><span class="fold-arrow" aria-hidden="true"></span>ยังไม่ได้จัดกลุ่ม · ${okrTree.orphans.length} KR</span></button><div class="objective-body" id="objective-orphans" ${expandedObjectives.has("__orphans__") ? "" : "hidden"}>${okrTree.orphans.map(renderKr).join("")}</div></section>` : "";
     el("okr-list").innerHTML = objectives + orphans;
+    restoreOkrForms();
+    focused?.focus({ preventScroll:true });
   }
 
   el("okr-list").addEventListener("click", event => {
@@ -901,6 +1006,7 @@ if (!session) {
   function openOkrForm(okr = null, parentId = null) {
     if (!canEditAll) return;
     editingOkrId = okr?.id || null;
+    addingKrParentId = parentId;
     const isKr = Boolean(okr?.parent_id || parentId);
     carriedFromId = okr?.carried_from_id || null;
     el("okr-form-title").textContent = okr ? "แก้ OKR" : (isKr ? "เพิ่ม Key Result" : "เพิ่ม Objective");
@@ -925,18 +1031,22 @@ if (!session) {
     syncOkrMode(false);
     ownerConflict();
     el("okr-form-box").hidden = false;
-    el("checkin-form-box").hidden = true;
-    el("okr-form-box").scrollIntoView({ behavior:"smooth", block:"start" });
+    closeCheckinForm();
+    revealOkr(editingOkrId || addingKrParentId);
+    renderOkrs();
+    focusForm(el("okr-form-box"));
   }
 
   function closeOkrForm() {
     editingOkrId = null;
+    addingKrParentId = null;
     carriedFromId = null;
     el("okr-form").reset();
     el("o-mode").disabled = false;
     el("o-sort").value = "0";
     el("o-active").checked = true;
     el("okr-form-box").hidden = true;
+    homeForm(el("okr-form-box"));
   }
 
   async function studentCountsFor(kr) {
@@ -995,9 +1105,11 @@ if (!session) {
       }
     }
     denominatorWarning();
-    el("okr-form-box").hidden = true;
+    closeOkrForm();
     el("checkin-form-box").hidden = false;
-    el("checkin-form-box").scrollIntoView({ behavior:"smooth", block:"start" });
+    revealOkr(editingCheckinKrId);
+    renderOkrs();
+    focusForm(el("checkin-form-box"));
   }
 
   function closeCheckinForm() {
@@ -1006,6 +1118,7 @@ if (!session) {
     el("checkin-form").reset();
     el("evidence-link-list").innerHTML = "";
     el("checkin-form-box").hidden = true;
+    homeForm(el("checkin-form-box"));
   }
 
   async function replaceEvidence(checkinId, links) {
@@ -1020,6 +1133,7 @@ if (!session) {
     const year = el("filter-year").value;
     if (!year) return;
     projectsLoaded = false;
+    homeForm(el("okr-form-box")); homeForm(el("checkin-form-box"));
     el("okr-list").innerHTML = '<div class="empty">กำลังโหลด…</div>';
     try {
       const [projectRows, okrRows, thresholdRows] = await Promise.all([
@@ -1143,7 +1257,9 @@ if (!session) {
     const query = editingOkrId ? sb.from(SCHOOL_OKRS_TABLE).update(payload).eq("id", editingOkrId) : sb.from(SCHOOL_OKRS_TABLE).insert(payload);
     const { error } = await query; button.disabled = false;
     if (error) return toast("บันทึก OKR ไม่สำเร็จ: " + error.message, true);
+    const savedOkrId = editingOkrId;
     toast(editingOkrId ? "แก้ OKR แล้ว" : "เพิ่ม OKR แล้ว"); closeOkrForm(); await loadData();
+    scrollToOkr(savedOkrId);
   });
 
   el("checkin-form").addEventListener("submit", async event => {
@@ -1171,6 +1287,7 @@ if (!session) {
       if (error) throw error;
       await replaceEvidence(data.id, links);
       toast("บันทึกผลวัดแล้ว"); closeCheckinForm(); await loadData();
+      scrollToOkr(kr.id);
     } catch (error) { toast("บันทึกผลวัดไม่สำเร็จ: " + error.message, true); }
     finally { button.disabled = false; }
   });
