@@ -196,11 +196,15 @@
   .type-summary { margin-top:16px; padding-top:16px; border-top:1px solid var(--line); }
   .type-summary-total { margin:0 0 8px; color:var(--ink); }
   .type-summary-actions, .type-summary-types { display:flex; flex-wrap:wrap; gap:8px; }
-  .type-summary-inactive { margin-left:8px; }
+  .type-summary-actions { column-gap:16px; }
   .type-summary-btn { min-height:44px; max-width:100%; padding:8px 12px; border:1px solid var(--line); background:transparent; color:var(--ink); font-weight:400; white-space:normal; overflow-wrap:anywhere; }
   .type-summary-btn.is-zero { color:var(--muted); }
   .type-summary-btn[aria-pressed="true"] { background:var(--teal-soft); border-color:var(--teal); font-weight:600; }
   .type-summary-btn:hover { background:var(--teal-soft); }
+  #type-summary-inactive { color:var(--amber); }
+  #type-summary-inactive[aria-pressed="true"] { background:var(--amber-soft); border-color:var(--amber); }
+  #type-summary-inactive:hover { background:var(--amber-soft); }
+  #type-summary-inactive.is-zero { color:var(--muted); }
   .type-summary-statuses { margin:8px 0 0; color:var(--muted); font-size:14px; overflow-wrap:anywhere; }
   .type-selection { display:flex; align-items:center; justify-content:center; flex:0 0 44px; min-height:44px; margin:0; cursor:pointer; }
   .type-selection input { width:18px; height:18px; accent-color:var(--teal); }
@@ -610,7 +614,10 @@ let typeSelectionRoom = null;
 const typeSelectedIds = new Set();
 const typeOptions = selected => STUDENT_TYPES.map(type => `<option${type === selected ? " selected" : ""}>${type}</option>`).join("");
 document.getElementById("filter-type").insertAdjacentHTML("beforeend",typeOptions());
-document.getElementById("filter-type").addEventListener("change",renderList);
+document.getElementById("filter-type").addEventListener("change", () => {
+  if (document.getElementById("filter-type").value) onlyInactive = false;
+  renderList();
+});
 
 async function loadStudents() {
   const { data, error } = await sb.from("students").select("*").order("grade_level").order("classroom").order("student_no");
@@ -638,9 +645,13 @@ function fillFilterOptions() {
 }
 document.getElementById("filter-grade").addEventListener("change", renderList);
 document.getElementById("filter-classroom").addEventListener("change", renderList);
-document.getElementById("filter-show-graduated").addEventListener("change", renderList);
+document.getElementById("filter-show-graduated").addEventListener("change", () => {
+  onlyInactive = false;
+  renderList();
+});
 
 const expandedStudentRooms = new Set();
+let onlyInactive = false;
 document.getElementById("student-search").addEventListener("input", renderList);
 
 // ยอดตามชั้น/ห้องเท่านั้น ไม่ลดตามประเภท คำค้น หรือการเปิดดูผู้ไม่ได้กำลังศึกษา
@@ -670,7 +681,6 @@ function renderStudentTypeSummary() {
     room: document.getElementById("filter-classroom").value
   });
   const filter = document.getElementById("filter-type");
-  const checkbox = document.getElementById("filter-show-graduated");
   const types = document.getElementById("type-summary-types");
   // สร้างปุ่มครั้งเดียวเพื่อรักษา focus เมื่อกดปุ่มแล้ว render รายชื่อใหม่
   if (!types.childElementCount) {
@@ -679,13 +689,15 @@ function renderStudentTypeSummary() {
       button.type = "button";
       button.className = "type-summary-btn";
       button.addEventListener("click", () => {
+        onlyInactive = false;
         filter.value = filter.value === type ? "" : type;
         renderList();
       });
       types.appendChild(button);
     }
     document.getElementById("type-summary-inactive").addEventListener("click", () => {
-      checkbox.checked = !checkbox.checked;
+      onlyInactive = !onlyInactive;
+      if (onlyInactive) filter.value = "";
       renderList();
     });
   }
@@ -697,7 +709,7 @@ function renderStudentTypeSummary() {
   });
   const inactive = document.getElementById("type-summary-inactive");
   inactive.textContent = `ไม่ได้กำลังศึกษา ${summary.inactive}`;
-  inactive.setAttribute("aria-pressed", String(checkbox.checked));
+  inactive.setAttribute("aria-pressed", String(onlyInactive));
   inactive.classList.toggle("is-zero", summary.inactive === 0);
   const statusOrder = [...document.getElementById("student-status").options].map(option => option.value);
   const rank = status => { const index = statusOrder.indexOf(status); return index < 0 ? statusOrder.length : index; };
@@ -718,7 +730,9 @@ function renderList() {
   const search = document.getElementById("student-search").value.trim().toLocaleLowerCase();
   const filtered = allStudents.filter(s => {
     // ปกติแสดงเฉพาะนักเรียนที่ยัง active — ติ๊กช่องถึงจะเห็นคนที่จบ/ย้ายออก
-    if (!showInactive && (s.graduated || s.left_school)) return false;
+    if (onlyInactive) {
+      if (!(s.graduated || s.left_school)) return false;
+    } else if (!showInactive && (s.graduated || s.left_school)) return false;
     if (gradeFilter && s.grade_level !== gradeFilter) return false;
     if (roomFilter && s.classroom !== roomFilter) return false;
     if (typeFilter && (s.student_type || "ปกติ") !== typeFilter) return false;
@@ -727,11 +741,16 @@ function renderList() {
   });
   const visibleIds = new Set(filtered.map(s => s.id));
   for (const id of typeSelectedIds) if (!visibleIds.has(id)) typeSelectedIds.delete(id);
-  document.getElementById("list-title").textContent = "รายชื่อนักเรียน (" + filtered.length + " คน)";
+  document.getElementById("list-title").textContent = "รายชื่อนักเรียน (" + filtered.length + " คน" + (onlyInactive ? " · เฉพาะไม่ได้กำลังศึกษา" : "") + ")";
 
   const elList = document.getElementById("student-list");
   elList.innerHTML = "";
-  if (filtered.length === 0) { elList.innerHTML = "<div class='hint'>ไม่มีนักเรียนตรงตัวกรอง</div>"; return; }
+  if (filtered.length === 0) {
+    elList.innerHTML = onlyInactive && !search
+      ? "<div class='hint'>ไม่มีนักเรียนที่ไม่ได้กำลังศึกษาในชั้น/ห้องที่เลือก</div>"
+      : "<div class='hint'>ไม่มีนักเรียนตรงตัวกรอง</div>";
+    return;
+  }
 
   // แบ่งตามชั้น/ห้อง และคงแถวนักเรียนทุกคนไว้ใน DOM แม้กลุ่มจะพับอยู่
   const groups = new Map();
