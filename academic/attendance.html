@@ -414,7 +414,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261117-1"></script>
+    <script src="../app-shell.js?v=20261117-2"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -1446,7 +1446,24 @@ async function filterRosterBySelectedClassroom(rawRoster, seq = loadSeq) {
     return [{ ...student, grade_level: placement.grade_level, classroom: placement.classroom }];
   });
   const rosterRooms = roomsInRoster(source);
-  if (rosterRooms.length === 1 && !selectedRoom()) autoSelectSingleRosterRoom(source);
+  // เมื่อมีห้องของเด็กจริง ให้ตัวเลือกตรง roster และล้างค่าห้องค้างจากวิชาก่อน
+  if (rosterRooms.length) {
+    const currentVal = elClassroom.value;
+    classroomByValue = new Map(rosterRooms.map(room => [room.value, room]));
+    elClassroom.innerHTML = '<option value="">— เลือกห้อง… —</option>' +
+      (rosterRooms.length > 1 ? '<option value="' + ALL_ROOMS_VALUE + '">— ทุกห้อง —</option>' : "");
+    for (const room of rosterRooms) {
+      const opt = document.createElement("option");
+      opt.value = room.value;
+      opt.textContent = room.label;
+      elClassroom.appendChild(opt);
+    }
+    elClassroom.disabled = false;
+    elClassroomPick.style.display = rosterRooms.length === 1 ? "none" : "block";
+    elClassroom.value = rosterRooms.length === 1 ? rosterRooms[0].value
+      : (currentVal === ALL_ROOMS_VALUE || classroomByValue.has(currentVal) ? currentVal : "");
+    acceptedClassroomValue = elClassroom.value;
+  }
 
   const room = selectedRoom();
   if (rosterRooms.length > 1 && !room) {

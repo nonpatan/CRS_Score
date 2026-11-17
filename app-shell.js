@@ -271,6 +271,7 @@ function syncFinanceKpiTones() {
             ["project-approval.html", "อนุมัติโครงการ/กิจกรรม"],
             ["project-report.html", "รายงานโครงการ/กิจกรรม"],
             ["makeup-approval.html", "อนุมัติคำขอสอนชด"],
+            ["timetable-swaps.html", "อนุมัติสลับคาบ"],
             ["lesson-plan-review.html", "ตรวจแผนการสอน"]
           ]
         }
@@ -363,6 +364,11 @@ function syncFinanceKpiTones() {
           title: "อนุมัติคำขอสอนชด",
           description: "คำขอสอนชดที่ครูส่งมาเอง ตรวจวันเวลาและจำนวนคาบก่อนตัดสิน",
           steps: ["อ่านคำขอ", "ตรวจวันเวลา", "อนุมัติหรือให้เหตุผล"]
+        },
+        "timetable-swaps.html": {
+          title: "อนุมัติสลับคาบ",
+          description: "ตรวจคาบทั้งสองขาและผลตรวจชน แล้วอนุมัติหรือไม่อนุมัติ",
+          steps: ["เลือกคำขอ", "ตรวจคาบและผลตรวจชน", "บันทึกผลพิจารณา"]
         },
         "warning.html": {
           title: "กรองกลุ่มที่ต้องติดตาม",
