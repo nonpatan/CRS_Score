@@ -367,13 +367,25 @@
   .pp6-comment { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
   .pp6-line { border-bottom:1px dotted #000; height:24px; }
   .pp6-sign { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px; text-align:center; break-inside:avoid; font-size:13px; }
-  .pp6-sign-line { margin-top:24px; border-top:1px dotted #000; padding-top:2px; font-size:14px; }
+  .pp6-sign-line { margin-top:24px; white-space:nowrap; }
+  .pp6-sign-dots { display:inline-block; width:38mm; border-bottom:1px dotted #000; }
+  .pp6-sign-name { font-size:14px; overflow-wrap:anywhere; }
   .pp6-printed { font-size:12px; text-align:right; margin-top:10px; }
   @media print {
     @page { size:A4 portrait; margin:12mm; }
     /* พิมพ์ ปพ.6: ซ่อนทุกอย่างใน main เหลือใบเดียว (ความเจาะจงสูงกว่ากฎใบตามงานด้านล่าง) */
     body.printing-pp6 main.academic-content > :not(#pp6-print-area), body.printing-pp6 main.academic-content > #competency-report { display:none !important; }
     body.printing-pp6 main.academic-content > #pp6-print-area { display:block !important; }
+    body.printing-pp6 { background:#fff !important; min-height:0; }
+    /* ตัดระยะของ header หน้าเว็บและกระชับตารางเพื่อเหลือพื้นที่ให้ช่องเขียนและช่องเซ็น */
+    .pp6-paper .pp6-head { padding:0; margin:0; }
+    .pp6-paper .pp6-info { margin-block:6px; padding-block:4px; }
+    .pp6-paper .pp6-table { font-size:13px; }
+    .pp6-paper .pp6-table :is(th,td) { padding-block:1px; }
+    .pp6-paper .pp6-outcomes .pp6-table { font-size:12px; }
+    .pp6-paper .pp6-sec { margin-top:6px; }
+    .pp6-paper .pp6-sec h2 { margin-bottom:3px; }
+    .pp6-paper .pp6-printed { margin-top:6px; }
     body { padding:0 !important; margin:0 !important; background:#fff !important; color:#000 !important; font-size:14px; }
     .wrap { max-width:none !important; width:100% !important; padding:0 !important; margin:0 !important; }
     .wrap > header, .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print,
@@ -4230,21 +4242,24 @@ function pp6TailHtml(d, commentTitle, parentTitle) {
     ? d.activities.map((a, i) => "<tr><td class='c'>" + (i + 1) + "</td><td>" + escapeHtml(a.name) + "</td><td class='c" +
       (a.result === "รอผล" ? " pend" : "") + "'>" + escapeHtml(a.result) + "</td></tr>").join("")
     : "<tr class='blank'><td></td><td></td><td></td></tr><tr class='blank'><td></td><td></td><td></td></tr>";
-  const traits = Array.isArray(d.traits) && (d.student?.room?.startsWith("ป.") || d.student?.room?.startsWith("ม."))
-    ? "<section class='pp6-sec'><h2>คุณลักษณะอันพึงประสงค์</h2><table class='pp6-table pp6-traits'><thead><tr><th>ข้อ</th><th>ระดับ</th></tr></thead><tbody>" +
+  let sectionNo = 3;
+  const traits = Array.isArray(d.traits) && (d.traits.length || d.traitError) &&
+    (d.student?.room?.startsWith("ป.") || d.student?.room?.startsWith("ม."))
+    ? "<section class='pp6-sec'><h2>" + sectionNo++ + ". คุณลักษณะอันพึงประสงค์</h2><table class='pp6-table pp6-traits'><thead><tr><th>ข้อ</th><th>ระดับ</th></tr></thead><tbody>" +
       (d.traitError ? "<tr><td colspan='2'>" + escapeHtml(d.traitError) + "</td></tr>" : "") + d.traits.map(t => "<tr><td>" + escapeHtml(t.name) + "</td><td class='c'>" + (t.level === null ? "—" : escapeHtml(["ไม่ผ่าน", "ผ่าน", "ดี", "ดีเยี่ยม"][t.level] || "—")) + "</td></tr>").join("") + "</tbody></table></section>" : "";
   const comment = String(d.comment || "").trim();
   const parentComment = String(d.parentComment || "").trim();
+  const signature = (name, role) => "<div><div class='pp6-sign-line'>ลงชื่อ <span class='pp6-sign-dots'></span></div>" +
+    "<div class='pp6-sign-name'>(" + escapeHtml(name || "........................................") + ")</div><div>" + role + "</div></div>";
   return (traits ? "<div class='pp6-outcomes'>" : "") + "<section class='pp6-sec'><h2>2. สมรรถนะหลัก</h2><table class='pp6-table'><thead><tr><th>ด้าน</th><th>คะแนน (เต็ม 100)</th><th>ระดับ</th></tr></thead><tbody>" + comps + "</tbody></table>" +
       (levelText ? "<div class='pp6-note'>ระดับ: " + levelText + " · ประเมินจากรายวิชา กิจกรรม และกิจวัตรประจำวัน</div>" : "") + "</section>" + traits + (traits ? "</div>" : "") +
-    "<section class='pp6-sec'><h2>3. กิจกรรมพัฒนาผู้เรียน</h2><table class='pp6-table'><thead><tr><th>ที่</th><th>กิจกรรม</th><th>ผลการประเมิน</th></tr></thead><tbody>" + acts + "</tbody></table></section>" +
-    "<section class='pp6-sec'><h2>4. " + commentTitle + "</h2>" +
+    "<section class='pp6-sec'><h2>" + sectionNo++ + ". กิจกรรมพัฒนาผู้เรียน</h2><table class='pp6-table'><thead><tr><th>ที่</th><th>กิจกรรม</th><th>ผลการประเมิน</th></tr></thead><tbody>" + acts + "</tbody></table></section>" +
+    "<section class='pp6-sec'><h2>" + sectionNo++ + ". " + commentTitle + "</h2>" +
       (comment ? "<p class='pp6-comment'>" + escapeHtml(comment) + "</p>" : "<div class='pp6-line'></div><div class='pp6-line'></div>") + "</section>" +
-    "<section class='pp6-sec'><h2>5. " + parentTitle + "</h2>" +
+    "<section class='pp6-sec'><h2>" + sectionNo + ". " + parentTitle + "</h2>" +
       (parentComment ? "<p class='pp6-comment'>" + escapeHtml(parentComment) + "</p>" : "<div class='pp6-line'></div><div class='pp6-line'></div><div class='pp6-line'></div>") + "</section>" +
-    "<div class='pp6-sign'><div><div class='pp6-sign-line'>(" + escapeHtml(d.signHomeroom || "........................................") + ")</div><div>ครูประจำชั้น</div></div>" +
-      "<div><div class='pp6-sign-line'>(" + escapeHtml(d.director || "........................................") + ")</div><div>ผู้อำนวยการโรงเรียน</div></div>" +
-      "<div><div class='pp6-sign-line'>(........................................)</div><div>ผู้ปกครอง</div></div></div>" +
+    "<div class='pp6-sign'>" + signature(d.signHomeroom, "ครูประจำชั้น") +
+      signature(d.director, "ผู้อำนวยการโรงเรียน") + signature(null, "ผู้ปกครอง") + "</div>" +
     "<div class='pp6-printed'>พิมพ์จากระบบ CRS MIS" + (d.printedDate ? " · " + escapeHtml(d.printedDate) : "") + "</div>";
 }
 

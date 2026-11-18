@@ -38,6 +38,7 @@
   select:focus, input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .field { margin-bottom: 14px; } .field:last-child { margin-bottom: 0; }
   .field-note { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .prefix-error { color: var(--danger); }
   button { font-family: inherit; font-size: 15px; font-weight: 600; padding: 10px 14px;
            border: none; border-radius: 8px; min-height: 44px; cursor: pointer; }
   button.primary { background: var(--teal); color: var(--white); }
@@ -195,6 +196,11 @@
           <div class="detail-body" id="detail-body" hidden>
             <div id="editor-host"></div>
             <div id="add-form" hidden>
+              <div class="field"><label for="new-prefix">คำนำหน้า</label>
+                <input id="new-prefix" type="text" list="staff-prefix-options" aria-describedby="new-prefix-help new-prefix-error">
+                <div id="new-prefix-help" class="field-note">ใช้ในเอกสารพิมพ์ เช่น ปพ.6 หนังสือเตือน · ว่างได้</div>
+                <div id="new-prefix-error" class="field-note prefix-error" role="alert" hidden>กรอกคำนำหน้าได้ไม่เกิน 40 ตัวอักษร</div>
+              </div>
               <div class="field"><label for="new-name">ชื่อ-นามสกุล</label>
                 <input id="new-name" type="text" aria-describedby="new-name-error" autocomplete="name">
                 <div id="new-name-error" class="field-note" role="alert" hidden>กรุณากรอกชื่อ-นามสกุล</div></div>
@@ -210,6 +216,14 @@
               </fieldset>
               <button type="button" id="btn-add" class="primary">เพิ่มบุคลากร</button>
             </div>
+            <datalist id="staff-prefix-options">
+              <option value="นาย"></option>
+              <option value="นาง"></option>
+              <option value="นางสาว"></option>
+              <option value="ว่าที่ร้อยตรี"></option>
+              <option value="ว่าที่ร้อยตรีหญิง"></option>
+              <option value="ดร."></option>
+            </datalist>
           </div>
           <div id="detail-foot" class="d-foot" hidden><span id="dirty-status" role="status">ยังไม่มีการแก้ไข</span>
             <button type="button" class="plain" id="btn-cancel">ยกเลิก</button>
@@ -363,6 +377,7 @@ if (session) {
     const s = staffList.find(row => row.id === box.dataset.editor);
     if (!s) return false;
     const get = key => box.querySelector(`[data-f="${key}"]`);
+    if ((get("prefix").value.trim() || null) !== (s.prefix ?? null)) return true;
     const current = staffPositionCodes.get(s.id) || new Set();
     const desired = new Set(selectedPositionCodes(box));
     if (current.size !== desired.size || [...current].some(code => !desired.has(code))) return true;
@@ -376,7 +391,7 @@ if (session) {
   function hasPendingChanges() {
     if (panelMode === "edit") return isDirty();
     if (panelMode !== "add") return false;
-    return !!el("new-name").value.trim() || !el("new-exempt").checked ||
+    return !!el("new-prefix").value.trim() || !!el("new-name").value.trim() || !el("new-exempt").checked ||
       selectedPositionCodes(el("new-position-list")).length > 0;
   }
 
@@ -414,6 +429,13 @@ if (session) {
       <div><h2 tabindex="-1">${esc(s.full_name)}</h2><div class="detail-meta">${esc(s.jibble_code || "ไม่มีรหัส Jibble")}${s.email ? " · " + esc(s.email) : ""}</div></div>
       <button type="button" class="plain detail-close" data-close-sheet>ปิด</button>`;
     el("editor-host").innerHTML = `<div data-editor="${esc(s.id)}">
+      <fieldset>
+        <div class="field"><label for="staff-prefix">คำนำหน้า</label>
+          <input id="staff-prefix" type="text" data-f="prefix" list="staff-prefix-options" value="${esc(s.prefix ?? "")}" aria-describedby="staff-prefix-help staff-prefix-error">
+          <div id="staff-prefix-help" class="field-note">ใช้ในเอกสารพิมพ์ เช่น ปพ.6 หนังสือเตือน · ว่างได้</div>
+          <div id="staff-prefix-error" class="field-note prefix-error" role="alert" hidden>กรอกคำนำหน้าได้ไม่เกิน 40 ตัวอักษร</div>
+        </div>
+      </fieldset>
       <fieldset><legend class="section">ตำแหน่ง · เลือกได้หลายอัน</legend>
         <div class="position-options">${positionOptionsHtml(selectedCodes)}</div>
         <div class="field-note">ไม่มีตำแหน่งที่ต้องการ? เพิ่มได้ที่หน้า <a href="hr-settings.html">ตั้งค่างานบุคคล</a></div>
@@ -497,7 +519,18 @@ if (session) {
       okLabel:"ทิ้งการแก้ไข", danger:true });
   }
 
+  function validatePrefix(input) {
+    const valid = Array.from(input.value.trim()).length <= 40;
+    el(input.id + "-error").hidden = valid;
+    if (valid) input.removeAttribute("aria-invalid");
+    else input.setAttribute("aria-invalid", "true");
+    return valid;
+  }
+
   function resetNewForm() {
+    const prefix = el("new-prefix");
+    prefix.value = "";
+    validatePrefix(prefix);
     el("new-name").value = "";
     el("new-name-error").hidden = true;
     el("new-exempt").checked = true;
@@ -512,7 +545,7 @@ if (session) {
     el("detail-shade").classList.add("open");
     el("detail").setAttribute("role", "dialog");
     el("detail").setAttribute("aria-modal", "true");
-    (panelMode === "add" ? el("new-name") : el("detail-head").querySelector("h2"))?.focus();
+    (panelMode === "add" ? el("new-prefix") : el("detail-head").querySelector("h2"))?.focus();
   }
 
   function hideSheet() {
@@ -628,8 +661,11 @@ if (session) {
     const box = document.querySelector(`[data-editor="${staffId}"]`);
     if (!box) return;
     const get = f => box.querySelector(`[data-f="${f}"]`);
+    const prefix = get("prefix");
+    if (!validatePrefix(prefix)) { prefix.focus(); return; }
     const isActiveInput = get("is_active");
     const payload = {
+      prefix: prefix.value.trim() || null,
       allowed_late_time: get("allowed_late_time").value || null,
       user_id: get("user_id").value || null,
       exempt: get("exempt").checked,
@@ -659,6 +695,9 @@ if (session) {
 
   // ---------- เหตุการณ์ ----------
   el("q").addEventListener("input", render);
+  el("detail").addEventListener("focusout", event => {
+    if (event.target.matches('input[list="staff-prefix-options"]')) validatePrefix(event.target);
+  });
   el("detail").addEventListener("input", ev => {
     if (!ev.target.matches('[data-f="allowed_late_time"]')) return;
     const warning = ev.target.closest(".field")?.querySelector("[data-permanent-warning]");
@@ -690,6 +729,8 @@ if (session) {
   });
 
   el("btn-add")?.addEventListener("click", async () => {
+    const prefix = el("new-prefix");
+    if (!validatePrefix(prefix)) { prefix.focus(); return; }
     const name = el("new-name").value.trim();
     if (!name) { el("new-name-error").hidden = false; el("new-name").focus(); toast("กรุณากรอกชื่อ-นามสกุล", true); return; }
     el("new-name-error").hidden = true;
@@ -698,6 +739,7 @@ if (session) {
     btn.disabled = true;
     const { data: inserted, error } = await sb.from("staff").insert({
       full_name: name,
+      prefix: prefix.value.trim() || null,
       exempt: el("new-exempt").checked,
       is_active: true
     }).select("id").single();
@@ -720,11 +762,7 @@ if (session) {
       }
     }
     btn.disabled = false;
-    el("new-name").value = "";
-    el("new-position-list").querySelectorAll("[data-position-code]").forEach(input => {
-      input.checked = false;
-    });
-    el("new-exempt").checked = true;
+    resetNewForm();
     selectedId = null;
     panelMode = "empty";
     render(true);
