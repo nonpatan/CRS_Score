@@ -322,6 +322,7 @@
   /* ใบ ปพ.6 + ความเห็นครูประจำชั้น (แท็บผลการเรียนรายคน · มัธยม) */
   .external-result-label { display:inline-block; font-size:13px; color:var(--teal); background:var(--teal-soft); padding:2px 6px; border-radius:6px; }
   #pp6-print-area { display:none; }
+  #pp6-print-area.pp6-measuring { display:block; position:fixed; top:0; left:-10000px; visibility:hidden; width:186mm; height:273mm; }
   #gpa-report .pp6-panel { border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
   #gpa-report .pp6-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
   #gpa-report .pp6-actions button, #gpa-report .pp6-comment-row button { font:inherit; font-size:16px; font-weight:600; min-height:44px; padding:0 18px; border:0; cursor:pointer; }
@@ -336,7 +337,7 @@
   #gpa-report .pp6-comment-card textarea:focus-visible { outline:2px solid var(--teal); outline-offset:1px; }
   #gpa-report .pp6-comment-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
   #gpa-report .pp6-msg { font-size:14px; color:var(--muted); }
-  .pp6-paper { color:#000; font-size:14px; line-height:1.4; }
+  .pp6-paper { margin-inline:1px; color:#000; font-size:14px; line-height:1.4; }
   .pp6-head { display:grid; grid-template-columns:64px 1fr 64px; align-items:center; gap:8px; text-align:center; }
   .pp6-head img { width:56px; height:56px; object-fit:contain; }
   .pp6-school { font-size:17px; font-weight:700; }
@@ -371,21 +372,21 @@
   .pp6-sign-dots { display:inline-block; width:38mm; border-bottom:1px dotted #000; }
   .pp6-sign-name { font-size:14px; overflow-wrap:anywhere; }
   .pp6-printed { font-size:12px; text-align:right; margin-top:10px; }
+  /* ใช้ระยะเดียวกันตอนวัดบนจอและตอนพิมพ์ */
+  .pp6-paper .pp6-head { padding:0; margin:0; }
+  .pp6-paper .pp6-info { margin-block:6px; padding-block:4px; }
+  .pp6-paper .pp6-table { font-size:13px; line-height:1.3; }
+  .pp6-paper .pp6-table :is(th,td) { padding-block:0; }
+  .pp6-paper .pp6-outcomes .pp6-table { font-size:12px; }
+  .pp6-paper .pp6-sec { margin-top:6px; }
+  .pp6-paper .pp6-sec h2 { margin-bottom:3px; }
+  .pp6-paper .pp6-printed { margin-top:6px; }
   @media print {
     @page { size:A4 portrait; margin:12mm; }
     /* พิมพ์ ปพ.6: ซ่อนทุกอย่างใน main เหลือใบเดียว (ความเจาะจงสูงกว่ากฎใบตามงานด้านล่าง) */
     body.printing-pp6 main.academic-content > :not(#pp6-print-area), body.printing-pp6 main.academic-content > #competency-report { display:none !important; }
     body.printing-pp6 main.academic-content > #pp6-print-area { display:block !important; }
     body.printing-pp6 { background:#fff !important; min-height:0; }
-    /* ตัดระยะของ header หน้าเว็บและกระชับตารางเพื่อเหลือพื้นที่ให้ช่องเขียนและช่องเซ็น */
-    .pp6-paper .pp6-head { padding:0; margin:0; }
-    .pp6-paper .pp6-info { margin-block:6px; padding-block:4px; }
-    .pp6-paper .pp6-table { font-size:13px; }
-    .pp6-paper .pp6-table :is(th,td) { padding-block:1px; }
-    .pp6-paper .pp6-outcomes .pp6-table { font-size:12px; }
-    .pp6-paper .pp6-sec { margin-top:6px; }
-    .pp6-paper .pp6-sec h2 { margin-bottom:3px; }
-    .pp6-paper .pp6-printed { margin-top:6px; }
     body { padding:0 !important; margin:0 !important; background:#fff !important; color:#000 !important; font-size:14px; }
     .wrap { max-width:none !important; width:100% !important; padding:0 !important; margin:0 !important; }
     .wrap > header, .nav, .app-shell, .app-sidebar, .workflow, .toast, .no-print,
@@ -4524,9 +4525,31 @@ async function pp6LoadCompetencies(student, year, grade, term, half = "กลา
   }) };
 }
 
+function pp6PrintZoom(paperHeight, pageHeight) {
+  return Math.min(1, Math.max(0.85, pageHeight * 0.97 / paperHeight));
+}
+
+async function pp6FitPrintPage(area) {
+  const paper = area.querySelector(".pp6-paper");
+  area.classList.add("pp6-measuring");
+  try {
+    // จัดเลย์เอาต์ก่อนรอฟอนต์ เพื่อเริ่มโหลดอักขระที่มีเฉพาะในใบพิมพ์
+    const pageHeight = area.getBoundingClientRect().height;
+    await document.fonts.ready;
+    const zoom = pp6PrintZoom(paper.getBoundingClientRect().height, pageHeight);
+    if (zoom < 1) paper.style.zoom = zoom;
+  } finally {
+    area.classList.remove("pp6-measuring");
+  }
+}
+
+let pp6PrintInProgress = false;
+
 async function printPp6(student, button) {
+  if (pp6PrintInProgress) return;
   const status = button.parentElement.querySelector(".pp6-print-status");
   const scope = pp6Scope(), year = elGpaYear.value, grade = elGpaGrade.value, term = scope.term, classroom = student.classroom || "";
+  pp6PrintInProgress = true;
   button.disabled = true; status.textContent = "กำลังเตรียมใบ ปพ.6…";
   try {
     const subjects = (gpaResultsMap && gpaResultsMap.get(student.id)?.subjects) || [];
@@ -4562,12 +4585,14 @@ async function printPp6(student, button) {
       director:signers.directorName || "", printedDate:thaiLetterDateText(toDateStr(bangkokNow()))
     };
     area.innerHTML = scope.primary ? buildPp6PrimaryHtml(sheet) : buildPp6Html(sheet);
+    await pp6FitPrintPage(area);
     document.body.classList.add("printing-pp6");
     status.textContent = "";
     window.print();
   } catch (error) {
     status.textContent = "เตรียมใบไม่สำเร็จ: " + (error?.message || String(error));
   } finally {
+    pp6PrintInProgress = false;
     button.disabled = false;
   }
 }
