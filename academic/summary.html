@@ -4530,19 +4530,17 @@ async function printPp6(student, button) {
   button.disabled = true; status.textContent = "กำลังเตรียมใบ ปพ.6…";
   try {
     const subjects = (gpaResultsMap && gpaResultsMap.get(student.id)?.subjects) || [];
-    const [homerooms, signers, school, me, allowed] = await Promise.all([
+    const [homerooms, signers, school, me, commentResult] = await Promise.all([
       listHomeroomTeachers(year, grade, classroom).catch(() => []),
       loadLetterSigners(year, grade, classroom).catch(() => ({})),
       getSetting("receipt_school_name").catch(() => ""),
       sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
-      pp6CanAccess(student.id, year)
+      // ให้ RLS ตัดสินสิทธิ์อ่านสำหรับใบพิมพ์ ส่วนกล่องแก้ไขตรวจสิทธิ์เขียนแยก
+      sb.from("student_term_comments").select("comment,parent_comment")
+        .eq("student_id", student.id).eq("year", year).eq("term", term).maybeSingle()
     ]);
-    let comment = "", parentComment = "";
-    if (allowed) {
-      const row = await sb.from("student_term_comments").select("comment,parent_comment")
-        .eq("student_id", student.id).eq("year", year).eq("term", term).maybeSingle();
-      if (!row.error && row.data) { comment = row.data.comment || ""; parentComment = row.data.parent_comment || ""; }
-    }
+    const comments = commentResult.error ? null : commentResult.data;
+    const comment = comments?.comment || "", parentComment = comments?.parent_comment || "";
     let competencies = [], levels = [], competencyError = "";
     try { const loaded = await pp6LoadCompetencies(student, year, grade, scope.primary ? "" : term, scope.half); competencies = loaded.rows; levels = loaded.levels; }
     catch (error) { competencyError = "โหลดสมรรถนะไม่สำเร็จ"; }
