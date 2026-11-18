@@ -241,11 +241,11 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, getAcademicYears, academicYearOf,
-  getStudentPlacements, getActiveStudents, isRegularStudent, loadDailyAttendanceToday, roomsFromPlacements,
+  fetchAllRows, fetchAllRowsByIds, getStudentPlacements, getActiveStudents, isRegularStudent, loadDailyAttendanceToday, roomsFromPlacements,
   summarizeDailyAttendance, isPlacementInactive, activePlacements, bangkokNow, toDateStr,
   getMyCoverageFor, getSetting, getDailyAttendanceCutoff, firstCheckTimeByRoom,
   classifyCheckTiming, needsLateReason, cutoffForGrade, CHECK_TIMING_LABEL
-} from "../supabase-client.js?v=20261117-1";
+} from "../supabase-client.js?v=20261118-1";
 
 const el = id => document.getElementById(id);
 const today = toDateStr(bangkokNow());
@@ -495,7 +495,7 @@ async function loadYearContext(dateStr) {
   const [placementRes, activeStudents, studentStatusRes, homeroomRes, ownStaffRes, myCoverage] = await Promise.all([
     getStudentPlacements(currentYear),
     getActiveStudents(),
-    sb.from("students").select("id,status"),
+    fetchAllRows(() => sb.from("students").select("id,status")),
     sb.from("homeroom_teachers").select("year,grade_level,classroom,staff_id").eq("year", currentYear),
     sb.from("staff").select("id").eq("user_id", session.user.id).maybeSingle(),
     getMyCoverageFor(dateStr)
@@ -686,11 +686,11 @@ async function loadRoomLeaves(room, dateStr, version, background = false) {
     el("leave-feedback").textContent = "กำลังโหลดใบลาจากผู้ปกครอง… · เช็คชื่อต่อได้";
   }
   try {
-    const { data, error } = await sb.from("leave_requests")
+    const { data, error } = await fetchAllRows(() => sb.from("leave_requests")
       .select("id,student_id,leave_type,start_date,end_date,reason,status,created_at")
+      // scale-ok: รายชื่อนักเรียนในห้องที่เลือก
       .in("student_id", ids)
-      .or(`and(start_date.lte.${dateStr},end_date.gte.${dateStr}),status.eq.รออนุมัติ`)
-      .order("created_at", { ascending:true });
+      .or(`and(start_date.lte.${dateStr},end_date.gte.${dateStr}),status.eq.รออนุมัติ`), ["created_at", "id"]);
     if (error) throw error;
     if (!isCurrent()) return;
     leaveRequests = (data || []).filter(row => ids.includes(row.student_id));
@@ -1008,18 +1008,16 @@ el("attend-date").addEventListener("change", async () => {
 async function findSubjectAttendance(absentPlacements, dateStr) {
   const ids = absentPlacements.map(p => p.student_id);
   const subjectNames = new Map();
-  for (let i = 0; i < ids.length; i += 150) {
-    const { data, error } = await sb.from("attendance_records")
-      .select("student_id,status,attendance_sessions!inner(session_date,subjects(name))")
-      .in("student_id", ids.slice(i, i + 150))
-      .in("status", ["มา", "มาสาย"])
-      .eq("attendance_sessions.session_date", dateStr);
-    if (error) throw error;
-    for (const row of data || []) {
-      if (!subjectNames.has(row.student_id)) subjectNames.set(row.student_id, new Set());
-      const name = row.attendance_sessions?.subjects?.name;
-      if (name) subjectNames.get(row.student_id).add(name);
-    }
+  const { data, error } = await fetchAllRowsByIds(chunk => sb.from("attendance_records")
+    .select("student_id,status,attendance_sessions!inner(session_date,subjects(name))")
+    .in("student_id", chunk)
+    .in("status", ["มา", "มาสาย"])
+    .eq("attendance_sessions.session_date", dateStr), ids, "id", 150);
+  if (error) throw error;
+  for (const row of data || []) {
+    if (!subjectNames.has(row.student_id)) subjectNames.set(row.student_id, new Set());
+    const name = row.attendance_sessions?.subjects?.name;
+    if (name) subjectNames.get(row.student_id).add(name);
   }
   return absentPlacements.filter(p => subjectNames.has(p.student_id)).map(placement => ({
     placement, subjects:[...subjectNames.get(placement.student_id)]

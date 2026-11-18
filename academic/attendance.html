@@ -633,7 +633,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadLessonPlanChoices, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder, fetchAllRows } from "../supabase-client.js?v=20261117-1";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadLessonPlanChoices, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder, fetchAllRows, fetchAllRowsByIds } from "../supabase-client.js?v=20261118-1";
 import { planOverallStatus } from "./lesson-plans.js?v=5";
 import { loadTimetableForDate, daySlots, normalizeDetails, attendancePeriodsOf } from "./timetable-fet.js?v=20261102-3";
 
@@ -2437,8 +2437,8 @@ async function computeMissedMap(subjectIds, seq = loadSeq) {
   if (memberMode) memberMissedMap = {};
   if (!subjectIds || subjectIds.length === 0) return;
   const [attendance, makeup] = await Promise.all([
-    sb.from("attendance_sessions").select("subject_id, periods_covered, attendance_records(status, student_id)").in("subject_id", subjectIds),
-    sb.from("makeup_hours").select("subject_id, student_id, periods").in("subject_id", subjectIds)
+    fetchAllRowsByIds(ids => sb.from("attendance_sessions").select("subject_id, periods_covered, attendance_records(status, student_id)").in("subject_id", ids), subjectIds),
+    fetchAllRowsByIds(ids => sb.from("makeup_hours").select("subject_id, student_id, periods").in("subject_id", ids), subjectIds)
   ]).catch(() => [{ error:true }, { error:true }]);
   if (seq !== loadSeq) return;
   const primary = isPrimaryGrade(pickedSubject?.grade_level || elFilterGrade.value);
@@ -3191,8 +3191,8 @@ async function loadMakeupBasis(subjectId, studentIds = []) {
   const ids = [...new Set(parentId ? integrationMap.get(parentId) : [subjectId])];
   const [subjectsResult, sessionsResult, makeupResult] = await Promise.all([
     sb.from("subjects").select("id,name,total_periods,exam_first_closed_at").in("id", ids),
-    sb.from("attendance_sessions").select("subject_id, periods_covered, attendance_records(status, student_id)").in("subject_id", ids),
-    sb.from("makeup_hours").select("*, student:student_id(*)").in("subject_id", ids).order("created_at")
+    fetchAllRowsByIds(chunk => sb.from("attendance_sessions").select("subject_id, periods_covered, attendance_records(status, student_id)").in("subject_id", chunk), ids),
+    fetchAllRowsByIds(chunk => sb.from("makeup_hours").select("*, student:student_id(*)").in("subject_id", chunk), ids, ["created_at", "id"])
   ]);
   for (const result of [subjectsResult, sessionsResult, makeupResult]) {
     if (result.error) throw new Error(result.error.message);

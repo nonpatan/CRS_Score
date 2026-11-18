@@ -215,7 +215,7 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 <div id="toast" class="toast"></div>
 </main></div>
 <script type="module">
-import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261117-1";
+import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, fetchAllRowsByIds, ID_CHUNK, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261118-1";
 const $ = id => document.getElementById(id);
 function escapeHtml(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 const session = await requireAuth();
@@ -980,7 +980,7 @@ async function reloadTouchedScores(keys, exam, subjectId) {
   }
   const ids = [...new Set(keys.map(key => key.split(":")[0]))];
   if (!ids.length) return;
-  const result = await fetchAllRows(() => sb.from("scores").select("*").in("collection_id",ids));
+  const result = await fetchAllRowsByIds(chunk => sb.from("scores").select("*").in("collection_id",chunk), ids);
   if (result.error) throw new Error(result.error.message);
   for (const collection of allCollections()) if (ids.includes(collection.id)) collection.scores = result.data.filter(row => row.collection_id === collection.id);
 }
@@ -992,10 +992,36 @@ async function saveScores() {
   const rows = upserts.map(({key,value}) => { const [collectionId,studentId] = key.split(":"); return exam ? { subject_id:currentSubject.id, student_id:studentId, half:isPrimaryEntry() ? entryHalf : null, raw_score:value, updated_at:new Date().toISOString() } : { collection_id:collectionId, student_id:studentId, raw_score:value, updated_at:new Date().toISOString() }; });
   let success = true, reason = "";
   try {
-    if (rows.length) { const result = await sb.from(table).upsert(rows,{ onConflict:exam ? "subject_id,student_id,half" : "student_id,collection_id" }).select("id"); if (result.error || result.data?.length !== rows.length) { success = false; reason = result.error?.message || "บันทึกได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา"; } }
+    for (let start = 0; start < rows.length; start += 1000) {
+      const chunk = rows.slice(start, start + 1000);
+      const result = await sb.from(table).upsert(chunk,{ onConflict:exam ? "subject_id,student_id,half" : "student_id,collection_id" }).select("id");
+      if (result.error || result.data?.length !== chunk.length) {
+        success = false;
+        reason = result.error?.message || "บันทึกได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา";
+        break;
+      }
+    }
     if (deletes.length) {
       const groups = new Map(); for (const key of deletes) { const [collectionId,studentId] = key.split(":"); const list = groups.get(collectionId) || []; list.push(studentId); groups.set(collectionId,list); }
-      for (const [collectionId, ids] of groups) { const result = exam ? await (isPrimaryEntry() ? sb.from("exam_scores").delete().eq("subject_id",currentSubject.id).eq("half",entryHalf) : sb.from("exam_scores").delete().eq("subject_id",currentSubject.id).is("half",null)).in("student_id",ids).select("id") : await sb.from("scores").delete().eq("collection_id",collectionId).in("student_id",ids).select("id"); if (result.error || result.data?.length !== ids.length) { success = false; reason += " ลบได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา"; } }
+      for (const [collectionId, ids] of groups) {
+        for (let start = 0; start < ids.length; start += ID_CHUNK) {
+          const chunk = ids.slice(start, start + ID_CHUNK);
+          let query;
+          if (exam) {
+            query = sb.from("exam_scores").delete().eq("subject_id", subjectId);
+            query = isPrimaryEntry() ? query.eq("half",entryHalf) : query.is("half",null);
+          } else {
+            query = sb.from("scores").delete().eq("collection_id", collectionId);
+          }
+          // scale-ok: แบ่งรหัสนักเรียนสำหรับลบผลทีละไม่เกิน ID_CHUNK
+          const result = await query.in("student_id", chunk).select("id");
+          if (result.error || result.data?.length !== chunk.length) {
+            success = false;
+            reason += " ลบได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา";
+            break;
+          }
+        }
+      }
     }
     if (success) applySavedScoreChanges(rows, deletes, exam);
     else await reloadTouchedScores([...upserts.map(row => row.key), ...deletes], exam, subjectId);

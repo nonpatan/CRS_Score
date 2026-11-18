@@ -388,13 +388,13 @@
 <script type="module">
   import {
     sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
-    getActiveStudents, loadGradeWeights, loadSubjectsData, computeAttendanceRisk, isPrimaryGrade,
+    getActiveStudents, fetchAllRowsByIds, loadGradeWeights, loadSubjectsData, computeAttendanceRisk, isPrimaryGrade,
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, MS_MAKEUP_RATIO,
     getSetting, homeroomAuditRoomLabel, SCHOOL_LETTER_CSS, renderSchoolLetter,
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
     loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
     bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-  } from "../supabase-client.js?v=20261117-1";
+  } from "../supabase-client.js?v=20261118-1";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -966,12 +966,15 @@ function decorateWarningReport(total, grade, warnPercent) {
       }
       const subjectIds = subjects.map(s => s.id);
 
-      // ดึง enrollments สำหรับเด็กห้องนี้ในวิชาของปีนี้
-      const { data: enrolls, error: errEn } = await sb.from("enrollments")
-        .select("*")
-        .in("student_id", targetStudentIds)
-        .in("subject_id", subjectIds);
-      if (errEn) throw errEn;
+      // ดึงรายชื่อลงทะเบียนของทั้งชั้น แบ่งทั้งรหัสนักเรียนและวิชา
+      const enrolls = [];
+      for (let start = 0; start < subjectIds.length; start += 100) {
+        const subjectsChunk = subjectIds.slice(start, start + 100);
+        const { data, error } = await fetchAllRowsByIds(ids => sb.from("enrollments").select("*")
+          .in("student_id", ids).in("subject_id", subjectsChunk), targetStudentIds, "id", 100);
+        if (error) throw error;
+        enrolls.push(...data);
+      }
 
       // ดึง integration_members ของวิชาบูรณาการในปีนี้
       const { data: intMembers, error: errInt } = await sb.from("integration_members")

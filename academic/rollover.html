@@ -325,8 +325,8 @@
 import { isRegularStudent,
   sb, requireAuth, signOut, getProfile, isAcademicHead, checkDepartment,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
-  getSetting, setSetting, GRADE_ORDER, PRE_SCHOOL_GRADE, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements
-} from "../supabase-client.js?v=20261117-1";
+  getSetting, setSetting, GRADE_ORDER, PRE_SCHOOL_GRADE, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements, fetchAllRowsByIds
+} from "../supabase-client.js?v=20261118-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1064,9 +1064,9 @@ btnRun.addEventListener("click", async () => {
     // ห้ามเดาจาก students ปัจจุบัน เพราะถ้าเลือกปีเก่า ค่านั้นอาจถูกเลื่อนชั้นทับไปแล้ว
     addLog("• กำลังตรวจประวัติชั้น/ห้องของปีต้นทาง...");
     const activeStudentIds = activeStudents.map(student => student.id);
-    const { data: sourcePlacements, error: sourcePlacementError } = activeStudentIds.length
-      ? await sb.from("student_year_placements").select("student_id").eq("year", src).in("student_id", activeStudentIds)
-      : { data: [], error: null };
+    const { data: sourcePlacements, error: sourcePlacementError } = await fetchAllRowsByIds(
+      ids => sb.from("student_year_placements").select("student_id").eq("year", src).in("student_id", ids),
+      activeStudentIds);
     if (sourcePlacementError) throw new Error("อ่านประวัติชั้น/ห้องไม่สำเร็จ: " + sourcePlacementError.message);
     const placedStudentIds = new Set((sourcePlacements || []).map(row => row.student_id));
     const missingPlacementCount = activeStudentIds.filter(id => !placedStudentIds.has(id)).length;

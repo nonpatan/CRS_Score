@@ -172,7 +172,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements, getSetting, availableCompetencyStages } from "../supabase-client.js?v=20261117-1";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements, getSetting, availableCompetencyStages, fetchAllRowsByIds, ID_CHUNK } from "../supabase-client.js?v=20261118-1";
 const session=await requireAuth();
 if(!session){
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -473,28 +473,44 @@ $("btn-save-activity-pass").addEventListener("click", async () => {
   }
   const button = $("btn-save-activity-pass");
   button.disabled = true;
+  const assessmentId = current.id;
+  const saveRows = async () => {
+    let saved = 0;
+    for (let start = 0; start < rows.length; start += 1000) {
+      const chunk = rows.slice(start, start + 1000);
+      const { data, error } = await sb.from("activity_pass_results").upsert(chunk, { onConflict:"assessment_id,student_id" }).select("id");
+      if (error) return { saved, error };
+      saved += (data || []).length;
+    }
+    return { saved, error: null };
+  };
+  const deleteRows = async () => {
+    let removed = 0;
+    for (let start = 0; start < removeIds.length; start += ID_CHUNK) {
+      const chunk = removeIds.slice(start, start + ID_CHUNK);
+      // scale-ok: แบ่งรหัสนักเรียนสำหรับลบผลทีละไม่เกิน ID_CHUNK
+      const { data, error } = await sb.from("activity_pass_results").delete().eq("assessment_id", assessmentId).in("student_id", chunk).select("id");
+      if (error) return { error };
+      removed += (data || []).length;
+    }
+    return { removed, error: null };
+  };
   const [saveResult, deleteResult] = await Promise.all([
-    rows.length
-      ? sb.from("activity_pass_results").upsert(rows, { onConflict:"assessment_id,student_id" }).select("id")
-      : Promise.resolve({ data:[], error:null }),
-    removeIds.length
-      ? sb.from("activity_pass_results").delete().eq("assessment_id", current.id).in("student_id", removeIds).select("id")
-      : Promise.resolve({ data:[], error:null })
+    saveRows(), deleteRows()
   ]);
-  button.disabled = false;
   const error = saveResult.error || deleteResult.error;
-  if (error) { toast("บันทึกผลกิจกรรมไม่สำเร็จ: " + error.message, false); return; }
-  if ((saveResult.data || []).length !== rows.length) {
-    toast("บันทึกผลกิจกรรมได้ไม่ครบทุกคน กรุณาตรวจสิทธิ์รายการ", false);
-    return;
-  }
-  if ((deleteResult.data || []).length !== removeIds.length) {
-    toast("ล้างสถานะยังไม่ประเมินได้ไม่ครบทุกคน กรุณาตรวจสิทธิ์รายการ", false);
-    return;
-  }
-  const refreshed = await loadActivityPassResults(current.id);
+  let failureMessage = "";
+  if (error) failureMessage = "บันทึกผลกิจกรรมไม่สำเร็จ: " + error.message;
+  else if (saveResult.saved !== rows.length) failureMessage = "บันทึกผลกิจกรรมได้ไม่ครบทุกคน กรุณาตรวจสิทธิ์รายการ";
+  else if (deleteResult.removed !== removeIds.length) failureMessage = "ล้างสถานะยังไม่ประเมินได้ไม่ครบทุกคน กรุณาตรวจสิทธิ์รายการ";
+
+  // อ่านสถานะจริงหลังบันทึกบางก้อน โดยคงค่าที่กรอกบนจอไว้ให้กดบันทึกซ้ำได้
+  const refreshed = await loadActivityPassResults(assessmentId);
+  button.disabled = false;
+  if (current?.id !== assessmentId) return;
+  if (!refreshed.error) activityPassResults = refreshed.data || [];
+  if (failureMessage) { toast(failureMessage, false); return; }
   if (refreshed.error) { toast("โหลดผลหลังบันทึกไม่สำเร็จ: " + refreshed.error.message, false); return; }
-  activityPassResults = refreshed.data || [];
   renderActivityPassResults();
   toast("บันทึกผลกิจกรรม " + rows.length + " คน" + (removeIds.length ? " · ล้างเป็นยังไม่ประเมิน " + removeIds.length + " คน" : ""));
 });
@@ -842,14 +858,19 @@ async function addLateMembers(late, button) {
   })) return;
   button.disabled = true;
   button.textContent = "กำลังเพิ่ม…";
-  const existing = await sb.from("competency_assessment_session_students").select("session_id,student_id")
-    .in("session_id", stageSessionIds).in("student_id", late.map(student => student.id));
-  if (existing.error) {
-    toast("ตรวจรายชื่อเดิมไม่สำเร็จ: " + existing.error.message, false);
-    renderLateMembers();
-    return;
+  const lateIds = late.map(student => student.id);
+  const have = new Set();
+  for (let start = 0; start < stageSessionIds.length; start += 100) {
+    const ids = stageSessionIds.slice(start, start + 100);
+    const { data, error } = await fetchAllRowsByIds(chunk => sb.from("competency_assessment_session_students").select("session_id,student_id")
+      .in("session_id", ids).in("student_id", chunk), lateIds, "id", 100);
+    if (error) {
+      toast("ตรวจรายชื่อเดิมไม่สำเร็จ: " + error.message, false);
+      renderLateMembers();
+      return;
+    }
+    for (const row of data) have.add(row.session_id + ":" + row.student_id);
   }
-  const have = new Set((existing.data || []).map(row => row.session_id + ":" + row.student_id));
   const rows = stageSessionIds.flatMap(id => late.filter(student => !have.has(id + ":" + student.id))
     .map(student => ({ session_id:id, student_id:student.id })));
   const { error } = rows.length ? await sb.from("competency_assessment_session_students").insert(rows) : { error:null };

@@ -348,14 +348,14 @@ import {
   sb, requireAuth, signOut,
   computeStudentSubjectResults, computeGpa,
   pickCountableSubjects, retentionCoverage, isSubjectResultDecided,
-  isPrimaryGrade, fetchAllRows, loadPrimaryDailyAttendance, computePrimaryDailyAttendance,
+  isPrimaryGrade, fetchAllRows, fetchAllRowsByIds, loadPrimaryDailyAttendance, computePrimaryDailyAttendance,
   computePrimaryPromotion, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS,
   getActiveYear, setActiveYear, GRADE_ORDER, getSetting, homeroomAuditRoomLabel,
   SCHOOL_LETTER_CSS, renderSchoolLetter,
   bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
   loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
   bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-} from "../supabase-client.js?v=20261117-1";
+} from "../supabase-client.js?v=20261118-1";
 
 document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -858,17 +858,17 @@ async function loadPrimaryActivities(studentIds, year) {
   const byStudent = new Map(studentIds.map(id => [id, []]));
   if (!activities.length) return byStudent;
   const activityIds = activities.map(item => item.id);
-  for (let start = 0; start < studentIds.length; start += 200) {
-    const chunk = studentIds.slice(start, start + 200);
+  const activityById = new Map(activities.map(item => [item.id, item]));
+  for (let start = 0; start < activityIds.length; start += 100) {
+    const activityChunk = activityIds.slice(start, start + 100);
     const [memberResult, passResult] = await Promise.all([
-      fetchAllRows(() => sb.from("competency_assessment_members").select("assessment_id,student_id")
-        .in("assessment_id", activityIds).in("student_id", chunk)),
-      fetchAllRows(() => sb.from("activity_pass_results").select("assessment_id,student_id,passed")
-        .in("assessment_id", activityIds).in("student_id", chunk))
+      fetchAllRowsByIds(chunk => sb.from("competency_assessment_members").select("assessment_id,student_id")
+        .in("assessment_id", activityChunk).in("student_id", chunk), studentIds, "id", 100),
+      fetchAllRowsByIds(chunk => sb.from("activity_pass_results").select("assessment_id,student_id,passed")
+        .in("assessment_id", activityChunk).in("student_id", chunk), studentIds, "id", 100)
     ]);
     if (memberResult.error || passResult.error) throw new Error("โหลดผลกิจกรรมไม่สำเร็จ: " + (memberResult.error || passResult.error).message);
     const passByKey = new Map((passResult.data || []).map(row => [row.assessment_id + "|" + row.student_id, row.passed]));
-    const activityById = new Map(activities.map(item => [item.id, item]));
     for (const member of memberResult.data || []) {
       const activity = activityById.get(member.assessment_id);
       if (!activity) continue;

@@ -525,7 +525,7 @@
 
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script type="module">
-import { STUDENT_TYPES, isRegularStudent, fetchAllRows, sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, PRE_SCHOOL_GRADE, isTempStudentNo, nextTempStudentNos, getSetting, getAcademicYears, academicYearOf, bangkokNow, toDateStr } from "../supabase-client.js?v=20261117-1";
+import { STUDENT_TYPES, isRegularStudent, fetchAllRows, fetchAllRowsByIds, sb, requireAuth, signOut, getProfile, checkDepartment, getActiveYear, setActiveYear, GRADE_ORDER, PRE_SCHOOL_GRADE, isTempStudentNo, nextTempStudentNos, getSetting, getAcademicYears, academicYearOf, bangkokNow, toDateStr } from "../supabase-client.js?v=20261118-1";
 import { normalizeNamePart, splitPrefix, parseStudentImportRows, STUDENT_PREFIXES } from "./student-registry.js?v=20261103-2";
 import { parseRegisRows, classifyAgainstDb, buildProfileUpsertRows } from "./student-import.js?v=20261103-2";
 
@@ -620,7 +620,7 @@ document.getElementById("filter-type").addEventListener("change", () => {
 });
 
 async function loadStudents() {
-  const { data, error } = await sb.from("students").select("*").order("grade_level").order("classroom").order("student_no");
+  const { data, error } = await fetchAllRows(() => sb.from("students").select("*"), ["grade_level", "classroom", "student_no", "id"]);
   if (error) { showToast("โหลดรายชื่อไม่สำเร็จ: " + error.message, false); return false; }
   allStudents = data || [];
   fillFilterOptions();
@@ -960,9 +960,9 @@ typeSave.addEventListener("click",async () => {
     if (becomingSpecial.length) {
       const year = academicYearOf(toDateStr(bangkokNow()),await getAcademicYears());
       if (!year) throw new Error("ไม่พบปีการศึกษาปัจจุบัน กรุณาตรวจการตั้งค่าปีการศึกษาแล้วลองใหม่");
-      const {data,error} = await fetchAllRows(() => sb.from("enrollments")
+      const {data,error} = await fetchAllRowsByIds(ids => sb.from("enrollments")
         .select("id,student_id,subject_id,subjects!inner(year)")
-        .in("student_id",becomingSpecial.map(s => s.id)).eq("subjects.year",year));
+        .in("student_id",ids).eq("subjects.year",year), becomingSpecial.map(s => s.id));
       if (error) throw new Error("ตรวจวิชาที่จะถูกเอาออกไม่สำเร็จ: " + error.message);
       const subjectCount = new Set((data || []).map(row => row.subject_id)).size;
       impact = `\nจะถูกเอาออกจาก ${subjectCount} วิชาของปี ${year} · คะแนนเดิมเก็บไว้\nสมาชิกกิจกรรมของปีปัจจุบันจะถูกเอาออกด้วย`;
@@ -1082,6 +1082,7 @@ async function loadExistingStudentNos() {
   const current = new Map();
   try {
     for (let from = 0; ; from += 1000) {
+      // scale-ok: วน range ทีละ 1,000 แถวจนครบด้วยรหัสนักเรียนที่มี unique index
       const { data, error } = await sb.from("students")
         .select("student_no,name,grade_level,classroom").order("student_no").range(from, from + 999);
       if (error) throw error;
@@ -1108,6 +1109,7 @@ async function insertStudentsWithPlacements(rows, year) {
   if (missing.length) {
     const existingNos = rows.map(row => row.studentNo).filter(Boolean);
     for (let from = 0; ; from += 1000) {
+      // scale-ok: วน range ทีละ 1,000 แถวจนครบด้วยรหัสนักเรียนที่มี unique index
       const { data, error } = await sb.from("students").select("student_no")
         .like("student_no", "ต%").order("student_no").range(from, from + 999);
       if (error) return { error: new Error("อ่านรหัสชั่วคราวไม่สำเร็จ: " + error.message) };
@@ -1249,8 +1251,8 @@ function regisUpdateBulkRooms() {
 }
 async function regisReload(resetSelection = true) {
   const [st,pl] = await Promise.all([
-    sb.from("students").select("id,student_no,prefix,first_name,last_name,status"),
-    sb.from("student_year_placements").select("student_id,grade_level,classroom").eq("year",regisYear)
+    fetchAllRows(() => sb.from("students").select("id,student_no,prefix,first_name,last_name,status")),
+    fetchAllRows(() => sb.from("student_year_placements").select("student_id,grade_level,classroom").eq("year",regisYear))
   ]);
   if (st.error || pl.error) throw new Error(`โหลดข้อมูลปัจจุบันไม่สำเร็จ: ${(st.error || pl.error).message}`);
   regisPlacements = pl.data || [];
@@ -1359,8 +1361,8 @@ async function regisFillNewProfiles(items) {
   for (const [room, group] of groups) {
     regisEl("regis-result").textContent = `เพิ่มนักเรียนแล้ว · กำลังเติมระเบียนห้อง ${room}…`;
     try {
-      const {data: students, error: studentError} = await sb.from("students")
-        .select("id,student_no").in("student_no",group.map(item => item.studentNo));
+      const {data: students, error: studentError} = await fetchAllRowsByIds(nos => sb.from("students")
+        .select("id,student_no").in("student_no",nos), group.map(item => item.studentNo));
       if (studentError) throw studentError;
       const byNo = new Map();
       for (const student of students || []) {
@@ -1379,8 +1381,8 @@ async function regisFillNewProfiles(items) {
         if (error) throw error;
         profileCount += profiles.length;
       }
-      const {data: existingGuardians, error: guardianReadError} = await sb.from("student_guardians")
-        .select("student_id").in("student_id",linked.map(item => item.studentId));
+      const {data: existingGuardians, error: guardianReadError} = await fetchAllRowsByIds(ids => sb.from("student_guardians")
+        .select("student_id").in("student_id",ids), linked.map(item => item.studentId));
       if (guardianReadError) throw guardianReadError;
       const occupied = new Set((existingGuardians || []).map(row => row.student_id));
       const guardians = linked.filter(item => !occupied.has(item.studentId))

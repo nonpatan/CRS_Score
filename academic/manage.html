@@ -557,7 +557,7 @@
 </div>
 
 <script type="module">
-import { isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261117-1";
+import { isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261118-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1156,7 +1156,7 @@ async function siblingEnrollments(subject, students) {
     for (let offset = 0; offset < students.length; offset += 40) {
       const studentIds = students.slice(offset, offset + 40).map(s => s.id);
       const { data, error } = await fetchAllRows(() => sb.from("enrollments")
-        .select("student_id, subject_id").in("subject_id", subjectIds).in("student_id", studentIds));
+        .select("student_id, subject_id").in("subject_id", subjectIds).in("student_id", studentIds)); // scale-ok: เฉพาะชุดนักเรียน 40 คนที่แบ่งไว้แล้ว
       if (error) throw error;
       rows.push(...(data || []));
     }
@@ -2304,7 +2304,8 @@ async function loadEnrollments() {
   elChkAllStages.checked = false;
   // ดึงเฉพาะนักเรียนที่ยัง active (ยังไม่จบ) มาเป็น "รายชื่อให้เพิ่มเข้าวิชา" — เด็กจบแล้วไม่ต้องเสนอให้ลงทะเบียนใหม่
   // (รายชื่อที่ลงทะเบียนอยู่แล้วแสดงจาก currentEnrollments ต่างหาก เด็กจบที่เคยลงไว้ยังเห็นได้)
-  const { data: students, error: stuErr } = await sb.from("students").select("*").eq("graduated", false).eq("left_school", false).order("grade_level").order("classroom").order("student_no");
+  const { data: students, error: stuErr } = await fetchAllRows(() => sb.from("students").select("*").eq("graduated", false).eq("left_school", false),
+    ["grade_level", "classroom", "student_no", "id"]);
   if (stuErr) { showToast("โหลดรายชื่อนักเรียนไม่สำเร็จ: " + stuErr.message, false); return; }
   allStudentsForEnroll = (students || []).filter(isRegularStudent);
 

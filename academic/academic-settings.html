@@ -187,7 +187,7 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, distinctYears, isAcademicHead } from "../supabase-client.js?v=20261117-1";
+import { sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, distinctYears, isAcademicHead } from "../supabase-client.js?v=20261118-1";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login
@@ -545,6 +545,7 @@ async function countExamSubjects(level, year) {
       .select("id")
       .eq("level", level)
       .eq("year", year)
+      .order("id")
       .range(page * subjectPageSize, (page + 1) * subjectPageSize - 1);
     if (error) throw new Error("โหลดวิชาระดับ" + level + " ปีการศึกษา " + year + " ไม่สำเร็จ: " + error.message);
     for (const subject of (data || [])) subjectIds.push(subject.id);
@@ -557,9 +558,11 @@ async function countExamSubjects(level, year) {
   for (let chunkStart = 0; chunkStart < subjectIds.length; chunkStart += idChunkSize) {
     const chunk = subjectIds.slice(chunkStart, chunkStart + idChunkSize);
     for (let page = 0; ; page++) {
+      // scale-ok: แบ่งรหัสวิชา 100 ค่าและวน range จนครบด้วยคีย์หลัก
       const { data, error } = await sb.from("exam_scores")
         .select("subject_id")
         .in("subject_id", chunk)
+        .order("id")
         .range(page * pageSize, (page + 1) * pageSize - 1);
       if (error) throw new Error("นับวิชาที่มีคะแนนสอบระดับ" + level + " ปีการศึกษา " + year + " ไม่สำเร็จ: " + error.message);
       for (const row of (data || [])) scoredSubjectIds.add(row.subject_id);

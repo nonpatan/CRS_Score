@@ -20,7 +20,7 @@
 <section id="step3" class="card" aria-labelledby="step3-title" hidden><h2 id="step3-title" tabindex="-1">ขั้นที่ 3 · บันทึก</h2><p id="save-progress" role="status"></p><p id="save-error" class="error" role="alert"></p><div id="save-result" class="info" role="status" hidden></div><div class="actions"><a class="button-link ghost" href="student-registry.html">ไปหน้าระเบียนนักเรียน</a></div></section></div><div id="toast" class="toast" role="status"></div></main></div>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script type="module">
-import {sb,requireAuth,signOut,checkDepartment,getAcademicYears,academicYearOf,bangkokNow,toDateStr} from '../supabase-client.js?v=20261117-1';
+import {sb,fetchAllRows,fetchAllRowsByIds,requireAuth,signOut,checkDepartment,getAcademicYears,academicYearOf,bangkokNow,toDateStr} from '../supabase-client.js?v=20261118-1';
 import {parseRegisRows,classifyAgainstDb,mergeFillEmpty,buildProfileUpsertRows,REGIS_PROFILE_LABELS} from './student-import.js?v=20261103-2';
 const $=id=>document.getElementById(id),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function fail(result,label){if(result.error)throw new Error(`${label}: ${result.error.message}`);return result.data||[]}
@@ -36,10 +36,13 @@ if(session){
  async function loadCurrent(ids){
   if(!ids.length)return {profiles:new Map(),guardians:new Set()};
   const profiles=new Map(),guardians=new Set();
-  for(let i=0;i<ids.length;i+=150){const batch=ids.slice(i,i+150);const [pr,gu]=await Promise.all([sb.from('student_profiles').select('*').in('student_id',batch),sb.from('student_guardians').select('student_id').in('student_id',batch)]);
-   for(const row of fail(pr,'โหลดประวัติ'))profiles.set(row.student_id,row);
-   for(const row of fail(gu,'โหลดผู้ปกครอง'))guardians.add(row.student_id);
-  }return {profiles,guardians};
+  const [pr,gu]=await Promise.all([
+   fetchAllRowsByIds(chunk=>sb.from('student_profiles').select('*').in('student_id',chunk),ids,'student_id',150),
+   fetchAllRowsByIds(chunk=>sb.from('student_guardians').select('student_id').in('student_id',chunk),ids,'id',150)
+  ]);
+  for(const row of fail(pr,'โหลดประวัติ'))profiles.set(row.student_id,row);
+  for(const row of fail(gu,'โหลดผู้ปกครอง'))guardians.add(row.student_id);
+  return {profiles,guardians};
  }
  function renderPreview(){
   const ready=classified.ready,conflicts=[],guardianSkipped=[],warnings=[];
@@ -67,7 +70,8 @@ if(session){
    const rows=window.XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,defval:''}),parsed=parseRegisRows(rows);
    if(parsed.errors.length)throw new Error(`พบเลขประจำตัวนักเรียนซ้ำ: ${parsed.errors.join(' · ')} — แก้ไฟล์แล้วเลือกใหม่`);
    const years=await getAcademicYears(),year=academicYearOf(toDateStr(bangkokNow()),years);if(!year)throw new Error('ไม่พบปีการศึกษาปัจจุบัน');
-   const [st,pl]=await Promise.all([sb.from('students').select('id,student_no,prefix,first_name,last_name,status'),sb.from('student_year_placements').select('student_id,grade_level,classroom').eq('year',year)]);
+   const [st,pl]=await Promise.all([fetchAllRows(()=>sb.from('students').select('id,student_no,prefix,first_name,last_name,status')),
+    fetchAllRows(()=>sb.from('student_year_placements').select('student_id,grade_level,classroom').eq('year',year))]);
    classified=classifyAgainstDb(parsed,fail(st,'โหลดนักเรียน'),fail(pl,'โหลดห้องปีปัจจุบัน'));
    const fresh=await loadCurrent(classified.ready.map(item=>item.studentId));previewProfiles=fresh.profiles;previewGuardians=fresh.guardians;
    $('file-summary').textContent=`${parsed.students.length} คนในไฟล์ · ${new Set(parsed.students.map(item=>item.roomText)).size} ห้อง`;

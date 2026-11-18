@@ -747,11 +747,11 @@ import {
   computeCombinedCompetencyResult, loadCompetencySettings, computeAttendanceRisk, isPrimaryGrade,
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting,
   loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS,
-  getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows,
+  getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows, fetchAllRowsByIds,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
   isAutoPresentStudent, isAutoAbsentStudent,
-} from "../supabase-client.js?v=20261117-1";
+} from "../supabase-client.js?v=20261118-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -1024,10 +1024,12 @@ elFilterTerm.addEventListener("change", () => { applySubjectFilter(); elSubject.
 async function loadClassroomsByGrade(grade, yearOverride = elFilterYear.value) {
   const currentVal = elClassroom.value;
   elClassroom.innerHTML = '<option value="">— กำลังโหลดห้อง... —</option>';
-  let query = sb.from("student_year_placements").select("classroom");
-  if (yearOverride) query = query.eq("year", yearOverride);
-  if (grade) query = query.eq("grade_level", grade);
-  const { data, error } = await query;
+  const { data, error } = await fetchAllRows(() => {
+    let query = sb.from("student_year_placements").select("id,classroom");
+    if (yearOverride) query = query.eq("year", yearOverride);
+    if (grade) query = query.eq("grade_level", grade);
+    return query;
+  });
   if (error) {
     elClassroom.innerHTML = '<option value="">— ต้องรัน migration ประวัติชั้น/ห้องก่อน —</option>';
     elClassroom.disabled = true;
@@ -1207,12 +1209,12 @@ async function loadActivitySummaries(year, subjectTerm, studentIds) {
 
   // วิชามีภาคเรียน ⟹ เอาเฉพาะกิจกรรมภาคเรียนเดียวกัน บวกกิจกรรมที่ไม่ระบุภาคเรียน (ทั้งปี)
   // วิชาไม่มีภาคเรียน (ประถม/รายปี) ⟹ ไม่กรอง คงพฤติกรรมเดิมไว้
-  let activityQuery = sb.from("competency_assessments")
-    .select("id,name,year,term,activity_category")
-    .eq("year", year)
-    .eq("source_type", "กิจกรรม");
-  if (subjectTerm) activityQuery = activityQuery.or(`term.eq.${subjectTerm},term.is.null`);
-  const activityResult = await activityQuery.order("created_at");
+  const activityResult = await fetchAllRows(() => {
+    let query = sb.from("competency_assessments").select("id,name,year,term,activity_category")
+      .eq("year", year).eq("source_type", "กิจกรรม");
+    if (subjectTerm) query = query.or(`term.eq.${subjectTerm},term.is.null`);
+    return query;
+  }, ["created_at", "id"]);
   if (activityResult.error) {
     activitySummaryError = activityResult.error.message;
     return;
@@ -1221,20 +1223,26 @@ async function loadActivitySummaries(year, subjectTerm, studentIds) {
   const activityIds = activities.map(activity => activity.id);
   if (!activityIds.length) return;
 
-  const [enrollmentResult, resultResult] = await Promise.all([
-    sb.from("competency_assessment_members").select("assessment_id,student_id")
-      .in("assessment_id", activityIds).in("student_id", studentIds),
-    sb.from("activity_pass_results").select("assessment_id,student_id,passed,note")
-      .in("assessment_id", activityIds).in("student_id", studentIds)
-  ]);
-  if (enrollmentResult.error || resultResult.error) {
-    activitySummaryError = (enrollmentResult.error || resultResult.error).message;
-    return;
+  const enrollments = [], results = [];
+  for (let start = 0; start < activityIds.length; start += 100) {
+    const activitiesChunk = activityIds.slice(start, start + 100);
+    const [enrollmentResult, resultResult] = await Promise.all([
+      fetchAllRowsByIds(ids => sb.from("competency_assessment_members").select("assessment_id,student_id")
+        .in("assessment_id", activitiesChunk).in("student_id", ids), studentIds, "id", 100),
+      fetchAllRowsByIds(ids => sb.from("activity_pass_results").select("assessment_id,student_id,passed,note")
+        .in("assessment_id", activitiesChunk).in("student_id", ids), studentIds, "id", 100)
+    ]);
+    if (enrollmentResult.error || resultResult.error) {
+      activitySummaryError = (enrollmentResult.error || resultResult.error).message;
+      return;
+    }
+    enrollments.push(...enrollmentResult.data);
+    results.push(...resultResult.data);
   }
 
   const activityById = new Map(activities.map(activity => [activity.id, activity]));
-  const resultByKey = new Map((resultResult.data || []).map(row => [row.assessment_id + "|" + row.student_id, row]));
-  for (const enrollment of (enrollmentResult.data || [])) {
+  const resultByKey = new Map(results.map(row => [row.assessment_id + "|" + row.student_id, row]));
+  for (const enrollment of enrollments) {
     const activity = activityById.get(enrollment.assessment_id);
     if (!activity) continue;
     if (!activitySummaryByStudent.has(enrollment.student_id)) activitySummaryByStudent.set(enrollment.student_id, []);
@@ -2119,9 +2127,9 @@ async function loadAttendanceSubjectContext() {
       .in("subject_id", subjectIds)
       .order("session_date")
       .order("created_at"), "id"),
-    sb.from("makeup_hours")
+    fetchAllRowsByIds(ids => sb.from("makeup_hours")
       .select("subject_id,student_id,periods")
-      .in("subject_id", subjectIds)
+      .in("subject_id", ids), subjectIds)
   ]);
   if (token !== attendanceLoadToken) return;
   if (rosterResult.error) {
@@ -2660,8 +2668,8 @@ async function loadExternalCompetencyScope(year, grade) {
       if (placements.error) throw new Error("โหลดรายชื่อสำหรับผลสมรรถนะภายนอกไม่สำเร็จ: " + placements.error.message);
       const ids = (placements.data || []).filter(p => p.grade_level === grade).map(p => p.student_id);
       if (!ids.length) return [];
-      const result = await fetchAllRows(() => sb.from("external_competency_results")
-        .select("id,student_id,year,term,competency_id,pct,source").eq("year", year).in("student_id", ids), "id");
+      const result = await fetchAllRowsByIds(chunk => sb.from("external_competency_results")
+        .select("id,student_id,year,term,competency_id,pct,source").eq("year", year).in("student_id", chunk), ids);
       if (result.error) throw new Error("โหลดสมรรถนะภายนอกไม่สำเร็จ: " + result.error.message);
       return result.data || [];
     })().catch(error => { externalCompetencyCache.delete(key); throw error; });
@@ -3026,13 +3034,16 @@ async function loadCompetencyRoomBatch(students, shared) {
     enrolledIds:new Set(), scoreRows:[], myAssessmentIds:new Set(),
     snapshotSessionIds:[], sessions:[], assessmentScores:[]
   }]));
-  // รายการ collection / assessment / session ใช้คู่กับ student_id; แบ่ง 100 กัน URL ยาวเกิน และไล่หน้าจนหมดทุกก้อน
-  const load = async (table, columns, build, chunks, message) => {
+  // แบ่งทั้งคีย์ข้อมูลและรหัสนักเรียนทีละ 100 เมื่อคิวรีใช้ตัวกรองทั้งสองชุด
+  const load = async (table, columns, key, chunks, message, restrictStudents = true) => {
     if (!chunks.length) return { ok:true, rows:[] };
     const rows = [];
     for (let start = 0; start < chunks.length; start += 100) {
       const ids = chunks.slice(start, start + 100);
-      const result = await fetchAllRows(() => build(sb.from(table).select(columns), ids), "id");
+      const query = () => sb.from(table).select(columns).in(key, ids);
+      const result = restrictStudents
+        ? await fetchAllRowsByIds(chunk => query().in("student_id", chunk), studentIds, "id", 100)
+        : await fetchAllRows(query);
       if (result.error) return { ok:false, message:message + result.error.message };
       rows.push(...(result.data || []));
     }
@@ -3044,18 +3055,18 @@ async function loadCompetencyRoomBatch(students, shared) {
   const assessmentIds = shared.assessments.map(row => row.id);
   try {
     const [enrollments, scores, members, snapshots, sessions] = await Promise.all([
-      load("enrollments", "id,student_id,subject_id", (query, ids) => query.in("student_id", studentIds).in("subject_id", ids), subjectIds,
+      load("enrollments", "id,student_id,subject_id", "subject_id", subjectIds,
         "โหลดข้อมูลรายวิชาไม่สำเร็จ: "),
-      subjectIds.length ? load("scores", "id,student_id,collection_id,raw_score", (query, ids) => query.in("student_id", studentIds).in("collection_id", ids), collectionIds,
+      subjectIds.length ? load("scores", "id,student_id,collection_id,raw_score", "collection_id", collectionIds,
         "โหลดคะแนนสมรรถนะรายวิชาไม่สำเร็จ: ") : Promise.resolve({ ok:true, rows:[] }),
-      load("competency_assessment_members", "id,student_id,assessment_id", (query, ids) => query.in("student_id", studentIds).in("assessment_id", ids), assessmentIds,
+      load("competency_assessment_members", "id,student_id,assessment_id", "assessment_id", assessmentIds,
         "โหลดองค์ประกอบกิจกรรม/กิจวัตรไม่สำเร็จ: "),
-      assessmentIds.length ? fetchAllRows(() => sb.from("competency_assessment_session_students").select("id,student_id,session_id")
-        .in("student_id", studentIds), "id").then(result => result.error
+      assessmentIds.length ? fetchAllRowsByIds(ids => sb.from("competency_assessment_session_students").select("id,student_id,session_id")
+        .in("student_id", ids), studentIds).then(result => result.error
           ? { ok:false, message:"โหลดประวัติรายชื่อประเมินไม่สำเร็จ: " + result.error.message }
           : { ok:true, rows:result.data || [] }) : Promise.resolve({ ok:true, rows:[] }),
-      load("competency_assessment_sessions", "id,assessment_id,target_id,max_score", (query, ids) => query.in("assessment_id", ids), assessmentIds,
-        "โหลดครั้งประเมินไม่สำเร็จ: ")
+      load("competency_assessment_sessions", "id,assessment_id,target_id,max_score", "assessment_id", assessmentIds,
+        "โหลดครั้งประเมินไม่สำเร็จ: ", false)
     ]);
     for (const result of [enrollments, scores, members, snapshots, sessions]) if (!result.ok) return result;
     for (const row of enrollments.rows) byStudent.get(row.student_id)?.enrolledIds.add(row.subject_id);
@@ -3069,7 +3080,7 @@ async function loadCompetencyRoomBatch(students, shared) {
       item.sessions.forEach(row => scoreSessionIds.add(row.id));
     }
     const assessmentScores = await load("competency_assessment_scores", "id,student_id,session_id,target_id,raw_score",
-      (query, ids) => query.in("student_id", studentIds).in("session_id", ids), [...scoreSessionIds],
+      "session_id", [...scoreSessionIds],
       "โหลดคะแนนกิจกรรม/กิจวัตรไม่สำเร็จ: ");
     if (!assessmentScores.ok) return assessmentScores;
     const scoreSessionsByStudent = new Map([...byStudent].map(([id, item]) => [id, new Set(item.sessions.map(row => row.id))]));

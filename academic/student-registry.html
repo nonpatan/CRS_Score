@@ -239,10 +239,11 @@ import {
   toDateStr,
   loadMyHomeroomRooms,
   getStudentPlacements,
+  fetchAllRowsByIds,
   GRADE_ORDER,
   PRE_SCHOOL_GRADE,
   isTempStudentNo
-} from "../supabase-client.js?v=20261117-1";
+} from "../supabase-client.js?v=20261118-1";
 import {
   profileCompleteness,
   sectionStatus
@@ -306,9 +307,11 @@ if(session){
       if(ids.length){
         const [pr,
           gu,
-          st]=await Promise.all([sb.from("student_profiles").select("*").in("student_id",ids),
-          sb.from("student_guardians").select("*").in("student_id",ids),
-          sb.from("students").select("id,status").in("id",ids)]);
+          st]=await Promise.all([
+          fetchAllRowsByIds(chunk => sb.from("student_profiles").select("*").in("student_id",chunk), ids, "student_id"),
+          fetchAllRowsByIds(chunk => sb.from("student_guardians").select("*").in("student_id",chunk), ids),
+          fetchAllRowsByIds(chunk => sb.from("students").select("id,status").in("id",chunk), ids)
+        ]);
         for(const r of [pr,
           gu,
           st]) if(r.error) throw r.error;

@@ -22,7 +22,7 @@
 <form id="visit-form" novalidate><div id="error-summary" role="alert" hidden></div><fieldset id="form-fields"><legend class="sr-only">แบบบันทึกเยี่ยมบ้าน</legend><div id="sections"></div></fieldset><div class="card" id="history-card" hidden><h2>เคยเยี่ยมคนนี้</h2><div id="history"></div></div><p id="history-status" class="hint" role="status"></p><div class="destructive"><button type="button" class="danger" id="delete" hidden>ลบบันทึกนี้</button></div><div class="actionbar"><span id="save-status">ยังไม่ได้บันทึก</span><button type="submit" class="primary" id="save">บันทึก</button></div></form></section>
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
-import { isRegularStudent, sb, requireAuth, signOut, getAcademicYears, academicYearOf, getProfile, getMyDepartments, applyRestrictedMenuAccess, bindDatePickOnly, DATE_PICK_ONLY_NOTE, bangkokNow, toDateStr } from "../supabase-client.js?v=20261117-1";
+import { isRegularStudent, sb, fetchAllRows, fetchAllRowsByIds, requireAuth, signOut, getAcademicYears, academicYearOf, getProfile, getMyDepartments, applyRestrictedMenuAccess, bindDatePickOnly, DATE_PICK_ONLY_NOTE, bangkokNow, toDateStr } from "../supabase-client.js?v=20261118-1";
 import { sdqCareList, loadSdqRoom, sdqFormsForGrade, sdqGradeRank, SDQ_FORMS, computeSdq } from "./sdq-core.js?v=3";
 import { HV_SECTIONS, HV_FIELDS, homeVisitTargets, latestHomeVisits, compareHomeVisits, hvRoomKey, hvIsActive, validateHomeVisit, loadVisitsRoom, loadStudentHistory, loadTarget, insertVisit, updateVisit, deleteVisit } from "./home-visit-core.js?v=1";
 document.getElementById("btn-signout")?.addEventListener("click",async event => { event.preventDefault(); if (busy || !await discardIfDirty()) return; dirty = false; signOut(); });
@@ -289,8 +289,8 @@ async function loadRoom() {
     if (!data) {
       const ids = roster.map(p => p.student_id);
       const [profileRes,guardianRes,sdqRows,visitRows,targetRow] = await Promise.all([
-        sb.from("student_profiles").select("student_id,admission_type,cur_same_as_reg,reg_house_no,reg_moo,reg_road,reg_subdistrict,reg_district,reg_province,reg_postcode,cur_house_no,cur_moo,cur_road,cur_subdistrict,cur_district,cur_province,cur_postcode,parents_marital,lives_with,travel_mode").in("student_id",ids),
-        sb.from("student_guardians").select("student_id,relation,prefix,first_name,last_name,phone").eq("is_primary",true).in("student_id",ids),
+        fetchAllRowsByIds(chunk => sb.from("student_profiles").select("student_id,admission_type,cur_same_as_reg,reg_house_no,reg_moo,reg_road,reg_subdistrict,reg_district,reg_province,reg_postcode,cur_house_no,cur_moo,cur_road,cur_subdistrict,cur_district,cur_province,cur_postcode,parents_marital,lives_with,travel_mode").in("student_id",chunk), ids, "student_id"),
+        fetchAllRowsByIds(chunk => sb.from("student_guardians").select("student_id,relation,prefix,first_name,last_name,phone").eq("is_primary",true).in("student_id",chunk), ids),
         sdqFormsForGrade(room.grade_level).length ? loadSdqRoom(year,room.grade_level,room.classroom) : Promise.resolve([]),
         loadVisitsRoom(year,room.grade_level,room.classroom), targetPromise
       ]);
@@ -326,10 +326,12 @@ if (session) {
       el("load-status").innerHTML = 'หน้านี้สำหรับครูประจำชั้น · <a href="home-visit-report.html">ดูภาพรวมที่รายงานเยี่ยมบ้าน →</a>';
     } else {
       // ครูดาวน์โหลดชื่อเฉพาะห้องที่รับผิดชอบ วิชาการ/admin ใช้ก้อนเดียวเลือกได้ทุกห้อง
-      let placementQuery = sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)").eq("year",year);
-      if (!manage && own.length === 1) placementQuery = placementQuery.eq("grade_level",own[0].grade_level).eq("classroom",own[0].classroom);
-      else if (!manage) placementQuery = placementQuery.or(own.map(r => `and(grade_level.eq.${JSON.stringify(r.grade_level)},classroom.eq.${JSON.stringify(r.classroom)})`).join(","));
-      const placementRes = await placementQuery;
+      const placementRes = await fetchAllRows(() => {
+        let query = sb.from("student_year_placements").select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)").eq("year",year);
+        if (!manage && own.length === 1) query = query.eq("grade_level",own[0].grade_level).eq("classroom",own[0].classroom);
+        else if (!manage) query = query.or(own.map(r => `and(grade_level.eq.${JSON.stringify(r.grade_level)},classroom.eq.${JSON.stringify(r.classroom)})`).join(","));
+        return query;
+      });
       if (placementRes.error) throw placementRes.error;
       allPlacements = (placementRes.data || []).filter(p => isRegularStudent(p.student));
       rooms = [...new Map(allPlacements.map(p => [hvRoomKey(p),{grade_level:p.grade_level,classroom:p.classroom}])).values()].filter(r => manage || ownRooms.has(hvRoomKey(r))).sort((a,b) => sdqGradeRank(a.grade_level)-sdqGradeRank(b.grade_level) || a.classroom.localeCompare(b.classroom,"th",{numeric:true}));

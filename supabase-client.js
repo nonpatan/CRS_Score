@@ -225,12 +225,11 @@ export async function issueStudentLetter({ studentId, year, kind, gradeLevel, cl
 }
 
 export async function loadIssuedLetters(year, kind, gradeLevel) {
-  const { data, error } = await sb.from("student_letters")
+  const { data, error } = await fetchAllRows(() => sb.from("student_letters")
     .select("student_id,year,doc_no,term,issued_date,meet_date,meet_time,homeroom_staff_id,invite_meeting")
     .eq("year", year)
     .eq("letter_kind", kind)
-    .eq("grade_level", gradeLevel)
-    .order("doc_no", { ascending: true });
+    .eq("grade_level", gradeLevel), ["doc_no", "id"]);
   if (error) throw new Error("อ่านทะเบียนหนังสือไม่สำเร็จ: " + error.message);
   return data || [];
 }
@@ -255,10 +254,9 @@ export async function issueAbsenceLetter({ studentId, year, gradeLevel, classroo
 }
 
 export async function loadIssuedAbsenceLetters(year) {
-  const { data, error } = await sb.from("absence_letters")
+  const { data, error } = await fetchAllRows(() => sb.from("absence_letters")
     .select("student_id,year,doc_no,letter_round,grade_level,classroom,absent_days,absent_from,absent_to,issued_date,meet_date,meet_time,invite_meeting")
-    .eq("year", year)
-    .order("doc_no", { ascending: true });
+    .eq("year", year), ["doc_no", "id"]);
   if (error) throw new Error("อ่านทะเบียนหนังสือเตือนไม่สำเร็จ: " + error.message);
   return data || [];
 }
@@ -1081,11 +1079,11 @@ export async function loadAbsenceStreaks(year, {
     .map(([studentId]) => studentId);
   if (candidateIds.length === 0) return [];
 
-  const detailResult = await fetchAllRows(() => sb.from("daily_attendance")
+  const detailResult = await fetchAllRowsByIds(ids => sb.from("daily_attendance")
     .select("student_id,attend_date,status,grade_level,classroom")
     .gte("attend_date", range.start)
     .lte("attend_date", to)
-    .in("student_id", candidateIds), ["student_id", "attend_date"]);
+    .in("student_id", ids), candidateIds, ["student_id", "attend_date"]);
   if (detailResult.error) {
     throw new Error("โหลดประวัติการขาดเรียนไม่สำเร็จ: " + detailResult.error.message);
   }
@@ -1187,11 +1185,11 @@ export async function loadAbsenceHistory(year, {
       .map(([studentId]) => studentId);
     if (!candidateIds.length) return [];
 
-    const detailResult = await fetchAllRows(() => sb.from("daily_attendance")
+    const detailResult = await fetchAllRowsByIds(ids => sb.from("daily_attendance")
       .select("student_id,attend_date,status,grade_level,classroom")
       .gte("attend_date", range.start)
       .lte("attend_date", to)
-      .in("student_id", candidateIds), ["student_id", "attend_date"]);
+      .in("student_id", ids), candidateIds, ["student_id", "attend_date"]);
     if (detailResult.error) throw detailResult.error;
     const episodes = buildAbsenceEpisodes(detailResult.data || [], { minDays });
     if (!episodes.length) return [];
@@ -1237,14 +1235,10 @@ export async function loadMyHomeroomRooms(userId) {
 }
 
 export async function getActiveStudents() {
-  const { data, error } = await sb
-    .from("students")
+  const { data, error } = await fetchAllRows(() => sb.from("students")
     .select("*")
     .eq("graduated", false)
-    .eq("left_school", false)
-    .order("grade_level")
-    .order("classroom")
-    .order("student_no");
+    .eq("left_school", false), ["grade_level", "classroom", "student_no", "id"]);
   if (error) return [];
   return data || [];
 }
@@ -1257,21 +1251,25 @@ const studentPlacementsInFlight = new Map();
 export async function getStudentPlacements(year, studentIds = null) {
   if (!year) return { data: [], error: null };
 
-  const load = async () => {
-    let query = sb.from("student_year_placements")
-      .select("id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)")
-      .eq("year", year)
-      .order("grade_level")
-      .order("classroom");
-    if (Array.isArray(studentIds)) {
-      if (studentIds.length === 0) return { data: [], error: null };
-      query = query.in("student_id", studentIds);
+  const columns = "id,student_id,year,grade_level,classroom,student:student_id(id,student_no,name,graduated,left_school,student_type)";
+  const order = ["grade_level", "classroom", "id"];
+  if (Array.isArray(studentIds)) {
+    const { data, error } = await fetchAllRowsByIds(ids => sb.from("student_year_placements")
+      .select(columns).eq("year", year).in("student_id", ids), studentIds, order);
+    const rows = data || [];
+    // เรียงทั้งผลลัพธ์เมื่อรวมจากหลายก้อน เพื่อให้ลำดับชั้นและห้องต่อเนื่อง
+    if (studentIds.length > ID_CHUNK) {
+      rows.sort((a, b) => a.grade_level.localeCompare(b.grade_level) ||
+        a.classroom.localeCompare(b.classroom) || a.id.localeCompare(b.id));
     }
-
-    const { data, error } = await query;
+    return { data: rows, error };
+  }
+  const load = () => fetchAllRows(() => sb.from("student_year_placements")
+    .select(columns).eq("year", year), order);
+  if (studentIds !== null) {
+    const { data, error } = await load();
     return { data: data || [], error };
-  };
-  if (studentIds !== null) return load();
+  }
 
   // รวมเฉพาะคำขอปีเดียวกันที่ยังไม่จบ ไม่เก็บข้อมูลข้ามการโหลดหลังบันทึก
   const key = String(year);
@@ -1282,7 +1280,7 @@ export async function getStudentPlacements(year, studentIds = null) {
   }
   const { data, error } = await request;
   // ผู้เรียกแต่ละรายจัดเรียง/เพิ่ม/ลบสมาชิก array ของตัวเองได้
-  return { data: data.slice(), error };
+  return { data: (data || []).slice(), error };
 }
 
 // รูปแบบจำนวนเงินกลาง — หน้าการเงินใช้ทศนิยม 2 ตำแหน่งตามค่าเริ่มต้น
@@ -2381,6 +2379,25 @@ export async function fetchAllRows(makeQuery, orderColumn = "id") {
   return { data: out, error: null };
 }
 
+// แบ่ง id กัน URL ยาวเกิน และแบ่งหน้าในแต่ละก้อนกันเพดาน 1,000 แถว
+// UUID ราว 680 ค่าเคยตอบ 400 จึงใช้ก้อนละ 200 เพื่อเผื่อความยาวคอลัมน์และตัวกรอง
+// makeQuery(ids) ต้องสร้าง query ใหม่ทุกครั้ง · ลำดับผลเป็นลำดับก้อนแล้วจึงเรียงตามคีย์ในแต่ละก้อน
+export const ID_CHUNK = 200;
+export async function fetchAllRowsByIds(makeQuery, ids, orderColumn = "id", chunkSize = ID_CHUNK) {
+  if (!Number.isInteger(chunkSize) || chunkSize < 1 || chunkSize > ID_CHUNK) {
+    throw new RangeError("ขนาดก้อน id ต้องเป็นจำนวนเต็มระหว่าง 1 ถึง " + ID_CHUNK);
+  }
+  const list = [...new Set((ids || []).filter(id => id !== null && id !== undefined && id !== ""))];
+  const out = [];
+  for (let start = 0; start < list.length; start += chunkSize) {
+    const chunk = list.slice(start, start + chunkSize);
+    const { data, error } = await fetchAllRows(() => makeQuery(chunk), orderColumn);
+    if (error) return { data: null, error };
+    for (const row of data) out.push(row);
+  }
+  return { data: out, error: null };
+}
+
 // ข้อมูลเช็คชื่อเป็นก้อนที่ใหญ่ที่สุดของหน้าภาพรวม (ครั้งที่เช็คทั้งปี × นักเรียนต่อครั้ง)
 // แต่สูตรคิด "คาบขาด" ใช้แค่ 3 สถานะนี้ — 'มา'/'มาสาย' คิดเป็นขาด 0 คาบอยู่แล้ว และ
 // computeMissedPeriods() ข้ามคนที่ "ไม่มีแถว" ด้วยผลเท่ากันเป๊ะ จึงกรองทิ้งตั้งแต่ฝั่งเซิร์ฟเวอร์ได้
@@ -2397,17 +2414,11 @@ const ABSENCE_STATUSES = ["ขาด", "ลาป่วย", "ลากิจ"];
 
 // ดึงแถวรายวันทั้งปีให้ครบทุกหน้า เด็กย้ายห้องกลางปีต้องนับด้วย student_id เท่านั้น
 export async function loadPrimaryDailyAttendance(studentIds, year) {
-  const ids = [...new Set((studentIds || []).filter(Boolean))];
-  if (!ids.length || !year) return [];
-  const rows = [];
-  for (let start = 0; start < ids.length; start += 200) {
-    const chunk = ids.slice(start, start + 200);
-    const { data, error } = await fetchAllRows(() => sb.from("daily_attendance")
-      .select("student_id,status").eq("year", year).in("student_id", chunk));
-    if (error) throw new Error("โหลดเวลาเรียนรายวันไม่สำเร็จ: " + error.message);
-    rows.push(...(data || []));
-  }
-  return rows;
+  if (!year) return [];
+  const { data, error } = await fetchAllRowsByIds(ids => sb.from("daily_attendance")
+    .select("student_id,status").eq("year", year).in("student_id", ids), studentIds);
+  if (error) throw new Error("โหลดเวลาเรียนรายวันไม่สำเร็จ: " + error.message);
+  return data;
 }
 
 async function fetchAttendanceSessions(subjectIds) {
@@ -3773,10 +3784,11 @@ export async function loadDailyPrefill(dateStr, students) {
   try {
     const chunks = [];
     for (let i = 0; i < roster.length; i += 200) chunks.push(roster.slice(i, i + 200).map(student => student.id));
+    // scale-ok: แบ่งก้อน 200 คน × วันเดียว คีย์ (student_id, attend_date) ไม่ซ้ำ
     const results = await Promise.all(chunks.map(ids => sb.from("daily_attendance")
       .select("student_id,status,grade_level,classroom,recorded_by,recorded_at,updated_at")
       .eq("attend_date", dateStr)
-      .in("student_id", ids)));
+      .in("student_id", ids))); // scale-ok: ก้อน 200 คนจากรายการ chunks
     const failedResult = results.find(result => result.error);
     if (failedResult) throw failedResult.error;
     const rows = results.flatMap(result => result.data || []);
@@ -9120,15 +9132,15 @@ export async function loadRoomTransportDebtors({ year, yearRange, today, grade_l
   if (!ids.length) return { count:0, unknown:0 };
   const [periodRes, attendanceRes, overrideRes, paymentRes, openingRes] = await Promise.all([
     fetchAllRows(() => sb.from("student_transport").select("id,student_id,year,zone_id,billing_mode,trip_mode,rate_amount,start_date,end_date")
-      .eq("year", year).in("student_id", ids), ["student_id","start_date","id"]),
+      .eq("year", year).in("student_id", ids), ["student_id","start_date","id"]), // scale-ok: เฉพาะรายชื่อนักเรียนห้องที่เลือก
     fetchAllRows(() => sb.from("daily_attendance").select("id,student_id,attend_date,status")
-      .eq("year", year).in("student_id", ids).gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]),
+      .eq("year", year).in("student_id", ids).gte("attend_date", yearRange.start).lte("attend_date", today), ["attend_date","student_id","id"]), // scale-ok: เฉพาะรายชื่อนักเรียนห้องที่เลือก
     fetchAllRows(() => sb.from("transport_day_overrides").select("id,student_id,charge_date,amount")
-      .eq("year", year).in("student_id", ids).gte("charge_date", yearRange.start).lte("charge_date", today), ["charge_date","student_id","id"]),
+      .eq("year", year).in("student_id", ids).gte("charge_date", yearRange.start).lte("charge_date", today), ["charge_date","student_id","id"]), // scale-ok: เฉพาะรายชื่อนักเรียนห้องที่เลือก
     fetchAllRows(() => sb.from("transport_payments").select("id,student_id,amount")
-      .eq("year", year).in("student_id", ids), ["student_id","id"]),
+      .eq("year", year).in("student_id", ids), ["student_id","id"]), // scale-ok: เฉพาะรายชื่อนักเรียนห้องที่เลือก
     fetchAllRows(() => sb.from("transport_opening_debts").select("student_id,amount")
-      .eq("year", year).in("student_id", ids), "student_id")
+      .eq("year", year).in("student_id", ids), "student_id") // scale-ok: เฉพาะรายชื่อนักเรียนห้องที่เลือก
   ]);
   for (const [label, result] of [["ช่วงใช้รถ",periodRes],["เช็คชื่อ",attendanceRes],["ยอดที่แก้",overrideRes],["รายการรับเงิน",paymentRes],["หนี้ยกมา",openingRes]]) {
     if (result.error) throw new Error(`โหลด${label}ไม่สำเร็จ: ${result.error.message}`);

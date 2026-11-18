@@ -402,8 +402,9 @@ import {
   checkDepartment,
   getSetting,
   PRE_SCHOOL_GRADE,
-  isTempStudentNo
-} from "../supabase-client.js?v=20261117-1";
+  isTempStudentNo,
+  fetchAllRowsByIds
+} from "../supabase-client.js?v=20261118-1";
 import {
   STUDENT_PREFIXES,
   normalizeNamePart,
@@ -870,7 +871,7 @@ async function loadPrivate(){
   const sourceIds=[...new Set(guardians.map(g=>g.copied_from_student_id).filter(Boolean))];
   sourceNames=new Map();
   if(sourceIds.length){
-    const sources=await sb.from("students").select("id,name").in("id",sourceIds);
+    const sources=await fetchAllRowsByIds(ids => sb.from("students").select("id,name").in("id",ids), sourceIds);
     if(sources.error)throw sources.error;
     sourceNames=new Map((sources.data||[]).map(row=>[row.id,
       row.name]));
@@ -981,6 +982,7 @@ $("profile-form").addEventListener("submit",async e=>{
   try{
     if(isAcademic){
       if(registry.student_no!==student.student_no){
+        // scale-ok: ตรวจรหัสนักเรียน 1 รหัสด้วย unique index
         const duplicate=await sb.from("students").select("id,name,student_no").eq("student_no",registry.student_no).neq("id",id);
         if(duplicate.error)throw duplicate.error;
         if(duplicate.data?.length){
