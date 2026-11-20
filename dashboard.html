@@ -506,6 +506,8 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
   // ผลประเมิน 360° ที่ประกาศแล้วแต่ยังไม่กดรับทราบ — โหลดครั้งเดียวตอนเปิดหน้า (ไม่ดึงซ้ำตอน realtime)
   // กดรับทราบแล้วกลับมาหน้าแรก = โหลดหน้าใหม่ แถวนี้จึงหายเอง
   let evalAckRows = [];
+  let evalCommentEntries = [];
+  const evalCommentAlertAgeMs = 14 * 864e5;
 
   async function loadEvalAckAlerts(staffId) {
     const { data, error } = await sb.from("eval_targets")
@@ -522,26 +524,61 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     }));
   }
 
-  async function loadEvalCommentAlerts(staffId) {
-    const since = new Date(Date.now() - 14 * 864e5).toISOString();
+  function readEvalAckSeen(userId) {
+    try {
+      const seen = JSON.parse(localStorage.getItem(`crs-eval-ack-seen:${userId}`));
+      return seen && typeof seen === "object" && !Array.isArray(seen) ? seen : {};
+    } catch { return {}; }
+  }
+
+  function markEvalAckSeen(userId, targetId, updatedAt) {
+    const timestamp = Date.parse(updatedAt);
+    if (!userId || !targetId || !Number.isFinite(timestamp)) return;
+    const seen = readEvalAckSeen(userId);
+    // หน้าเดิมที่เปิดค้างไว้อาจมีคำชี้แจงเวอร์ชันก่อนหน้า
+    if (!(Date.parse(seen[targetId]) >= timestamp)) seen[targetId] = updatedAt;
+    const latestSeen = seen[targetId];
+    const cutoff = Date.now() - 60 * 864e5;
+    for (const [id, at] of Object.entries(seen)) {
+      if (!(Date.parse(at) >= cutoff)) delete seen[id];
+    }
+    try {
+      localStorage.setItem(`crs-eval-ack-seen:${userId}`, JSON.stringify(seen));
+    } catch { /* ยังแสดงสถานะที่อ่านแล้วในหน้านี้ได้ */ }
+    return latestSeen;
+  }
+
+  async function loadEvalCommentAlerts(staffId, userId) {
+    const since = new Date(Date.now() - evalCommentAlertAgeMs).toISOString();
     const { data, error } = await sb.from("eval_acknowledgements")
       .select("target_id, comment, updated_at, eval_targets!inner(staff_id, round_id, eval_rounds!inner(status, academic_year, round_no))")
       .not("comment", "is", null).gte("updated_at", since)
       .eq("eval_targets.eval_rounds.status", "published");
     if (error) return [];
+    evalCommentEntries = (data || []).filter(row => row.eval_targets.staff_id !== staffId && row.comment?.trim())
+      .map(row => ({ targetId:row.target_id, updatedAt:row.updated_at,
+        roundId:row.eval_targets.round_id, round:row.eval_targets.eval_rounds }));
+    return buildEvalCommentAlerts(evalCommentEntries, userId);
+  }
+
+  function buildEvalCommentAlerts(entries, userId) {
+    const seen = readEvalAckSeen(userId);
+    const cutoff = Date.now() - evalCommentAlertAgeMs;
     const byRound = new Map();
-    for (const row of data || []) {
-      const target = row.eval_targets;
-      if (target.staff_id === staffId || !row.comment?.trim()) continue;
-      const summary = byRound.get(target.round_id) || { round:target.eval_rounds, count:0, latest:0 };
+    for (const { targetId, updatedAt, roundId, round } of entries) {
+      const updated = Date.parse(updatedAt);
+      if (!(updated >= cutoff) || Date.parse(seen[targetId]) >= updated) continue;
+      const summary = byRound.get(roundId) || { round, targetId, count:0, latest:0 };
       summary.count++;
-      summary.latest = Math.max(summary.latest, Date.parse(row.updated_at));
-      byRound.set(target.round_id, summary);
+      summary.latest = Math.max(summary.latest, updated);
+      byRound.set(roundId, summary);
     }
-    return [...byRound].map(([id, { round, count, latest }]) => ({
+    return [...byRound].map(([id, { round, targetId, count, latest }]) => ({
       kind:"ประเมิน",
-      text:`คำชี้แจงผลประเมินครู 360° ปี ${round.academic_year} ครั้งที่ ${round.round_no} จากครู ${count} คน · ล่าสุด ${thaiShortDateText(evalThaiDateStr(latest))}`,
-      href:`personnel/eval-rounds.html?round=${encodeURIComponent(id)}`, linkLabel:"อ่าน"
+      text:`คำชี้แจงผลประเมินครู 360° ปี ${round.academic_year} ครั้งที่ ${round.round_no} ยังไม่ได้อ่าน ${count} คน · ล่าสุด ${thaiShortDateText(evalThaiDateStr(latest))}`,
+      href:count === 1 ? `personnel/eval-result.html?target=${encodeURIComponent(targetId)}#ack-comment`
+        : `personnel/eval-result.html?round=${encodeURIComponent(id)}`,
+      linkLabel:"อ่าน"
     }));
   }
 
@@ -1042,7 +1079,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       capture(sb.rpc('my_timetable_swap_alerts')),
       me ? capture(sb.rpc('my_lesson_plan_alerts')) : Promise.resolve(null),
       me ? loadEvalAckAlerts(me.id).catch(() => []) : Promise.resolve([]),
-      me ? loadEvalCommentAlerts(me.id).catch(() => []) : []
+      me ? loadEvalCommentAlerts(me.id, session.user.id).catch(() => []) : []
     ]);
     evalAckRows = [...(evalAckResult || []), ...evalCommentResult];
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
@@ -1137,6 +1174,10 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       let lastSwapResult = swapAlertsResult;
       let lastLessonPlanResult = lessonPlanAlertsResult;
       let syncPending = false;
+      const renderCurrentMyAlerts = () => renderMyAlerts(
+        lastAlertsResult, dailyResult, today, pendingApprovals, isApprover,
+        pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult, lastLessonPlanResult, evalAckRows
+      );
       async function syncDashboardAlerts(parts) {
         if (syncPending) return;
         syncPending = true;
@@ -1166,10 +1207,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
               // เงียบไว้ — ของเดิมบนจอยังถูกอยู่ ไม่ต้องแทนด้วยสถานะ error ชั่วคราว
             }
           }
-          renderMyAlerts(
-            lastAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-            pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult, lastLessonPlanResult, evalAckRows
-          );
+          renderCurrentMyAlerts();
           if ((!freshProjectsResult || !freshProjectsResult.error) && (!freshAlertsResult || !freshAlertsResult.error)) {
             updateFreshTime();
           }
@@ -1228,9 +1266,14 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
         lastFullSyncAt = Date.now();
         scheduleSync(ALL_PARTS);
       });
-      // Back/forward cache restores the old DOM; seen is read again from localStorage on return.
+      // ย้อนกลับมาเจอหน้าเดิมจากแคช: นับคำชี้แจงที่ยังไม่อ่านใหม่จากข้อมูลที่โหลดไว้
       window.addEventListener("pageshow", event => {
-        if (event.persisted && me) void syncDashboardAlerts(new Set(["alerts"]));
+        if (!event.persisted || !me) return;
+        if (evalCommentEntries.length) {
+          evalAckRows = [...(evalAckResult || []), ...buildEvalCommentAlerts(evalCommentEntries, session.user.id)];
+          renderCurrentMyAlerts();
+        }
+        void syncDashboardAlerts(new Set(["alerts"]));
       });
       window.addEventListener("pagehide", () => { sb.removeChannel(alertsChannel); });
     }

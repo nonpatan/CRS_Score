@@ -31,7 +31,7 @@
   .table-scroll table.wide { min-width:640px; } td.num, th.num { white-space:nowrap; text-align:right; } td.res { white-space:nowrap; }
   .table-scroll table.wide td:first-child, .table-scroll table.wide th:first-child { position:sticky; left:0; background:var(--white); z-index:1; }
   .table-scroll table.wide th:first-child { background:var(--bg); }
-  .ack-comment-link { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); white-space:nowrap; }
+  .ack-comment-link { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); }
   #ack-comment { scroll-margin-top:16px; }
   #ack-comment:focus { outline:2px solid var(--teal); outline-offset:2px; }
   .ack-comment-text { white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -83,7 +83,8 @@ if (session) {
   const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
   const number = value => value == null ? "—" : Number(value).toFixed(2);
   const date = value => value ? new Intl.DateTimeFormat("th-TH", { timeZone:"Asia/Bangkok", day:"numeric", month:"short", year:"numeric" }).format(new Date(value)) : "—";
-  const state = { rounds:[], staff:[], roundData:null, detail:null, result:null, appealText:"" };
+  const state = { rounds:[], staff:[], roundData:null, detail:null, result:null, appealText:"",
+    evalAckSeen:readEvalAckSeen(session.user.id) };
   const name = id => state.staff.find(row => row.id === id)?.full_name || "ไม่พบชื่อ";
   const section = (code, form) => form.sections.find(row => String(row.code) === String(code));
   const notify = message => { toastBox.textContent = message; toastBox.classList.add("show"); setTimeout(() => toastBox.classList.remove("show"), 4500); };
@@ -146,8 +147,36 @@ if (session) {
     }
     return html + '</details>';
   }
+  function readEvalAckSeen(userId) {
+    try {
+      const seen = JSON.parse(localStorage.getItem(`crs-eval-ack-seen:${userId}`));
+      return seen && typeof seen === "object" && !Array.isArray(seen) ? seen : {};
+    } catch { return {}; }
+  }
+
+  function markEvalAckSeen(userId, targetId, updatedAt) {
+    const timestamp = Date.parse(updatedAt);
+    if (!userId || !targetId || !Number.isFinite(timestamp)) return;
+    const seen = readEvalAckSeen(userId);
+    // หน้าเดิมที่เปิดค้างไว้อาจมีคำชี้แจงเวอร์ชันก่อนหน้า
+    if (!(Date.parse(seen[targetId]) >= timestamp)) seen[targetId] = updatedAt;
+    const latestSeen = seen[targetId];
+    const cutoff = Date.now() - 60 * 864e5;
+    for (const [id, at] of Object.entries(seen)) {
+      if (!(Date.parse(at) >= cutoff)) delete seen[id];
+    }
+    try {
+      localStorage.setItem(`crs-eval-ack-seen:${userId}`, JSON.stringify(seen));
+    } catch { /* ยังแสดงสถานะที่อ่านแล้วในหน้านี้ได้ */ }
+    return latestSeen;
+  }
+
   function renderRound() {
     const data = state.roundData, round = data.round;
+    const comments = round.status === "published" ? data.acknowledgements.filter(row => row.comment?.trim()) : [];
+    const unreadIds = new Set(comments.filter(row =>
+      !(Date.parse(state.evalAckSeen[row.target_id]) >= Date.parse(row.updated_at))
+    ).map(row => row.target_id));
     app.className = "";   // #app เริ่มเป็นการ์ด "กำลังโหลด" — เนื้อหามีการ์ดของตัวเอง ห้ามซ้อนการ์ดในการ์ด
     const rows = data.targets.map(target => {
       const result = compute(data, target), decision = data.decisions.find(row => row.target_id === target.id);
@@ -158,9 +187,11 @@ if (session) {
       const finalCell = decision ? '<span class="chip done">' + esc(evalDecisionLabel(decision.final)) + '</span>' : '<span class="chip todo">ยังไม่ยืนยัน</span>';
       const targetUrl = "?target=" + encodeURIComponent(target.id);
       const teacherName = esc(name(target.staff_id));
+      const unread = unreadIds.has(target.id);
       const commentLink = ack?.comment?.trim()
         ? '<br><a class="ack-comment-link" href="' + targetUrl + '#ack-comment" data-open-target="' + esc(target.id) +
-          '" aria-label="อ่านคำชี้แจงของ ' + teacherName + '">มีคำชี้แจง →</a>'
+          '" aria-label="อ่านคำชี้แจงของ ' + teacherName + (unread ? ', ยังไม่อ่าน' : '') +
+          '">มีคำชี้แจง' + (unread ? ' · ยังไม่อ่าน' : '') + ' →</a>'
         : '';
       return '<tr><td><a href="' + targetUrl + '" data-open-target="' + esc(target.id) + '">' + teacherName + '</a></td><td class="num">' + number(result.total) + '</td><td>' + esc(result.level || "—") + '</td><td>' + status + '</td><td>' + finalCell + '</td><td>' + esc(result.deficiencies.map(code => deficitText(code, data.form, result, false)).join(" · ") || "—") + '</td>' + (round.status === "published" ? '<td>' + (ack ? 'รับทราบแล้ว ' + esc(date(ack.acknowledged_at)) : "ยังไม่รับทราบ") + commentLink + '</td>' : "") + '</tr>';
     });
@@ -168,7 +199,6 @@ if (session) {
     const confirmed = data.decisions.length, incomplete = results.filter(row => !row.complete).length;
     const decisionSummary = evalDecisionOptions(round.round_no).map(option =>
       option.label + " " + data.decisions.filter(row => row.final === option.value).length).join(" · ");
-    const commentCount = round.status === "published" ? data.acknowledgements.filter(row => row.comment?.trim()).length : 0;
     app.innerHTML = '<section class="card"><div class="toolbar"><label for="round-select">รอบประเมิน</label><select id="round-select">' + state.rounds.map(row => '<option value="' + esc(row.id) + '"' + (row.id === round.id ? " selected" : "") + '>' + esc(row.academic_year + " · ครั้งที่ " + row.round_no) + '</option>').join("") + '</select></div>' +
       '<div class="round-tools" style="margin-top:10px">' + (state.head ? '<a class="button" href="eval-rounds.html?round=' + encodeURIComponent(round.id) + '">ไปหน้ารอบประเมิน</a>' : '') +
       (state.admin ? '<a class="button" href="red-flags.html">บันทึก Red Flag</a>' : '') + '</div></section>' +
@@ -176,7 +206,8 @@ if (session) {
       [[data.targets.length,"ครูในรอบ"],[confirmed,"ยืนยันผลแล้ว"],[incomplete,"ข้อมูลไม่ครบ"]].map(([n,label]) => '<div class="kpi"><b>' + n + '</b><span>' + esc(label) + '</span></div>').join("") +
       '<div class="kpi"><b class="decision-summary">' + esc(decisionSummary) + '</b><span>ผลที่ยืนยันแล้ว</span></div></div></section>' +
       '<section class="card"><h2>ผลรายคน</h2><p class="hint">กดชื่อครูเพื่อดูตาราง ก ข ค และยืนยันผล' + (confirmed < data.targets.length ? ' · ยังไม่ยืนยัน ' + (data.targets.length - confirmed) + ' คน' : ' · ยืนยันครบแล้ว') +
-      (commentCount ? ' · มีคำชี้แจง ' + commentCount + ' คน' : '') + '</p>' +
+      (comments.length ? ' · มีคำชี้แจง ' + comments.length + ' คน' : '') +
+      (unreadIds.size ? ' · ยังไม่อ่าน ' + unreadIds.size : '') + '</p>' +
       (rows.length ? table(["ครู","#รวม","ระดับ","ระบบเสนอ","ผลที่ยืนยัน","ข้อบกพร่อง"].concat(round.status === "published" ? ["รับทราบ"] : []), rows, true) : '<div class="empty">ยังไม่มีครูในรอบนี้</div>') + '</section>';
   }
   // ลำดับครูในรอบ (เรียงชื่อ) สำหรับปุ่มคนก่อน/คนถัดไป — ใช้ข้อมูลทั้งรอบที่โหลดไว้
@@ -304,6 +335,11 @@ if (session) {
     const commentHash = hash === "#ack-comment" ? hash : "";
     history.replaceState(null,"","?target=" + encodeURIComponent(id) + commentHash);
     renderDetail();
+    if (detail.acknowledgement?.comment?.trim()) {
+      const targetId = detail.target.id;
+      const seenAt = markEvalAckSeen(session.user.id, targetId, detail.acknowledgement.updated_at);
+      if (seenAt && !(Date.parse(state.evalAckSeen[targetId]) >= Date.parse(seenAt))) state.evalAckSeen[targetId] = seenAt;
+    }
     const comment = commentHash && app.querySelector(commentHash);
     if (comment) {
       comment.scrollIntoView({ block:"start" });
