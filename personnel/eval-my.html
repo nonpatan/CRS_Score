@@ -61,6 +61,10 @@
   .result-hero b { font-size:20px; color:var(--teal); } .result-table { width:100%; border-collapse:collapse; font-size:14px; }
   .result-table th,.result-table td { border-bottom:1px solid var(--line); padding:7px; text-align:left; }
   .result-table th { background:var(--bg); } .result-table td:last-child { text-align:right; }
+  .dept-head-notes { margin-top:16px; }
+  .dept-head-notes ul { margin:0; padding-inline-start:22px; }
+  .dept-head-notes li { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .dept-head-notes li + li { margin-top:8px; }
   .result-card details { margin-top:12px; } .result-card summary { cursor:pointer; min-height:44px; padding:8px 0; }
   .result-card textarea { width:100%; min-height:86px; font:inherit; font-size:16px; padding:9px; border:1px solid var(--line); border-radius:8px; }
   .result-card button { font:inherit; min-height:44px; border:0; border-radius:8px; padding:8px 14px; background:var(--teal); color:var(--white); cursor:pointer; margin-top:8px; }
@@ -147,6 +151,11 @@ if (!session) {
         const committee = form.sections.find(row => row.kind === "committee");
         const committeeText = (committee?.text_fields || []).map(field => '<p><b>' + esc(field.label) + ':</b> ' +
           esc(item.committee_texts?.[field.key] || "—") + '</p>').join("");
+        const deptHeadNotes = item.dept_head_notes ?? [];
+        const deptHeadNotesHtml = deptHeadNotes.length ?
+          '<div class="dept-head-notes"><h3>ข้อสังเกตจากหัวหน้าฝ่าย</h3>' +
+          '<p class="hint">ไม่ระบุชื่อผู้เขียน · มีข้อสังเกต ' + deptHeadNotes.length + ' ข้อ</p><ul>' +
+          deptHeadNotes.map(note => '<li>' + esc(note) + '</li>').join("") + '</ul></div>' : "";
         const parts = (computed.sections || []).filter(row => row.weight > 0);
         const starFails = (computed.stars || []).filter(row => row.fail);
         html += '<section class="card result-card" data-result="' + esc(item.target_id) + '"><h2>ผลประเมินของฉัน · ' +
@@ -159,7 +168,7 @@ if (!session) {
             '</td><td>' + (row.avg == null ? "—" : Number(row.avg).toFixed(2)) + '</td><td>' + esc(row.weight) + '%</td></tr>').join("") + '</tbody></table>' +
           (starFails.length ? '<h3>ข้อ ★ ที่ไม่ผ่าน</h3><p>' + esc(starFails.map(row => row.code + " " + row.label).join(" · ")) + '</p>' : "") +
           (decision.reason ? '<p><b>เหตุผลประกอบการพิจารณา:</b> ' + esc(decision.reason) + '</p>' : "") +
-          committeeText + '<details><summary>ดูคะแนนรายข้อ</summary>' + parts.filter(row => ["committee","dept_head","peer"].includes(row.kind)).map(row =>
+          committeeText + deptHeadNotesHtml + '<details><summary>ดูคะแนนรายข้อ</summary>' + parts.filter(row => ["committee","dept_head","peer"].includes(row.kind)).map(row =>
             '<h3>' + esc(row.title) + '</h3><table class="result-table"><tbody>' + (row.items || []).map(score =>
               '<tr><td>' + esc(score.code + " " + score.text) + '</td><td>' +
               (score.value == null ? "—" : Number(score.value).toFixed(2)) + '</td></tr>').join("") + '</tbody></table>').join("") + '</details>' +
