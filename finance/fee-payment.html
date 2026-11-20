@@ -197,7 +197,7 @@
           </div>
           <div id="add-promo-form" hidden>
             <div class="field"><label for="add-promo">คูปองส่วนลด</label><select id="add-promo"></select></div>
-            <div id="add-promo-status" class="banner info"></div>
+            <div id="add-promo-status" class="banner info" role="status"></div>
             <div class="actions"><button id="add-promo-submit" class="ghost" type="button">บันทึกส่วนลด</button></div>
           </div>
           <div id="add-subsidy-form" hidden>
@@ -310,6 +310,7 @@ function roomLabel(room){
 
 function friendly(error){
   const message=error?.message||String(error||"");
+  if(message.includes("student_charges_promo_term_uniq"))return"ได้รับโปรโมชั่นนี้ในภาคเรียนนี้แล้ว · กรุณาโหลดข้อมูลล่าสุด";
   const scholarshipInsufficient=message.match(/ยอดทุนคงเหลือไม่พอ\s*·?\s*คงเหลือ\s+([0-9.,]+)\s+บาท/);
   if(scholarshipInsufficient)return`ยอดทุนไม่พอ (เหลือ ${money(scholarshipInsufficient[1])}) · ยังไม่มีการบันทึก`;
   const insufficient=message.match(/ยอดคงเหลือ\s+([0-9.,]+)\s+บาท\s+ไม่พอ/);
@@ -435,16 +436,29 @@ function syncAddManualStatus(){
   el("add-manual-submit").disabled=addingLine||!selectedPlacement()||!installed
 }
 
+// ส่วนลดรายปีตรวจทั้งปี ส่วนลดรายภาคตรวจเฉพาะภาคที่เลือก
+function promoTaken(charge,promo,studentId,term){
+  return Boolean(promo)&&!charge.voided_at&&charge.kind==="ส่วนลด"&&charge.student_id===studentId
+    &&charge.promotion_id===promo.id&&(promo.scope!=="term"||Number(charge.term)===Number(term))
+}
+
+function promoTakenMessage(promo,charge){
+  return promo.scope==="term"
+    ?"ได้รับแล้วในภาคเรียนนี้ · โปรโมชั่นรายภาคเรียนได้ภาคละครั้ง"
+    :`ได้รับแล้วในภาคเรียน ${charge.term} · โปรโมชั่นรายปีได้ครั้งเดียวต่อปี`
+}
+
 function syncAddPromo(){
   const placement=selectedPlacement(),promo=promotions.find(row=>row.id===el("add-promo").value);
-  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
+  const term=el("term").value;
+  const existing=charges.find(charge=>promoTaken(charge,promo,placement?.student_id,term));
   const status=el("add-promo-status");
   status.className=`banner ${!promo?"bad":existing?"":"info"}`;
   status.textContent=!promo
     ?"ยังไม่มีคูปองส่วนลดที่เปิดใช้งานในปีนี้"
     :existing
-      ?`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`
-      :`ส่วนลด ${money(promo.amount)} · ใช้อัตราที่ประกาศไว้เท่านั้น`;
+      ?promoTakenMessage(promo,existing)
+      :`ส่วนลด ${money(promo.amount)} · ใช้อัตราที่ประกาศไว้เท่านั้น · ${promo.scope==="term"?"รายภาคเรียน":"รายปี"}`;
   el("add-promo-submit").disabled=addingLine||!placement||!promo||Boolean(existing)
 }
 
@@ -484,7 +498,7 @@ function renderAddLineForms(){
   el("add-product-group").innerHTML=groups.map(group=>`<option value="${esc(group)}">${esc(group)}</option>`).join("");
   if(groups.includes(currentGroup))el("add-product-group").value=currentGroup;
   const currentPromo=el("add-promo").value;
-  el("add-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${esc(promo.id)}">${esc(promo.name)} · ${money(promo.amount)}</option>`).join("");
+  el("add-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${esc(promo.id)}">${esc(promo.name)} · ${money(promo.amount)}${promo.scope==="term"?" · รายภาคเรียน":""}</option>`).join("");
   if(promotions.some(promo=>promo.active&&promo.id===currentPromo))el("add-promo").value=currentPromo;
   syncAddProduct();
   syncAddManualStatus();
@@ -775,9 +789,10 @@ el("add-manual-submit").onclick=async()=>{
 el("add-promo-submit").onclick=async()=>{
   if(addingLine)return;
   const placement=selectedPlacement(),promo=promotions.find(row=>row.id===el("add-promo").value);
-  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
   if(!placement||!promo)return toast("ยังไม่มีคูปองส่วนลดที่เลือกได้",true);
-  if(existing)return toast(`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`,true);
+  const term=el("term").value;
+  const existing=charges.find(charge=>promoTaken(charge,promo,placement.student_id,term));
+  if(existing)return toast(promoTakenMessage(promo,existing),true);
   if(!await window.crsAskConfirm({
     title:"ยืนยันให้ส่วนลด",
     message:`${placement.student?.name||"นักเรียน"}\n${promo.name} · ลด ${money(promo.amount)}`,

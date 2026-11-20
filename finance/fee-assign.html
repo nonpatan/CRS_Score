@@ -539,7 +539,7 @@ th{
               </div>
               <div id="person-promo-form" hidden>
                 <div class="field"><label for="person-promo">โปรโมชั่น</label><select id="person-promo"></select></div>
-                <div id="person-promo-status" class="banner info"></div>
+                <div id="person-promo-status" class="banner info" role="status"></div>
                 <div class="actions"><button id="person-save-promo" class="primary" type="button">บันทึกส่วนลด</button></div>
               </div>
               <div id="person-subsidy-form" hidden>
@@ -612,7 +612,7 @@ const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({
 
 function buildAssignmentRoster(placements,charges,matcher){
   return (placements||[]).map(placement=>{
-    const existing=(charges||[]).find(charge=>!charge.voided_at&&charge.student_id===placement.student_id&&matcher(charge));
+    const existing=(charges||[]).find(charge=>!charge.voided_at&&charge.student_id===placement.student_id&&matcher(charge,placement.student_id));
     return {
       placement,
       existing,
@@ -671,6 +671,7 @@ function toast(message,bad=false){
 
 function friendly(error){
   const m=error?.message||"เกิดข้อผิดพลาด";
+  if(m.includes("student_charges_promo_term_uniq"))return"มีนักเรียนได้รับโปรโมชั่นนี้ในภาคเรียนนี้แล้ว · กรุณาโหลดข้อมูลล่าสุด";
   if(m.includes("duplicate key"))return"มีรายการนี้อยู่แล้ว กรุณาโหลดข้อมูลล่าสุด";
   if(m.includes("สต๊อก")||m.includes("ยังไม่ได้")||m.includes("ราคา")||m.includes("อัตรา")||m.includes("ห้อง")||m.includes("ยกเลิก"))return m;
   if(m.includes("row-level security"))return"คุณไม่มีสิทธิ์ตั้งหนี้นักเรียน";
@@ -705,8 +706,29 @@ function renderAdmin(){
   syncAdminTotal()
 }
 
+// ส่วนลดรายปีตรวจทั้งปี ส่วนลดรายภาคตรวจเฉพาะภาคที่เลือก
+function promoTaken(charge,promo,studentId,term){
+  return Boolean(promo)&&!charge.voided_at&&charge.kind==="ส่วนลด"&&charge.student_id===studentId
+    &&charge.promotion_id===promo.id&&(promo.scope!=="term"||Number(charge.term)===Number(term))
+}
+
+function promoTakenMessage(promo,charge){
+  return promo.scope==="term"
+    ?"ได้รับแล้วในภาคเรียนนี้ · โปรโมชั่นรายภาคเรียนได้ภาคละครั้ง"
+    :`ได้รับแล้วในภาคเรียน ${charge.term} · โปรโมชั่นรายปีได้ครั้งเดียวต่อปี`
+}
+
+function promoOptionLabel(promo){
+  return `${esc(promo.name)} · ${money(promo.amount)}${promo.scope==="term"?" · รายภาคเรียน":""}`
+}
+
 function rowsFor(kind,ref){
-  return buildAssignmentRoster(roomPlacements,charges,c=>c.kind===kind&&(kind==="ส่วนลด"?c.promotion_id===ref:true)).map(row=>row.existing?{
+  const promo=kind==="ส่วนลด"?promotions.find(row=>row.id===ref):null;
+  const term=el("term").value;
+  const matches=kind==="ส่วนลด"
+    ?(charge,studentId)=>promoTaken(charge,promo,studentId,term)
+    :charge=>charge.kind===kind;
+  return buildAssignmentRoster(roomPlacements,charges,matches).map(row=>row.existing?{
     ...row,checked:true
   }:row)
 }
@@ -815,9 +837,13 @@ function syncPersonProductStock(){
 
 function syncPersonPromo(){
   const placement=selectedPersonPlacement(),promo=promotions.find(row=>row.id===el("person-promo").value);
-  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
+  const term=el("term").value;
+  const existing=charges.find(charge=>promoTaken(charge,promo,placement?.student_id,term));
   el("person-promo-status").className="banner "+(existing?"":"info");
-  el("person-promo-status").textContent=existing?`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`:promo?`ส่วนลด ${money(promo.amount)} · บันทึกเป็นยอดลดในบิล`:"ยังไม่มีโปรโมชั่นที่เปิดใช้งานในปีนี้";
+  el("person-promo-status").textContent=existing
+    ?promoTakenMessage(promo,existing)
+    :promo?`ส่วนลด ${money(promo.amount)} · บันทึกเป็นยอดลดในบิล · ${promo.scope==="term"?"รายภาคเรียน":"รายปี"}`
+      :"ยังไม่มีโปรโมชั่นที่เปิดใช้งานในปีนี้";
   el("person-save-promo").disabled=!placement||!promo||Boolean(existing)
 }
 
@@ -866,7 +892,7 @@ function renderPerson(){
   el("person-student").value=personStudentId||"";
   const groups=[...new Set(items.filter(item=>item.category==="ค่าสินค้า"&&!item.special_order&&item.active).map(item=>item.group_name))];
   el("person-product-group").innerHTML=groups.map(group=>`<option value="${esc(group)}">${esc(group)}</option>`).join("");
-  el("person-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${promo.id}">${esc(promo.name)} · ${money(promo.amount)}</option>`).join("");
+  el("person-promo").innerHTML=promotions.filter(promo=>promo.active).map(promo=>`<option value="${promo.id}">${promoOptionLabel(promo)}</option>`).join("");
   renderPersonBill();
   setPersonKind(personKind)
 }
@@ -912,7 +938,7 @@ function renderAll(){
   el("product-student").innerHTML=students.map(p=>`<option value="${p.student_id}">${esc(nameOf(p))}</option>`).join("");
   const groups=[...new Set(items.filter(i=>i.category==="ค่าสินค้า"&&!i.special_order&&i.active).map(i=>i.group_name))];
   el("product-group").innerHTML=groups.map(g=>`<option value="${esc(g)}">${esc(g)}</option>`).join("");
-  el("promo-select").innerHTML=promotions.filter(p=>p.active).map(p=>`<option value="${p.id}">${esc(p.name)} · ${money(p.amount)}</option>`).join("");
+  el("promo-select").innerHTML=promotions.filter(p=>p.active).map(p=>`<option value="${p.id}">${promoOptionLabel(p)}</option>`).join("");
   renderGuard();
   renderAdmin();
   renderSubsidy();
@@ -1105,9 +1131,10 @@ el("person-save-product").onclick=async()=>{
 
 el("person-save-promo").onclick=async()=>{
   const placement=selectedPersonPlacement(),promo=promotions.find(row=>row.id===el("person-promo").value);
-  const existing=charges.find(charge=>charge.student_id===placement?.student_id&&charge.kind==="ส่วนลด"&&charge.promotion_id===promo?.id&&!charge.voided_at);
   if(!placement||!promo)return toast("กรุณาเลือกนักเรียนและโปรโมชั่น",true);
-  if(existing)return toast(`ได้รับส่วนลดนี้แล้วในภาคเรียน ${existing.term}`,true);
+  const term=el("term").value;
+  const existing=charges.find(charge=>promoTaken(charge,promo,placement.student_id,term));
+  if(existing)return toast(promoTakenMessage(promo,existing),true);
   if(!await window.crsAskConfirm({title:"ยืนยันให้ส่วนลด",message:`${nameOf(placement)}\n${promo.name} · ลด ${money(promo.amount)}`,okLabel:"บันทึกส่วนลด",danger:false}))return;
   el("promo-select").value=promo.id;
   renderPromo();
@@ -1138,6 +1165,8 @@ el("room").onchange=()=>{personStudentId=null;selectRoom();resetPersonForm()};
 el("term").onchange=()=>{
   renderGuard();
   renderAdmin();
+  // รายปีใช้รายชื่อเดิมได้ เก็บรายการที่ติ๊กไว้เมื่อสลับภาค
+  if(promotions.some(promo=>promo.id===el("promo-select").value&&promo.scope==="term"))renderPromo();
   renderPersonBill();
   syncPersonPromo();
   syncPersonSubsidy()
