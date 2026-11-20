@@ -448,7 +448,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     loadAcademicProjects, filterProjectsInMonth, countPendingProjects, projectResponsibleName,
     loadMyDashboardAlerts, pickMyDashboardAlerts, loadDutyMonthReminders,
     isProjectApprover, isMakeupApprover, listPendingMakeupRequests,
-    bangkokNow, toDateStr, formatMoney
+    bangkokNow, toDateStr, formatMoney, evalThaiDateStr, thaiShortDateText
   } from "./supabase-client.js?v=20261118-1";
 
   document.querySelectorAll("[data-dashboard-signout]").forEach(button => {
@@ -519,6 +519,29 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       kind:"ประเมิน",
       text:`ผลประเมินครู 360° ปี ${row.eval_rounds.academic_year} ครั้งที่ ${row.eval_rounds.round_no} ประกาศแล้ว · รอคุณกดรับทราบ`,
       href:"personnel/eval-my.html", linkLabel:"ดูผล"
+    }));
+  }
+
+  async function loadEvalCommentAlerts(staffId) {
+    const since = new Date(Date.now() - 14 * 864e5).toISOString();
+    const { data, error } = await sb.from("eval_acknowledgements")
+      .select("target_id, comment, updated_at, eval_targets!inner(staff_id, round_id, eval_rounds!inner(status, academic_year, round_no))")
+      .not("comment", "is", null).gte("updated_at", since)
+      .eq("eval_targets.eval_rounds.status", "published");
+    if (error) return [];
+    const byRound = new Map();
+    for (const row of data || []) {
+      const target = row.eval_targets;
+      if (target.staff_id === staffId || !row.comment?.trim()) continue;
+      const summary = byRound.get(target.round_id) || { round:target.eval_rounds, count:0, latest:0 };
+      summary.count++;
+      summary.latest = Math.max(summary.latest, Date.parse(row.updated_at));
+      byRound.set(target.round_id, summary);
+    }
+    return [...byRound].map(([id, { round, count, latest }]) => ({
+      kind:"ประเมิน",
+      text:`คำชี้แจงผลประเมินครู 360° ปี ${round.academic_year} ครั้งที่ ${round.round_no} จากครู ${count} คน · ล่าสุด ${thaiShortDateText(evalThaiDateStr(latest))}`,
+      href:`personnel/eval-rounds.html?round=${encodeURIComponent(id)}`, linkLabel:"อ่าน"
     }));
   }
 
@@ -1005,7 +1028,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
     const [dailyResult, calendarResult, projectResult, approverResult, makeupApproverResult,
-      myAlertsResult, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckResult] = await Promise.all([
+      myAlertsResult, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckResult, evalCommentResult] = await Promise.all([
       capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
@@ -1018,9 +1041,10 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       loadDutyMonthReminders(today).catch(() => []),
       capture(sb.rpc('my_timetable_swap_alerts')),
       me ? capture(sb.rpc('my_lesson_plan_alerts')) : Promise.resolve(null),
-      me ? loadEvalAckAlerts(me.id).catch(() => []) : Promise.resolve([])
+      me ? loadEvalAckAlerts(me.id).catch(() => []) : Promise.resolve([]),
+      me ? loadEvalCommentAlerts(me.id).catch(() => []) : []
     ]);
-    evalAckRows = evalAckResult || [];
+    evalAckRows = [...(evalAckResult || []), ...evalCommentResult];
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
     makeupApprover = makeupApproverResult?.value === true;

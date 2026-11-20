@@ -141,6 +141,7 @@
     .toolbar > select { min-width:0; width:100%; }
     .toolbar > button, .actions > button { flex:1 1 100%; }
   }
+  .ack-comment-link { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); white-space:nowrap; }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -166,7 +167,7 @@
 </div>
 <script type="module">
 import {
-  requireAuth, signOut, checkDepartment, isPersonnelHead, applyPersonnelMenuAccess,
+  requireAuth, signOut, checkDepartment, isPersonnelHead, applyPersonnelMenuAccess, listEvalRoundsICanSee,
   listStaffPicker, getSetting, getAcademicYears, academicYearOf, bangkokNow, toDateStr, thaiShortDateText,
   listEvalForms, loadEvalForm, listEvalRounds, loadEvalRoundAdmin, saveEvalRound, deleteEvalRound,
   setEvalRoundStatus, upsertEvalTarget, deleteEvalTarget, addEvalAssignment,
@@ -401,11 +402,15 @@ if (!session) {
       }
       const decision = state.resultData?.decisions.find(row => row.target_id === target.id);
       const ack = state.resultData?.acknowledgements.find(row => row.target_id === target.id);
+      const commentLink = ack?.comment?.trim()
+        ? '<br><a class="ack-comment-link" href="eval-result.html?target=' + encodeURIComponent(target.id) +
+          '#ack-comment" aria-label="อ่านคำชี้แจงของ ' + esc(staffName(target.staff_id)) + '">มีคำชี้แจง →</a>'
+        : '';
       html += '<td>' + (targetSnapshot(target.id) ? "ล็อกแล้ว" : "ยังไม่ล็อกตัวเลข") + '</td>' +
         '<td>' + (state.resultData ? '<a href="eval-result.html?target=' + encodeURIComponent(target.id) + '">' +
           esc(decision ? evalDecisionLabel(decision.final) : "ยังไม่ยืนยัน") + '</a>' : "—") + '</td>' +
         (state.data.round.status === "published" ? '<td>' + (ack ? "รับทราบแล้ว " +
-          esc(thaiShortDateText(evalThaiDateStr(ack.acknowledged_at))) : "ยังไม่รับทราบ") + '</td>' : '') + '</tr>';
+          esc(thaiShortDateText(evalThaiDateStr(ack.acknowledged_at))) : "ยังไม่รับทราบ") + commentLink + '</td>' : '') + '</tr>';
     }
     return html + '</tbody></table></div><p class="hint">' +
       (state.data.round.status === "published" ? "ผลประกาศแล้ว · ไม่เปิดแบบคืนให้แก้" :
@@ -457,7 +462,9 @@ if (!session) {
         actionButton("reopen-round", "เปิดรับคะแนนอีกครั้ง") +
         actionButton("publish-round", "ประกาศผล", "primary", undecided ? "disabled" : "") + '</div>';
     }
-    return '<div class="next-step"><p><b>ประกาศผลแล้ว</b> · ครูเห็นผลของตัวเองใน “งานประเมินของฉัน” · ดูการรับทราบในตารางด้านล่าง</p></div>';
+    const commentCount = state.resultData?.acknowledgements.filter(row => row.comment?.trim()).length || 0;
+    return '<div class="next-step"><p><b>ประกาศผลแล้ว</b> · ครูเห็นผลของตัวเองใน “งานประเมินของฉัน” · ดูการรับทราบในตารางด้านล่าง' +
+      (commentCount ? ' · มีคำชี้แจง ' + commentCount + ' คน' : '') + '</p></div>';
   }
   function renderHead(round) {
     const at = STEP_ORDER.indexOf(round.status);
@@ -718,6 +725,14 @@ if (!session) {
     el("gate").hidden = false;
     el("gate").innerHTML = '<div class="banner warn"><b>หน้านี้สำหรับหัวหน้าฝ่ายบุคคล</b><br>' +
       'หากต้องจัดรอบประเมิน ให้ติดต่อผู้ดูแลระบบ</div>';
+    // ผอ. ที่ไม่ได้เป็นหัวหน้าฝ่ายเปิดลิงก์จากหน้าแรกได้ผ่านหน้าสรุปผลของรอบที่มีสิทธิ์ดู
+    const roundId = new URLSearchParams(location.search).get("round");
+    if (roundId) {
+      const visibleRounds = await listEvalRoundsICanSee().catch(() => []);
+      if (visibleRounds.some(round => round.id === roundId && round.status === "published")) {
+        location.replace("eval-result.html?round=" + encodeURIComponent(roundId));
+      }
+    }
   } else {
     state.canDepartment = canDepartment;
     el("app").innerHTML = '<div class="card">กำลังโหลดรอบประเมิน…</div>';

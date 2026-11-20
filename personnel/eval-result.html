@@ -31,6 +31,10 @@
   .table-scroll table.wide { min-width:640px; } td.num, th.num { white-space:nowrap; text-align:right; } td.res { white-space:nowrap; }
   .table-scroll table.wide td:first-child, .table-scroll table.wide th:first-child { position:sticky; left:0; background:var(--white); z-index:1; }
   .table-scroll table.wide th:first-child { background:var(--bg); }
+  .ack-comment-link { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); white-space:nowrap; }
+  #ack-comment { scroll-margin-top:16px; }
+  #ack-comment:focus { outline:2px solid var(--teal); outline-offset:2px; }
+  .ack-comment-text { white-space:pre-wrap; overflow-wrap:anywhere; }
   .banner { padding:10px 12px; border-radius:8px; margin:10px 0; } .banner.warn { background:var(--amber-soft); color:var(--amber); } .banner.ok { background:var(--teal-soft); color:var(--teal); } .banner.err { background:var(--danger-soft); color:var(--danger); }
   .pass { color:var(--teal); font-weight:600; } .fail { color:var(--danger); font-weight:600; } .muted { color:var(--muted); }
   .pending { color:var(--amber); font-weight:600; } .recheck-item { border-top:1px solid var(--line); padding:14px 0; }
@@ -71,14 +75,15 @@
 import { requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess, isPersonnelHead,
   listEvalRoundsICanSee, loadEvalRoundResults, getProfile, loadEvalTargetResult, listStaffPicker,
   computeEvalResult, evalDecisionSnapshot, evalDecisionOptions, evalDecisionLabel,
-  saveEvalDecision, saveEvalStarRecheck, deleteEvalStarRecheck, thaiShortDateText } from "../supabase-client.js?v=20261118-1";
+  saveEvalDecision, saveEvalStarRecheck, deleteEvalStarRecheck, thaiShortDateText,
+  evalThaiDateStr, addDaysStr, addWorkingDays, loadEvalAppealHolidays } from "../supabase-client.js?v=20261118-1";
 const session = await requireAuth();
 if (session) {
   const app = document.getElementById("app"), toastBox = document.getElementById("toast");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
   const number = value => value == null ? "—" : Number(value).toFixed(2);
   const date = value => value ? new Intl.DateTimeFormat("th-TH", { timeZone:"Asia/Bangkok", day:"numeric", month:"short", year:"numeric" }).format(new Date(value)) : "—";
-  const state = { rounds:[], staff:[], roundData:null, detail:null, result:null };
+  const state = { rounds:[], staff:[], roundData:null, detail:null, result:null, appealText:"" };
   const name = id => state.staff.find(row => row.id === id)?.full_name || "ไม่พบชื่อ";
   const section = (code, form) => form.sections.find(row => String(row.code) === String(code));
   const notify = message => { toastBox.textContent = message; toastBox.classList.add("show"); setTimeout(() => toastBox.classList.remove("show"), 4500); };
@@ -151,19 +156,27 @@ if (session) {
         result.pendingRechecks.length ? '<span class="suggest warn">รอตรวจเพิ่ม</span>' :
         '<span class="suggest ' + suggestTone(result.suggested) + '">' + esc(evalDecisionLabel(result.suggested)) + '</span>';
       const finalCell = decision ? '<span class="chip done">' + esc(evalDecisionLabel(decision.final)) + '</span>' : '<span class="chip todo">ยังไม่ยืนยัน</span>';
-      return '<tr><td><a href="?target=' + encodeURIComponent(target.id) + '" data-open-target="' + esc(target.id) + '">' + esc(name(target.staff_id)) + '</a></td><td class="num">' + number(result.total) + '</td><td>' + esc(result.level || "—") + '</td><td>' + status + '</td><td>' + finalCell + '</td><td>' + esc(result.deficiencies.map(code => deficitText(code, data.form, result, false)).join(" · ") || "—") + '</td>' + (round.status === "published" ? '<td>' + (ack ? 'รับทราบแล้ว ' + esc(date(ack.acknowledged_at)) : "ยังไม่รับทราบ") + '</td>' : "") + '</tr>';
+      const targetUrl = "?target=" + encodeURIComponent(target.id);
+      const teacherName = esc(name(target.staff_id));
+      const commentLink = ack?.comment?.trim()
+        ? '<br><a class="ack-comment-link" href="' + targetUrl + '#ack-comment" data-open-target="' + esc(target.id) +
+          '" aria-label="อ่านคำชี้แจงของ ' + teacherName + '">มีคำชี้แจง →</a>'
+        : '';
+      return '<tr><td><a href="' + targetUrl + '" data-open-target="' + esc(target.id) + '">' + teacherName + '</a></td><td class="num">' + number(result.total) + '</td><td>' + esc(result.level || "—") + '</td><td>' + status + '</td><td>' + finalCell + '</td><td>' + esc(result.deficiencies.map(code => deficitText(code, data.form, result, false)).join(" · ") || "—") + '</td>' + (round.status === "published" ? '<td>' + (ack ? 'รับทราบแล้ว ' + esc(date(ack.acknowledged_at)) : "ยังไม่รับทราบ") + commentLink + '</td>' : "") + '</tr>';
     });
     const results = data.targets.map(target => compute(data, target));
     const confirmed = data.decisions.length, incomplete = results.filter(row => !row.complete).length;
     const decisionSummary = evalDecisionOptions(round.round_no).map(option =>
       option.label + " " + data.decisions.filter(row => row.final === option.value).length).join(" · ");
+    const commentCount = round.status === "published" ? data.acknowledgements.filter(row => row.comment?.trim()).length : 0;
     app.innerHTML = '<section class="card"><div class="toolbar"><label for="round-select">รอบประเมิน</label><select id="round-select">' + state.rounds.map(row => '<option value="' + esc(row.id) + '"' + (row.id === round.id ? " selected" : "") + '>' + esc(row.academic_year + " · ครั้งที่ " + row.round_no) + '</option>').join("") + '</select></div>' +
       '<div class="round-tools" style="margin-top:10px">' + (state.head ? '<a class="button" href="eval-rounds.html?round=' + encodeURIComponent(round.id) + '">ไปหน้ารอบประเมิน</a>' : '') +
       (state.admin ? '<a class="button" href="red-flags.html">บันทึก Red Flag</a>' : '') + '</div></section>' +
       '<section class="card"><h2>' + esc(round.academic_year + " · ครั้งที่ " + round.round_no) + '</h2><div class="kpis">' +
       [[data.targets.length,"ครูในรอบ"],[confirmed,"ยืนยันผลแล้ว"],[incomplete,"ข้อมูลไม่ครบ"]].map(([n,label]) => '<div class="kpi"><b>' + n + '</b><span>' + esc(label) + '</span></div>').join("") +
       '<div class="kpi"><b class="decision-summary">' + esc(decisionSummary) + '</b><span>ผลที่ยืนยันแล้ว</span></div></div></section>' +
-      '<section class="card"><h2>ผลรายคน</h2><p class="hint">กดชื่อครูเพื่อดูตาราง ก ข ค และยืนยันผล' + (confirmed < data.targets.length ? ' · ยังไม่ยืนยัน ' + (data.targets.length - confirmed) + ' คน' : ' · ยืนยันครบแล้ว') + '</p>' +
+      '<section class="card"><h2>ผลรายคน</h2><p class="hint">กดชื่อครูเพื่อดูตาราง ก ข ค และยืนยันผล' + (confirmed < data.targets.length ? ' · ยังไม่ยืนยัน ' + (data.targets.length - confirmed) + ' คน' : ' · ยืนยันครบแล้ว') +
+      (commentCount ? ' · มีคำชี้แจง ' + commentCount + ' คน' : '') + '</p>' +
       (rows.length ? table(["ครู","#รวม","ระดับ","ระบบเสนอ","ผลที่ยืนยัน","ข้อบกพร่อง"].concat(round.status === "published" ? ["รับทราบ"] : []), rows, true) : '<div class="empty">ยังไม่มีครูในรอบนี้</div>') + '</section>';
   }
   // ลำดับครูในรอบ (เรียงชื่อ) สำหรับปุ่มคนก่อน/คนถัดไป — ใช้ข้อมูลทั้งรอบที่โหลดไว้
@@ -215,6 +228,28 @@ if (session) {
     }
     return html + '</section>';
   }
+  function ackCommentCard(ack, appealText) {
+    if (!ack?.comment?.trim()) return "";
+    const written = evalThaiDateStr(ack.acknowledged_at);
+    const updated = evalThaiDateStr(ack.updated_at);
+    return '<section class="card" id="ack-comment" tabindex="-1" aria-labelledby="ack-comment-title">' +
+      '<h2 id="ack-comment-title">คำชี้แจงจากผู้รับการประเมิน</h2>' +
+      '<p class="ack-comment-text">' + esc(ack.comment) + '</p>' +
+      '<p class="hint">เขียนเมื่อ ' + esc(date(ack.acknowledged_at)) +
+      (updated && updated !== written ? ' · แก้ล่าสุด ' + esc(date(ack.updated_at)) : '') + '</p>' +
+      (appealText ? '<p class="hint">' + esc(appealText) + '</p>' : '') + '</section>';
+  }
+  async function ackAppealText(data) {
+    const publishedDay = evalThaiDateStr(data.round.published_at);
+    if (!publishedDay || !data.acknowledgement?.comment?.trim()) return "";
+    try {
+      const holidays = await loadEvalAppealHolidays(publishedDay, addDaysStr(publishedDay, 30));
+      const appeal = addWorkingDays(publishedDay, Number(data.form.rules?.appeal_working_days || 7), holidays);
+      return "ครบกำหนดทักท้วง " + thaiShortDateText(appeal);
+    } catch {
+      return "โหลดกำหนดทักท้วงไม่สำเร็จ";
+    }
+  }
   function renderDetail() {
     const data = state.detail, target = data.target, result = state.result;
     app.className = "";
@@ -252,14 +287,29 @@ if (session) {
       '<p class="hint" style="margin-bottom:0">' + esc(target.workload || "ไม่ระบุภาระงาน") + ' · ' + esc(data.round.academic_year + " ครั้งที่ " + data.round.round_no) + ' · ฉบับ ' + esc(data.form.code) + '</p></section>' +
       recheckCard(data, result) + '<div class="detail-grid">' + decide + '<div class="detail-main">' +
       (result.complete ? resultTables(result) : '') +
+      ackCommentCard(data.acknowledgement, state.appealText) +
       '<section class="card"><h2>ข้อความจากผู้ประเมิน</h2>' + (textHtml || '<p class="hint">ยังไม่มีข้อความ</p>') + privateDetails(data) + '</section></div></div>';
   }
   async function openRound(id) { state.roundData = await loadEvalRoundResults(id); state.detail = null; state.result = null; history.replaceState(null,"","?round=" + encodeURIComponent(id)); renderRound(); window.scrollTo({ top:0 }); }
-  async function openTarget(id, reloadRound = false) { state.detail = await loadEvalTargetResult(id); state.result = computeEvalResult({ form:state.detail.form, target:state.detail.target, assignments:state.detail.assignments,
-    responses:state.detail.responses, section4:state.detail.section4, rechecks:state.detail.rechecks,
-    roundNo:Number(state.detail.round.round_no), history:state.detail.history });
-    if (reloadRound || state.roundData?.round.id !== state.detail.round.id) state.roundData = await loadEvalRoundResults(state.detail.round.id);
-    history.replaceState(null,"","?target=" + encodeURIComponent(id)); renderDetail(); window.scrollTo({ top:0 }); }
+  async function openTarget(id, reloadRound = false, hash = "") {
+    const detail = await loadEvalTargetResult(id);
+    const result = computeEvalResult({ form:detail.form, target:detail.target, assignments:detail.assignments,
+      responses:detail.responses, section4:detail.section4, rechecks:detail.rechecks,
+      roundNo:Number(detail.round.round_no), history:detail.history });
+    const [roundData, appealText] = await Promise.all([
+      reloadRound || state.roundData?.round.id !== detail.round.id ? loadEvalRoundResults(detail.round.id) : state.roundData,
+      ackAppealText(detail)
+    ]);
+    Object.assign(state, { detail, result, roundData, appealText });
+    const commentHash = hash === "#ack-comment" ? hash : "";
+    history.replaceState(null,"","?target=" + encodeURIComponent(id) + commentHash);
+    renderDetail();
+    const comment = commentHash && app.querySelector(commentHash);
+    if (comment) {
+      comment.scrollIntoView({ block:"start" });
+      comment.focus({ preventScroll:true });
+    } else window.scrollTo({ top:0 });
+  }
   document.getElementById("btn-signout").addEventListener("click", event => { event.preventDefault(); signOut(); });
   try {
     const department = await checkDepartment("บุคลากร"); applyPersonnelMenuAccess(department);
@@ -272,7 +322,7 @@ if (session) {
       state.staff = await listStaffPicker();
       const requested = new URLSearchParams(location.search);
       const targetId = requested.get("target"), roundId = requested.get("round");
-      if (targetId) await openTarget(targetId);
+      if (targetId) await openTarget(targetId, false, location.hash);
       else if (rounds.length) await openRound(rounds.find(row => row.id === roundId)?.id || rounds[0].id);
       else app.innerHTML = '<div class="empty"><b style="display:block;color:var(--ink)">ยังไม่มีรอบที่ปิดรับคะแนน</b>ผลประเมินจะขึ้นที่หน้านี้หลังหัวหน้าฝ่ายบุคคลกด “ปิดรับคะแนน” ในหน้ารอบประเมิน' +
         (head ? '<p><a class="button" href="eval-rounds.html">ไปหน้ารอบประเมิน</a></p>' : '') + (state.admin ? '<p><a class="button" href="red-flags.html">บันทึก Red Flag</a></p>' : '') + '</div>';
@@ -327,7 +377,7 @@ if (session) {
         const link = event.target.closest("[data-open-target], [data-open-round]");
         if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
           event.preventDefault();
-          try { if (link.dataset.openTarget) await openTarget(link.dataset.openTarget); else await openRound(link.dataset.openRound); }
+          try { if (link.dataset.openTarget) await openTarget(link.dataset.openTarget, false, link.hash); else await openRound(link.dataset.openRound); }
           catch (error) { notify(error.message); }
           return;
         }
