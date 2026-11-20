@@ -125,6 +125,9 @@
   .link-row { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) auto; gap: 8px; align-items: end; margin-bottom: 8px; }
   .link-row.project-link-row { grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) minmax(190px, .8fr) auto; }
   .link-row.project-link-row.existing-link-row { grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) minmax(190px, .8fr); }
+  .project-link-upload { grid-column: 1 / -1; display: grid; justify-items: start; gap: 4px; }
+  .project-link-upload button { min-height: 44px; }
+  .project-link-upload .err { color: var(--danger); }
   .link-readonly { min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow-wrap: anywhere; }
   fieldset.plan-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
   fieldset.plan-fields:disabled { opacity: .72; }
@@ -221,6 +224,7 @@
   @media (max-width: 899px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 620px) {
     .row2, .form-grid, .link-row, .link-row.project-link-row { grid-template-columns: 1fr; }
+    .project-drive-enabled .project-link-row.existing-link-row { grid-template-columns: minmax(0, 1fr); }
     .wide { grid-column: auto; }
     .item-grid { grid-template-columns: 1fr; }
     .actions { justify-content: flex-start; }
@@ -339,7 +343,7 @@
 
 <script type="module">
 import {
-  sb, requireAuth, signOut, getProfile, checkDepartment,
+  sb, requireAuth, signOut, getProfile, checkDepartment, getSetting,
   getActiveYear, setActiveYear, getAcademicYears,
   loadAcademicProjects, listStaffPicker, projectResponsibleName,
   projectApprovalBadge, submitProjectForApproval, withdrawProjectApproval,
@@ -348,6 +352,7 @@ import {
   buildOkrTree, buildProjectTree, projectBudgetOf, summarizeProjectBudget,
   okrChipLabel, okrCoverage, DATE_PICK_ONLY_NOTE, bindDatePickOnly
 } from "../supabase-client.js?v=20261118-1";
+import { pdfFileError, driveFileId, readPdfBase64, driveRequest, trashDriveFiles, driveUploadUrl, DRIVE_UPLOAD_ERROR } from "../shared/drive-upload.js?v=20261120-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -411,11 +416,13 @@ if (!session) {
 
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
 
-  const [profile, canEditAll, myStaffResult] = await Promise.all([
+  const [profile, canEditAll, myStaffResult, projectDriveUrl] = await Promise.all([
     getProfile(session.user.id),
     checkDepartment("วิชาการ"),
-    sb.from("staff").select("id,full_name").eq("user_id", session.user.id).maybeSingle()
+    sb.from("staff").select("id,full_name").eq("user_id", session.user.id).maybeSingle(),
+    driveUploadUrl(getSetting)
   ]);
+  if (projectDriveUrl) el("project-form").classList.add("project-drive-enabled");
   const isAdmin = profile?.role === "admin";
   const myStaff = myStaffResult.error ? null : myStaffResult.data;
   const myStaffId = myStaff?.id || null;
@@ -432,6 +439,11 @@ if (!session) {
   let editingProjectMode = "plan";
   let linkingLegacyProject = false;
   let revisionProjectId = null;
+  let projectUploadRowId = 0;
+  let projectUploadsInFlight = 0;
+  let projectSaving = false;
+  let originalUrls = [];
+  const uploadedThisSession = new Set();
 
   const canEditProject = project => canEditAll || (
     canEditOwn && project?.responsible_staff_id === myStaffId
@@ -925,11 +937,110 @@ if (!session) {
     el("responsible-note").textContent = option?.value && option.dataset.login === "false" ? "บุคลากรรายนี้ยังไม่ผูกบัญชี แต่เลือกเป็นผู้รับผิดชอบได้" : "";
   }
 
-  // 🔴 ไฟล์แนบของหน้านี้เก็บเป็น "ลิงก์" ไม่ใช่การอัปโหลดไฟล์ ⟹ ระบบไม่มีไฟล์ให้ตรวจชนิด
-  //    และลิงก์ drive.google.com/file/d/… ก็ไม่บอกว่าปลายทางเป็นอะไร
-  //    ⟹ ทำได้แค่บอกกติกาให้ครูรู้ · ห้ามเขียนโค้ดเดาชนิดไฟล์แล้วขึ้นว่า "ไม่ใช่ PDF"
-  //      เพราะจะเตือนผิดกับลิงก์ Drive ซึ่งเป็นเคสที่ครูใช้บ่อยที่สุด (ผู้ใช้เคาะ 2026-09-02)
+  // ลิงก์ที่ครูวางเองไม่ได้ระบุชนิดของไฟล์ปลายทาง ให้ครูตรวจไฟล์ก่อนส่ง
   const PDF_ATTACHMENT_NOTE = "แนบเป็นไฟล์ PDF เท่านั้น · ถ้าเป็นลิงก์ Google Drive ระบบตรวจแทนไม่ได้ ครูต้องเปิดดูเองว่าไฟล์ปลายทางเป็น PDF";
+  const PROJECT_DRIVE_NOTE = "อัปไฟล์ PDF ได้เลย ผู้บริหารเปิดอ่านได้ทันที แต่คอมเมนต์ในไฟล์ไม่ได้ · ถ้าต้องการให้ผู้บริหารคอมเมนต์ในเอกสาร ให้วางลิงก์จาก Drive ของคุณเองและตั้งสิทธิ์ “ผู้แสดงความคิดเห็น”";
+  const PROJECT_UPLOAD_RETRY = "อัปโหลดไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วเลือกไฟล์อีกครั้ง";
+
+  function trashUnusedProjectFiles(savedLinks) {
+    if (!projectDriveUrl) return;
+    const unused = new Set(uploadedThisSession);
+    if (savedLinks) {
+      for (const url of originalUrls) unused.add(driveFileId(url));
+      for (const link of savedLinks) unused.delete(driveFileId(link.url));
+    }
+    trashDriveFiles(sb, projectDriveUrl, [...unused]);
+    uploadedThisSession.clear();
+  }
+
+  function projectUploadMarkup(label) {
+    const fileId = `project-upload-file-${++projectUploadRowId}`;
+    return `<div class="project-link-upload">
+      <label for="${fileId}" hidden>ไฟล์ PDF</label>
+      <input id="${fileId}" class="project-upload-file" type="file" accept="application/pdf,.pdf" hidden>
+      <button type="button" class="ghost project-upload-button" aria-label="${esc(projectUploadButtonLabel(label))}"
+        aria-describedby="${fileId}-status">อัปโหลด PDF</button>
+      <div id="${fileId}-status" class="hint project-upload-status" role="status"></div>
+    </div>`;
+  }
+
+  function projectUploadButtonLabel(label) {
+    return "อัปโหลด PDF สำหรับ" + (label.trim() ? " " + label.trim() : "ไฟล์แนบแถวนี้");
+  }
+
+  function projectUploadDetails(row) {
+    const name = row.querySelector(".project-link-label");
+    const status = row.querySelector(".project-upload-status");
+    const projectField = el("p-name");
+    const label = name.value.trim();
+    const projectName = projectField.value.trim();
+    if (label && projectName) return { label, projectName };
+    status.classList.add("err");
+    status.textContent = label ? "ใส่ชื่อโครงการหรือกิจกรรมก่อนอัปไฟล์" : "ใส่ชื่อเอกสารก่อนอัปไฟล์";
+    if (!label) name.focus();
+    else (el("project-plan-picker-field").hidden ? projectField : el("p-plan")).focus();
+    return null;
+  }
+
+  function syncProjectUploadBusy() {
+    const busy = projectUploadsInFlight > 0;
+    const save = el("save-project");
+    el("project-form").setAttribute("aria-busy", String(busy));
+    save.disabled = busy || projectSaving || (editingProjectMode !== "progress" && save.dataset.planBlocked === "true");
+    el("back-to-projects").disabled = el("cancel-project").disabled = busy;
+  }
+
+  async function uploadProjectLink(fileInput) {
+    const file = fileInput.files[0];
+    if (!file || projectSaving || fileInput.disabled) return;
+    fileInput.value = "";
+    const row = fileInput.closest(".link-row");
+    const details = projectUploadDetails(row);
+    if (!details) return;
+    const status = row.querySelector(".project-upload-status");
+    const button = row.querySelector(".project-upload-button");
+    const fileError = pdfFileError(file);
+    if (fileError) {
+      status.classList.add("err");
+      status.textContent = fileError;
+      button.focus();
+      return;
+    }
+    const year = el("filter-year").value;
+    const url = row.querySelector(".project-link-url");
+    const name = row.querySelector(".project-link-label");
+    const remove = row.querySelector(".remove-link");
+    const hadFocus = document.activeElement === button;
+    projectUploadsInFlight++;
+    syncProjectUploadBusy();
+    button.disabled = fileInput.disabled = remove.disabled = true;
+    url.readOnly = name.readOnly = true;
+    status.classList.remove("err");
+    status.textContent = "กำลังอัปไฟล์…";
+    try {
+      const base64 = await readPdfBase64(file).catch(() => {
+        throw new Error("อ่านไฟล์ไม่สำเร็จ กรุณาเลือกไฟล์อีกครั้ง");
+      });
+      const result = await driveRequest(sb, projectDriveUrl, {
+        action:"upload", purpose:"project", year, ...details, title:details.label, base64
+      });
+      const fileId = driveFileId(result.url);
+      if (!fileId || fileId !== result.fileId) throw new Error(PROJECT_UPLOAD_RETRY);
+      uploadedThisSession.add(fileId);
+      url.value = result.url;
+      clearReportError("summary-link-error", url);
+      status.innerHTML = `อัปแล้ว · <a href="${esc(result.url)}" target="_blank" rel="noopener noreferrer">เปิดไฟล์</a>`;
+    } catch (error) {
+      status.classList.add("err");
+      status.textContent = error.message === DRIVE_UPLOAD_ERROR ? PROJECT_UPLOAD_RETRY : error.message;
+    } finally {
+      button.disabled = fileInput.disabled = remove.disabled = false;
+      url.readOnly = name.readOnly = false;
+      projectUploadsInFlight--;
+      syncProjectUploadBusy();
+      if (hadFocus && document.activeElement === document.body) button.focus();
+    }
+  }
 
   function addLinkRow(containerId, prefix, link = {}, options = {}) {
     const isProjectLink = prefix === "project-link";
@@ -959,7 +1070,8 @@ if (!session) {
           ).join("")}
         </select></div>`
       : "";
-    row.innerHTML = `<div class="field"><label>ชื่อเอกสาร</label><input class="${prefix}-label" type="text" maxlength="300" value="${esc(link.label || "")}"></div><div class="field"><label>URL</label><input class="${prefix}-url" type="url" inputmode="url" value="${esc(link.url || "")}" placeholder="https://…"></div>${kindField}<button class="danger remove-link" type="button">เอาออก</button>`;
+    const upload = isProjectLink && projectDriveUrl ? projectUploadMarkup(link.label || "") : "";
+    row.innerHTML = `<div class="field"><label>ชื่อเอกสาร</label><input class="${prefix}-label" type="text" maxlength="300" value="${esc(link.label || "")}"></div><div class="field"><label>URL</label><input class="${prefix}-url" type="url" inputmode="url" value="${esc(link.url || "")}" placeholder="https://…"></div>${kindField}<button class="danger remove-link" type="button">เอาออก</button>${upload}`;
     el(containerId).appendChild(row);
   }
 
@@ -1049,7 +1161,7 @@ if (!session) {
   function setProjectPlanBlocked(blocked) {
     const button = el("save-project");
     button.dataset.planBlocked = blocked ? "true" : "false";
-    if (editingProjectMode !== "progress") button.disabled = blocked;
+    if (editingProjectMode !== "progress") button.disabled = blocked || projectUploadsInFlight > 0 || projectSaving;
     const noPlan = !el("project-plan-picker-field").hidden && !el("p-plan").value;
     for (const id of ["project-step-2", "project-step-3", "project-step-4"]) {
       el(id).inert = noPlan && editingProjectMode !== "progress";
@@ -1197,6 +1309,7 @@ if (!session) {
   }
 
   function openProjectForm(project = null, mode = "plan") {
+    if (projectUploadsInFlight || projectSaving) return;
     if (project ? !canEditProject(project) : !(canEditAll || canEditOwn)) return;
     const approvedLocked = project?.approval_status === "อนุมัติ";
     if (mode === "progress" && !approvedLocked) {
@@ -1245,6 +1358,7 @@ if (!session) {
     if (project && !project.plan_id) showLegacyProjectFields(project, selectedIds);
     else renderProjectPlanPicker(project, selectedIds);
     const progressMode = project?.approval_status === "อนุมัติ";
+    originalUrls = projectDriveUrl ? (project?.links || []).map(link => link.url) : [];
     el("project-link-list").innerHTML = "";
     (project?.links || []).forEach(link => addLinkRow("project-link-list", "project-link", link, {
       existing:true,
@@ -1266,7 +1380,9 @@ if (!session) {
     (progressMode ? el("progress-links-slot") : el("project-step-4")).appendChild(el("project-links-field"));
     el("project-link-note").textContent = progressMode
       ? "เอกสารนำเสนอเพื่ออนุมัติและเอกสารอื่นที่แนบไว้แล้วถูกล็อก · เอกสารสรุปโครงการแก้ไขหรือลบได้"
-      : "ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้";
+      : projectDriveUrl ? PROJECT_DRIVE_NOTE
+        : "ก่อนส่งขออนุมัติ ตั้งสิทธิ์แชร์ใน Google Drive ให้ผู้บริหารเปิดอ่านและแสดงความเห็นในเอกสารได้";
+    if (progressMode && projectDriveUrl) el("project-link-note").textContent += " · " + PROJECT_DRIVE_NOTE;
     el("project-link-hint").textContent = (progressMode
       ? "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์ใหม่เริ่มต้นเป็นประเภทสรุปโครงการ"
       : "URL ต้องขึ้นต้นด้วย http:// หรือ https:// · ไฟล์แรกควรเป็นเอกสารนำเสนอเพื่ออนุมัติ")
@@ -1294,6 +1410,9 @@ if (!session) {
   }
 
   function closeProjectForm() {
+    if (projectUploadsInFlight) return;
+    trashUnusedProjectFiles();
+    originalUrls = [];
     editingProjectId = null;
     editingProjectMode = "plan";
     linkingLegacyProject = false;
@@ -1447,8 +1566,11 @@ if (!session) {
   el("p-start-hint").textContent = DATE_PICK_ONLY_NOTE;
   setEndDateHint(false);
   el("add-project").addEventListener("click", () => openProjectForm());
-  el("cancel-project").addEventListener("click", closeProjectForm);
-  el("back-to-projects").addEventListener("click", closeProjectForm);
+  for (const id of ["cancel-project", "back-to-projects"]) {
+    el(id).addEventListener("click", () => {
+      if (!projectSaving) closeProjectForm();
+    });
+  }
   el("toggle-project-plan").addEventListener("click", () => {
     const expanded = el("toggle-project-plan").getAttribute("aria-expanded") !== "true";
     el("project-plan-fields").hidden = !expanded;
@@ -1463,16 +1585,42 @@ if (!session) {
     { defaultKind: editingProjectMode === "progress" ? "สรุปโครงการ" : null }
   ));
   el("project-link-list").addEventListener("click", event => {
+    const upload = event.target.closest(".project-upload-button");
+    if (upload) {
+      const row = upload.closest(".link-row");
+      if (!projectSaving && !upload.disabled && projectUploadDetails(row)) {
+        row.querySelector(".project-upload-file").click();
+      }
+      return;
+    }
     event.target.closest(".remove-link")?.closest(".link-row")?.remove();
     clearReportError("summary-link-error");
   });
-  el("project-link-list").addEventListener("input", () => clearReportError("summary-link-error"));
+  el("project-link-list").addEventListener("change", event => {
+    if (event.target.matches(".project-upload-file")) uploadProjectLink(event.target);
+  });
+  el("project-link-list").addEventListener("input", event => {
+    clearReportError("summary-link-error");
+    if (!projectDriveUrl) return;
+    const row = event.target.closest(".link-row");
+    const button = row?.querySelector(".project-upload-button");
+    if (!button) return;
+    if (event.target.matches(".project-link-label")) {
+      button.setAttribute("aria-label", projectUploadButtonLabel(event.target.value));
+    }
+    if (event.target.matches(".project-link-url")) row.querySelector(".project-upload-status").textContent = "";
+  });
 
   el("revision-overlay").addEventListener("click", event => {
     if (event.target === el("revision-overlay")) closeRevisionForm();
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && !el("revision-overlay").hidden) closeRevisionForm();
+    if (event.key !== "Escape") return;
+    if (projectUploadsInFlight) {
+      event.preventDefault();
+      return;
+    }
+    if (!el("revision-overlay").hidden) closeRevisionForm();
   });
   el("revision-form").addEventListener("submit", async event => {
     event.preventDefault();
@@ -1508,6 +1656,7 @@ if (!session) {
 
   el("project-form").addEventListener("submit", async event => {
     event.preventDefault();
+    if (projectUploadsInFlight || projectSaving) return;
     if (editingProjectMode === "progress") {
       const project = projects.find(row => row.id === editingProjectId);
       if (!project || !canEditProject(project)) {
@@ -1551,6 +1700,7 @@ if (!session) {
       };
       const button = el("save-project");
       button.disabled = true;
+      projectSaving = Boolean(projectDriveUrl);
       try {
         try {
           await saveProgressLinks(project, existingSummaryLinks, newLinksOnly);
@@ -1570,6 +1720,10 @@ if (!session) {
           toast("บันทึกเอกสารแล้ว แต่บันทึกผลไม่สำเร็จ: " + error.message, true);
           return;
         }
+        if (projectDriveUrl) {
+          const lockedLinks = (project.links || []).filter(link => link.kind !== "สรุปโครงการ");
+          trashUnusedProjectFiles([...lockedLinks, ...existingSummaryLinks, ...newLinksOnly]);
+        }
         toast("บันทึกรายงานผลแล้ว");
         closeProjectForm();
         await loadData();
@@ -1577,6 +1731,7 @@ if (!session) {
       } catch (error) {
         toast("บันทึกรายงานผลไม่สำเร็จ: " + error.message, true);
       } finally {
+        projectSaving = false;
         button.disabled = false;
       }
       return;
@@ -1679,6 +1834,7 @@ if (!session) {
     };
     if (!payload.name) return toast("กรุณากรอกชื่อโครงการหรือกิจกรรม", true);
     const button = el("save-project"); button.disabled = true;
+    projectSaving = Boolean(projectDriveUrl);
     try {
       let projectId = editingProjectId;
       if (projectId) {
@@ -1692,10 +1848,14 @@ if (!session) {
         projectId = data.id;
       }
       await replaceProjectDetails(projectId, selected, links);
+      trashUnusedProjectFiles(links);
       toast(editingProjectId ? "แก้โครงการ/กิจกรรมแล้ว" : "เพิ่มโครงการ/กิจกรรมแล้ว");
       closeProjectForm(); await loadData(); restoreListScroll();
     } catch (error) { toast(friendlyProjectError(error.message), true); }
-    finally { button.disabled = button.dataset.planBlocked === "true"; }
+    finally {
+      projectSaving = false;
+      button.disabled = button.dataset.planBlocked === "true";
+    }
   });
 
   el("project-list").addEventListener("click", async event => {
@@ -1764,8 +1924,10 @@ if (!session) {
     const impact = `${project.okrs.length} การผูก KR และ ${project.links.length} ลิงก์จะหายตาม`;
     if (!project || !await window.crsAskConfirm({ title:"ลบโครงการ/กิจกรรม", message:`ลบ “${project.name}” หรือไม่? ${impact} · การลบกู้คืนไม่ได้`, okLabel:"ลบ", requireText:project.name, danger:true })) return;
     remove.disabled = true;
-    const { error } = await sb.from("academic_projects").delete().eq("id", project.id);
+    const deletion = sb.from("academic_projects").delete().eq("id", project.id);
+    const { error } = await (projectDriveUrl ? deletion.select("id").single() : deletion);
     if (error) { remove.disabled = false; return toast("ลบไม่สำเร็จ: " + error.message, true); }
+    if (projectDriveUrl) trashDriveFiles(sb, projectDriveUrl, project.links.map(link => driveFileId(link.url)));
     toast("ลบโครงการ/กิจกรรมแล้ว"); await loadData();
   });
 
