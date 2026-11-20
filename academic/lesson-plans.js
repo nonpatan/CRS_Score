@@ -1,3 +1,5 @@
+export { pdfFileError, driveFileId, MAX_PDF_BYTES } from '../shared/drive-upload.js?v=20261120-1';
+
 // ต้องตรงกับ check constraint lesson_plans_plan_url_ok ใน schema.sql ทุกตัวอักษร
 export const PLAN_PDF_URL_RE = /^https:\/\/(drive\.google\.com\/(file\/d\/[A-Za-z0-9_-]+|open\?id=[A-Za-z0-9_-]+)|\S+\.pdf([?#]\S*)?$)/i;
 export function pdfUrlError(url) {
@@ -7,24 +9,6 @@ export function pdfUrlError(url) {
   if (/^https:\/\/docs\.google\.com\/(document|presentation|spreadsheets)(\/|$)/i.test(value)) return 'ลิงก์นี้เป็น Google Docs/Slides/Sheets ไม่ใช่ไฟล์ PDF — ดาวน์โหลดเป็น PDF แล้วอัปขึ้น Drive ก่อน';
   if (/^https:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders(?:\/|$)/i.test(value)) return 'ลิงก์นี้เป็นโฟลเดอร์ ให้ใช้ลิงก์ของไฟล์ PDF';
   return PLAN_PDF_URL_RE.test(value) ? null : 'ใช้ลิงก์ไฟล์ Google Drive หรือลิงก์ที่ลงท้าย .pdf';
-}
-export const MAX_PDF_BYTES = 20 * 1024 * 1024;
-export function pdfFileError(file, maxBytes = MAX_PDF_BYTES) {
-  if (!file) return 'เลือกไฟล์ PDF';
-  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') return 'เลือกไฟล์ PDF เท่านั้น';
-  if (file.size === 0) return 'ไฟล์ว่าง เลือกไฟล์ PDF ใหม่';
-  if (file.size > maxBytes) return 'ไฟล์ใหญ่เกิน 20 MB ลดขนาดไฟล์แล้วเลือกใหม่';
-  return null;
-}
-export function driveFileId(url) {
-  try {
-    const { origin, pathname, searchParams } = new URL(url);
-    if (origin !== 'https://drive.google.com') return null;
-    const id = pathname === '/open' ? searchParams.get('id') : pathname.match(/^\/file\/d\/([^/]+)/)?.[1];
-    return id && /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
-  } catch {
-    return null;
-  }
 }
 export function planOverallStatus(plan) {
   if ([plan.plan_status, plan.assessment_status].includes('ขอให้แก้')) return 'ขอให้แก้';

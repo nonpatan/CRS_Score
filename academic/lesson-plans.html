@@ -105,13 +105,13 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { sb, requireAuth, signOut, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, getSetting, GRADE_ORDER } from '../supabase-client.js?v=20261118-1';
-import { pdfUrlError, pdfFileError, driveFileId, planOverallStatus, isIntegratedParent, summarizeSubjectPlans, planSlots, sortPlansForTeacher, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=6';
+import { pdfUrlError, planOverallStatus, isIntegratedParent, summarizeSubjectPlans, planSlots, sortPlansForTeacher, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=7';
+import { pdfFileError, driveFileId, readPdfBase64, driveRequest, trashDriveFiles, driveUploadUrl as loadDriveUploadUrl, DRIVE_UPLOAD_ERROR } from '../shared/drive-upload.js?v=20261120-1';
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
   const MAX_STARS = 4;
   const pdfDocuments = [{key:'plan', kind:'แผน', warning:'plan-url-warning'}, {key:'assessment', kind:'วัดผล', warning:'assessment-warning'}];
-  const uploadErrorMessage = 'อัปโหลดไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วกดบันทึกอีกครั้ง';
   $('btn-signout')?.addEventListener('click', event => { event.preventDefault(); signOut(); });
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const date = value => value ? new Date(value).toLocaleString('th-TH', {dateStyle:'medium', timeStyle:'short'}) : '—';
@@ -315,41 +315,6 @@ if (!session) {} else {
       $(key+'-file').focus();
     });
   }
-  function readPdfBase64(file) {
-    return new Promise((resolve,reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.slice(reader.result.indexOf(',')+1));
-      reader.onerror = reader.onabort = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ เลือกไฟล์แล้วกดบันทึกอีกครั้ง'));
-      reader.readAsDataURL(file);
-    });
-  }
-  async function driveRequest(payload) {
-    const {data,error} = await sb.auth.getSession();
-    const token = data?.session?.access_token;
-    if (error || !token) throw new Error('เซสชันหมดอายุ ออกจากระบบแล้วเข้าใหม่');
-    return new Promise((resolve,reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST',driveUploadUrl);
-      xhr.timeout = 120_000;
-      xhr.responseType = 'json';
-      xhr.setRequestHeader('Content-Type','text/plain;charset=utf-8');
-      // ตัวรับ Apps Script ไม่ส่ง CORS headers สำหรับ OPTIONS ที่เกิดจาก upload.onprogress
-      const fail = () => reject(new Error(uploadErrorMessage));
-      xhr.onerror = xhr.ontimeout = xhr.onabort = fail;
-      xhr.onload = () => {
-        if (xhr.status !== 200) { fail(); return; }
-        if (xhr.response?.ok === true) resolve(xhr.response);
-        else reject(new Error(xhr.response?.message || uploadErrorMessage));
-      };
-      xhr.send(JSON.stringify({...payload,token}));
-    });
-  }
-  function trashDriveFiles(fileIds) {
-    if (!driveUploadUrl) return;
-    for (const fileId of new Set(fileIds.filter(Boolean))) {
-      driveRequest({action:'trash',fileId}).catch(() => {});
-    }
-  }
   $('subjects').addEventListener('submit',async event => {
     const form = event.target.closest('.target'); if (!form) return; event.preventDefault(); if (busy) return;
     const id = form.dataset.subject, count = Number(form.plan_count.value);
@@ -375,7 +340,7 @@ if (!session) {} else {
       setBusy(true);
       try {
         check(await sb.from('lesson_plans').delete().eq('id',plan.id).select('id').single());
-        trashDriveFiles(pdfDocuments.map(({key}) => driveFileId(plan[key+'_url'])));
+        trashDriveFiles(sb, driveUploadUrl, pdfDocuments.map(({key}) => driveFileId(plan[key+'_url'])));
         plans = plans.filter(row => row.id !== plan.id); renderSubject(plan.subject_id); toast('ลบแผนแล้ว');
       }
       catch (error) { toast(error.message,false); try { await refreshSubject(plan.subject_id); } catch (reloadError) { toast(reloadError.message,false); } }
@@ -425,9 +390,9 @@ if (!session) {} else {
         const status = 'กำลังอัปไฟล์'+item.kind+' '+(index+1)+'/'+uploads.length+'…';
         $('save-plan').textContent = $('upload-status').textContent = status;
         const base64 = await readPdfBase64(item.file);
-        const result = await driveRequest({action:'upload',kind:item.kind,year:subject.year,subjectLabel:[subject.code,subject.name].filter(Boolean).join(' '),seq:old.seq,title:values.title,base64});
+        const result = await driveRequest(sb, driveUploadUrl, {action:'upload',kind:item.kind,year:subject.year,subjectLabel:[subject.code,subject.name].filter(Boolean).join(' '),seq:old.seq,title:values.title,base64});
         const fileId = driveFileId(result.url);
-        if (!fileId || fileId !== result.fileId) throw new Error(uploadErrorMessage);
+        if (!fileId || fileId !== result.fileId) throw new Error(DRIVE_UPLOAD_ERROR);
         uploaded.push(fileId);
         values[item.key+'_url'] = result.url;
       }
@@ -437,7 +402,7 @@ if (!session) {} else {
       const query = old.id ? sb.from('lesson_plans').update(values).eq('id',old.id) : sb.from('lesson_plans').insert({...values,subject_id:old.subject_id,seq:old.seq});
       row = check(await query.select(PLAN_COLUMNS).single());
     } catch (error) {
-      trashDriveFiles(uploaded);
+      trashDriveFiles(sb, driveUploadUrl, uploaded);
       if (uploading) {
         focusOnError = uploading.key+'-file';
         showError(focusOnError,error.message,uploading.key+'-url-error');
@@ -455,7 +420,7 @@ if (!session) {} else {
       if (focusOnError) $(focusOnError).focus();
     }
     const changedDocuments = pdfDocuments.filter(({key}) => old[key+'_url'] !== values[key+'_url']);
-    trashDriveFiles(changedDocuments.map(({key}) => driveFileId(old[key+'_url'])));
+    trashDriveFiles(sb, driveUploadUrl, changedDocuments.map(({key}) => driveFileId(old[key+'_url'])));
     plans = [...plans.filter(plan => plan.id !== row.id),row]; renderSubject(old.subject_id); closeEditor();
     const returnedToReview = old.id && changedDocuments.some(({key}) => ['ผ่าน','ขอให้แก้'].includes(old[key+'_status']));
     const changedLabel = driveUploadUrl ? 'ไฟล์' : 'ลิงก์';
@@ -464,10 +429,9 @@ if (!session) {} else {
   $('year').addEventListener('change', () => { if (busy) return; year = $('year').value; setActiveYear(year); loadYear(); });
   $('term').addEventListener('change', () => { term = $('term').value; render(); });
   try {
-    const [years, configuredUrl] = await Promise.all([getAcademicYears(), getSetting('drive_upload_url').catch(() => null)]);
-    const url = typeof configuredUrl === 'string' ? configuredUrl.trim() : '';
-    if (/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) {
-      driveUploadUrl = url;
+    const [years, configuredUrl] = await Promise.all([getAcademicYears(), loadDriveUploadUrl(getSetting)]);
+    driveUploadUrl = configuredUrl;
+    if (driveUploadUrl) {
       $('submission-hint').textContent = 'กำหนดจำนวนแผนของแต่ละวิชา แล้วส่ง PDF แผนการสอนและเอกสารวัดผล';
       $('pdf-check-label').textContent = 'ยืนยันว่าลิงก์เป็นไฟล์ PDF และหัวหน้าฝ่ายวิชาการเปิดดูได้';
       for (const {key,warning} of pdfDocuments) {

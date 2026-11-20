@@ -111,6 +111,18 @@
   .project-note.fail { background:var(--danger-soft); color:var(--danger); }
   .report-entry { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:start; margin-top:9px; }
   .report-entry button { width:auto; white-space:nowrap; }
+  .report-upload { display:grid; justify-items:start; gap:8px; margin-top:9px; }
+  .report-upload > * { min-width:0; max-width:100%; }
+  .report-file { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .report-file > span { min-width:0; overflow-wrap:anywhere; }
+  .report-file label { display:inline-flex; align-items:center; min-height:44px; margin:0; padding:8px 14px;
+                       border-radius:8px; background:var(--teal-soft); color:var(--teal); cursor:pointer; }
+  .report-file input:focus-visible + label { outline:2px solid var(--teal); outline-offset:2px; }
+  .report-file input:disabled + label { opacity:.5; cursor:wait; pointer-events:none; }
+  .report-upload button { width:auto; min-height:44px; }
+  .report-upload details { width:100%; }
+  .report-upload summary { min-height:44px; padding:8px 0; color:var(--teal); cursor:pointer; }
+  .report-upload input[aria-invalid="true"] { border-color:var(--danger); }
   .report-status { min-height:20px; color:var(--muted); font-size:13px; margin-top:4px; }
   .report-status.err { color:var(--danger); }
   .report-status.ok { color:var(--teal); }
@@ -386,6 +398,7 @@ import { sb, requireAuth, signOut, checkDepartment, applyPersonnelMenuAccess,
          getStaffFieldDuties, getTrainingReports, createTrainingReport, updateTrainingReport,
          loadMyProjects, projectApprovalBadge, loadMyTeachingGap, ackMakeupRejection,
          bangkokNow, toDateStr, computeDayStatus, timePeriodFor } from "../supabase-client.js?v=20261118-1";
+import { pdfFileError, driveFileId, readPdfBase64, driveRequest, trashDriveFiles, driveUploadUrl, DRIVE_UPLOAD_ERROR } from "../shared/drive-upload.js?v=20261120-1";
 
 const session = await requireAuth();
 if (session) {
@@ -423,6 +436,8 @@ if (session) {
     });
     let permitBusy = false;
     const reportBusy = new Set();
+    const reportUploadSetting = driveUploadUrl(getSetting);
+    let reportUploadUrl = "";
     let myDutyRows = [], swapState = null, swapRequests = [], swapActionBusy = false;
     let teachingGapReport = null, editingMakeupId = null, makeupBusy = false;
     let swapReturnRequestSeq = 0;
@@ -587,17 +602,18 @@ if (session) {
       update();
       box.after(button);
     }
-    function reportFieldDutySection() {
+    function reportFieldDutySection(uploadsEnabled = false, savedId = "") {
       const box = el("my-field-duty-list");
       const pending = Array.from(box.querySelectorAll("[data-field-duty]")).filter(row =>
         row.dataset.reportPending === "true");
-      const todos = pending.map(row => ({ title:`ส่งลิงก์รายงาน${row.querySelector("b").textContent.split(" · ").slice(1).join(" · ")}`,
+      const todos = pending.map(row => ({ title:`${uploadsEnabled ? "ส่งรายงาน" : "ส่งลิงก์รายงาน"}${row.querySelector("b").textContent.split(" · ").slice(1).join(" · ")}`,
         detail:`${row.querySelector(".my-duty-meta").textContent} · ${row.querySelector("b").textContent.split(" · ")[0]}`,
-        action:"ส่งลิงก์", card:"field-duty-card", section:"my-field-duty-list",
+        action:uploadsEnabled ? "ส่งรายงาน" : "ส่งลิงก์", card:"field-duty-card", section:"my-field-duty-list",
         selector:`[data-field-duty="${CSS.escape(row.dataset.fieldDuty)}"]`
       }));
       el("field-duty-sharing-note").hidden = !todos.length;
-      collapseLongList("my-field-duty-list", "[data-field-duty]", '[data-report-pending="true"]');
+      const keepVisible = savedId ? `, [data-field-duty="${CSS.escape(savedId)}"]` : "";
+      collapseLongList("my-field-duty-list", "[data-field-duty]", '[data-report-pending="true"]' + keepVisible);
       setSection("my-field-duty-list", { todos });
     }
     // Projects' renderer is also used in isolation by existing tests; an optional DOM
@@ -1491,6 +1507,10 @@ if (session) {
         const duties = await getStaffFieldDuties({ staffId: me.id });
         const reports = await getTrainingReports(duties.map(row => row.id));
         const reportByDuty = new Map(reports.map(row => [row.field_duty_id, row]));
+        reportUploadUrl = await reportUploadSetting;
+        if (reportUploadUrl) {
+          el("field-duty-sharing-note").textContent = "อัปไฟล์ PDF ได้เลย ระบบตั้งสิทธิ์ให้ฝ่ายบุคคลเปิดดูเอง · ถ้าวางลิงก์ ต้องตั้งแชร์ให้ฝ่ายบุคคลเปิดดูได้";
+        }
         box.innerHTML = duties.length ? duties.map(row => {
           const report = reportByDuty.get(row.id);
           const start = new Date(row.start_date + "T00:00:00Z").toLocaleDateString("th-TH", {
@@ -1501,25 +1521,43 @@ if (session) {
           });
           const range = row.start_date === row.end_date ? start : `${start} – ${end}`;
           const reportUrl = validHttpUrl(report?.report_url);
-          return `<div class="field-duty-row" data-field-duty="${row.id}" data-has-report="${report ? "1" : "0"}" data-report-pending="${report && reportUrl ? "false" : "true"}">
+          const statusId = `report-status-${row.id}`;
+          const linkAttrs = reportUploadUrl ? ` id="report-url-${row.id}" aria-describedby="${statusId}"` : "";
+          const linkInput = `<input type="url" data-report-url value="${escapeHtml(reportUrl)}"${linkAttrs}
+                placeholder="https://drive.google.com/…" aria-label="ลิงก์รายงานสรุป ${escapeHtml(row.title)}">`;
+          const button = `<button type="button" class="primary" data-save-report>${report ? "บันทึกการแก้ไข" : reportUploadUrl ? "ส่งรายงาน" : "ส่งลิงก์รายงาน"}</button>`;
+          const uploadAttrs = reportUploadUrl
+            ? ` data-report-start="${escapeHtml(row.start_date)}" data-report-saved-url="${escapeHtml(reportUrl)}"` : "";
+          return `<div class="field-duty-row" data-field-duty="${row.id}" data-has-report="${report ? "1" : "0"}" data-report-pending="${report && reportUrl ? "false" : "true"}"${uploadAttrs}>
             <b>${escapeHtml(range)} · ${escapeHtml(row.kind)}</b>
             <div class="my-duty-meta">${escapeHtml(row.title)}</div>
-            <div class="report-entry">
-              <input type="url" data-report-url value="${escapeHtml(reportUrl)}"
-                placeholder="https://drive.google.com/…" aria-label="ลิงก์รายงานสรุป ${escapeHtml(row.title)}">
-              <button type="button" class="primary" data-save-report>${report ? "บันทึกการแก้ไข" : "ส่งลิงก์รายงาน"}</button>
-            </div>
-            <div class="report-status ${report ? "ok" : ""}" data-report-status>${
-              report && reportUrl
-                ? `ส่งแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}" target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`
-                : "ยังไม่ได้ส่งลิงก์รายงาน"
+            ${reportUploadUrl ? `<div class="report-upload">
+              <div class="report-file">
+                <input type="file" class="sr-only" id="report-file-${row.id}" data-report-file
+                  accept="application/pdf,.pdf" aria-describedby="report-file-info-${row.id} ${statusId}">
+                <label for="report-file-${row.id}">เลือกไฟล์ PDF<span class="sr-only"> รายงาน ${escapeHtml(row.title)}</span></label>
+                <span class="field-note" id="report-file-info-${row.id}" data-report-file-info hidden></span>
+                <button type="button" class="ghost" data-remove-report-file hidden>เอาออก</button>
+              </div>
+              <details${report ? " open" : ""}>
+                <summary>หรือวางลิงก์แทน</summary>
+                <label for="report-url-${row.id}">ลิงก์รายงาน</label>
+                ${linkInput}
+              </details>
+              ${button}
+            </div>` : `<div class="report-entry">
+              ${linkInput}
+              ${button}
+            </div>`}
+            <div class="report-status ${report ? "ok" : ""}" data-report-status${reportUploadUrl ? ` id="${statusId}" role="status"` : ""}>${
+              trainingReportStatus(reportUrl, reportUploadUrl ? "ยังไม่ได้ส่งรายงาน" : "ยังไม่ได้ส่งลิงก์รายงาน")
             }</div>
           </div>`;
         }).join("") : '<div class="muted-empty">ยังไม่มีรายการออกปฏิบัติหน้าที่หรืออบรมของคุณ</div>';
       } catch {
         box.innerHTML = '<div class="banner warn">โหลดรายการออกปฏิบัติหน้าที่ไม่สำเร็จ กรุณาลองเปิดหน้าใหม่</div>';
       } finally {
-        reportFieldDutySection();
+        reportFieldDutySection(Boolean(reportUploadUrl));
       }
     }
 
@@ -1577,7 +1615,51 @@ if (session) {
       }
     }
 
-    el("field-duty-card").addEventListener("click", async event => {
+    function trainingReportStatus(reportUrl, pendingText) {
+      return reportUrl
+        ? `ส่งแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}" target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`
+        : pendingText;
+    }
+
+    function showReportFile(row, fileInput) {
+      const file = fileInput.files[0];
+      const info = row.querySelector("[data-report-file-info]");
+      info.hidden = row.querySelector("[data-remove-report-file]").hidden = !file;
+      info.textContent = file ? `${file.name} · ${(file.size / (1024 * 1024)).toLocaleString("th-TH", { maximumFractionDigits:2 })} MB` : "";
+    }
+
+    function reportFileChanged(row, fileInput) {
+      const status = row.querySelector("[data-report-status]");
+      const file = fileInput.files[0];
+      const error = file ? pdfFileError(file) : null;
+      showReportFile(row, fileInput);
+      if (error) {
+        fileInput.setAttribute("aria-invalid", "true");
+        status.className = "report-status err";
+        status.textContent = error;
+      } else {
+        fileInput.removeAttribute("aria-invalid");
+        const savedUrl = row.dataset.reportSavedUrl;
+        status.className = savedUrl ? "report-status ok" : "report-status";
+        status.innerHTML = trainingReportStatus(savedUrl, "ยังไม่ได้ส่งรายงาน");
+      }
+    }
+
+    const fieldDutyCard = el("field-duty-card");
+    fieldDutyCard.addEventListener("change", event => {
+      const fileInput = event.target.closest("[data-report-file]");
+      if (fileInput) reportFileChanged(fileInput.closest("[data-field-duty]"), fileInput);
+    });
+    fieldDutyCard.addEventListener("click", async event => {
+      const removeButton = event.target.closest("[data-remove-report-file]");
+      if (removeButton) {
+        const row = removeButton.closest("[data-field-duty]");
+        const fileInput = row.querySelector("[data-report-file]");
+        fileInput.value = "";
+        reportFileChanged(row, fileInput);
+        fileInput.focus();
+        return;
+      }
       const button = event.target.closest("[data-save-report]");
       if (!button) return;
       const row = button.closest("[data-field-duty]");
@@ -1585,38 +1667,112 @@ if (session) {
       if (!fieldDutyId || reportBusy.has(fieldDutyId)) return;
       const input = row.querySelector("[data-report-url]");
       const status = row.querySelector("[data-report-status]");
-      const reportUrl = validHttpUrl(input.value);
+      const fileInput = reportUploadUrl ? row.querySelector("[data-report-file]") : null;
+      const file = fileInput?.files[0];
+      const linkDetails = fileInput ? input.closest("details") : null;
+      let reportUrl = validHttpUrl(input.value);
       status.className = "report-status";
-      if (!reportUrl) {
-        status.textContent = "กรุณากรอกลิงก์ที่ขึ้นต้นด้วย http:// หรือ https://";
+      if (file) {
+        const error = pdfFileError(file);
+        if (error) {
+          reportFileChanged(row, fileInput);
+          fileInput.focus();
+          return;
+        }
+      } else if (!reportUrl) {
+        const missing = fileInput && !input.value.trim();
+        status.textContent = missing ? "เลือกไฟล์ PDF หรือวางลิงก์รายงาน"
+          : "กรุณากรอกลิงก์ที่ขึ้นต้นด้วย http:// หรือ https://";
         status.classList.add("err");
-        input.focus();
+        if (missing && !linkDetails.open) {
+          fileInput.focus();
+        } else {
+          if (linkDetails) {
+            linkDetails.open = true;
+            input.setAttribute("aria-invalid", "true");
+          }
+          input.focus();
+        }
         return;
       }
+
+      const removeFile = fileInput ? row.querySelector("[data-remove-report-file]") : null;
+      const oldUrl = row.dataset.reportSavedUrl;
+      let uploadedId = null;
+      let uploading = Boolean(file);
+      let focus = button;
       reportBusy.add(fieldDutyId);
       button.disabled = true;
-      status.textContent = "กำลังบันทึก…";
+      if (fileInput) {
+        fileInput.disabled = input.disabled = removeFile.disabled = true;
+        input.removeAttribute("aria-invalid");
+        button.textContent = uploading ? "กำลังอัปไฟล์…" : "กำลังบันทึก…";
+      }
+      status.textContent = uploading ? "กำลังอัปไฟล์…" : "กำลังบันทึก…";
       try {
+        if (file) {
+          const startDate = row.dataset.reportStart;
+          const year = academicYearOf(startDate, years);
+          if (year == null) throw new Error("ยังไม่มีปีการศึกษาสำหรับวันที่เริ่มรายการนี้ กรุณาวางลิงก์รายงานแทน");
+          const base64 = await readPdfBase64(file);
+          const result = await driveRequest(sb, reportUploadUrl, {
+            action:"upload", purpose:"training-report", year, staffName:me.full_name,
+            startDate, title:row.querySelector(".my-duty-meta").textContent, base64
+          });
+          const fileId = driveFileId(result.url);
+          if (!fileId || fileId !== result.fileId) throw new Error(DRIVE_UPLOAD_ERROR);
+          uploadedId = fileId;
+          reportUrl = result.url;
+          uploading = false;
+          button.textContent = status.textContent = "กำลังบันทึก…";
+        }
         if (row.dataset.hasReport === "1") {
           await updateTrainingReport(fieldDutyId, reportUrl);
         } else {
           await createTrainingReport(fieldDutyId, reportUrl);
           row.dataset.hasReport = "1";
-          button.textContent = "บันทึกการแก้ไข";
         }
-        input.value = reportUrl;
-        status.innerHTML = `บันทึกแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}"
-          target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`;
-        status.classList.add("ok");
-        row.dataset.reportPending = "false";
-        reportFieldDutySection();
-      } catch {
-        status.textContent = "บันทึกลิงก์ไม่สำเร็จ กรุณาตรวจลิงก์และลองใหม่";
+      } catch (error) {
+        if (uploadedId) trashDriveFiles(sb, reportUploadUrl, [uploadedId]);
+        if (uploading) {
+          status.textContent = error.message;
+          focus = fileInput;
+        } else {
+          status.textContent = file ? "บันทึกรายงานไม่สำเร็จ กรุณาลองส่งอีกครั้ง"
+            : "บันทึกลิงก์ไม่สำเร็จ กรุณาตรวจลิงก์และลองใหม่";
+          if (linkDetails && !file) {
+            linkDetails.open = true;
+            focus = input;
+          }
+        }
         status.classList.add("err");
+        return;
       } finally {
         reportBusy.delete(fieldDutyId);
         button.disabled = false;
+        if (fileInput) {
+          fileInput.disabled = input.disabled = removeFile.disabled = false;
+          button.textContent = row.dataset.hasReport === "1" ? "บันทึกการแก้ไข" : "ส่งรายงาน";
+          if (status.classList.contains("err")) focus.focus();
+        }
       }
+
+      button.textContent = "บันทึกการแก้ไข";
+      input.value = reportUrl;
+      if (fileInput) {
+        row.dataset.reportSavedUrl = reportUrl;
+        if (oldUrl !== reportUrl) trashDriveFiles(sb, reportUploadUrl, [driveFileId(oldUrl)]);
+        fileInput.value = "";
+        showReportFile(row, fileInput);
+        linkDetails.open = true;
+      }
+      status.innerHTML = fileInput ? trainingReportStatus(reportUrl)
+        : `บันทึกแล้ว · <a class="report-link" href="${escapeHtml(reportUrl)}"
+          target="_blank" rel="noopener noreferrer">เปิดรายงาน</a>`;
+      status.classList.add("ok");
+      row.dataset.reportPending = "false";
+      reportFieldDutySection(Boolean(fileInput), fileInput ? fieldDutyId : "");
+      if (fileInput) button.focus();
     });
 
     async function renderPermitCard() {
