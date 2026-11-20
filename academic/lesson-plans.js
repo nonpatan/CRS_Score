@@ -8,6 +8,24 @@ export function pdfUrlError(url) {
   if (/^https:\/\/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders(?:\/|$)/i.test(value)) return 'ลิงก์นี้เป็นโฟลเดอร์ ให้ใช้ลิงก์ของไฟล์ PDF';
   return PLAN_PDF_URL_RE.test(value) ? null : 'ใช้ลิงก์ไฟล์ Google Drive หรือลิงก์ที่ลงท้าย .pdf';
 }
+export const MAX_PDF_BYTES = 20 * 1024 * 1024;
+export function pdfFileError(file, maxBytes = MAX_PDF_BYTES) {
+  if (!file) return 'เลือกไฟล์ PDF';
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') return 'เลือกไฟล์ PDF เท่านั้น';
+  if (file.size === 0) return 'ไฟล์ว่าง เลือกไฟล์ PDF ใหม่';
+  if (file.size > maxBytes) return 'ไฟล์ใหญ่เกิน 20 MB ลดขนาดไฟล์แล้วเลือกใหม่';
+  return null;
+}
+export function driveFileId(url) {
+  try {
+    const { origin, pathname, searchParams } = new URL(url);
+    if (origin !== 'https://drive.google.com') return null;
+    const id = pathname === '/open' ? searchParams.get('id') : pathname.match(/^\/file\/d\/([^/]+)/)?.[1];
+    return id && /^[A-Za-z0-9_-]+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
 export function planOverallStatus(plan) {
   if ([plan.plan_status, plan.assessment_status].includes('ขอให้แก้')) return 'ขอให้แก้';
   if ([plan.plan_status, plan.assessment_status].includes('รอตรวจ')) return 'รอตรวจ';

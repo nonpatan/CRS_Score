@@ -30,6 +30,20 @@ textarea { min-height:90px; resize:vertical; } .row2,.docs { display:grid; grid-
 .overlay { position:fixed; inset:0; z-index:200; background:var(--scrim); padding:16px; display:grid; place-items:center; }
 .modal { width:100%; max-width:650px; max-height:calc(100dvh - 32px); overflow-y:auto; background:var(--white); border-radius:12px; padding:20px; }
 .check { display:flex; align-items:center; gap:10px; min-height:44px; padding:8px 0; } .check input { flex:none; width:22px; height:22px; }
+.pdf-source { border:0; padding:0; margin-inline:0; }
+.pdf-source.with-upload { border:1px solid var(--line); border-radius:10px; padding:12px; }
+.pdf-source .check { cursor:pointer; }
+.pdf-source input[type=radio] { accent-color:var(--teal); }
+.pdf-link label, .pdf-source label[for$="-file"] { font-weight:600; }
+.pdf-link label { display:block; margin-bottom:4px; }
+.pdf-source input[type=file] { display:block; width:100%; min-height:44px; font:inherit; color:var(--ink); }
+.pdf-source input[type=file]::file-selector-button { min-height:44px; font:inherit; color:var(--teal); background:var(--teal-soft); border:0; border-radius:8px; padding:8px 12px; margin-inline-end:8px; cursor:pointer; }
+.pdf-source input[type=file]:disabled { opacity:.5; }
+.pdf-source input[type=file]:disabled::file-selector-button { cursor:wait; }
+.pdf-source input[type=file]:has(+ .actions:not([hidden])) { color:transparent; }
+.pdf-source .actions span { min-width:0; overflow-wrap:anywhere; }
+.current-file a { display:inline-flex; align-items:center; min-height:44px; }
+#upload-status { position:absolute; width:1px; height:1px; clip-path:inset(50%); overflow:hidden; }
 .plans { list-style:none; padding:0; margin:12px 0 0; } .plan { border-top:1px solid var(--line); padding:14px 0; display:grid; gap:10px; } .plan .actions { justify-content:flex-end; } .target { display:flex; flex-wrap:wrap; align-items:center; gap:8px; } .target input { width:90px; }
 .prog { display:flex; align-items:center; gap:10px; margin-top:12px; } .bar { flex:1; height:12px; border-radius:99px; background:var(--line); overflow:hidden; display:flex; } .bar i { display:block; } .b-sent { background:var(--line); } .b-ok { background:var(--teal); } .b-wait { background:var(--muted); } .b-fix { background:var(--amber); } .legend { font-size:13px; color:var(--muted); }
 .tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; } .tabs [aria-selected=true],.chips [aria-pressed=true] { background:var(--teal); color:var(--white); border-color:var(--teal); } .chips { margin-top:12px; }
@@ -43,28 +57,61 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 @media(max-width:639px) { .row2,.docs { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } .cov thead { display:none; } table.cov,.cov tbody,.cov tr,.cov td,.cov th { display:block; width:100%!important; } .cov td { border:0; padding:3px 0; } .cov tr:not(.grp) { border-bottom:1px solid var(--line); padding:12px 0; } .cov td.num { text-align:left; } .cov td[data-l]::before { content:attr(data-l) " "; color:var(--muted); } }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1"></head><body><div class="wrap"><header>
-<h1>แผนการสอนของฉัน</h1><p class="hint">กำหนดจำนวนแผนของแต่ละวิชา แล้วส่งลิงก์ PDF แผนการสอนและเอกสารวัดผล</p>
+<h1>แผนการสอนของฉัน</h1><p id="submission-hint" class="hint">กำหนดจำนวนแผนของแต่ละวิชา แล้วส่งลิงก์ PDF แผนการสอนและเอกสารวัดผล</p>
 <div class="nav"><a href="index.html">ภาพรวมวิชาการ</a> · <a href="lesson-plans.html">แผนการสอนของฉัน</a> · <a href="lesson-plan-review.html">ตรวจแผนการสอน</a> · <a href="#" id="btn-signout">ออกจากระบบ</a></div>
 <script src="../app-shell.js?v=20261117-2"></script></header><main class="academic-content">
 <section id="ack-banner" class="card" hidden><div class="head"><p id="ack-count" role="status" aria-atomic="true"></p><button id="ack-all" class="ghost" type="button">รับทราบทั้งหมด</button></div></section>
 <section id="filters" class="card"><div class="filters"><div class="field"><label for="year">ปีการศึกษา</label><select id="year" aria-label="ปีการศึกษา"></select></div><div id="term-field" class="field"><label for="term">ภาคเรียน (มัธยม)</label><select id="term"><option value="1">ภาค 1</option><option value="2">ภาค 2</option></select></div></div><p class="hint">วิชาประถมไม่มีภาคเรียน — แสดงทั้งปีเสมอ</p></section>
 <div id="subjects"><div class="card" role="status">กำลังโหลดวิชาและแผนการสอน…</div></div>
-<div id="editor-overlay" class="overlay" hidden><section class="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title"><div class="head"><h2 id="editor-title">ส่งแผน</h2><button id="close-editor" type="button">ปิด</button></div>
+<div id="editor-overlay" class="overlay" hidden><section id="editor-dialog" class="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title" tabindex="-1"><div class="head"><h2 id="editor-title">ส่งแผน</h2><button id="close-editor" type="button">ปิด</button></div>
 <form id="plan-form" novalidate>
 <div class="row2"><div class="field"><label for="plan-title">ชื่อแผน/หน่วย *</label><input id="plan-title" type="text" required aria-describedby="plan-title-error"><div id="plan-title-error" class="err" role="alert"></div></div><div class="field"><label for="periods">จำนวนคาบตามแผน *</label><input id="periods" type="number" inputmode="decimal" min="0.1" max="999.9" step="0.1" required aria-describedby="periods-error"><div id="periods-error" class="err" role="alert"></div></div></div>
-<div class="field"><label for="plan-url">ลิงก์ PDF แผนการสอน *</label><input id="plan-url" type="url" required aria-describedby="plan-url-hint plan-url-warning plan-url-error"><p id="plan-url-hint" class="hint">ลิงก์ไฟล์ Google Drive หรือลิงก์ที่ลงท้าย .pdf · ตั้งแชร์ “ทุกคนที่มีลิงก์ดูได้”</p><p id="plan-url-warning" class="st fix" hidden>เปลี่ยนลิงก์แล้ว เอกสารนี้จะกลับไปรอตรวจซ้ำ</p><div id="plan-url-error" class="err" role="alert"></div></div>
+<fieldset id="plan-source" class="field pdf-source">
+<legend id="plan-legend" hidden>PDF แผนการสอน *</legend>
+<div id="plan-methods" hidden>
+<label class="check" for="plan-mode-file"><input id="plan-mode-file" name="plan-mode" type="radio" value="file" checked>อัปโหลดไฟล์ PDF</label>
+<label class="check" for="plan-mode-url"><input id="plan-mode-url" name="plan-mode" type="radio" value="url">วางลิงก์ Google Drive</label>
+</div>
+<div id="plan-upload" hidden>
+<p id="plan-current" class="current-file" hidden>ไฟล์ปัจจุบัน <a target="_blank" rel="noopener">เปิดดู ↗ (แท็บใหม่)</a></p>
+<label for="plan-file">เลือกไฟล์ PDF แผนการสอน</label>
+<input id="plan-file" type="file" accept="application/pdf,.pdf" aria-describedby="plan-upload-hint plan-url-warning plan-url-error">
+<div id="plan-selection" class="actions" hidden><span id="plan-file-info"></span><button id="plan-remove" type="button" class="ghost" aria-label="เอาไฟล์แผนการสอนที่เลือกออก">เอาออก</button></div>
+<p id="plan-upload-hint" class="hint">ไฟล์ PDF ไม่เกิน 20 MB · ระบบเก็บใน Drive ของโรงเรียนและตั้งสิทธิ์ให้ผู้ตรวจเปิดได้เอง</p>
+</div>
+<div id="plan-link" class="pdf-link"><label for="plan-url">ลิงก์ PDF แผนการสอน *</label><input id="plan-url" type="url" required aria-describedby="plan-url-hint plan-url-warning plan-url-error"><p id="plan-url-hint" class="hint">ลิงก์ไฟล์ Google Drive หรือลิงก์ที่ลงท้าย .pdf · ตั้งแชร์ “ทุกคนที่มีลิงก์ดูได้”</p></div>
+<p id="plan-url-warning" class="st fix" hidden>เปลี่ยนลิงก์แล้ว เอกสารนี้จะกลับไปรอตรวจซ้ำ</p><div id="plan-url-error" class="err" role="alert"></div>
+</fieldset>
 <div class="field"><label for="teacher-note">หมายเหตุ (ไม่บังคับ)</label><textarea id="teacher-note" maxlength="500" rows="3" aria-describedby="teacher-note-hint teacher-note-count teacher-note-error"></textarea><p id="teacher-note-hint" class="hint">แก้หมายเหตุได้ตลอด ไม่ทำให้ต้องตรวจซ้ำ</p><p id="teacher-note-count" class="hint" aria-live="polite" aria-atomic="true">0/500</p><div id="teacher-note-error" class="err" role="alert"></div></div>
-<div class="field"><label for="assessment-url">ลิงก์ PDF การวัดและประเมินผล *</label><input id="assessment-url" type="url" required aria-describedby="assessment-url-hint assessment-warning assessment-url-error"><p id="assessment-url-hint" class="hint">ลิงก์ไฟล์ Google Drive หรือลิงก์ที่ลงท้าย .pdf · ตั้งแชร์ “ทุกคนที่มีลิงก์ดูได้”</p><p id="assessment-warning" class="st fix" hidden>เปลี่ยนลิงก์แล้ว เอกสารนี้จะกลับไปรอตรวจซ้ำ</p><div id="assessment-url-error" class="err" role="alert"></div></div>
-<div id="pdf-check-field" class="field"><label class="check" for="pdf-check"><input id="pdf-check" type="checkbox" aria-describedby="pdf-check-error">ยืนยันว่าทั้งสองลิงก์เป็นไฟล์ PDF และหัวหน้าฝ่ายวิชาการเปิดดูได้</label><div id="pdf-check-error" class="err" role="alert"></div></div>
-<button id="save-plan" class="primary" type="submit">บันทึกแผน</button></form></section></div>
+<fieldset id="assessment-source" class="field pdf-source">
+<legend id="assessment-legend" hidden>PDF การวัดและประเมินผล *</legend>
+<div id="assessment-methods" hidden>
+<label class="check" for="assessment-mode-file"><input id="assessment-mode-file" name="assessment-mode" type="radio" value="file" checked>อัปโหลดไฟล์ PDF</label>
+<label class="check" for="assessment-mode-url"><input id="assessment-mode-url" name="assessment-mode" type="radio" value="url">วางลิงก์ Google Drive</label>
+</div>
+<div id="assessment-upload" hidden>
+<p id="assessment-current" class="current-file" hidden>ไฟล์ปัจจุบัน <a target="_blank" rel="noopener">เปิดดู ↗ (แท็บใหม่)</a></p>
+<label for="assessment-file">เลือกไฟล์ PDF การวัดและประเมินผล</label>
+<input id="assessment-file" type="file" accept="application/pdf,.pdf" aria-describedby="assessment-upload-hint assessment-warning assessment-url-error">
+<div id="assessment-selection" class="actions" hidden><span id="assessment-file-info"></span><button id="assessment-remove" type="button" class="ghost" aria-label="เอาไฟล์วัดผลที่เลือกออก">เอาออก</button></div>
+<p id="assessment-upload-hint" class="hint">ไฟล์ PDF ไม่เกิน 20 MB · ระบบเก็บใน Drive ของโรงเรียนและตั้งสิทธิ์ให้ผู้ตรวจเปิดได้เอง</p>
+</div>
+<div id="assessment-link" class="pdf-link"><label for="assessment-url">ลิงก์ PDF การวัดและประเมินผล *</label><input id="assessment-url" type="url" required aria-describedby="assessment-url-hint assessment-warning assessment-url-error"><p id="assessment-url-hint" class="hint">ลิงก์ไฟล์ Google Drive หรือลิงก์ที่ลงท้าย .pdf · ตั้งแชร์ “ทุกคนที่มีลิงก์ดูได้”</p></div>
+<p id="assessment-warning" class="st fix" hidden>เปลี่ยนลิงก์แล้ว เอกสารนี้จะกลับไปรอตรวจซ้ำ</p><div id="assessment-url-error" class="err" role="alert"></div>
+</fieldset>
+<div id="pdf-check-field" class="field"><label class="check" for="pdf-check"><input id="pdf-check" type="checkbox" aria-describedby="pdf-check-error"><span id="pdf-check-label">ยืนยันว่าทั้งสองลิงก์เป็นไฟล์ PDF และหัวหน้าฝ่ายวิชาการเปิดดูได้</span></label><div id="pdf-check-error" class="err" role="alert"></div></div>
+<div id="plan-save-error" class="err" role="alert" tabindex="-1"></div>
+<button id="save-plan" class="primary" type="submit">บันทึกแผน</button></form><div id="upload-status" role="status" aria-live="polite" aria-atomic="true"></div></section></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, GRADE_ORDER } from '../supabase-client.js?v=20261118-1';
-import { pdfUrlError, planOverallStatus, isIntegratedParent, summarizeSubjectPlans, planSlots, sortPlansForTeacher, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=5';
+import { sb, requireAuth, signOut, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, getSetting, GRADE_ORDER } from '../supabase-client.js?v=20261118-1';
+import { pdfUrlError, pdfFileError, driveFileId, planOverallStatus, isIntegratedParent, summarizeSubjectPlans, planSlots, sortPlansForTeacher, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=6';
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
   const MAX_STARS = 4;
+  const pdfDocuments = [{key:'plan', kind:'แผน', warning:'plan-url-warning'}, {key:'assessment', kind:'วัดผล', warning:'assessment-warning'}];
+  const uploadErrorMessage = 'อัปโหลดไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วกดบันทึกอีกครั้ง';
   $('btn-signout')?.addEventListener('click', event => { event.preventDefault(); signOut(); });
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const date = value => value ? new Date(value).toLocaleString('th-TH', {dateStyle:'medium', timeStyle:'short'}) : '—';
@@ -74,8 +121,13 @@ if (!session) {} else {
   const pageParams = new URLSearchParams(location.search);
   let linkedPlanId = pageParams.get('plan');
   let subjects = [], targets = [], plans = [], year = '', term = '', loadToken = 0, busy = false, editing = null, opener = null, toastTimer;
+  let driveUploadUrl = '';
   function toast(message, ok = true) { $('toast').textContent = message; $('toast').className = 'toast show ' + (ok ? 'ok' : 'err'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 5000); }
-  function setBusy(value) { busy = value; document.querySelectorAll('button,input,select,textarea').forEach(node => node.disabled = value); }
+  function setBusy(value) {
+    busy = value;
+    document.querySelectorAll('button,input,select,textarea').forEach(node => node.disabled = value);
+    $('plan-form').setAttribute('aria-busy',String(value && Boolean(editing)));
+  }
   function docBox(plan, key, label) {
     return `<section class="doc"><h3>${label}</h3><a href="${esc(plan[key+'_url'])}" target="_blank" rel="noopener">เปิดไฟล์ PDF ↗ (แท็บใหม่)</a><div>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</div>${plan[key+'_comment'] ? `<p class="comment ${plan[key+'_status'] === 'ขอให้แก้' ? 'fix' : ''}">${esc(plan[key+'_comment'])}</p>` : ''}</section>`;
   }
@@ -173,19 +225,66 @@ if (!session) {} else {
     else { const card = [...$('subjects').children].find(node => node.dataset.subject === editing?.subject_id); (card?.querySelector('[data-plan="'+editing?.id+'"]') || card?.querySelector('button') || $('year')).focus(); }
   }
   function closeEditor() { if (busy) return; $('editor-overlay').hidden = true; document.querySelectorAll('.wrap > header,.wrap > .sidebar,#ack-banner').forEach(node => node.inert = false); $('filters').inert = false; $('subjects').inert = false; restoreFocus(); editing = null; }
-  function showError(id,message) { $(id+'-error').textContent = message || ''; $(id).setAttribute('aria-invalid',message ? 'true' : 'false'); }
+  function showError(id,message,errorId = id+'-error') { $(errorId).textContent = message || ''; $(id).setAttribute('aria-invalid',message ? 'true' : 'false'); }
+  function usesUpload(key) { return Boolean(driveUploadUrl && $(key+'-mode-file').checked); }
+  function selectedFile(key) { return $(key+'-file').files[0]; }
+  function setDocumentMode(key) {
+    const upload = usesUpload(key);
+    $(key+'-upload').hidden = !upload;
+    $(key+'-link').hidden = upload;
+    $(key+'-url').required = !upload;
+    $(key+'-file').required = upload && !editing[key+'_url'];
+    const file = selectedFile(key);
+    const message = upload && file ? pdfFileError(file) : '';
+    showError(key+'-file',message,key+'-url-error');
+    $(key+'-url').setAttribute('aria-invalid','false');
+  }
+  function updateSelectedFile(key) {
+    const file = selectedFile(key);
+    $(key+'-selection').hidden = !file;
+    let info = '';
+    if (file) {
+      let size = file.size+' B';
+      if (file.size >= 1024*1024) size = (file.size/(1024*1024)).toFixed(1)+' MB';
+      else if (file.size >= 1024) size = (file.size/1024).toFixed(1)+' KB';
+      info = file.name+' · '+size;
+    }
+    $(key+'-file-info').textContent = info;
+    showError(key+'-file',file ? pdfFileError(file) : '',key+'-url-error');
+  }
   function linkChanges() {
-    const changed = !editing?.id || ['plan','assessment'].some(key => $(key+'-url').value.trim() !== editing[key+'_url']);
-    $('pdf-check-field').hidden = !changed;
-    for (const key of ['plan','assessment']) $(key === 'plan' ? 'plan-url-warning' : 'assessment-warning').hidden = !editing?.id || !['ผ่าน','ขอให้แก้'].includes(editing[key+'_status']) || $(key+'-url').value.trim() === editing[key+'_url'];
-    return changed;
+    let confirmLinks = false;
+    for (const {key,warning} of pdfDocuments) {
+      const upload = usesUpload(key);
+      const changed = upload ? Boolean(selectedFile(key)) : !editing?.id || $(key+'-url').value.trim() !== editing[key+'_url'];
+      if (!upload && changed) confirmLinks = true;
+      $(warning).hidden = !editing?.id || !['ผ่าน','ขอให้แก้'].includes(editing[key+'_status']) || !changed;
+    }
+    $('pdf-check-field').hidden = !confirmLinks;
+    $('pdf-check').required = confirmLinks;
+    if (!confirmLinks) {
+      $('pdf-check').checked = false;
+      showError('pdf-check','');
+    }
+    return confirmLinks;
   }
   function openEditor(plan, button) {
     editing = plan; opener = button; $('plan-form').reset();
     $('editor-title').textContent = (plan.id ? 'แก้ไข' : 'ส่ง')+'แผนที่ '+plan.seq;
     $('plan-title').value = plan.title || ''; $('periods').value = plan.planned_periods || '';
-    for (const key of ['plan','assessment']) $(key+'-url').value = plan[key+'_url'] || '';
+    for (const {key} of pdfDocuments) {
+      const url = plan[key+'_url'] || '';
+      $(key+'-url').value = url;
+      const current = $(key+'-current');
+      current.hidden = !url;
+      const link = current.querySelector('a');
+      if (url) link.href = url;
+      else link.removeAttribute('href');
+      setDocumentMode(key);
+      updateSelectedFile(key);
+    }
     $('teacher-note').value = plan.teacher_note || ''; updateNoteCount();
+    $('plan-save-error').textContent = '';
     for (const id of ['plan-title','periods','plan-url','assessment-url','teacher-note','pdf-check']) showError(id,'');
     linkChanges(); $('editor-overlay').hidden = false;
     document.querySelectorAll('.wrap > header,.wrap > .sidebar,#ack-banner').forEach(node => node.inert = true); $('filters').inert = true; $('subjects').inert = true; $('plan-title').focus();
@@ -198,14 +297,58 @@ if (!session) {} else {
   $('editor-overlay').addEventListener('keydown',event => {
     if (event.key === 'Escape') { event.preventDefault(); closeEditor(); }
     if (event.key !== 'Tab') return;
-    const nodes = [...$('editor-overlay').querySelectorAll('button,input,textarea')].filter(node => !node.disabled && node.getClientRects().length);
+    if (busy) { event.preventDefault(); return; }
+    const nodes = [...$('editor-overlay').querySelectorAll('button,input,textarea,a[href]')].filter(node => !node.disabled && node.getClientRects().length && (node.type !== 'radio' || node.checked));
     const first = nodes[0], last = nodes.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
-  for (const key of ['plan','assessment']) {
-    $(key+'-url').addEventListener('blur', () => showError(key+'-url',pdfUrlError($(key+'-url').value)));
+  for (const {key} of pdfDocuments) {
+    $(key+'-url').addEventListener('blur', () => { if (!busy && !usesUpload(key)) showError(key+'-url',pdfUrlError($(key+'-url').value)); });
     $(key+'-url').addEventListener('input',linkChanges);
+    $(key+'-methods').addEventListener('change', () => { setDocumentMode(key); linkChanges(); });
+    $(key+'-file').addEventListener('change', () => { updateSelectedFile(key); linkChanges(); });
+    $(key+'-remove').addEventListener('click', () => {
+      $(key+'-file').value = '';
+      updateSelectedFile(key);
+      linkChanges();
+      $(key+'-file').focus();
+    });
+  }
+  function readPdfBase64(file) {
+    return new Promise((resolve,reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.slice(reader.result.indexOf(',')+1));
+      reader.onerror = reader.onabort = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ เลือกไฟล์แล้วกดบันทึกอีกครั้ง'));
+      reader.readAsDataURL(file);
+    });
+  }
+  async function driveRequest(payload) {
+    const {data,error} = await sb.auth.getSession();
+    const token = data?.session?.access_token;
+    if (error || !token) throw new Error('เซสชันหมดอายุ ออกจากระบบแล้วเข้าใหม่');
+    return new Promise((resolve,reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST',driveUploadUrl);
+      xhr.timeout = 120_000;
+      xhr.responseType = 'json';
+      xhr.setRequestHeader('Content-Type','text/plain;charset=utf-8');
+      // ตัวรับ Apps Script ไม่ส่ง CORS headers สำหรับ OPTIONS ที่เกิดจาก upload.onprogress
+      const fail = () => reject(new Error(uploadErrorMessage));
+      xhr.onerror = xhr.ontimeout = xhr.onabort = fail;
+      xhr.onload = () => {
+        if (xhr.status !== 200) { fail(); return; }
+        if (xhr.response?.ok === true) resolve(xhr.response);
+        else reject(new Error(xhr.response?.message || uploadErrorMessage));
+      };
+      xhr.send(JSON.stringify({...payload,token}));
+    });
+  }
+  function trashDriveFiles(fileIds) {
+    if (!driveUploadUrl) return;
+    for (const fileId of new Set(fileIds.filter(Boolean))) {
+      driveRequest({action:'trash',fileId}).catch(() => {});
+    }
   }
   $('subjects').addEventListener('submit',async event => {
     const form = event.target.closest('.target'); if (!form) return; event.preventDefault(); if (busy) return;
@@ -227,31 +370,112 @@ if (!session) {} else {
     else if (action === 'edit' && plan) openEditor(plan,button);
     else if (action === 'delete' && plan) {
       if (!window.crsAskConfirm) { toast('โหลดกล่องยืนยันไม่สำเร็จ เปิดหน้านี้ใหม่แล้วลองอีกครั้ง',false); return; }
-      if (!await window.crsAskConfirm({title:'ลบแผนที่ '+plan.seq,message:'ลบแผน “'+plan.title+'” 1 แผนพร้อมลิงก์เอกสาร 2 รายการออกจากวิชานี้ ไฟล์ต้นฉบับใน Drive ยังอยู่ หากมีบันทึกหลังสอนอ้างถึง ระบบจะไม่อนุญาตให้ลบ',okLabel:'ลบแผน',danger:true})) return;
+      const driveMessage = driveUploadUrl ? 'ไฟล์ที่อัปผ่านระบบและไม่มีการอ้างถึงจะย้ายไปถังขยะของ Drive (กู้คืนได้ภายใน 30 วัน) ไฟล์ภายนอกที่แนบด้วยลิงก์จะอยู่ในที่เดิม' : 'ไฟล์ต้นฉบับใน Drive ยังอยู่';
+      if (!await window.crsAskConfirm({title:'ลบแผนที่ '+plan.seq,message:'ลบแผน “'+plan.title+'” 1 แผนพร้อมลิงก์เอกสาร 2 รายการออกจากวิชานี้ '+driveMessage+' หากมีบันทึกหลังสอนอ้างถึง ระบบจะไม่อนุญาตให้ลบ',okLabel:'ลบแผน',danger:true})) return;
       setBusy(true);
-      try { const result = await sb.from('lesson_plans').delete().eq('id',plan.id); check(result); plans = plans.filter(row => row.id !== plan.id); renderSubject(plan.subject_id); toast('ลบแผนแล้ว'); }
+      try {
+        check(await sb.from('lesson_plans').delete().eq('id',plan.id).select('id').single());
+        trashDriveFiles(pdfDocuments.map(({key}) => driveFileId(plan[key+'_url'])));
+        plans = plans.filter(row => row.id !== plan.id); renderSubject(plan.subject_id); toast('ลบแผนแล้ว');
+      }
       catch (error) { toast(error.message,false); try { await refreshSubject(plan.subject_id); } catch (reloadError) { toast(reloadError.message,false); } }
       finally { setBusy(false); $('count-'+plan.subject_id)?.focus(); }
     }
   });
   $('plan-form').addEventListener('submit',async event => {
     event.preventDefault(); if (busy) return;
-    const periods = Number($('periods').value), values = {title:$('plan-title').value.trim(),planned_periods:periods,plan_url:$('plan-url').value.trim(),assessment_url:$('assessment-url').value.trim(),teacher_note:$('teacher-note').value.trim() || null};
-    const errors = {'plan-title':values.title ? '' : 'ใส่ชื่อแผน/หน่วย',periods:periods > 0 && periods <= 999.9 && Math.abs(periods*10-Math.round(periods*10)) < 1e-8 ? '' : 'ใส่จำนวนคาบมากกว่า 0 ไม่เกิน 999.9 ทศนิยมได้ 1 ตำแหน่ง','plan-url':pdfUrlError(values.plan_url),'assessment-url':pdfUrlError(values.assessment_url),'teacher-note':$('teacher-note').value.length > 500 ? 'ใส่หมายเหตุไม่เกิน 500 ตัวอักษร' : '','pdf-check':linkChanges() && !$('pdf-check').checked ? 'กรุณายืนยันไฟล์ PDF ทั้งสองลิงก์ก่อนส่ง' : ''};
-    Object.entries(errors).forEach(([id,message]) => showError(id,message)); const first = Object.keys(errors).find(id => errors[id]); if (first) { $(first).focus(); return; }
-    const old = editing; setBusy(true); $('save-plan').textContent = 'กำลังบันทึก…';
+    $('plan-save-error').textContent = '';
+    const old = editing;
+    const periods = Number($('periods').value);
+    const values = {title:$('plan-title').value.trim(),planned_periods:periods,teacher_note:$('teacher-note').value.trim() || null};
+    const errors = [
+      ['plan-title',values.title ? '' : 'ใส่ชื่อแผน/หน่วย'],
+      ['periods',periods > 0 && periods <= 999.9 && Math.abs(periods*10-Math.round(periods*10)) < 1e-8 ? '' : 'ใส่จำนวนคาบมากกว่า 0 ไม่เกิน 999.9 ทศนิยมได้ 1 ตำแหน่ง'],
+    ];
+    const uploads = [];
+    for (const {key,kind} of pdfDocuments) {
+      const field = key+'_url';
+      const upload = usesUpload(key);
+      if (upload) {
+        const file = selectedFile(key);
+        values[field] = old[field];
+        errors.push([key+'-file',file || !old[field] ? pdfFileError(file) : '',key+'-url-error']);
+        if (file) uploads.push({key,kind,file});
+      } else {
+        values[field] = $(key+'-url').value.trim();
+        errors.push([key+'-url',pdfUrlError(values[field])]);
+      }
+    }
+    errors.push(['teacher-note',$('teacher-note').value.length > 500 ? 'ใส่หมายเหตุไม่เกิน 500 ตัวอักษร' : '']);
+    const confirmationError = driveUploadUrl ? 'กรุณายืนยันว่าเปิดดูไฟล์ PDF จากลิงก์ได้ก่อนส่ง' : 'กรุณายืนยันไฟล์ PDF ทั้งสองลิงก์ก่อนส่ง';
+    errors.push(['pdf-check',linkChanges() && !$('pdf-check').checked ? confirmationError : '']);
+    errors.forEach(([id,message,errorId]) => showError(id,message,errorId));
+    const first = errors.find(([,message]) => message)?.[0];
+    if (first) { $(first).focus(); return; }
+
+    setBusy(true);
+    $('editor-dialog').focus({preventScroll:true});
+    $('save-plan').textContent = 'กำลังบันทึก…';
+    const uploaded = [];
+    let uploading, row, focusOnError;
     try {
+      const subject = subjects.find(item => item.id === old.subject_id);
+      for (const [index,item] of uploads.entries()) {
+        uploading = item;
+        const status = 'กำลังอัปไฟล์'+item.kind+' '+(index+1)+'/'+uploads.length+'…';
+        $('save-plan').textContent = $('upload-status').textContent = status;
+        const base64 = await readPdfBase64(item.file);
+        const result = await driveRequest({action:'upload',kind:item.kind,year:subject.year,subjectLabel:[subject.code,subject.name].filter(Boolean).join(' '),seq:old.seq,title:values.title,base64});
+        const fileId = driveFileId(result.url);
+        if (!fileId || fileId !== result.fileId) throw new Error(uploadErrorMessage);
+        uploaded.push(fileId);
+        values[item.key+'_url'] = result.url;
+      }
+      uploading = null;
+      $('save-plan').textContent = 'กำลังบันทึกแผน…';
+      if (uploads.length) $('upload-status').textContent = 'อัปโหลดไฟล์ครบแล้ว กำลังบันทึกแผน';
       const query = old.id ? sb.from('lesson_plans').update(values).eq('id',old.id) : sb.from('lesson_plans').insert({...values,subject_id:old.subject_id,seq:old.seq});
-      const row = check(await query.select(PLAN_COLUMNS).single()); plans = [...plans.filter(plan => plan.id !== row.id),row]; renderSubject(old.subject_id); setBusy(false); closeEditor();
-      const returnedToReview = old.id && ['plan','assessment'].some(key => ['ผ่าน','ขอให้แก้'].includes(old[key+'_status']) && values[key+'_url'] !== old[key+'_url']);
-      toast(old.id ? 'บันทึกการแก้ไขแผนที่ '+old.seq+' แล้ว'+(returnedToReview ? ' · เอกสารที่เปลี่ยนลิงก์กลับไปรอตรวจซ้ำ' : '') : 'ส่งแผนที่ '+old.seq+' แล้ว');
-    } catch (error) { toast(error.message,false); try { await refreshSubject(old.subject_id); } catch (reloadError) { toast(reloadError.message,false); } }
-    finally { setBusy(false); $('save-plan').textContent = 'บันทึกแผน'; }
+      row = check(await query.select(PLAN_COLUMNS).single());
+    } catch (error) {
+      trashDriveFiles(uploaded);
+      if (uploading) {
+        focusOnError = uploading.key+'-file';
+        showError(focusOnError,error.message,uploading.key+'-url-error');
+      } else {
+        focusOnError = 'plan-save-error';
+        $(focusOnError).textContent = error.message;
+        if (!driveUploadUrl) toast(error.message,false);
+        try { await refreshSubject(old.subject_id); } catch (reloadError) { toast(reloadError.message,false); }
+      }
+      return;
+    } finally {
+      setBusy(false);
+      $('save-plan').textContent = 'บันทึกแผน';
+      $('upload-status').textContent = '';
+      if (focusOnError) $(focusOnError).focus();
+    }
+    const changedDocuments = pdfDocuments.filter(({key}) => old[key+'_url'] !== values[key+'_url']);
+    trashDriveFiles(changedDocuments.map(({key}) => driveFileId(old[key+'_url'])));
+    plans = [...plans.filter(plan => plan.id !== row.id),row]; renderSubject(old.subject_id); closeEditor();
+    const returnedToReview = old.id && changedDocuments.some(({key}) => ['ผ่าน','ขอให้แก้'].includes(old[key+'_status']));
+    const changedLabel = driveUploadUrl ? 'ไฟล์' : 'ลิงก์';
+    toast(old.id ? 'บันทึกการแก้ไขแผนที่ '+old.seq+' แล้ว'+(returnedToReview ? ' · เอกสารที่เปลี่ยน'+changedLabel+'กลับไปรอตรวจซ้ำ' : '') : 'ส่งแผนที่ '+old.seq+' แล้ว');
   });
   $('year').addEventListener('change', () => { if (busy) return; year = $('year').value; setActiveYear(year); loadYear(); });
   $('term').addEventListener('change', () => { term = $('term').value; render(); });
   try {
-    const years = await getAcademicYears();
+    const [years, configuredUrl] = await Promise.all([getAcademicYears(), getSetting('drive_upload_url').catch(() => null)]);
+    const url = typeof configuredUrl === 'string' ? configuredUrl.trim() : '';
+    if (/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) {
+      driveUploadUrl = url;
+      $('submission-hint').textContent = 'กำหนดจำนวนแผนของแต่ละวิชา แล้วส่ง PDF แผนการสอนและเอกสารวัดผล';
+      $('pdf-check-label').textContent = 'ยืนยันว่าลิงก์เป็นไฟล์ PDF และหัวหน้าฝ่ายวิชาการเปิดดูได้';
+      for (const {key,warning} of pdfDocuments) {
+        $(key+'-methods').hidden = $(key+'-legend').hidden = false;
+        $(key+'-source').classList.add('with-upload');
+        $(warning).textContent = 'เปลี่ยนไฟล์แล้ว เอกสารนี้จะกลับไปรอตรวจซ้ำ';
+      }
+    }
     const today = new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'});
     year = String(getActiveYear() || academicYearOf(today,years) || years.at(-1)?.year || ''); term = String(academicTermOf(today,years) || '1');
     const requestedYear = pageParams.get('year'), requestedTerm = pageParams.get('term');
