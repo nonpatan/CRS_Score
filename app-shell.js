@@ -653,16 +653,6 @@ function syncFinanceKpiTones() {
           ]
         },
         {
-          label: "รายงาน",
-          items: [
-            ["savings-report.html", "รายงานออมทรัพย์"],
-            ["transport-report.html", "รายงานค่ารถ"],
-            ["fee-report.html", "รายงานค่าใช้จ่ายนักเรียน"],
-            ["fee-profit.html", "รายงานกำไรสินค้า"],
-            ["scholarship-report.html", "รายงานทุนการศึกษา"]
-          ]
-        },
-        {
           label: "กำหนดค่า",
           items: [
             ["savings-opening.html", "ยอดยกมาออมทรัพย์"],
@@ -671,6 +661,16 @@ function syncFinanceKpiTones() {
             ["fee-settings.html", "ตั้งค่าค่าใช้จ่าย"],
             ["fee-stock.html", "คลังสินค้า"],
             ["scholarship-sources.html", "ทะเบียนแหล่งทุน"]
+          ]
+        },
+        {
+          label: "รายงาน",
+          items: [
+            ["savings-report.html", "รายงานออมทรัพย์"],
+            ["transport-report.html", "รายงานค่ารถ"],
+            ["fee-report.html", "รายงานค่าใช้จ่ายนักเรียน"],
+            ["fee-profit.html", "รายงานกำไรสินค้า"],
+            ["scholarship-report.html", "รายงานทุนการศึกษา"]
           ]
         }
       ],
