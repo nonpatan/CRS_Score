@@ -204,6 +204,15 @@
   #competency-report .comp-room-actions { display:flex; gap:8px; flex-wrap:wrap; }
   #competency-report .comp-room-actions button { min-height:44px; padding:8px 16px; border:1px solid var(--line); border-radius:9px; background:var(--white); color:var(--ink); font:inherit; cursor:pointer; }
   #competency-report .comp-room-actions .comp-room-button { background:var(--teal); color:var(--white); border-color:var(--teal); }
+  #competency-report .comp-room-actions button:disabled { opacity:.5; cursor:not-allowed; }
+  #competency-report .comp-room-action-group { min-width:0; max-width:100%; }
+  #competency-report .comp-room-publish-feedback { margin:0; overflow-wrap:anywhere; }
+  #competency-report .comp-room-publish-feedback:not(:empty) { margin-top:6px; }
+  #competency-report .comp-room-publish-error { color:var(--danger); }
+  #competency-report #comp-room-publish { display:inline-flex; align-items:center; gap:8px; background:var(--teal-soft); color:var(--teal); }
+  #competency-report #comp-room-publish svg { width:18px; height:18px; flex:none; }
+  #competency-report #comp-room-publish svg[hidden] { display:none; }
+  #competency-report #comp-room-publish:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
   #competency-report .comp-print-paper { padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--white); margin-bottom:16px; }
   #competency-report .comp-print-paper h2 { margin:0; font-size:23px; line-height:1.3; }
   #competency-report .comp-print-paper h3 { margin:20px 0 9px; font-size:17px; line-height:1.35; }
@@ -750,7 +759,7 @@ import {
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows, fetchAllRowsByIds,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
-  isAutoPresentStudent, isAutoAbsentStudent,
+  isAutoPresentStudent, isAutoAbsentStudent, checkDepartment,
 } from "../supabase-client.js?v=20261118-1";
 import { traitLevel, activityRows, reportTerms } from "../shared/report-card.js?v=20261121-1";
 
@@ -852,6 +861,7 @@ let compStudents = [], coreCompetencies = [], sourceWeights = [], interpretation
 let competencyConfigError = "", competencySettingsError = "", competencyPlacementError = "", selectedCompStudentId = "";
 let compVisibleStudents = [], compRequestSeq = 0, compRoomRunSeq = 0;
 let compRoomState = null;
+let canPublishCompRoom = false, compRoomPublishBusy = false;
 let compPrimaryHalf = "กลางปี";
 let placementWarning = "";
 let subjectStructureMissing = false;
@@ -2397,10 +2407,12 @@ elAttSubject.addEventListener("change", loadAttendanceSubjectContext);
 // ============================================================
 
 async function initCompetencyReport() {
-  const [assessmentYears,competencies] = await Promise.all([
+  const [assessmentYears,competencies,canPublish] = await Promise.all([
     sb.from("competency_assessments").select("year"),
-    sb.from("core_competencies").select("*").order("seq")
+    sb.from("core_competencies").select("*").order("seq"),
+    checkDepartment("วิชาการ")
   ]);
+  canPublishCompRoom = canPublish;
   coreCompetencies = competencies.data || [];
   competencyConfigError = (competencies.error && competencies.error.message) || "";
 
@@ -2549,8 +2561,7 @@ function writeCompResult(token, html) {
 }
 
 function selectCompStudent(student, scrollToNav = false) {
-  if (!compRoomState || compRoomState.key !== [elCompYear.value, elCompGrade.value,
-    elCompGrade.value.startsWith("ม.") ? elCompTerm.value : compPrimaryHalf, elCompRoom.value].join("|")) return;
+  if (!compRoomState || compRoomState.key !== currentCompRoomKey()) return;
   const entry = compRoomState.perStudent.find(row => row.student.id === student.id);
   if (!entry) return;
   selectedCompStudentId = student.id;
@@ -2568,6 +2579,11 @@ function selectCompStudent(student, scrollToNav = false) {
     entry.plannedByCompetency, entry.missingCompetencySubjects, token, compRoomState.blockedLoad.error,
     entry.subjectOwnerById, entry.assessmentOwnerByName, entry.halves || null);
   if (scrollToNav) elCompNav.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start" });
+}
+
+function currentCompRoomKey() {
+  return [elCompYear.value, elCompGrade.value,
+    elCompGrade.value.startsWith("ม.") ? elCompTerm.value : compPrimaryHalf, elCompRoom.value].join("|");
 }
 
 elCompPrev.addEventListener("click", () => {
@@ -3104,17 +3120,22 @@ function cancelCompRoomRun() {
 }
 
 function showCompRoomResults(focusStudentId = "") {
-  if (!compRoomState) return;
+  if (!compRoomState || compRoomState.key !== currentCompRoomKey()) return;
   ++compRequestSeq;
   const state = compRoomState;
   elCompRoomPrint.innerHTML = state.roomHtml;
   const toolbar = elCompRoomPrint.querySelector(".comp-room-toolbar");
+  const busyIcon = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' aria-hidden='true' hidden><path d='M6 3h12M6 21h12M7 3v3a5 5 0 0 0 10 0V3M7 21v-3a5 5 0 0 1 10 0v3'/></svg>";
   toolbar.innerHTML = "<div><h2 id='comp-room-print-heading' tabindex='-1'>ผลสมรรถนะทั้งห้อง · " +
     escapeHtml(elCompGrade.value) + "/" + escapeHtml(elCompRoom.value) + "</h2><span class='comp-room-time'>คำนวณเมื่อ " +
-    escapeHtml(state.computedAt) + " น.</span></div><div class='comp-room-actions'>" +
+    escapeHtml(state.computedAt) + " น.</span></div><div class='comp-room-action-group'><div class='comp-room-actions'>" +
     "<button type='button' id='comp-room-recompute'>คำนวณใหม่</button>" +
     "<button type='button' class='comp-room-button' id='comp-room-do-print'>พิมพ์ใบตามงานทั้งห้อง</button>" +
-    "<button type='button' id='comp-room-close'>ปิด</button></div>";
+    (canPublishCompRoom ? "<button type='button' id='comp-room-publish' aria-describedby='comp-room-publish-status comp-room-release-note'>" +
+      busyIcon + "<span>บันทึกผลให้ผู้ปกครอง</span></button>" : "") +
+    "<button type='button' id='comp-room-close'>ปิด</button></div>" +
+    (canPublishCompRoom ? "<p id='comp-room-publish-status' class='hint comp-room-publish-feedback' role='status'></p>" +
+      "<p id='comp-room-release-note' class='hint comp-room-publish-feedback'></p>" : "") + "</div>";
   const people = document.createElement("section");
   people.className = "card comp-room-people no-print";
   people.innerHTML = "<h3>ดูรายคน</h3><div class='student-list'></div>";
@@ -3150,9 +3171,95 @@ function showCompRoomResults(focusStudentId = "") {
     cancelCompRoomRun();
     elCompRoomStart.focus();
   });
+  const publishButton = toolbar.querySelector("#comp-room-publish");
+  if (publishButton) {
+    updateCompRoomPublishControls();
+    publishButton.addEventListener("click", () => publishCompRoomResults(state, publishButton));
+    const note = toolbar.querySelector("#comp-room-release-note");
+    state.releaseNote ??= loadCompRoomReleaseNote(elCompYear.value, compRoomPublishTerm());
+    state.releaseNote.then(message => { note.textContent = message; });
+  }
   (focusStudentId ? [...list.querySelectorAll(".comp-student-button")]
     .find(button => button.dataset.student === String(focusStudentId)) : null)?.focus();
   if (!focusStudentId) elCompRoomPrint.querySelector("#comp-room-print-heading").focus();
+}
+
+function compRoomPublishTerm() {
+  if (elCompGrade.value.startsWith("ม.")) return elCompTerm.value;
+  return compPrimaryHalf === "ปลายปี" ? "2" : "1";
+}
+
+async function loadCompRoomReleaseNote(year, term) {
+  try {
+    const { data, error } = await sb.from("grade_releases").select("id").eq("year", year).eq("term", term).maybeSingle();
+    if (!error) return data ? "" : "ยังไม่ได้ตั้งวันประกาศผลภาคนี้ ผู้ปกครองจะยังไม่เห็น";
+  } catch {
+    // ยังบันทึกได้ตามปกติเมื่อเช็กวันประกาศไม่สำเร็จ
+  }
+  return "ตรวจสอบวันประกาศผลภาคนี้ไม่สำเร็จ";
+}
+
+function compRoomPublishBlockedReason(state) {
+  if (state.blockedLoad.error) return "โหลดผล ร./มส. ไม่ครบ กรุณาคำนวณใหม่ก่อนบันทึก";
+  return state.perStudent.some(entry => entry.results.length) ? "" : "ไม่มีผลสมรรถนะให้บันทึก";
+}
+
+function updateCompRoomPublishControls() {
+  const state = compRoomState;
+  if (!state || state.key !== currentCompRoomKey() || elCompRoomPrint.hidden) return;
+  const button = elCompRoomPrint.querySelector("#comp-room-publish");
+  if (!button) return;
+  const blockedReason = compRoomPublishBlockedReason(state);
+  button.disabled = Boolean(blockedReason) || compRoomPublishBusy;
+  button.querySelector("svg").toggleAttribute("hidden", !compRoomPublishBusy);
+  button.querySelector("span").textContent = compRoomPublishBusy ? "กำลังบันทึก…" : "บันทึกผลให้ผู้ปกครอง";
+  const status = elCompRoomPrint.querySelector("#comp-room-publish-status");
+  status.classList.toggle("comp-room-publish-error", Boolean(blockedReason || state.publishStatus?.error));
+  status.textContent = blockedReason || state.publishStatus?.message || "";
+}
+
+async function publishCompRoomResults(state, button) {
+  const canSubmit = () => canPublishCompRoom && !compRoomPublishBusy && !elCompRoomPrint.hidden &&
+    button.isConnected && state === compRoomState && state.key === currentCompRoomKey() && !compRoomPublishBlockedReason(state);
+  if (!canSubmit()) return;
+
+  const year = elCompYear.value, term = compRoomPublishTerm();
+  const rows = state.perStudent.flatMap(entry => entry.results.map(({ competency, combined }) => ({
+    student_id: entry.student.id,
+    competency_id: competency.id,
+    complete: !!combined?.complete,
+    score: combined?.complete ? combined.score : null,
+    level: combined?.complete ? combined.level : null
+  })));
+  // RPC คืนจำนวนแถวสมรรถนะ ส่วนข้อความยืนยันและผลบันทึกใช้จำนวนนักเรียน
+  const count = new Set(rows.map(row => row.student_id)).size;
+  const incomplete = state.perStudent.filter(entry => entry.results.some(row => !row.combined?.complete)).length;
+  const room = elCompGrade.value + "/" + elCompRoom.value;
+  const period = elCompGrade.value.startsWith("ม.") ? "ภาคเรียนที่ " + term + "/" + year : compPrimaryHalf + "/" + year;
+  const accepted = await window.crsAskConfirm({
+    title: "บันทึกผลให้ผู้ปกครอง",
+    message: "บันทึกผลสมรรถนะ " + room + " " + period + " ให้ผู้ปกครองเห็น " + count + " คน?\n" +
+      "ผู้ปกครองจะเห็นเมื่อถึงวันประกาศผลของภาคนั้น\nบันทึกซ้ำได้เพื่อแทนผลเดิมของนักเรียนที่บันทึก\n" +
+      "ยังสรุปไม่ได้อย่างน้อย 1 ด้าน " + incomplete + " คน · คำนวณไม่สำเร็จ " + state.failures.length + " คน (ไม่บันทึก)",
+    okLabel: "บันทึกผล",
+    danger: false
+  });
+  if (!accepted || !canSubmit()) return;
+
+  compRoomPublishBusy = true;
+  state.publishStatus = null;
+  updateCompRoomPublishControls();
+  try {
+    const { error } = await sb.rpc("publish_competency_results", { p_year:year, p_term:term, p_rows:rows });
+    if (error) throw error;
+    const time = bangkokNow().toLocaleTimeString("th-TH", { timeZone:"UTC", hour:"2-digit", minute:"2-digit", hour12:false });
+    state.publishStatus = { message:"บันทึกแล้ว " + count + " คน · เวลา " + time };
+  } catch (error) {
+    state.publishStatus = { error:true, message:"บันทึกไม่สำเร็จ: " + (error?.message || String(error)) };
+  } finally {
+    compRoomPublishBusy = false;
+    updateCompRoomPublishControls();
+  }
 }
 
 function compRoomPendingText(item) {
@@ -3432,8 +3539,7 @@ async function startCompRoomRun() {
   summary.blockedLoadError = blockedLoad.error;
   const html = compRoomPrintHtml(summary, perStudent, failures, ownerWarning, roster.length);
   if (token !== compRoomRunSeq) return;
-  compRoomState = { key:[elCompYear.value, elCompGrade.value,
-    elCompGrade.value.startsWith("ม.") ? elCompTerm.value : compPrimaryHalf, elCompRoom.value].join("|"),
+  compRoomState = { key:currentCompRoomKey(),
     roster, perStudent, failures, summary, ownerNameById, ownerWarning, blockedLoad,
     computedAt:bangkokNow().toLocaleTimeString("th-TH", { timeZone:"UTC", hour:"2-digit", minute:"2-digit", hour12:false }),
     roomHtml:html };
@@ -4167,7 +4273,7 @@ async function populateGradeSelects() {
 
 // ============================================================
 //  ใบ ปพ.6 + ความเห็นครูประจำชั้น/ผู้ปกครอง (แท็บผลการเรียนรายคน · brief docs/brief-pp6-parent-comment.md)
-//  แยกจากส่วนแท็บ GPA โดยตั้งใจ: คำสั่งเขียนฐานข้อมูลของหน้านี้อยู่ที่นี่ที่เดียว
+//  แยกคำสั่งเขียนความเห็นออกจากส่วนแท็บ GPA โดยตั้งใจ
 // ============================================================
 const PP6_COMMENT_MAX = 250;
 let pp6Seq = 0;
