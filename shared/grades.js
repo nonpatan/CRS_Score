@@ -868,7 +868,7 @@ export function computeGpa(subjectResults) {
   };
 }
 
-// แปลง child_grade_data ตาม SQL G1: โครงสร้างครบทุกคน แต่แถวคะแนน/เวลาเฉพาะนักเรียนนี้
+// แปลง child_grade_data: โครงสร้างครบ แต่แถวคะแนน/เวลาและผลภายนอกเฉพาะนักเรียนนี้
 // null/ยังไม่ประกาศไม่มีข้อมูลให้คำนวณ ไม่สร้างค่าเกรดขึ้นเอง
 export function fromGradeRpc(payload) {
   if (!payload || payload.released !== true || !payload.student_id) return null;
@@ -877,7 +877,6 @@ export function fromGradeRpc(payload) {
   const enrolledIds = new Set(payload.enrolled_subject_ids || []);
   const integratedIds = new Set(memberLinks.map(link => link.integrated_subject_id));
   const subjects = payload.subjects || [];
-  const scopedSubjects = subjects.filter(subject => enrolledIds.has(subject.id) || integratedIds.has(subject.id));
   const group = rows => {
     const map = new Map();
     for (const row of rows || []) {
@@ -886,6 +885,9 @@ export function fromGradeRpc(payload) {
     }
     return map;
   };
+  const externalBySubject = group(payload.external_subject_results);
+  const scopedSubjects = subjects.filter(subject =>
+    enrolledIds.has(subject.id) || integratedIds.has(subject.id) || externalBySubject.has(subject.id));
   const units = group(payload.units), remarks = group(payload.remarks), sessions = group(payload.sessions);
   const makeup = group(payload.makeup_hours), exams = group(payload.exam_scores);
   const loadedData = new Map(subjects.filter(subject => subject.subject_type === "พื้นฐาน").map(subject => [subject.id, {
@@ -894,7 +896,7 @@ export function fromGradeRpc(payload) {
     examScores:exams.get(subject.id) || [], gradeWeight:gradeWeightFor(subject, payload.grade_weights)
   }]));
   return {
-    scopedSubjects, memberLinks, loadedData,
+    scopedSubjects, memberLinks, loadedData, externalBySubject,
     enrolledBySubject:new Map([...enrolledIds].map(id => [id, new Set([studentId])])),
     students:new Map([[studentId, { id:studentId }]])
   };

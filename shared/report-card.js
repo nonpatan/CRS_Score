@@ -36,3 +36,61 @@ export function activityRows(categories, assessments, memberIds, resultById, req
 export function reportTerms({ primary, half, term }) {
   return primary && half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : term];
 }
+
+export function sortReportSubjects(subjects) {
+  const group = item => item.subject.subject_type === "บูรณาการ" ? 2 :
+    String(item.subject.code || "").startsWith("พ") ? 1 : 0;
+  return [...subjects].sort((a, b) => group(a) - group(b) ||
+    String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th", { numeric:true }));
+}
+
+// คะแนน ปพ.6 ประถม: ถ่วงด้วยชั่วโมงของวิชาหลัก ช่องที่ยังว่างนับเป็น 0
+export function primaryReportRows(subjects, { half }) {
+  const isEnd = half === "ปลายปี";
+  const sorted = sortReportSubjects(subjects);
+  const missingPeriods = [...new Set(sorted.flatMap(item => item.creditInfo?.missing || []))];
+  let weightedTotal = 0, totalWeight = 0, allOk = true;
+  const rows = sorted.map(item => {
+    const mid = primaryHalfScore(item.halves?.["กลางปี"], Number);
+    const end = primaryHalfScore(item.halves?.["ปลายปี"], Number);
+    const year = {
+      score:item.halves && item.result?.percentScore != null ? Number(item.result.percentScore) : null,
+      ok:Boolean(item.halves && item.scoring?.complete)
+    };
+    const result = { label:reportResultLabel(item.result), ok:year.ok };
+    const integrated = item.subject.subject_type === "บูรณาการ";
+    const missingMemberPeriods = integrated && Boolean(item.creditInfo?.missing?.length);
+    const period = isEnd ? year : mid;
+    const shown = { score:missingMemberPeriods ? null : period.score, ok:period.ok };
+    const hours = Number(item.creditInfo?.weight);
+    if (Number.isFinite(hours) && hours > 0) {
+      weightedTotal += (shown.score === null ? 0 : shown.score) * hours;
+      totalWeight += hours;
+    }
+    allOk &&= shown.ok;
+    const members = integrated ? (item.memberResults || []).map(member => {
+      const score = Number(member.result?.percentScore);
+      const ok = Boolean(member.scoring?.complete);
+      return {
+        subject:member.subject,
+        mid:primaryHalfScore(member.halves?.["กลางปี"]),
+        end:primaryHalfScore(member.halves?.["ปลายปี"]),
+        year:{ score:Number.isFinite(score) ? score : null, ok },
+        result:{ label:reportResultLabel(member.result), ok },
+        external:Boolean(item.external?.merged)
+      };
+    }) : [];
+    return { subject:item.subject, hours, integrated, missingMemberPeriods, mid, end, year, result, shown, members };
+  });
+  const average = missingPeriods.length || !totalWeight || (isEnd && sorted.some(item => item.external && !item.scoring?.complete))
+    ? null : weightedTotal / totalWeight;
+  return { rows, average, allOk, missingPeriods };
+}
+
+function primaryHalfScore(half, toScore = score => score) {
+  return { score:half ? toScore(half.score) : null, ok:Boolean(half?.complete) };
+}
+
+function reportResultLabel(result) {
+  return result?.type === "grade" ? result.grade ?? null : result?.type || null;
+}

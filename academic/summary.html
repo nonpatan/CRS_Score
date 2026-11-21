@@ -761,7 +761,7 @@ import {
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
   isAutoPresentStudent, isAutoAbsentStudent, checkDepartment,
 } from "../supabase-client.js?v=20261118-1";
-import { traitLevel, activityRows, reportTerms } from "../shared/report-card.js?v=20261121-1";
+import { traitLevel, activityRows, reportTerms, sortReportSubjects, primaryReportRows } from "../shared/report-card.js?v=20261121-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -4375,16 +4375,9 @@ function pp6TailHtml(d, commentTitle, parentTitle) {
 }
 
 // เรียงวิชาใน ปพ.6 ทั้งสองระดับ: พื้นฐาน → สุขศึกษา/พลศึกษา → บูรณาการ
-function pp6SortSubjects(subjects) {
-  const group = item => item.subject.subject_type === "บูรณาการ" ? 2 :
-    String(item.subject.code || "").startsWith("พ") ? 1 : 0;
-  return [...subjects].sort((a, b) => group(a) - group(b) ||
-    String(a.subject.code || "").localeCompare(String(b.subject.code || ""), "th", { numeric:true }));
-}
-
 // ฟังก์ชันบริสุทธิ์ — รับข้อมูลที่เตรียมแล้ว คืน HTML ใบ ปพ.6 มัธยม (ทดสอบได้โดยไม่ต่อฐาน)
 function buildPp6Html(d) {
-  const subjects = pp6SortSubjects(d.subjects || []);
+  const subjects = sortReportSubjects(d.subjects || []);
   const totalCredits = subjects.reduce((sum, item) => sum + (Number(item.creditInfo?.credits) || 0), 0);
   const rows = subjects.map((item, index) => {
     const cells = pp6SubjectCells(item), att = item.attendance || { base:0, missed:0 };
@@ -4421,52 +4414,33 @@ function buildPp6Html(d) {
 // แสดงคะแนนที่ระบบมีตามจริง (ไม่ “รอผล”) ช่วงที่ยังไม่ครบติด * · เฉลี่ยเป็นร้อยละ · ไม่มีหน่วยกิต/GPA/เวลาเรียน
 function buildPp6PrimaryHtml(d) {
   const isEnd = d.half === "ปลายปี";
-  const subjects = pp6SortSubjects(d.subjects || []);
+  const subjects = d.subjects || [];
+  const { rows, average, allOk, missingPeriods } = primaryReportRows(subjects, { half:d.half });
   const star = ok => ok ? "" : "<sup>*</sup>";
-  const num = (value, ok, now) => "<td class='r" + (now ? " now" : "") + "'>" + (value === null ? "—" : Number(value).toFixed(2)) + star(ok) + "</td>";
+  const num = ({ score, ok }, now) => "<td class='r" + (now ? " now" : "") + "'>" + (score === null ? "—" : Number(score).toFixed(2)) + star(ok) + "</td>";
   const blank = "<td class='c'>—</td>";
-  let weightedTotal = 0, totalWeight = 0, allOk = true;
-  const missingPeriods = [...new Set(subjects.flatMap(item => item.creditInfo?.missing || []))];
-  const rows = subjects.map((item, index) => {
-    const mid = item.halves?.["กลางปี"], end = item.halves?.["ปลายปี"];
-    const midScore = mid ? Number(mid.score) : null, midOk = Boolean(mid && mid.complete);
-    const endScore = end ? Number(end.score) : null, endOk = Boolean(end && end.complete);
-    const integrated = item.subject.subject_type === "บูรณาการ";
-    const yearScore = item.halves && item.result?.percentScore != null ? Number(item.result.percentScore) : null, yearOk = Boolean(item.halves && item.scoring?.complete);
-    const missingMemberPeriods = integrated && Boolean(item.creditInfo?.missing?.length);
-    const shown = missingMemberPeriods ? null : isEnd ? yearScore : midScore;
-    const shownOk = isEnd ? yearOk : midOk;
-    const hours = Number(item.creditInfo?.weight);
-    if (Number.isFinite(hours) && hours > 0) {
-      weightedTotal += (shown === null ? 0 : shown) * hours;
-      totalWeight += hours;
-    }
-    allOk &&= shownOk;
-    const main = "<tr><td class='c'>" + (index + 1) + "</td><td>" + escapeHtml(item.subject.code || "") + "</td><td>" + escapeHtml(item.subject.name || "") +
+  const rowHtml = rows.map(({ subject, hours, missingMemberPeriods, mid, end, year, result, members }, index) => {
+    const main = "<tr><td class='c'>" + (index + 1) + "</td><td>" + escapeHtml(subject.code || "") + "</td><td>" + escapeHtml(subject.name || "") +
       "</td><td class='c'>" + (hours > 0 ? pp6Number(hours) : "—") + "</td>" +
-      (missingMemberPeriods ? "<td class='r" + (isEnd ? "" : " now") + "'>—</td>" : num(midScore, midOk, !isEnd)) +
+      (missingMemberPeriods ? "<td class='r" + (isEnd ? "" : " now") + "'>—</td>" : num(mid, !isEnd)) +
       (isEnd ? (missingMemberPeriods ? "<td class='r now'>—</td><td class='r now'>—</td><td class='c now'>—</td>" :
-        num(endScore, endOk, true) + num(yearScore, yearOk, true) +
-        "<td class='c now'>" + (yearScore === null ? "—" : item.result.type === "grade" ? item.result.grade : escapeHtml(item.result.type)) + star(yearOk) + "</td>") : blank + blank + blank) + "</tr>";
-    const members = integrated ? (item.memberResults || []).map(member => {
-      const m = member.halves?.["กลางปี"], e = member.halves?.["ปลายปี"];
-      const score = Number(member.result?.percentScore);
-      const ok = Boolean(member.scoring?.complete);
-      return "<tr class='pp6-member'><td></td><td>" + escapeHtml(member.subject.code || "") + "</td><td>· " + escapeHtml(member.subject.name || "") +
-        "</td><td></td>" + (item.external?.merged ? blank : num(m ? m.score : null, Boolean(m?.complete), false)) + (isEnd ? num(e ? e.score : null, Boolean(e?.complete), true) +
-        (item.external?.merged ? blank + blank : num(Number.isFinite(score) ? score : null, ok, true) + "<td class='c now'>" + (member.result?.type === "grade" ? member.result.grade : escapeHtml(member.result?.type || "—")) + star(ok) + "</td>") : blank + blank + blank) + "</tr>";
-    }).join("") : "";
-    return main + members;
+        num(end, true) + num(year, true) +
+        "<td class='c now'>" + (year.score === null ? "—" : escapeHtml(result.label)) + star(result.ok) + "</td>") : blank + blank + blank) + "</tr>";
+    const memberHtml = members.map(member =>
+      "<tr class='pp6-member'><td></td><td>" + escapeHtml(member.subject.code || "") + "</td><td>· " + escapeHtml(member.subject.name || "") +
+      "</td><td></td>" + (member.external ? blank : num(member.mid, false)) + (isEnd ? num(member.end, true) +
+      (member.external ? blank + blank : num(member.year, true) + "<td class='c now'>" + escapeHtml(member.result.label ?? "—") + star(member.result.ok) + "</td>") : blank + blank + blank) + "</tr>"
+    ).join("");
+    return main + memberHtml;
   }).join("");
-  const avg = missingPeriods.length || !totalWeight || (isEnd && subjects.some(item => item.external && !item.scoring?.complete)) ? null : weightedTotal / totalWeight;
   const now = side => side === isEnd ? " class='now'" : "";
   return "<article class='pp6-paper'>" +
     pp6HeadHtml(d, "รายงาน" + (isEnd ? "ปลายปี" : "กลางปี") + " ปีการศึกษา " + escapeHtml(d.year)) +
     "<section class='pp6-sec'><h2>1. ผลการเรียนรายวิชา</h2><table class='pp6-table'>" +
       "<thead><tr><th>ที่</th><th>รหัสวิชา</th><th>รายวิชา</th><th>ชม./ปี</th><th" + now(false) + ">กลางปี</th><th" + now(true) + ">ปลายปี</th><th" + now(true) + ">ทั้งปี</th><th" + now(true) + ">ระดับผล</th></tr></thead>" +
-      "<tbody>" + rows + "</tbody><tfoot><tr><td colspan='" + (isEnd ? 6 : 4) + "' class='r'>คะแนนเฉลี่ย" + (isEnd ? "ทั้งปี" : "กลางปี") + " (ร้อยละ)</td>" +
-      "<td class='c' colspan='" + (isEnd ? 2 : 4) + "'>" + (avg === null ? "—" : avg.toFixed(2)) + star(allOk) + "</td></tr></tfoot></table>" +
-      pp6ZeroNotes(subjects) +
+      "<tbody>" + rowHtml + "</tbody><tfoot><tr><td colspan='" + (isEnd ? 6 : 4) + "' class='r'>คะแนนเฉลี่ย" + (isEnd ? "ทั้งปี" : "กลางปี") + " (ร้อยละ)</td>" +
+      "<td class='c' colspan='" + (isEnd ? 2 : 4) + "'>" + (average === null ? "—" : average.toFixed(2)) + star(allOk) + "</td></tr></tfoot></table>" +
+      pp6ZeroNotes(sortReportSubjects(subjects)) +
       (missingPeriods.length ? "<div class='pp6-note'>ยังไม่ตั้งคาบเรียน: " + missingPeriods.map(escapeHtml).join(" · ") + " — คะแนนเฉลี่ยยังสรุปไม่ได้</div>" : "") +
       "<div class='pp6-note'>" + (allOk ? "" : "<b>*</b> กรอกยังไม่ครบ ช่องว่างนับ 0 · ") +
       "เฉลี่ยถ่วงด้วยชั่วโมงเรียน · ช่วงละเต็ม 100 · ทั้งปี = (กลางปี + ปลายปี) ÷ 2 · ระดับผล 4 = 80+ · 3.5 = 75+ · 3 = 70+ · 2.5 = 65+ · 2 = 60+ · 1.5 = 55+ · 1 = 50+ · 0 = ไม่ผ่าน</div></section>" +
