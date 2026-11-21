@@ -16,8 +16,8 @@ export {
 // ============================================================
 // ตั้งค่า Supabase ที่เดียว ใช้ร่วมกันทุกหน้า (index/attendance/summary/manage)
 // ============================================================
-import { computeSavingsBalance } from "./shared/money.js?v=20261109-1";
-export { computeSavingsBalance };
+import { computeSavingsBalance, TRANSPORT_CHARGE_STATUSES, computeTransportCharges, computeTransportOutstanding } from "./shared/money.js?v=20261121-1";
+export { computeSavingsBalance, TRANSPORT_CHARGE_STATUSES, computeTransportCharges, computeTransportOutstanding };
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
@@ -1372,111 +1372,6 @@ export function summarizeScholarshipByStudent(txns) {
     grouped.get(txn.student_id).push(txn);
   }
   return new Map([...grouped].map(([studentId, rows]) => [studentId, computeScholarshipBalance(rows)]));
-}
-
-// ---------- ค่ารถรับส่ง ----------
-// ต้องแก้พร้อมชุดสถานะใน transport_payments_guard() ที่ schema.sql หากกติกาเปลี่ยน
-export const TRANSPORT_CHARGE_STATUSES = ["มา", "มาสาย"];
-
-function transportMonthStart(dateStr) {
-  return String(dateStr || "").slice(0, 7) + "-01";
-}
-
-function nextTransportMonth(ym) {
-  const date = new Date(ym + "T00:00:00Z");
-  date.setUTCMonth(date.getUTCMonth() + 1);
-  return toDateStr(date).slice(0, 7) + "-01";
-}
-
-function transportRateKey(year, ym, zoneId, tripMode) {
-  return [year, ym, zoneId, tripMode].join("\u0000");
-}
-
-// คำนวณยอดจากช่วงใช้รถ + เช็คชื่อ + override + ยอดเดือนที่ประกาศ โดยไม่แตะ DOM/ฐานข้อมูล
-// monthRates ต้องมี year เสมอ เพราะเดือน พ.ค. เดียวกันอยู่ได้ใน 2 ปีการศึกษา
-export function computeTransportCharges({
-  periods = [], attendance = [], overrides = [], monthRates = [], openingDebt = 0, from, to
-} = {}) {
-  if (!from || !to || from > to) {
-    return { days:[], months:[], openingDebt:0, total:0, missingAttendanceDates:[], unannouncedMonths:[] };
-  }
-
-  const opening = Number(openingDebt) > 0 ? Number(openingDebt) : 0;
-
-  const attendanceByDate = new Map(
-    (attendance || []).map(row => [row.attend_date || row.date, row.status])
-  );
-  const overrideByDate = new Map(
-    (overrides || []).map(row => [row.charge_date || row.date, row])
-  );
-  const rateByKey = new Map((monthRates || []).map(row => [
-    transportRateKey(row.year, row.ym, row.zone_id, row.trip_mode), row
-  ]));
-  const missing = new Set();
-  const unannounced = new Set();
-  const days = [];
-  const months = [];
-
-  for (const period of (periods || [])) {
-    const start = [period.start_date, from].sort().at(-1);
-    const periodEnd = period.end_date || to;
-    const end = [periodEnd, to].sort()[0];
-    if (!start || start > end) continue;
-
-    if (period.billing_mode === "รายวัน") {
-      for (const date of eachDate(start, end)) {
-        const override = overrideByDate.get(date);
-        const status = attendanceByDate.get(date) ?? null;
-        if (override) {
-          days.push({ date, amount:Number(override.amount) || 0, source:"override", status });
-          continue;
-        }
-        if (!attendanceByDate.has(date) && isoWeekday(date) <= 5) missing.add(date);
-        days.push({
-          date,
-          amount:TRANSPORT_CHARGE_STATUSES.includes(status) ? (Number(period.rate_amount) || 0) : 0,
-          source:"auto",
-          status
-        });
-      }
-      continue;
-    }
-
-    if (period.billing_mode !== "รายเดือน") continue;
-    for (let ym = transportMonthStart(start); ym <= transportMonthStart(end); ym = nextTransportMonth(ym)) {
-      const anchor = period.start_date > ym ? period.start_date : ym;
-      const override = overrideByDate.get(anchor);
-      if (override) {
-        months.push({ ym, amount:Number(override.amount) || 0, announced:true, source:"override" });
-        continue;
-      }
-      const rate = rateByKey.get(transportRateKey(period.year, ym, period.zone_id, period.trip_mode));
-      if (!rate) {
-        months.push({ ym, amount:0, announced:false, source:"month_rate" });
-        unannounced.add(ym);
-        continue;
-      }
-      months.push({ ym, amount:Number(rate.amount) || 0, announced:true, source:"month_rate" });
-    }
-  }
-
-  const total = [...days, ...months].reduce((sum, row) => sum + (Number(row.amount) || 0), 0) + opening;
-  return {
-    days,
-    months,
-    openingDebt:opening,
-    total,
-    missingAttendanceDates:[...missing].sort(),
-    unannouncedMonths:[...unannounced].sort()
-  };
-}
-
-export function computeTransportOutstanding(charges, payments) {
-  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
-    const amount = Number(payment?.amount);
-    return Number.isFinite(amount) ? sum + amount : sum;
-  }, 0);
-  return (Number(charges?.total) || 0) - paid;
 }
 
 // ---------- ค่าใช้จ่ายนักเรียน ----------
