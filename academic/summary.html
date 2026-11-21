@@ -752,6 +752,7 @@ import {
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
   isAutoPresentStudent, isAutoAbsentStudent,
 } from "../supabase-client.js?v=20261118-1";
+import { traitLevel, activityRows, reportTerms } from "../shared/report-card.js?v=20261121-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -4215,21 +4216,13 @@ function pp6HeadHtml(d, subtitle) {
       "<div><b>ชั้น</b> " + escapeHtml(d.student.room) + "</div><div><b>ครูประจำชั้น</b> " + (d.homeroomNames || []).map(escapeHtml).join(", ") + "</div></div>";
 }
 
-// คุณลักษณะรายข้อ: ประถมปลายปีเฉลี่ยสองครั้งปัดขึ้น มีครั้งเดียวใช้ครั้งนั้น
-function pp6TraitLevel(rows, traitId, { primary = false, half = "", term = "1" } = {}) {
-  const terms = primary && half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : String(term)];
-  const levels = terms.map(t => rows.find(r => r.trait_id === traitId && String(r.term) === t)?.level)
-    .filter(v => Number.isInteger(v) && v >= 0 && v <= 3);
-  return levels.length ? Math.ceil(levels.reduce((a, b) => a + b, 0) / levels.length) : null;
-}
-
 // รายการข้อใช้ร่วมกันทุกใบในหน้านี้ เก็บเฉพาะเมื่ออ่านสำเร็จ ส่วนผลนักเรียนอ่านใหม่ต่อใบ
 let pp6TraitsCache = null;
 
 async function pp6LoadTraits(studentId, year, grade, term, half) {
   if (!grade?.startsWith("ป.") && !grade?.startsWith("ม.")) return [];
   const primary = grade.startsWith("ป.");
-  const terms = primary && half === "ปลายปี" ? ["1", "2"] : [primary ? "1" : term];
+  const terms = reportTerms({ primary, half, term });
   const [traits, results] = await Promise.all([
     pp6TraitsCache !== null ? { data:pp6TraitsCache, error:null }
       : sb.from("core_traits").select("id,name,seq").eq("active", true).order("seq"),
@@ -4239,7 +4232,7 @@ async function pp6LoadTraits(studentId, year, grade, term, half) {
   if (traits.error) throw traits.error;
   pp6TraitsCache = traits.data || [];
   if (results.error) throw results.error;
-  return (traits.data || []).map(t => ({ name:t.name, level:pp6TraitLevel(results.data || [], t.id, { primary, half, term }) }));
+  return (traits.data || []).map(t => ({ name:t.name, level:traitLevel(results.data || [], t.id, { primary, half, term }) }));
 }
 
 // หัวข้อ 2–5 (สมรรถนะ · กิจกรรม · ความเห็นครู/ผู้ปกครอง) + ลายเซ็น (ใช้ร่วมมัธยม/ประถม)
@@ -4464,29 +4457,6 @@ async function renderPp6Panel(student) {
   });
 }
 
-// รวมผลของกิจกรรมในแต่ละประเภทตามลำดับหลักสูตร
-function pp6ActivityRows(categories, assessments, memberIds, resultById, requiredTerms, externalRows = []) {
-  const mine = new Map();
-  for (const row of assessments) {
-    if (!memberIds.has(row.id)) continue;
-    if (!mine.has(row.activity_category)) mine.set(row.activity_category, []);
-    mine.get(row.activity_category).push(row);
-  }
-  return categories.slice().sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
-    .filter(category => category.active || mine.has(category.code) || externalRows.some(r => r.category_code === category.code))
-    .map(category => {
-      const rows = mine.get(category.code) || [];
-      const statuses = requiredTerms.map(term => {
-        const external = externalRows.find(r => r.category_code === category.code && r.term === term);
-        if (external) return external.passed ? "ผ่าน" : "ไม่ผ่าน";
-        const current = rows.filter(r => r.term === null || r.term === term);
-        if (current.some(r => resultById.get(r.id) === false)) return "ไม่ผ่าน";
-        return (category.active && !current.length) || current.some(r => !resultById.has(r.id)) ? "รอผล" : "ผ่าน";
-      });
-      return { name:category.code, result:statuses.includes("ไม่ผ่าน") ? "ไม่ผ่าน" : statuses.includes("รอผล") ? "รอผล" : "ผ่าน" };
-    });
-}
-
 async function pp6LoadActivities(studentId, year, terms) {
   let query = sb.from("competency_assessments").select("id,term,activity_category")
     .eq("year", year).eq("source_type", "กิจกรรม").not("activity_category", "is", null);
@@ -4498,7 +4468,7 @@ async function pp6LoadActivities(studentId, year, terms) {
   ]);
   if (list.error || categories.error || external.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (list.error || categories.error || external.error).message);
   const ids = (list.data || []).map(row => row.id);
-  if (!ids.length) return pp6ActivityRows(categories.data || [], [], new Set(), new Map(), terms, external.data || []);
+  if (!ids.length) return activityRows(categories.data || [], [], new Set(), new Map(), terms, external.data || []);
   const [members, results] = await Promise.all([
     sb.from("competency_assessment_members").select("assessment_id").eq("student_id", studentId).in("assessment_id", ids),
     sb.from("activity_pass_results").select("assessment_id,passed").eq("student_id", studentId).in("assessment_id", ids)
@@ -4506,7 +4476,7 @@ async function pp6LoadActivities(studentId, year, terms) {
   if (members.error || results.error) throw new Error("โหลดกิจกรรมไม่สำเร็จ: " + (members.error || results.error).message);
   const mine = new Set((members.data || []).map(row => row.assessment_id));
   const resultById = new Map((results.data || []).map(row => [row.assessment_id, row.passed]));
-  return pp6ActivityRows(categories.data || [], list.data || [], mine, resultById, terms, external.data || []);
+  return activityRows(categories.data || [], list.data || [], mine, resultById, terms, external.data || []);
 }
 
 async function pp6LoadCompetencies(student, year, grade, term, half = "กลางปี") {
@@ -4579,7 +4549,7 @@ async function printPp6(student, button) {
     try { const loaded = await pp6LoadCompetencies(student, year, grade, scope.primary ? "" : term, scope.half); competencies = loaded.rows; levels = loaded.levels; }
     catch (error) { competencyError = "โหลดสมรรถนะไม่สำเร็จ"; }
     let activities = [];
-    try { activities = await pp6LoadActivities(student.id, year, scope.primary ? (scope.half === "ปลายปี" ? ["1", "2"] : ["1"]) : [term]); } catch (error) { activities = []; }
+    try { activities = await pp6LoadActivities(student.id, year, reportTerms(scope)); } catch (error) { activities = []; }
     let traits = [], traitError = "";
     try { traits = await pp6LoadTraits(student.id, year, grade, term, scope.half); }
     catch (error) {
