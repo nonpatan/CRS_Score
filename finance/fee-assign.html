@@ -255,6 +255,27 @@ th{
   color:var(--danger);
   background:var(--danger-soft)
 }
+#fee-notice-card table{
+  min-width:460px
+}
+#fee-notice-card td{
+  vertical-align:middle
+}
+#fee-notice-card .unpublished{
+  color:var(--muted);
+  background:var(--bg)
+}
+#fee-notice-card .notice-count{
+  font-variant-numeric:tabular-nums
+}
+#fee-notice-retract{
+  width:min(460px,calc(100% - 36px));
+  border:1px solid var(--line);
+  color:var(--ink)
+}
+#fee-notice-retract::backdrop{
+  background:rgba(31,42,46,.52)
+}
 .bill-summary{
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
@@ -558,7 +579,39 @@ th{
             <div id="charge-list">
             </div>
           </section>
+          <section id="fee-notice-card" class="card" aria-labelledby="fee-notice-title">
+            <div class="section-head">
+              <div>
+                <h2 id="fee-notice-title" tabindex="-1">ประกาศใบแจ้งค่าธรรมเนียมให้ผู้ปกครอง</h2>
+                <p id="fee-notice-term"></p>
+              </div>
+            </div>
+            <div id="fee-notice-table" class="table-wrap" role="region" aria-labelledby="fee-notice-title" tabindex="0" hidden>
+              <table>
+                <thead><tr><th scope="col">ชั้น</th><th scope="col">นักเรียนที่มีรายการ (คน)</th><th scope="col">สถานะ</th><th scope="col">จัดการ</th></tr></thead>
+                <tbody id="fee-notice-rows"></tbody>
+              </table>
+            </div>
+            <p id="fee-notice-status" class="hint" role="status"></p>
+            <p id="fee-notice-error" class="banner bad" role="alert" hidden></p>
+            <button id="fee-notice-reload" class="ghost" type="button" hidden>โหลดสถานะใหม่</button>
+            <p class="hint">หลังประกาศ ผู้ปกครองเห็นยอดสด — ตั้งหนี้เพิ่มหรือรับเงิน ยอดในแอปเปลี่ยนตาม</p>
+          </section>
         </div>
+        <dialog id="fee-notice-retract" class="modal" aria-labelledby="fee-notice-retract-title" aria-describedby="fee-notice-retract-detail">
+          <form id="fee-notice-retract-form">
+            <h2 id="fee-notice-retract-title">ยกเลิกประกาศใบแจ้งค่าธรรมเนียม</h2>
+            <p id="fee-notice-retract-detail" class="hint"></p>
+            <div class="field">
+              <label for="fee-notice-reason">เหตุผลการยกเลิก (ใช้ภายในโรงเรียน)</label>
+              <textarea id="fee-notice-reason" required maxlength="500" autofocus></textarea>
+            </div>
+            <div class="modal-actions">
+              <button id="fee-notice-retract-back" class="ghost" type="button">กลับ</button>
+              <button class="danger" type="submit">ยืนยันยกเลิกประกาศ</button>
+            </div>
+          </form>
+        </dialog>
         <div id="toast" class="toast">
         </div>
         <div id="void-overlay" class="overlay" hidden>
@@ -588,6 +641,9 @@ import {
   applyRestrictedMenuAccess,
   financeMenuKeepHrefs,
   getAcademicYears,
+  getSetting,
+  GRADE_ORDER,
+  PRE_SCHOOL_GRADE,
   academicYearOf,
   bangkokNow,
   toDateStr,
@@ -599,7 +655,7 @@ import {
   computeFeeOutstanding,
   chargeLineRemaining,
   formatMoney
-} from "../supabase-client.js?v=20261121-1";
+} from "../supabase-client.js?v=20261121-2";
 
 const el=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({
@@ -650,6 +706,10 @@ function chargeHasPayment(charge,allPayments){
 }
 
 let session,canFinance=false,currentYear="",placements=[],roomPlacements=[],rooms=[],items=[],rates=[],prices=[],subsidies=[],promotions=[],moves=[],charges=[],payments=[],voidId=null,personStudentId=null,personKind="product",toastTimer;
+let loadedYear="",yearLoadRequest=0,noticeLoadRequest=0,noticeGrades=[],noticeRounds=null,noticeBusy=false;
+const noticeDate=new Intl.DateTimeFormat("th-TH",{
+  timeZone:"Asia/Bangkok",day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"
+});
 const nameOf=p=>p?.student?.name||"ไม่พบชื่อ";
 const money=n=>formatMoney(n,{
   minimumFractionDigits:2
@@ -929,6 +989,143 @@ function renderCharges(){
       </table></div></details>`).join(""):'<div class="empty">ยังไม่มีรายการของห้องนี้</div>'
 }
 
+function showNoticeError(message=""){
+  el("fee-notice-error").hidden=!message;
+  el("fee-notice-error").textContent=message
+}
+
+function renderFeeNotices(){
+  const term=Number(el("term").value);
+  el("fee-notice-term").textContent=`ภาคเรียนที่ ${term}/${currentYear}`;
+  const ready=loadedYear===currentYear&&noticeRounds!==null;
+  el("fee-notice-table").hidden=!ready;
+  if(!ready)return;
+
+  const studentsByGrade=new Map();
+  for(const charge of charges){
+    if(charge.voided_at||Number(charge.term)!==term)continue;
+    if(!studentsByGrade.has(charge.grade_level))studentsByGrade.set(charge.grade_level,new Set());
+    studentsByGrade.get(charge.grade_level).add(charge.student_id);
+  }
+  const roundsByGrade=new Map(noticeRounds.filter(row=>Number(row.term)===term).map(row=>[row.grade_level,row]));
+  el("fee-notice-rows").innerHTML=noticeGrades.map((grade,index)=>{
+    const count=studentsByGrade.get(grade)?.size??0;
+    const round=roundsByGrade.get(grade);
+    const status=round?`ประกาศแล้ว · ${noticeDate.format(new Date(round.published_at))}`:count?"ยังไม่ประกาศ":"ยังไม่มีรายการ";
+    const label=round?"ยกเลิกประกาศ":"ประกาศ";
+    return `<tr>
+      <th scope="row">${esc(grade)}</th><td class="notice-count">${count.toLocaleString("th-TH")}</td>
+      <td><span class="status ${round?"":"unpublished"}">${status}</span></td>
+      <td><button class="${round?"danger":"primary"}" type="button" data-notice-grade="${index}" aria-label="${label} ${esc(grade)}"${noticeBusy||(!round&&!count)?" disabled":""}>${label}</button></td>
+    </tr>`;
+  }).join("")
+}
+
+async function loadFeeNotices(year){
+  const request=++noticeLoadRequest;
+  const status=el("fee-notice-status");
+  el("fee-notice-reload").hidden=true;
+  if(!status.textContent)status.textContent="กำลังโหลดสถานะประกาศ…";
+  try{
+    const {data,error}=await fetchAllRows(()=>sb.from("fee_notice_rounds")
+      .select("id,term,grade_level,published_at").eq("year",year).is("retracted_at",null));
+    if(error)throw error;
+    if(request!==noticeLoadRequest||year!==currentYear)return;
+    noticeRounds=data;
+    if(status.textContent==="กำลังโหลดสถานะประกาศ…")status.textContent="";
+    renderFeeNotices()
+  }catch(error){
+    if(request!==noticeLoadRequest||year!==currentYear)return;
+    noticeRounds=null;
+    if(status.textContent==="กำลังโหลดสถานะประกาศ…")status.textContent="";
+    const message=`โหลดสถานะประกาศไม่สำเร็จ · ${friendly(error)}`;
+    showNoticeError([el("fee-notice-error").textContent,message].filter(Boolean).join(" · "));
+    el("fee-notice-reload").hidden=false;
+    renderFeeNotices()
+  }
+}
+
+async function changeFeeNotice(button){
+  if(!canFinance||noticeBusy||!noticeRounds||loadedYear!==currentYear)return;
+  const grade=noticeGrades[Number(button.dataset.noticeGrade)];
+  const year=currentYear,term=Number(el("term").value);
+  const round=noticeRounds.find(row=>Number(row.term)===term&&row.grade_level===grade);
+  const label=round?"ยกเลิกประกาศ":"ประกาศ";
+  const scope=`${grade} ภาคเรียนที่ ${term}/${year}`;
+  const sameScope=()=>year===currentYear&&term===Number(el("term").value);
+  noticeBusy=true;
+  let refresh=false;
+  try{
+    const reason=round?await askFeeNoticeReason(scope):null;
+    const confirmed=round?Boolean(reason):await window.crsAskConfirm({
+      title:"ประกาศใบแจ้งค่าธรรมเนียม",
+      message:`ประกาศใบแจ้งค่าธรรมเนียม ${scope} ให้ผู้ปกครองเห็น?\nผู้ปกครองจะเห็นยอดสดตามรายการตั้งหนี้และการรับเงินล่าสุด`,
+      okLabel:"ประกาศ",danger:false
+    });
+    if(!confirmed||!sameScope())return;
+
+    showNoticeError();
+    el("fee-notice-status").textContent=`กำลัง${label}ใบแจ้งค่าธรรมเนียม ${scope}…`;
+    el("fee-notice-rows").querySelectorAll("button").forEach(action=>action.disabled=true);
+    button.textContent=`กำลัง${label}…`;
+    button.setAttribute("aria-busy","true");
+    refresh=true;
+    const {error}=round
+      ?await sb.rpc("retract_fee_notice",{p_id:round.id,p_reason:reason})
+      :await sb.rpc("publish_fee_notice",{p_year:year,p_term:term,p_grade_level:grade});
+    if(error)throw error;
+    if(sameScope())el("fee-notice-status").textContent=`${label}ใบแจ้งค่าธรรมเนียม ${scope} แล้ว`;
+  }catch(error){
+    if(sameScope()){
+      el("fee-notice-status").textContent="";
+      showNoticeError(`${label}ไม่สำเร็จ · ${friendly(error)}`);
+    }
+  }finally{
+    if(refresh&&year===currentYear)await loadFeeNotices(year);
+    noticeBusy=false;
+    if(refresh){
+      renderFeeNotices();
+      if(sameScope()&&document.activeElement===document.body){
+        const next=el("fee-notice-rows").querySelector(`[data-notice-grade="${button.dataset.noticeGrade}"]:not(:disabled)`);
+        (el("fee-notice-table").hidden||!next?el("fee-notice-title"):next).focus()
+      }
+    }
+  }
+}
+
+function askFeeNoticeReason(scope){
+  const dialog=el("fee-notice-retract"),form=el("fee-notice-retract-form"),reason=el("fee-notice-reason");
+  form.reset();
+  reason.setCustomValidity("");
+  el("fee-notice-retract-detail").textContent=`ผู้ปกครองจะไม่เห็นใบแจ้งค่าธรรมเนียม ${scope} จนกว่าจะประกาศใหม่`;
+  dialog.returnValue="";
+  dialog.showModal();
+  return new Promise(resolve=>{
+    dialog.addEventListener("close",()=>resolve(dialog.returnValue==="retract"?reason.value.trim():null),{once:true});
+  })
+}
+
+el("fee-notice-retract-back").onclick=()=>el("fee-notice-retract").close();
+el("fee-notice-reason").oninput=event=>event.target.setCustomValidity("");
+el("fee-notice-retract-form").onsubmit=event=>{
+  event.preventDefault();
+  const reason=el("fee-notice-reason");
+  if(!reason.value.trim()){
+    reason.setCustomValidity("กรุณากรอกเหตุผลการยกเลิก");
+    reason.reportValidity();
+    return;
+  }
+  el("fee-notice-retract").close("retract")
+};
+el("fee-notice-rows").onclick=event=>{
+  const button=event.target.closest("button[data-notice-grade]");
+  if(button)changeFeeNotice(button)
+};
+el("fee-notice-reload").onclick=()=>{
+  showNoticeError();
+  loadFeeNotices(currentYear)
+};
+
 function renderAll(){
   const adminItems=items.filter(i=>i.category==="ค่าบริการ"&&i.active);
   el("admin-item").innerHTML=adminItems.map(i=>`<option value="${i.id}">${esc(i.display_name)}</option>`).join("");
@@ -976,6 +1173,7 @@ function restoreAssignmentState(state){
 }
 
 async function loadYear(viewState=assignmentState()){
+  const year=currentYear,request=++yearLoadRequest;
   const [pRes,iRes,rRes,prRes,sRes,proRes,mRes,cRes,payRes]=await Promise.all([
     getStudentPlacements(currentYear),
     sb.from("fee_items").select("*").order("sort_order"),
@@ -987,6 +1185,7 @@ async function loadYear(viewState=assignmentState()){
     fetchAllRows(()=>sb.from("student_charges").select("*").eq("year",currentYear),["student_id","charge_date","id"]),
     fetchAllRows(()=>sb.from("fee_payments").select("id,charge_id,amount,voided_at,receipt:receipt_id!inner(year)").eq("receipt.year",currentYear),["charge_id","id"])
   ]);
+  if(request!==yearLoadRequest)return;
   for(const [label,res] of [["ทะเบียน",pRes],["รายการ",iRes],["อัตรา",rRes],["ราคา",prRes],["เงินอุดหนุนค่าเครื่องแบบ",sRes],["โปรโมชั่น",proRes],["คลัง",mRes],["หนี้",cRes],["ยอดชำระ",payRes]])
     if(res.error)throw new Error(`โหลด${label}ไม่สำเร็จ: ${res.error.message}`);
   placements=activePlacements(pRes.data);
@@ -1001,7 +1200,10 @@ async function loadYear(viewState=assignmentState()){
   rooms=roomsFromPlacements(placements,currentYear);
   el("room").innerHTML=rooms.map((r,index)=>`<option value="${index}">${esc(roomLabel(r))} · ${r.studentCount} คน</option>`).join("");
   el("room").disabled=!rooms.length;
-  restoreAssignmentState(viewState)
+  restoreAssignmentState(viewState);
+  loadedYear=year;
+  renderFeeNotices();
+  await loadFeeNotices(year)
 }
 
 function selectRoom(){
@@ -1167,7 +1369,12 @@ el("term").onchange=()=>{
   if(promotions.some(promo=>promo.id===el("promo-select").value&&promo.scope==="term"))renderPromo();
   renderPersonBill();
   syncPersonPromo();
-  syncPersonSubsidy()
+  syncPersonSubsidy();
+  if(noticeRounds!==null){
+    showNoticeError();
+    el("fee-notice-status").textContent="";
+  }
+  renderFeeNotices()
 };
 el("admin-item").onchange=renderAdmin;
 el("admin-roster").onchange=syncAdminTotal;
@@ -1254,6 +1461,8 @@ if(session){
         .map(y=>`<option>${esc(y.year)}</option>`)
         .join("");
       el("year").value=currentYear;
+      const highest=GRADE_ORDER.indexOf(await getSetting("highest_grade"));
+      noticeGrades=[PRE_SCHOOL_GRADE,...(highest<0?GRADE_ORDER:GRADE_ORDER.slice(0,highest+1))];
       el("year").disabled=false;
       el("app").hidden=false;
       await loadYear()
@@ -1267,10 +1476,17 @@ if(session){
 
 el("year").onchange=async()=>{
   currentYear=el("year").value;
+  noticeRounds=null;
+  el("fee-notice-reload").hidden=true;
+  el("fee-notice-status").textContent="กำลังโหลดสถานะประกาศ…";
+  showNoticeError();
+  renderFeeNotices();
   try{
     await loadYear()
   }catch(e){
-    toast(friendly(e),true)
+    toast(friendly(e),true);
+    el("fee-notice-status").textContent="";
+    showNoticeError(`โหลดข้อมูลปีการศึกษาไม่สำเร็จ · ${friendly(e)} · กรุณาเลือกปีอีกครั้ง`)
   }
 };
 </script><script type="module">

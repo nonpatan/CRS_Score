@@ -198,38 +198,14 @@
 <script type="module">
 import {
   sb, requireAuth, signOut, checkDepartment, applyRestrictedMenuAccess, financeMenuKeepHrefs,
-  computeFeeOutstanding, chargeLineRemaining, formatMoney, bahtText, fetchAllRows, getStaffNamesByUser
-} from "../supabase-client.js?v=20261121-1";
+  computeFeeOutstanding, formatMoney, bahtText, fetchAllRows, getStaffNamesByUser
+} from "../supabase-client.js?v=20261121-2";
+import { buildInvoiceRows as buildReceiptRows, MANUAL_NOTE_PLACEHOLDER } from "../shared/money.js?v=20261121-2";
 
 const el=id=>document.getElementById(id);
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 const money=value=>formatMoney(value,{minimumFractionDigits:2});
 
-// ============================================================
-// 🪤 ข้อความสำรองของบรรทัด "พิมพ์เอง" ที่ตั้งจากหน้ารับเงิน — ห้ามพิมพ์ลงใบเสร็จ
-// ------------------------------------------------------------
-// ค่านี้ต้องตรงกับ MANUAL_NOTE_PLACEHOLDER ใน finance/fee-payment.html เป๊ะ
-// ที่มา: รายการกลาง "รายการอื่น ๆ" ราคาประกาศ 0 ⟹ ฐานข้อมูลบังคับให้ทุกแถวมี note
-// ⟹ แถวที่ครูไม่ได้พิมพ์รายละเอียดจะมี note เป็นข้อความนี้ ซึ่งเป็นภาษาภายในระบบ
-// ⟹ ซ่อนบรรทัดย่อยเมื่อ note ตรงกับค่านี้ · note ที่ครูพิมพ์เองยังพิมพ์ตามปกติ
-// ⛔ แก้ที่นี่แล้วต้องแก้ finance/fee-payment.html ให้ตรงกันเสมอ
-// ============================================================
-const MANUAL_NOTE_PLACEHOLDER="รายการเฉพาะรายที่ตั้งจากหน้ารับเงิน";
-
-function buildReceiptRows(charges,payments){
-  const active=(charges||[]).filter(charge=>!charge.voided_at).sort((a,b)=>String(a.charge_date||"").localeCompare(String(b.charge_date||""))||String(a.created_at||"").localeCompare(String(b.created_at||""))||String(a.id||"").localeCompare(String(b.id||"")));
-  const rows=active.map(charge=>{
-    const full=Number(charge.amount)||0,remaining=chargeLineRemaining(charge,payments);
-    const qty=Number(charge.qty)||1;
-    return{...charge,qty,unit:full/qty,full,paid:full>0?full-remaining:0,remaining}
-  });
-  return{
-    rows,
-    full:rows.reduce((sum,row)=>sum+row.full,0),
-    paid:rows.reduce((sum,row)=>sum+row.paid,0),
-    remaining:rows.reduce((sum,row)=>sum+row.remaining,0)
-  }
-}
 
 // ภาพของหนี้และการจ่ายต้องหยุด ณ เวลาจ่ายของใบนั้น
 function receiptSnapshotAt(receipt,charges,allPayments,receiptPayments){

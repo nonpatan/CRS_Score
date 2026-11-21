@@ -16,8 +16,8 @@ export {
 // ============================================================
 // ตั้งค่า Supabase ที่เดียว ใช้ร่วมกันทุกหน้า (index/attendance/summary/manage)
 // ============================================================
-import { computeSavingsBalance, TRANSPORT_CHARGE_STATUSES, computeTransportCharges, computeTransportOutstanding } from "./shared/money.js?v=20261121-1";
-export { computeSavingsBalance, TRANSPORT_CHARGE_STATUSES, computeTransportCharges, computeTransportOutstanding };
+import { computeSavingsBalance, TRANSPORT_CHARGE_STATUSES, computeTransportCharges, computeTransportOutstanding, computeFeeOutstanding, chargeLineRemaining } from "./shared/money.js?v=20261121-2";
+export { computeSavingsBalance, TRANSPORT_CHARGE_STATUSES, computeTransportCharges, computeTransportOutstanding, computeFeeOutstanding, chargeLineRemaining };
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
@@ -1382,37 +1382,6 @@ export function computeStockBalance(moves) {
     const qty = Number(move?.qty);
     return Number.isFinite(qty) ? sum + qty : sum;
   }, 0);
-}
-
-export function computeFeeOutstanding(charges, payments = []) {
-  const active = (Array.isArray(charges) ? charges : []).filter(charge => !charge?.voided_at);
-  const charged = active.reduce((sum, charge) => {
-    const amount = Number(charge?.amount);
-    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
-  }, 0);
-  const credited = active.reduce((sum, charge) => {
-    const amount = Number(charge?.amount);
-    return Number.isFinite(amount) && amount < 0 ? sum + Math.abs(amount) : sum;
-  }, 0);
-  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
-    if (payment?.voided_at) return sum;
-    const amount = Number(payment?.amount);
-    return Number.isFinite(amount) ? sum + amount : sum;
-  }, 0);
-  return { charged, credited, paid, outstanding:charged - credited - paid };
-}
-
-export function chargeLineRemaining(charge, payments = []) {
-  if (!charge || charge.voided_at) return 0;
-  const amount = Number(charge.amount);
-  if (!Number.isFinite(amount)) return 0;
-  if (amount < 0) return amount;
-  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
-    if (payment?.voided_at || payment?.charge_id !== charge.id) return sum;
-    const value = Number(payment.amount);
-    return Number.isFinite(value) ? sum + value : sum;
-  }, 0);
-  return amount - paid;
 }
 
 export function summarizeFeeByRoom(charges, placements, payments = []) {

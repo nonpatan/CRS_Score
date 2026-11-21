@@ -136,3 +136,52 @@ export function computeTransportOutstanding(charges, payments) {
   }, 0);
   return (Number(charges?.total) || 0) - paid;
 }
+
+export function computeFeeOutstanding(charges, payments = []) {
+  const active = (Array.isArray(charges) ? charges : []).filter(charge => !charge?.voided_at);
+  const charged = active.reduce((sum, charge) => {
+    const amount = Number(charge?.amount);
+    return Number.isFinite(amount) && amount > 0 ? sum + amount : sum;
+  }, 0);
+  const credited = active.reduce((sum, charge) => {
+    const amount = Number(charge?.amount);
+    return Number.isFinite(amount) && amount < 0 ? sum + Math.abs(amount) : sum;
+  }, 0);
+  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+    if (payment?.voided_at) return sum;
+    const amount = Number(payment?.amount);
+    return Number.isFinite(amount) ? sum + amount : sum;
+  }, 0);
+  return { charged, credited, paid, outstanding:charged - credited - paid };
+}
+
+export function chargeLineRemaining(charge, payments = []) {
+  if (!charge || charge.voided_at) return 0;
+  const amount = Number(charge.amount);
+  if (!Number.isFinite(amount)) return 0;
+  if (amount < 0) return amount;
+  const paid = (Array.isArray(payments) ? payments : []).reduce((sum, payment) => {
+    if (payment?.voided_at || payment?.charge_id !== charge.id) return sum;
+    const value = Number(payment.amount);
+    return Number.isFinite(value) ? sum + value : sum;
+  }, 0);
+  return amount - paid;
+}
+
+export function buildInvoiceRows(charges,payments){
+  const active=(charges||[]).filter(charge=>!charge.voided_at).sort((a,b)=>String(a.charge_date||"").localeCompare(String(b.charge_date||""))||String(a.created_at||"").localeCompare(String(b.created_at||""))||String(a.id||"").localeCompare(String(b.id||"")));
+  const rows=active.map(charge=>{
+    const full=Number(charge.amount)||0,remaining=chargeLineRemaining(charge,payments);
+    const qty=Number(charge.qty)||1;
+    return{...charge,qty,unit:full/qty,full,paid:full>0?full-remaining:0,remaining}
+  });
+  return{
+    rows,
+    full:rows.reduce((sum,row)=>sum+row.full,0),
+    paid:rows.reduce((sum,row)=>sum+row.paid,0),
+    remaining:rows.reduce((sum,row)=>sum+row.remaining,0)
+  }
+}
+
+// ข้อความสำรองของบรรทัดที่ตั้งจากหน้ารับเงิน ใช้ซ่อนหมายเหตุภายในบนใบเสร็จและในแอป
+export const MANUAL_NOTE_PLACEHOLDER="รายการเฉพาะรายที่ตั้งจากหน้ารับเงิน";
