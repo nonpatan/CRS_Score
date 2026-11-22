@@ -189,8 +189,21 @@ const openRequests = (year, term) => read(fetchAllRows(() => {
 }));
 
 const loadReleaseSubjects = (year, term) => read(fetchAllRows(() => sb.from("subjects")
-  .select("id,name,grade_level,term,exam_closed_at").eq("year", year).or(`term.eq.${term},term.is.null`)));
-const openExamCount = (subjects, term) => subjects.filter(row => row.term === term && row.exam_closed_at === null).length;
+  .select("id,name,grade_level,term").eq("year", year).or(`term.eq.${term},term.is.null`)));
+
+async function loadPendingExams(year, term) {
+  try {
+    const rows = await read(fetchAllRows(() => sb.rpc("exam_close_pending", { p_year:year, p_mine:false }),
+      ["grade_level", "code", "subject_id"]));
+    // วิชารายปีของประถมปิดคะแนนสอบครั้งเดียวเมื่อจบภาค 2
+    return rows.filter(row => row.term === term || (term === "2" && row.term === null));
+  } catch {
+    return null;
+  }
+}
+
+const examCheckFailed = "ตรวจสถานะปิดคะแนนสอบไม่สำเร็จ";
+const examStatus = pending => pending === null ? examCheckFailed : `ยังไม่ปิดคะแนนสอบ ${pending.length} วิชา`;
 
 async function loadLockedRelease(year, term) {
   const [requests, repairs, placements, logs, published] = await Promise.all([
@@ -246,15 +259,25 @@ function warningStudent(kind, row, scope) {
   return `<li><a href="${gradeEscape(url)}">${label}</a>${gradeEscape(detail)}</li>`;
 }
 
-function warningGroup(label, count, unit, body) {
+function warningGroup(label, body) {
   return `<details class="release-warning"><summary><span aria-hidden="true">⚠</span>
-    <span>${label} · ${count} ${unit}</span></summary>${body}</details>`;
+    <span>${label}</span></summary>${body}</details>`;
+}
+
+function examWarning({ year, pendingExams }) {
+  const report = `<p><a href="exam-close-report.html?${gradeEscape(new URLSearchParams({ year }))}">ดูรายงานปิดคะแนนสอบ</a></p>`;
+  if (pendingExams === null) {
+    return warningGroup(examCheckFailed, '<p class="hint">กด “ตรวจก่อนอนุมัติ” เพื่อลองอีกครั้ง</p>' + report);
+  }
+  if (!pendingExams.length) return "";
+  const subjects = pendingExams.map(({ code, name, grade_level, owner_name }) =>
+    `${code || "—"} · ${name} · ${grade_level} · ${owner_name || "ไม่ระบุครู"}`);
+  return warningGroup(`ยังไม่ปิดคะแนนสอบ · ${subjects.length} วิชา`, list(subjects) + report);
 }
 
 function renderPrecheck(result, scope) {
   const { warnings, repairs } = result;
-  const incompleteExams = scope.openExams ? warningGroup("ยังไม่ปิดคะแนนสอบ", scope.openExams, "วิชา",
-    `<p><a href="exam-close-report.html?${gradeEscape(new URLSearchParams({ year:scope.year }))}">ดูรายงานปิดคะแนนสอบ</a></p>`) : "";
+  const incompleteExams = examWarning(scope);
   const groups = Object.entries(warnings).filter(([, rows]) => rows.length);
   const needsReview = Boolean(incompleteExams || groups.length);
   const r = repairs.filter(row => row.code === "ร.").length;
@@ -263,7 +286,7 @@ function renderPrecheck(result, scope) {
     ${incompleteExams}${groups.map(([kind, rows]) => {
       const hint = kind === "scores" ? `<p class="hint">นักเรียนย้ายเข้า หรือเปลี่ยนจากฮาฟีเซาะ/ฝากเรียนมาเป็นปกติ ให้กรอกผลภาคนี้ที่ <a href="${transferLink}">โอนผลนักเรียนย้ายเข้า</a></p>` : "";
       const students = `<ul>${rows.map(row => warningStudent(kind, row, scope)).join("")}</ul>`;
-      return warningGroup(warningTitles[kind], rows.length, "คน", hint + students);
+      return warningGroup(`${warningTitles[kind]} · ${rows.length} คน`, hint + students);
     }).join("")}
     ${needsReview ? "" : '<p>ไม่พบรายการที่ต้องตรวจ</p>'}
     <div class="release-repairs">
@@ -330,9 +353,11 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
         loadReleaseSubjects(year, term),
         term === "1" ? read(sb.from("grade_releases").select("locked_at").eq("year", year).eq("term", "2").maybeSingle()) : null
       ]);
-      const locked = release?.locked_at ? await loadLockedRelease(year, term) : null;
       if (token !== sequence) return;
-      scope = { year, term, release, scopedSubjects, locked, otherLock:releases?.locked_at };
+      const locked = release?.locked_at ? await loadLockedRelease(year, term) : null;
+      const pendingExams = locked ? null : await loadPendingExams(year, term);
+      if (token !== sequence) return;
+      scope = { year, term, release, scopedSubjects, pendingExams, locked, otherLock:releases?.locked_at };
       render();
       updateProgress("");
     } catch (error) {
@@ -346,14 +371,13 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
     const { release, scopedSubjects, locked, otherLock } = scope;
     const releaseDate = release?.calendar?.start_date;
     const exams = scopedSubjects.filter(row => row.term === scope.term);
-    scope.openExams = openExamCount(scopedSubjects, scope.term);
     const lead = release
       ? locked ? `อนุมัติแล้ว ${gradeDate(release.locked_at, true)} · ผู้ปกครองเห็น ${gradeDate(releaseDate)}`
         : `${releaseDate > today() ? "กำหนดประกาศ" : "ประกาศแล้ว"} ${gradeDate(releaseDate)} · ${otherLock ? "ล็อกจากการอนุมัติภาค 2" : "ยังไม่ล็อก"}`
       : otherLock ? "ล็อกจากการอนุมัติภาค 2 · ยังไม่มีวันประกาศของภาคนี้" : "ยังไม่ได้อนุมัติผล";
     let html = `<p><strong>${gradeEscape(lead)}</strong></p>`;
     if (!locked) {
-      html += `<p class="hint" id="release-exams">ยังไม่ปิดคะแนนสอบ ${scope.openExams} วิชา</p>`;
+      html += `<p class="hint" id="release-exams" role="status">${examStatus(scope.pendingExams)}</p>`;
       if (!release && !exams.length) html += '<p class="empty">ยังไม่มีรายวิชาที่ระบุภาคเรียนนี้ กรุณาตรวจสอบการตั้งค่ารายวิชา</p>';
       else {
         if (!release) html += `<div class="field"><label for="release-date">วันที่ผู้ปกครองเห็นผล</label>
@@ -409,11 +433,14 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
     stop.disabled = false;
     updateProgress("กำลังเตรียมข้อมูล…");
     try {
-      current.scopedSubjects = await loadReleaseSubjects(current.year, current.term);
+      const [scopedSubjects, pendingExams] = await Promise.all([
+        loadReleaseSubjects(current.year, current.term),
+        loadPendingExams(current.year, current.term)
+      ]);
       let result;
       if (!cancelled) {
-        current.openExams = openExamCount(current.scopedSubjects, current.term);
-        examsHint.textContent = `ยังไม่ปิดคะแนนสอบ ${current.openExams} วิชา`;
+        Object.assign(current, { scopedSubjects, pendingExams });
+        examsHint.textContent = examStatus(pendingExams);
         const run = await prepareRun(current, true, () => cancelled);
         result = await runGradePrecheck(current, run, () => cancelled, updateProgress);
       }
@@ -491,7 +518,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
 
   async function approve() {
     if (busy || !mayApprove()) return;
-    const { year, term, release, openExams } = scope;
+    const { year, term, release, pendingExams } = scope;
     const dateInput = find("date");
     const date = dateInput?.value || null;
     if (!release && (!date || date < today())) {
@@ -508,7 +535,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
         message:`ภาคเรียน ${term}/${year} · ผู้ปกครองเห็น ${gradeDate(date || release?.calendar?.start_date)}\n` +
           "หลังอนุมัติ ครูแก้คะแนนที่ล็อกได้เมื่อมีสิทธิ์ซ่อม หรือได้รับอนุมัติจากฝ่ายวิชาการและ ผอ.\n" +
           (term === "2" ? "การอนุมัติภาค 2 มีผลล็อกคะแนนภาค 1 ของปีนี้ด้วย\n" : "") +
-          `ยังไม่ปิดคะแนนสอบ ${openExams} วิชา`,
+          examStatus(pendingExams),
         okLabel:release ? "อนุมัติย้อนหลัง" : "อนุมัติผลและประกาศ", danger:false,
         checkbox:release ? { label:"บันทึกสมรรถนะใหม่ทุกห้องด้วย", checked:true } : null
       });
