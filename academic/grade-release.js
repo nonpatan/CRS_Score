@@ -1,4 +1,4 @@
-import { sb, fetchAllRows, fetchAllRowsByIds, getStudentPlacements, isRegularStudent, isAutoPresentStudent, isAutoAbsentStudent, GRADE_ORDER,
+import { sb, fetchAllRows, fetchAllRowsByIds, isRegularStudent, isAutoPresentStudent, isAutoAbsentStudent, GRADE_ORDER,
   getActiveYear, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr } from "../supabase-client.js?v=20261121-2";
 import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=2";
 
@@ -10,10 +10,21 @@ const compareRooms = (a, b) => GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexO
   String(a.room).localeCompare(String(b.room), "th", { numeric:true });
 const halfFor = term => term === "1" ? "กลางปี" : "ปลายปี";
 
+// พักการเรียนยังมีสิทธิ์ซ่อม แม้ left_school จะเป็น true
+const isTransferredOrWithdrawn = student => student?.status === "ย้ายสถานศึกษา" || student?.status === "ลาออก";
+const excludedFromRelease = student => student?.graduated === true || isTransferredOrWithdrawn(student);
+
+export function loadGradeReleasePlacements(year) {
+  return fetchAllRows(() => sb.from("student_year_placements")
+    .select("id,student_id,grade_level,classroom,student:student_id(id,name,student_no,student_type,graduated,status)")
+    .eq("year", year), ["grade_level", "classroom", "id"]);
+}
+
 export function releaseRooms(placements) {
   const rooms = new Map();
   for (const p of placements) {
     if (!p.grade_level || !p.classroom || !p.student || !/^[ปม]\./.test(p.grade_level)) continue;
+    if (excludedFromRelease(p.student)) continue;
     const room = { grade:p.grade_level, room:p.classroom };
     const key = roomKey(room);
     if (!rooms.has(key)) rooms.set(key, { ...room, students:[] });
@@ -24,8 +35,9 @@ export function releaseRooms(placements) {
 
 export function gradeRepairCandidates(results, blockedSubjectsFor, parentByMember) {
   const pairs = new Map();
-  for (const [student_id, student] of results) {
-    for (const [subject_id, { code }] of blockedSubjectsFor(student, parentByMember)) {
+  for (const [student_id, entry] of results) {
+    if (excludedFromRelease(entry.student)) continue;
+    for (const [subject_id, { code }] of blockedSubjectsFor(entry, parentByMember)) {
       const key = subject_id + "|" + student_id;
       if (!pairs.has(key) || code === "มส.") pairs.set(key, { subject_id, student_id, code });
     }
@@ -142,7 +154,7 @@ export function precheckWarnings({ placements, repairRows, incomplete, scored, e
   const warnings = { competency:[], scores:[], special:[], traits:[] };
   const repairs = new Set(repairRows.map(row => row.student_id));
   for (const { student, grade_level:grade, classroom:room } of placements) {
-    if (!student || isAutoAbsentStudent(student) || !/^[ปม]\./.test(grade || "")) continue;
+    if (!student || excludedFromRelease(student) || isAutoAbsentStudent(student) || !/^[ปม]\./.test(grade || "")) continue;
     const entry = { id:student.id, name:student.name, grade, room };
     if (isRegularStudent(student)) {
       const count = incomplete.get(student.id);
@@ -170,8 +182,9 @@ export async function runGradePrecheck(scope, run, cancelled, progress) {
   progress("กำลังตรวจคะแนน ผลโอน และคุณลักษณะ…", run.rooms.length, run.rooms.length);
   const evidence = await loadPrecheckEvidence(scope, cancelled);
   if (cancelled()) return;
+  const leftCount = new Set(run.placements.filter(p => isTransferredOrWithdrawn(p.student)).map(p => p.student_id)).size;
   return { warnings:precheckWarnings({ ...evidence, placements:run.placements, repairRows, incomplete }),
-    repairs:run.repairReport(repairRows) };
+    repairs:run.repairReport(repairRows), leftCount };
 }
 
 export function gradeRepairCsv(rows) {
@@ -210,7 +223,7 @@ async function loadLockedRelease(year, term) {
     openRequests(year, term),
     read(fetchAllRows(() => sb.from("grade_release_repairs")
       .select("id,subject_id,subject:subjects(name)").eq("year", year).eq("term", term).is("done_at", null))),
-    read(getStudentPlacements(year)),
+    read(loadGradeReleasePlacements(year)),
     read(fetchAllRows(() => {
       const query = sb.from("grade_edit_log").select("id,student_id,created_at,term").eq("year", year);
       return term === "2" ? query.or("term.eq.2,term.is.null,term.eq.1") : query.eq("term", term);
@@ -276,13 +289,14 @@ function examWarning({ year, pendingExams }) {
 }
 
 function renderPrecheck(result, scope) {
-  const { warnings, repairs } = result;
+  const { warnings, repairs, leftCount } = result;
   const incompleteExams = examWarning(scope);
   const groups = Object.entries(warnings).filter(([, rows]) => rows.length);
   const needsReview = Boolean(incompleteExams || groups.length);
   const r = repairs.filter(row => row.code === "ร.").length;
   const transferLink = gradeEscape(periodLink("transfer-results.html", scope));
   return `<h3>ผลตรวจก่อนอนุมัติ</h3>
+    <p class="hint">ไม่นับนักเรียนที่ย้ายสถานศึกษา/ลาออก ${leftCount} คน</p>
     ${incompleteExams}${groups.map(([kind, rows]) => {
       const hint = kind === "scores" ? `<p class="hint">นักเรียนย้ายเข้า หรือเปลี่ยนจากฮาฟีเซาะ/ฝากเรียนมาเป็นปกติ ให้กรอกผลภาคนี้ที่ <a href="${transferLink}">โอนผลนักเรียนย้ายเข้า</a></p>` : "";
       const students = `<ul>${rows.map(row => warningStudent(kind, row, scope)).join("")}</ul>`;
@@ -486,7 +500,8 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
     updateProgress("กำลังเตรียมข้อมูล…");
     try {
       const run = await prepareRun(current, publishRooms, () => cancelled);
-      const rooms = publishRooms ? (isRefresh ? current.locked.stale : run.rooms) : [];
+      const staleKeys = isRefresh ? new Set(current.locked.stale.map(roomKey)) : null;
+      const rooms = !publishRooms ? [] : staleKeys ? run.rooms.filter(room => staleKeys.has(roomKey(room))) : run.rooms;
       const result = await runGradeRelease({
         rooms, cancelled:() => cancelled, progress:updateProgress,
         compute:run.compute, publish:rows => gradeRpc("publish_competency_results", { p_year:current.year, p_term:current.term, p_rows:rows }),
