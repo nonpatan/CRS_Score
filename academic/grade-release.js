@@ -138,17 +138,12 @@ async function loadPrecheckEvidence({ year, term, scopedSubjects }, cancelled) {
   };
 }
 
-export function precheckWarnings({ placements, typeDates, termStart, repairRows, incomplete, scored, external, traits }) {
-  const warnings = { competency:[], type:[], scores:[], special:[], traits:[] };
+export function precheckWarnings({ placements, repairRows, incomplete, scored, external, traits }) {
+  const warnings = { competency:[], scores:[], special:[], traits:[] };
   const repairs = new Set(repairRows.map(row => row.student_id));
-  const startsAt = termStart ? Date.parse(termStart + "T00:00:00+07:00") : NaN;
   for (const { student, grade_level:grade, classroom:room } of placements) {
     if (!student || isAutoAbsentStudent(student) || !/^[ปม]\./.test(grade || "")) continue;
     const entry = { id:student.id, name:student.name, grade, room };
-    const changedAt = typeDates.get(student.id);
-    if (Date.parse(changedAt) >= startsAt) {
-      warnings.type.push({ ...entry, changedAt, type:student.student_type || "ปกติ", regular:isRegularStudent(student) });
-    }
     if (isRegularStudent(student)) {
       const count = incomplete.get(student.id);
       if (count && !repairs.has(student.id)) warnings.competency.push({ ...entry, count });
@@ -173,15 +168,10 @@ export async function runGradePrecheck(scope, run, cancelled, progress) {
   const repairRows = await run.repairs();
   if (cancelled()) return;
   progress("กำลังตรวจคะแนน ผลโอน และคุณลักษณะ…", run.rooms.length, run.rooms.length);
-  const [evidence, dates] = await Promise.all([
-    loadPrecheckEvidence(scope, cancelled),
-    read(fetchAllRowsByIds(ids => sb.from("students").select("id,student_type_at").in("id", ids),
-      run.placements.map(row => row.student_id)))
-  ]);
+  const evidence = await loadPrecheckEvidence(scope, cancelled);
   if (cancelled()) return;
-  const typeDates = new Map(dates.map(row => [row.id, row.student_type_at]));
-  return { warnings:precheckWarnings({ ...evidence, placements:run.placements, typeDates, termStart:scope.termStart,
-    repairRows, incomplete }), repairs:run.repairReport(repairRows) };
+  return { warnings:precheckWarnings({ ...evidence, placements:run.placements, repairRows, incomplete }),
+    repairs:run.repairReport(repairRows) };
 }
 
 export function gradeRepairCsv(rows) {
@@ -227,7 +217,6 @@ const list = (items, empty) => items.length
 
 const warningTitles = {
   competency:"นักเรียนปกติสรุปสมรรถนะไม่ได้ ทั้งที่ไม่ติด ร./มส.",
-  type:"ประเภทนักเรียนเปลี่ยนหลังเปิดภาคนี้",
   scores:"ไม่มีคะแนนภาคนี้เลยและไม่มีผลโอน",
   special:"ฮาฟีเซาะ/ฝากเรียนยังไม่มีผลสุ่ม",
   traits:"ยังไม่ประเมินคุณลักษณะ"
@@ -242,9 +231,9 @@ function warningStudent(kind, row, scope) {
     detail = ` · ค้าง ${row.count} ด้าน`;
     file = "summary.html";
     params = { grade:row.grade, room:row.room, student:row.id };
-  } else if (kind === "type" || kind === "scores") {
-    if (kind === "type") detail = ` · ${row.type} · ${gradeDate(row.changedAt)} · ภาคนี้อาจยังไม่มีผลตามประเภทเดิม`;
-    if (kind === "scores" || row.regular) { file = "transfer-results.html"; params = { student:row.id }; }
+  } else if (kind === "scores") {
+    file = "transfer-results.html";
+    params = { student:row.id };
   } else if (kind === "special") {
     file = "special-results.html";
     params = { grade:row.grade };
@@ -253,7 +242,8 @@ function warningStudent(kind, row, scope) {
     params = { room:roomKey(row) };
   }
   const label = gradeEscape(`${roomName(row)} · ${row.name}`);
-  return `<li>${file ? `<a href="${gradeEscape(periodLink(file, scope, params, kind === "competency" ? "#competency" : ""))}">${label}</a>` : label}${gradeEscape(detail)}</li>`;
+  const url = periodLink(file, scope, params, kind === "competency" ? "#competency" : "");
+  return `<li><a href="${gradeEscape(url)}">${label}</a>${gradeEscape(detail)}</li>`;
 }
 
 function warningGroup(label, count, unit, body) {
@@ -268,10 +258,13 @@ function renderPrecheck(result, scope) {
   const groups = Object.entries(warnings).filter(([, rows]) => rows.length);
   const needsReview = Boolean(incompleteExams || groups.length);
   const r = repairs.filter(row => row.code === "ร.").length;
+  const transferLink = gradeEscape(periodLink("transfer-results.html", scope));
   return `<h3>ผลตรวจก่อนอนุมัติ</h3>
-    ${scope.termStart ? "" : '<p class="hint">ยังไม่ได้ตั้งวันเริ่มภาคนี้ จึงตรวจการเปลี่ยนประเภทนักเรียนไม่ได้</p>'}
-    ${incompleteExams}${groups.map(([kind, rows]) =>
-      warningGroup(warningTitles[kind], rows.length, "คน", `<ul>${rows.map(row => warningStudent(kind, row, scope)).join("")}</ul>`)).join("")}
+    ${incompleteExams}${groups.map(([kind, rows]) => {
+      const hint = kind === "scores" ? `<p class="hint">นักเรียนย้ายเข้า หรือเปลี่ยนจากฮาฟีเซาะ/ฝากเรียนมาเป็นปกติ ให้กรอกผลภาคนี้ที่ <a href="${transferLink}">โอนผลนักเรียนย้ายเข้า</a></p>` : "";
+      const students = `<ul>${rows.map(row => warningStudent(kind, row, scope)).join("")}</ul>`;
+      return warningGroup(warningTitles[kind], rows.length, "คน", hint + students);
+    }).join("")}
     ${needsReview ? "" : '<p>ไม่พบรายการที่ต้องตรวจ</p>'}
     <div class="release-repairs">
       <h4>รายชื่อซ่อม</h4>
@@ -288,7 +281,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   const status = find("status"), errorBox = find("error"), progress = find("progress");
   const content = find("content"), yearInput = find("year"), termInput = find("term");
   const stop = find("stop"), retry = find("retry");
-  let years = [], scope, precheck, sequence = 0, busy = false, cancelled = false, retryAction = null;
+  let scope, precheck, sequence = 0, busy = false, cancelled = false, retryAction = null;
 
   function mayApprove() {
     return Boolean(precheck && precheck.scope === scope &&
@@ -339,9 +332,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
       ]);
       const locked = release?.locked_at ? await loadLockedRelease(year, term) : null;
       if (token !== sequence) return;
-      const academicYear = years.find(row => row.year === year);
-      scope = { year, term, release, scopedSubjects, locked, otherLock:releases?.locked_at,
-        termStart:term === "1" ? academicYear?.start_date : academicYear?.term2_start_date };
+      scope = { year, term, release, scopedSubjects, locked, otherLock:releases?.locked_at };
       render();
       updateProgress("");
     } catch (error) {
@@ -551,7 +542,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   retry.onclick = () => retryAction?.();
   yearInput.onchange = termInput.onchange = () => { if (!busy) void load(); };
   try {
-    years = await getAcademicYears();
+    const years = await getAcademicYears();
     if (!years.length) {
       toggleBusy(true);
       updateProgress("ยังไม่มีปีการศึกษา · กำหนดปีการศึกษาก่อนอนุมัติผล");
