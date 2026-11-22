@@ -156,6 +156,11 @@
   }
   .report-tabs { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .report-tab { font-family:inherit; font-size:15px; font-weight:600; border:1px solid var(--line); border-radius:9px; padding:11px; background:var(--white); color:var(--muted); cursor:pointer; }
+  #release-report [role=alert] { color:var(--danger); }
+  #release-report :is(input, select, button), #tab-release { min-height:44px; }
+  #release-report input[type=date] { width:100%; min-width:0; border:1px solid var(--line); border-radius:8px; padding:8px; background:var(--white); color:var(--ink); font:inherit; font-size:16px; }
+  #release-progress { display:block; width:100%; accent-color:var(--teal); }
+  #release-report [hidden], #tab-release[hidden] { display:none!important; }
   .report-tab.active { color:var(--white); background:var(--teal); border-color:var(--teal); }
   .student-list { display:grid; gap:8px; }
   .student-button { width:100%; display:flex; justify-content:space-between; align-items:center; gap:10px; text-align:left; font-family:inherit; border:1px solid var(--line); border-radius:9px; padding:11px 12px; background:var(--white); color:var(--ink); cursor:pointer; }
@@ -596,7 +601,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261120-1"></script>
+    <script src="../app-shell.js?v=20261122-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -617,6 +622,7 @@
     <button type="button" class="report-tab" id="tab-attendance">รายละเอียดการเข้าเรียน</button>
     <button type="button" class="report-tab" id="tab-gpa">ผลการเรียนรายคน</button>
     <button type="button" class="report-tab" id="tab-competency">สมรรถนะรายนักเรียน</button>
+    <button type="button" class="report-tab" id="tab-release" hidden>อนุมัติและประกาศผล</button>
   </div>
 
   <div id="subject-report">
@@ -742,6 +748,23 @@
       <div id="gpa-result"><div class="card hint">เลือกนักเรียนเพื่อดูผลการเรียน</div></div>
     </div>
   </div>
+  <section class="card" id="release-report" aria-labelledby="release-heading" hidden>
+    <h2 id="release-heading">อนุมัติและประกาศผล</h2>
+    <div class="row2">
+      <div class="field"><label for="release-year">ปีการศึกษา</label><select id="release-year"></select></div>
+      <div class="field"><label for="release-term">ภาคเรียน</label><select id="release-term">
+        <option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option>
+      </select></div>
+    </div>
+    <div id="release-content"></div>
+    <p id="release-status" role="status" aria-atomic="true"></p>
+    <progress id="release-progress" aria-label="ความคืบหน้าการบันทึกสมรรถนะ" hidden></progress>
+    <p id="release-error" role="alert"></p>
+    <div class="grade-lock-actions">
+      <button type="button" class="ghost" id="release-stop" hidden>หยุดการทำงาน</button>
+      <button type="button" class="ghost" id="release-retry" hidden>ลองใหม่</button>
+    </div>
+  </section>
   <section id="pp6-print-area" aria-hidden="true"></section>
   </main>
 </div>
@@ -759,8 +782,9 @@ import {
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows, fetchAllRowsByIds,
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
-  isAutoPresentStudent, isAutoAbsentStudent, checkDepartment,
+  isAutoPresentStudent, isAutoAbsentStudent, checkDepartment, getProfile,
 } from "../supabase-client.js?v=20261121-2";
+import { initGradeReleaseTab, releaseRooms, gradeRepairCandidates, competencyPublishRows } from "./grade-release.js?v=1";
 import { traitLevel, activityRows, reportTerms, sortReportSubjects, primaryReportRows } from "../shared/report-card.js?v=20261121-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -923,6 +947,8 @@ function ensureTabInit(mode) {
 }
 
 function setReportMode(mode) {
+  document.getElementById("release-report").hidden = mode !== "release";
+  document.getElementById("tab-release").classList.toggle("active", mode === "release");
   elSubjectReport.style.display = mode === "subject" ? "block" : "none";
   elAttendanceReport.style.display = mode === "attendance" ? "block" : "none";
   elGpaReport.style.display = mode === "gpa" ? "block" : "none";
@@ -931,6 +957,7 @@ function setReportMode(mode) {
   document.getElementById("tab-attendance").classList.toggle("active", mode === "attendance");
   document.getElementById("tab-gpa").classList.toggle("active", mode === "gpa");
   document.getElementById("tab-competency").classList.toggle("active", mode === "competency");
+  if (mode !== "release" && location.hash === "#release") history.replaceState(null, "", location.pathname + location.search);
   ensureTabInit(mode);
 }
 document.getElementById("tab-subject").addEventListener("click", () => setReportMode("subject"));
@@ -2406,11 +2433,12 @@ elAttSubject.addEventListener("change", loadAttendanceSubjectContext);
 // รายงานสมรรถนะรายนักเรียน: รวมรายวิชา + กิจกรรม + กิจวัตรประจำวัน
 // ============================================================
 
+const canPublishGradeResults = () => checkDepartment("วิชาการ");
 async function initCompetencyReport() {
   const [assessmentYears,competencies,canPublish] = await Promise.all([
     sb.from("competency_assessments").select("year"),
     sb.from("core_competencies").select("*").order("seq"),
-    checkDepartment("วิชาการ")
+    canPublishGradeResults()
   ]);
   canPublishCompRoom = canPublish;
   coreCompetencies = competencies.data || [];
@@ -2627,15 +2655,15 @@ function competencySettingsIssue() {
   return "";
 }
 
-function loadCompSubjectResults() {
-  const grade = elCompGrade.value, year = elCompYear.value;
-  const term = grade.startsWith("ม.") ? elCompTerm.value : "";
-  const key = [year, grade, term, grade.startsWith("ป.") ? compPrimaryHalf : ""].join("|");
-  if (!compSubjectResultsCache.has(key)) compSubjectResultsCache.set(key,
+function loadCompSubjectResults({ year = elCompYear.value, grade = elCompGrade.value,
+  term = elCompTerm.value, half, cache = compSubjectResultsCache } = {}) {
+  term = grade.startsWith("ม.") ? term : "";
+  const key = [year, grade, term, grade.startsWith("ป.") ? (half ?? compPrimaryHalf) : ""].join("|");
+  if (!cache.has(key)) cache.set(key,
     computeStudentSubjectResults({ grade, year, term:term || undefined })
       .then(results => ({ results, error:"" }))
       .catch(error => ({ results:new Map(), error:error?.message || String(error) })));
-  return compSubjectResultsCache.get(key);
+  return cache.get(key);
 }
 
 function blockedSubjectsFor(studentEntry, parentByMember) {
@@ -2701,7 +2729,7 @@ function externalCompetencyForStudent(studentId, rows, scope) {
   const primary = scope.grade.startsWith("ป.");
   const terms = primary && scope.half === "ปลายปี" ? ["1", "2"] : [scope.externalTerm || (primary ? "1" : scope.term)];
   if (!mine.some(row => terms.includes(row.term))) return null;
-  const makeHalf = term => ({ results:coreCompetencies.map(competency => {
+  const makeHalf = term => ({ results:(scope.competencies ?? coreCompetencies).map(competency => {
     const row = mine.find(row => row.term === term && row.competency_id === competency.id);
     const score = row ? Number(row.pct) : null;
     const level = (scope.levels || []).slice().sort((a,b) => Number(b.min_score)-Number(a.min_score)).find(l => score !== null && score >= Number(l.min_score));
@@ -2732,7 +2760,7 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
   const externalTerm = grade.startsWith("ป.") ? (shared.externalTerm || "1") : term;
   if (shared.externalRows?.some(row => row.student_id === student.id && row.term === externalTerm)) {
     return externalCompetencyForStudent(student.id, shared.externalRows.filter(row => row.term === externalTerm),
-      { year, grade, term:externalTerm, externalTerm, half:"กลางปี", levels });
+      { year, grade, term:externalTerm, externalTerm, half:"กลางปี", levels, competencies:scope.competencies });
   }
 
   // ---------- แหล่งที่ 1: คะแนนสมรรถนะจากรายวิชาที่นักเรียนลงทะเบียน ----------
@@ -2772,7 +2800,7 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
   const missingCompetencySubjects = subjectIds.filter(id => !integratedParentIdSet.has(id) && !sessionIds.has(id))
     .map(id => ({ id, reason:structuredIds.has(id) ? "no-session" : "no-structure",
       structuredCount:new Set(activeUnits.filter(unit => unit.subject_id === id).map(unit => unit.core_competency_id)).size }));
-  const blockedSubjects = blockedSubjectsFor(blockedResults.get(student.id), integratedParentByMember);
+  const blockedSubjects = blockedSubjectsFor(blockedResults.get(student.id), scope.parentByMember ?? integratedParentByMember);
 
   // ---------- แหล่งที่ 2–3: กิจกรรมและกิจวัตรที่มี snapshot นักเรียนในครั้งประเมิน ----------
   const assessments = shared.assessments;
@@ -2858,7 +2886,7 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
     }
   }
 
-  const results = coreCompetencies.map(competency => {
+  const results = (scope.competencies ?? coreCompetencies).map(competency => {
     const baseSources = {
       subject: computeSubjectCompetencySource(competency.id, competencyUnits, subjectScoreRows),
       activity: computeAssessmentCompetencySource(competency.id, activityItems),
@@ -3224,13 +3252,7 @@ async function publishCompRoomResults(state, button) {
   if (!canSubmit()) return;
 
   const year = elCompYear.value, term = compRoomPublishTerm();
-  const rows = state.perStudent.flatMap(entry => entry.results.map(({ competency, combined }) => ({
-    student_id: entry.student.id,
-    competency_id: competency.id,
-    complete: !!combined?.complete,
-    score: combined?.complete ? combined.score : null,
-    level: combined?.complete ? combined.level : null
-  })));
+  const rows = competencyPublishRows(state.perStudent);
   // RPC คืนจำนวนแถวสมรรถนะ ส่วนข้อความยืนยันและผลบันทึกใช้จำนวนนักเรียน
   const count = new Set(rows.map(row => row.student_id)).size;
   const incomplete = state.perStudent.filter(entry => entry.results.some(row => !row.combined?.complete)).length;
@@ -3446,6 +3468,110 @@ async function startCompStudentPrint(student, rows, todo, subjectNameById, plann
   elCompRoomPrint.querySelector("#comp-room-print-heading").focus();
 }
 
+async function computeCompetencyRoom(scope, roster, { cancelled, onStart, onProgress, publishing = false, sharedScope } = {}) {
+  const stopped = () => cancelled?.() === true;
+  const primary = scope.grade.startsWith("ป.");
+  const blockedLoad = await loadCompSubjectResults(scope);
+  if (stopped()) return { ok:false };
+  if (publishing && blockedLoad.error) return { ok:false, message:"โหลดผล ร./มส. ไม่สำเร็จ: " + blockedLoad.error };
+  let shared;
+  try { shared = await (sharedScope?.() || loadCompetencyScopeShared(scope.year, scope.grade, primary ? "" : scope.term)); }
+  catch (error) { return { ok:false, message:"คำนวณไม่สำเร็จ: " + (error?.message || String(error)) }; }
+  if (!shared.ok || stopped()) return shared;
+  const batch = await loadCompetencyRoomBatch(roster, shared);
+  if (!batch.ok || stopped()) return batch;
+  onStart?.();
+  const computedRows = new Array(roster.length);
+  let next = 0, done = 0;
+  const worker = async () => {
+    while (!stopped() && next < roster.length) {
+      const index = next++, student = roster[index], prefetched = batch.byStudent.get(student.id);
+      // รอบอัตโนมัติบันทึกเฉพาะนักเรียนที่ลงทะเบียนในช่วงนี้
+      if (publishing && (!prefetched?.enrolledIds.size || !shared.subjectRows.some(row => prefetched.enrolledIds.has(row.id)))) continue;
+      try {
+        const calculate = primary ? computePrimaryCompetencyForStudent : computeCompetencyForStudent;
+        computedRows[index] = await calculate(student, blockedLoad.results, scope, shared, prefetched);
+      } catch (error) {
+        computedRows[index] = { ok:false, message:"คำนวณไม่สำเร็จ: " + (error?.message || String(error)) };
+      }
+      if (!stopped()) onProgress?.(++done);
+    }
+  };
+  await Promise.all(Array.from({ length:Math.min(3, roster.length) }, worker));
+  const perStudent = [], failures = [];
+  computedRows.forEach((result, index) => {
+    const student = roster[index];
+    if (!result?.ok) failures.push({ student, message:result?.message || "ไม่ทราบสาเหตุ" });
+    else perStudent.push({ student, number:index + 1, ...result });
+  });
+  return { ok:true, perStudent, failures, blockedLoad };
+}
+
+async function prepareGradeReleaseRun({ year, term, scopedSubjects }, publishRooms, cancelled) {
+  const dataOrThrow = result => {
+    if (result.error) throw result.error;
+    return result.data || [];
+  };
+  const [links, placements, settings, competencies] = await Promise.all([
+    fetchAllRows(() => sb.from("integration_members").select("integrated_subject_id,member_subject_id"),
+      ["integrated_subject_id", "member_subject_id"]).then(dataOrThrow),
+    publishRooms ? getStudentPlacements(year).then(dataOrThrow) : [],
+    publishRooms ? loadCompetencySettings(year) : null,
+    publishRooms ? sb.from("core_competencies").select("*").order("seq").then(dataOrThrow) : []
+  ]);
+  if (publishRooms && (!competencies.length || settings.levels.length !== 4 ||
+      competencies.some(competency => !settings.weights.some(weight => weight.competency_id === competency.id)))) {
+    throw new Error("ตั้งน้ำหนักและเกณฑ์แปลผลให้ครบที่หน้า “กำหนดสมรรถนะหลัก” ก่อนบันทึกผล");
+  }
+  const parentByMember = new Map(links.map(row => [row.member_subject_id, row.integrated_subject_id]));
+  const cache = new Map(), sharedCache = new Map();
+  const period = { year, term, half:term === "1" ? "กลางปี" : "ปลายปี", cache };
+  const rooms = releaseRooms(placements);
+  return {
+    rooms,
+    compute:async room => {
+      const { grade } = room;
+      if (!scopedSubjects.some(subject => subject.grade_level === grade)) return [];
+      const sharedScope = () => {
+        if (!sharedCache.has(grade)) {
+          const key = [year, grade].join("|");
+          externalCompetencyCache.delete(key);
+          sharedCache.set(grade, loadCompetencyScopeShared(year, grade, grade.startsWith("ป.") ? "" : term));
+        }
+        return sharedCache.get(grade);
+      };
+      const result = await computeCompetencyRoom({ ...period, grade, room:room.room, parentByMember,
+        competencies, weights:settings.weights, levels:settings.levels }, room.students,
+        { cancelled, publishing:true, sharedScope });
+      if (cancelled()) return [];
+      if (!result.ok) throw new Error(result.message);
+      if (result.failures.length) throw new Error(result.failures[0].student.name + " · " + result.failures[0].message);
+      return competencyPublishRows(result.perStudent);
+    },
+    repairs:async () => {
+      const candidates = [];
+      for (const grade of new Set(scopedSubjects.map(subject => subject.grade_level).filter(Boolean))) {
+        if (cancelled()) return [];
+        const { results, error } = await loadCompSubjectResults({ ...period, grade });
+        if (error) throw new Error(grade + " · โหลดผล ร./มส. ไม่สำเร็จ: " + error);
+        candidates.push(...gradeRepairCandidates(results, blockedSubjectsFor, parentByMember));
+      }
+      // วิชาบูรณาการคิด มส. รวม แต่เปิดสิทธิ์ซ่อมเฉพาะวิชาย่อยที่นักเรียนลงทะเบียนจริง
+      const scopedIds = new Set(scopedSubjects.map(subject => subject.id));
+      const subjectIds = [...new Set(candidates.map(row => row.subject_id).filter(id => scopedIds.has(id)))];
+      const enrollments = await fetchAllRowsByIds(ids => sb.from("enrollments").select("id,subject_id,student_id")
+        .in("subject_id", ids), subjectIds).then(dataOrThrow);
+      const enrolled = new Set(enrollments.map(row => row.subject_id + "|" + row.student_id));
+      const repairs = new Map();
+      for (const row of candidates) {
+        const key = row.subject_id + "|" + row.student_id;
+        if (enrolled.has(key) && (!repairs.has(key) || row.code === "มส.")) repairs.set(key, row);
+      }
+      return [...repairs.values()];
+    }
+  };
+}
+
 async function startCompRoomRun() {
   if (!competencyFiltersReady() || !compVisibleStudents.length) return;
   const issue = competencySettingsIssue();
@@ -3454,8 +3580,6 @@ async function startCompRoomRun() {
   externalCompetencyCache.delete(elCompYear.value + "|" + elCompGrade.value);
   const token = ++compRoomRunSeq;
   const roster = compVisibleStudents.slice();
-  let next = 0, done = 0;
-  const computedRows = new Array(roster.length);
   elCompRoomStart.disabled = true;
   elCompStudentListCard.hidden = false;
   elCompRoomProgress.hidden = false;
@@ -3468,42 +3592,12 @@ async function startCompRoomRun() {
   elCompNav.hidden = true;
   elCompResult.hidden = false;
   writeCompResult(++compRequestSeq, "");
-  const blockedLoad = await loadCompSubjectResults();
-  if (token !== compRoomRunSeq) return;
-  let shared;
-  try { shared = await loadCompetencyScopeShared(elCompYear.value, elCompGrade.value,
-    elCompGrade.value.startsWith("ม.") ? elCompTerm.value : ""); }
-  catch (error) { shared = { ok:false, message:"คำนวณไม่สำเร็จ: " + (error?.message || String(error)) }; }
-  if (token !== compRoomRunSeq) return;
-  if (!shared.ok) {
-    writeCompResult(++compRequestSeq, "<div class='card incomplete'>" + escapeHtml(shared.message) + "</div>");
-    elCompRoomProgressStatus.textContent = "";
-    elCompRoomProgress.hidden = true;
-    elCompRoomStart.disabled = false;
-    return;
-  }
-  const batch = await loadCompetencyRoomBatch(roster, shared);
-  if (token !== compRoomRunSeq) return;
-  if (!batch.ok) {
-    writeCompResult(++compRequestSeq, "<div class='card incomplete'>" + escapeHtml(batch.message) + "</div>");
-    elCompRoomProgressStatus.textContent = "";
-    elCompRoomProgress.hidden = true;
-    elCompRoomStart.disabled = false;
-    return;
-  }
-  elCompRoomProgressStatus.textContent = "เริ่มคำนวณ " + roster.length + " คน";
-  const worker = async () => {
-    while (token === compRoomRunSeq && next < roster.length) {
-      const index = next++;
-      let result;
-      try { result = elCompGrade.value.startsWith("ป.")
-        ? await computePrimaryCompetencyForStudent(roster[index], blockedLoad.results,
-          { year:elCompYear.value, grade:elCompGrade.value, half:compPrimaryHalf }, shared, batch.byStudent.get(roster[index].id))
-        : await computeCompetencyForStudent(roster[index], blockedLoad.results, {}, shared, batch.byStudent.get(roster[index].id)); }
-      catch (error) { result = { ok:false, message:"คำนวณไม่สำเร็จ: " + (error?.message || String(error)) }; }
-      if (token !== compRoomRunSeq) return;
-      computedRows[index] = result;
-      done++;
+  const scope = { year:elCompYear.value, grade:elCompGrade.value, room:elCompRoom.value,
+    term:elCompTerm.value, half:compPrimaryHalf };
+  const result = await computeCompetencyRoom(scope, roster, {
+    cancelled:() => token !== compRoomRunSeq,
+    onStart:() => { elCompRoomProgressStatus.textContent = "เริ่มคำนวณ " + roster.length + " คน"; },
+    onProgress:done => {
       elCompRoomProgressBar.value = done;
       elCompRoomProgressText.textContent = "กำลังคำนวณสมรรถนะทั้งห้อง " + done + " / " + roster.length + " คน";
       const quarter = Math.floor(done * 4 / roster.length);
@@ -3512,17 +3606,20 @@ async function startCompRoomRun() {
         elCompRoomProgressStatus.textContent = "คำนวณแล้ว " + done + " จาก " + roster.length + " คน";
       }
     }
-  };
-  await Promise.all(Array.from({ length:Math.min(3, roster.length) }, worker));
-  if (token !== compRoomRunSeq) return;
-  const perStudent = [], failures = [];
-  computedRows.forEach((result,index) => {
-    const student = roster[index];
-    if (!result?.ok) { failures.push({ student, message:result?.message || "ไม่ทราบสาเหตุ" }); return; }
-    perStudent.push({ student, number:index + 1, ...result,
-      todo:result.halves ? primaryCompetencyTodo(result.halves)
-        : buildCompetencyTodo(result.results, result.subjectNameById, result.plannedByCompetency, result.missingCompetencySubjects, result.blockedSubjects) });
   });
+  if (token !== compRoomRunSeq) return;
+  if (!result.ok) {
+    writeCompResult(++compRequestSeq, "<div class='card incomplete'>" + escapeHtml(result.message) + "</div>");
+    elCompRoomProgressStatus.textContent = "";
+    elCompRoomProgress.hidden = true;
+    elCompRoomStart.disabled = false;
+    return;
+  }
+  const { perStudent, failures, blockedLoad } = result;
+  for (const entry of perStudent) {
+    entry.todo = entry.halves ? primaryCompetencyTodo(entry.halves)
+      : buildCompetencyTodo(entry.results, entry.subjectNameById, entry.plannedByCompetency, entry.missingCompetencySubjects, entry.blockedSubjects);
+  }
   const ownerIds = [...new Set(perStudent.flatMap(row => [...row.subjectOwnerById.values(), ...row.assessmentOwnerByName.values(),
     ...row.todo.filter(item => item.kind === "not-member").flatMap(item => [...(item.othersByComp || new Map()).values()].flat().map(other => other.ownerId))]).filter(Boolean))];
   let ownerNameById = new Map(), ownerWarning = "";
@@ -4674,6 +4771,21 @@ pageReady = (async () => {
   await loadSubjects();
 })();
 await pageReady;
+if (await canPublishGradeResults()) {
+  const releaseTab = document.getElementById("tab-release");
+  const host = document.getElementById("release-report");
+  let initialized = false;
+  releaseTab.hidden = false;
+  releaseTab.onclick = async () => {
+    setReportMode("release");
+    history.replaceState(null, "", "#release");
+    if (initialized) return;
+    initialized = true;
+    const profile = await getProfile(session.user.id);
+    await initGradeReleaseTab(host, { admin:profile?.role === "admin", prepareRun:prepareGradeReleaseRun });
+  };
+  if (location.hash === "#release") void releaseTab.onclick();
+}
 }
 </script>
 </body>

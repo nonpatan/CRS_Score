@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>คำขอแก้คะแนน — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+    --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  }
+  * { box-sizing:border-box; }
+  body { font:16px/1.6 "Sarabun",sans-serif; color:var(--ink); background:var(--bg); margin:0; padding:16px; }
+  .wrap { max-width:760px; margin:0 auto; }
+  .card { border:1px solid var(--line); border-radius:12px; background:var(--white); padding:16px; margin:0 0 12px; min-width:0; overflow-wrap:anywhere; }
+  h2,h3,p { margin:0 0 8px; }
+  h2 { font-size:20px; }
+  h3 { font-size:17px; }
+  .hint,.meta,.empty { color:var(--muted); }
+  .meta { font-size:14px; }
+  .reason { white-space:pre-wrap; }
+  [role=alert] { color:var(--danger); }
+  .queue-tab { min-height:44px; font:inherit; }
+  .queue-tab[aria-selected=true] { background:var(--teal); color:var(--white); }
+  details { margin-top:12px; border-top:1px solid var(--line); }
+  summary { cursor:pointer; min-height:44px; padding:10px 0; }
+  ul { padding-inline-start:24px; }
+  [hidden] { display:none!important; }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>คำขอแก้คะแนน</h1>
+  <div class="nav"><a href="index.html">ภาพรวมวิชาการ</a><a href="entry.html">กรอกคะแนน</a>
+    <a href="grade-edit-requests.html" aria-current="page">คำขอแก้คะแนน</a><a href="#" id="btn-signout">ออกจากระบบ</a></div>
+  <script src="../app-shell.js?v=20261122-1"></script>
+</header>
+<main class="academic-content">
+  <section class="card" aria-label="คิวคำขอ">
+    <div class="grade-lock-actions" id="queue-tabs" role="tablist" aria-label="คิวคำขอ"></div>
+    <p id="queue-counts" class="hint" role="status" aria-atomic="true"></p>
+    <p id="queue-message" role="status"></p>
+    <div id="queue-error" role="alert"></div>
+    <div class="grade-lock-actions"><button type="button" class="ghost" id="queue-retry" hidden>ลองใหม่</button></div>
+  </section>
+  <section id="queue-list" role="tabpanel" aria-label="รายการคำขอ"></section>
+</main>
+</div>
+<script type="module">
+import { sb, requireAuth, signOut, checkDepartment, isProjectApprover, fetchAllRows, fetchAllRowsByIds,
+  getStudentPlacements, getRosterForSubject } from "../supabase-client.js?v=20261121-2";
+import { gradeDate, gradeEscape as esc, gradeRpc, installGradeStyles, editGradeRequestForm, decideGradeRequestForm,
+  confirmGradeAction, finishGradeRequestConfirm, withdrawGradeRequestConfirm, pendingGradeRequests,
+  gradeQueueCounts, watchGradeRequests } from "./grade-lock.js?v=2";
+
+const session = await requireAuth();
+if (session) {
+  document.getElementById("btn-signout").onclick = event => { event.preventDefault(); void signOut(); };
+  installGradeStyles();
+  const $ = id => document.getElementById("queue-" + id);
+  const userId = session.user.id;
+  const [academic, director] = await Promise.all([checkDepartment("วิชาการ"), isProjectApprover()]);
+  const tabs = [{ id:"mine", name:"คำขอของฉัน" }];
+  if (academic) tabs.push({ id:"academic", name:"รอวิชาการ", status:"รอวิชาการ" });
+  if (director) tabs.push({ id:"director", name:"รอ ผอ.", status:"รอผอ." });
+  if (academic) tabs.push({ id:"open", name:"เปิดให้แก้อยู่", status:"เปิดให้แก้" });
+  if (academic || director) tabs.push({ id:"history", name:"ประวัติการแก้", status:"แก้เสร็จ" });
+  const params = new URLSearchParams(location.search);
+  let selected = tabs.find(tab => tab.id === params.get("tab")) || tabs[0];
+  let sequence = 0, runningAction = false, refreshAfterAction = false;
+
+  async function read(query) {
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  }
+
+  function setError(error) {
+    $("error").textContent = error?.message || "";
+    $("retry").hidden = !error;
+  }
+
+  function selectTab(tab, focus = false) {
+    selected = tab;
+    for (const button of $("tabs").querySelectorAll("button")) {
+      const active = button.id === "queue-tab-" + tab.id;
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && focus) button.focus();
+    }
+    $("list").setAttribute("aria-labelledby", "queue-tab-" + tab.id);
+    const url = new URL(location.href);
+    url.searchParams.set("tab", tab.id);
+    history.replaceState(null, "", url);
+    void load(true);
+  }
+
+  for (const tab of tabs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost queue-tab";
+    button.id = "queue-tab-" + tab.id;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", "queue-list");
+    button.textContent = tab.name;
+    button.onclick = () => selectTab(tab);
+    $("tabs").append(button);
+  }
+  $("tabs").addEventListener("keydown", event => {
+    const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const index = tabs.indexOf(selected);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+      : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    selectTab(tabs[next], true);
+  });
+
+  function entryLink(row, students) {
+    const link = new URL(row.kind === "วิชา" ? "entry.html" : row.kind === "คุณลักษณะ" ? "traits.html" : "competency-entry.html", location.href);
+    if (row.subject_id) {
+      link.searchParams.set("subject", row.subject_id);
+      if (row.subject?.term == null) link.searchParams.set("half", row.term === "1" ? "กลางปี" : "ปลายปี");
+    } else if (row.assessment_id) {
+      link.searchParams.set("assessment", row.assessment_id);
+    } else {
+      link.searchParams.set("year", row.year);
+      link.searchParams.set("term", row.term);
+      if (students[0]?.roomKey) link.searchParams.set("room", students[0].roomKey);
+    }
+    return link.pathname + link.search;
+  }
+
+  const studentRoom = p => p ? p.grade_level + "/" + p.classroom : "";
+  const studentRoomKey = p => p ? p.grade_level + "|" + p.classroom : "";
+
+  async function loadRows(tab) {
+    const rows = await read(fetchAllRows(() => {
+      const query = sb.from("grade_edit_requests")
+        .select("*,subject:subjects(name,term),assessment:competency_assessments(name),grade_edit_request_students(student_id,student:students(name))");
+      return tab.status ? query.eq("status", tab.status) : query.eq("requested_by", userId);
+    }, ["created_at", "id"]));
+    const people = [...new Set(rows.flatMap(row => [row.requested_by, row.academic_by, row.director_by]).filter(Boolean))];
+    const studentsByYear = new Map();
+    for (const row of rows) {
+      if (!studentsByYear.has(row.year)) studentsByYear.set(row.year, new Set());
+      for (const item of row.grade_edit_request_students) studentsByYear.get(row.year).add(item.student_id);
+    }
+    const [profiles, ...placements] = await Promise.all([
+      read(fetchAllRowsByIds(ids => sb.from("profiles").select("id,name").in("id", ids), people)),
+      ...[...studentsByYear].map(async ([year, ids]) => [year, await read(getStudentPlacements(year, [...ids]))])
+    ]);
+    const names = new Map(profiles.map(row => [row.id, row.name]));
+    const byYear = new Map(placements.map(([year, rows]) => [year, new Map(rows.map(p => [p.student_id, p]))]));
+    return rows.reverse().map(row => ({
+      ...row, names, students:row.grade_edit_request_students.map(item => {
+        const p = byYear.get(row.year)?.get(item.student_id);
+        return { id:item.student_id, name:p?.student?.name || item.student?.name || "ไม่พบชื่อนักเรียน",
+          room:studentRoom(p), roomKey:studentRoomKey(p) };
+      })
+    }));
+  }
+
+  const logFields = {
+    scores:["raw_score", "คะแนนเก็บ"], exam_scores:["raw_score", "คะแนนสอบ"],
+    competency_assessment_scores:["raw_score", "คะแนนสมรรถนะ"], remarks:["code", "รหัสผลการเรียน"],
+    makeup_hours:["periods", "คาบชดเชย"], student_trait_results:["level", "ระดับคุณลักษณะ"],
+    activity_pass_results:["passed", "ผลกิจกรรม"]
+  };
+  const logValue = (row, key) => {
+    const value = row?.[key];
+    if (value == null) return "—";
+    if (key === "passed") return value ? "ผ่าน" : "ไม่ผ่าน";
+    if (key === "level") return ["ไม่ผ่าน", "ผ่าน", "ดี", "ดีเยี่ยม"][value] || String(value);
+    return String(value);
+  };
+
+  async function showLog(row, details) {
+    const output = details.querySelector("div");
+    if (!details.open || details.dataset.loaded) return;
+    details.dataset.loaded = "loading";
+    output.textContent = "กำลังโหลดประวัติ…";
+    try {
+      const logs = await read(fetchAllRows(() => sb.from("grade_edit_log").select("id,table_name,student_id,old_row,new_row,created_at")
+        .eq("request_id", row.id), ["created_at", "id"]));
+      const names = new Map(row.students.map(student => [student.id, student.name]));
+      output.innerHTML = logs.length ? "<ul>" + logs.map(log => {
+        const [key, label] = logFields[log.table_name] || [];
+        return `<li>${esc(names.get(log.student_id) || "นักเรียน")} · ${esc(label || "แก้ไขข้อมูล")}
+          <br>${esc(logValue(log.old_row, key))} → ${esc(logValue(log.new_row, key))}
+          <br><span class="meta">${esc(gradeDate(log.created_at, true))}</span></li>`;
+      }).join("") + "</ul>" : '<p class="empty">ไม่มีการแก้ไขที่บันทึกผ่านคำขอนี้</p>';
+    } catch (error) {
+      delete details.dataset.loaded;
+      output.textContent = error.message + " · ปิดและเปิดประวัติเพื่อลองอีกครั้ง";
+    }
+  }
+
+  function renderCard(row) {
+    const mine = row.requested_by === userId;
+    const review = row.status === "รอวิชาการ" && academic || row.status === "รอผอ." && director;
+    const card = document.createElement("article");
+    card.className = "card";
+    const label = row.subject?.name || row.assessment?.name || row.kind;
+    const notes = [
+      ["วิชาการ", row.academic_at, row.academic_by, row.academic_note],
+      ["ผอ.", row.director_at, row.director_by, row.director_note]
+    ].filter(([, at, , note]) => at || note);
+    card.innerHTML = `<h3>${esc(label)}</h3>
+      <p class="meta">ภาคเรียน ${esc(row.term)}/${esc(row.year)} · ${esc(row.kind)} ·
+      <span class="grade-lock-chip ${row.status === "เปิดให้แก้" ? "open" : ""}">${esc(row.status)}</span></p>
+      <p class="meta">ผู้ขอ ${esc(row.names.get(row.requested_by) || "บัญชีบุคลากร")} · ${esc(gradeDate(row.created_at, true))}</p>
+      <p><strong>นักเรียน ${row.students.length} คน</strong></p>
+      <ul>${row.students.map(student => `<li>${esc(student.name)}${student.room ? " · " + esc(student.room) : ""}</li>`).join("")}</ul>
+      <p class="reason"><strong>เหตุผล</strong> ${esc(row.reason)}</p>
+      ${notes.map(([role, at, by, note]) => `<p class="reason"><strong>${esc(role)}</strong>
+        ${esc([row.names.get(by), gradeDate(at, true), note].filter(Boolean).join(" · ") || "พิจารณาแล้ว")}</p>`).join("")}
+      <div class="grade-lock-actions">
+        ${mine ? `<a href="${esc(entryLink(row, row.students))}">ไปหน้ากรอก</a>` : ""}
+        ${mine && pendingGradeRequests.includes(row.status) ? '<button type="button" class="ghost" data-action="withdraw">ถอนคำขอ</button>' : ""}
+        ${mine && row.status === "ส่งกลับ" ? '<button type="button" class="primary" data-action="resubmit">แก้ไขและส่งใหม่</button>' : ""}
+        ${row.status === "เปิดให้แก้" && (mine || academic) ? '<button type="button" class="primary" data-action="finish">แก้เสร็จ</button>' : ""}
+        ${review ? '<button type="button" class="primary" data-action="อนุมัติ">อนุมัติ</button><button type="button" class="ghost" data-action="ส่งกลับ">ส่งกลับ</button><button type="button" class="danger" data-action="ไม่อนุมัติ">ไม่อนุมัติ</button>' : ""}
+      </div>
+      ${row.status === "แก้เสร็จ" && (academic || director) ? '<details><summary>ดูประวัติการแก้คะแนน</summary><div role="status"></div></details>' : ""}`;
+    card.querySelector("details")?.addEventListener("toggle", event => void showLog(row, event.currentTarget));
+    card.addEventListener("click", event => {
+      const button = event.target.closest("button[data-action]");
+      if (button) void act(row, button);
+    });
+    return card;
+  }
+
+  async function candidates(row) {
+    if (row.kind === "วิชา") {
+      return (await getRosterForSubject(row.subject_id)).map(student => ({
+        id:student.id, name:student.name, room:studentRoom(student)
+      }));
+    }
+    if (row.kind === "กิจกรรม/กิจวัตร") {
+      const members = await read(fetchAllRows(() => sb.from("competency_assessment_members")
+        .select("id,student_id,student:students(name)").eq("assessment_id", row.assessment_id)));
+      const placements = await read(getStudentPlacements(row.year, members.map(member => member.student_id)));
+      const byStudent = new Map(placements.map(p => [p.student_id, p]));
+      return members.map(member => ({ id:member.student_id, name:member.student?.name, room:studentRoom(byStudent.get(member.student_id)) }));
+    }
+    const rooms = new Set(row.students.map(student => student.roomKey));
+    const placements = await read(getStudentPlacements(row.year));
+    return placements.filter(p => rooms.has(studentRoomKey(p))).map(p => ({
+      id:p.student_id, name:p.student?.name, room:studentRoom(p)
+    }));
+  }
+
+  async function done(error, message) {
+    if (error) { setError(error); return; }
+    $("message").textContent = message;
+    await load(true);
+  }
+
+  async function act(row, button) {
+    if (runningAction) return;
+    const action = button.dataset.action;
+    runningAction = true;
+    setError(null);
+    try {
+      if (action === "withdraw" || action === "finish") {
+        const finish = action === "finish";
+        await confirmGradeAction(button, finish ? "finish_grade_edit_request" : "withdraw_grade_edit_request",
+          row.id, finish ? finishGradeRequestConfirm : withdrawGradeRequestConfirm,
+          error => done(error, finish ? "ปิดคำขอแล้ว" : "ถอนคำขอแล้ว"));
+      } else if (action === "resubmit") {
+        button.disabled = true;
+        $("message").textContent = "กำลังโหลดรายชื่อนักเรียน…";
+        const eligible = await candidates(row);
+        $("message").textContent = "";
+        editGradeRequestForm({ students:eligible, request:row, success:() => done(null, "ส่งคำขอใหม่แล้ว รอฝ่ายวิชาการ") });
+      } else if (action === "อนุมัติ") {
+        if (!await window.crsAskConfirm({
+          title:"อนุมัติคำขอแก้คะแนน", okLabel:"อนุมัติ", danger:false,
+          message:row.status === "รอวิชาการ" ? "คำขอนี้จะเข้าสู่คิว ผอ." : "ครูจะแก้คะแนนของนักเรียนตามรายการในคำขอนี้ได้"
+        })) return;
+        button.disabled = true;
+        $("message").textContent = "กำลังบันทึกผลพิจารณา…";
+        const next = await gradeRpc("decide_grade_edit_request", { p_id:row.id, p_decision:action, p_note:null });
+        await done(null, "อนุมัติแล้ว · " + next);
+      } else {
+        decideGradeRequestForm(row, action, () => done(null, action + "คำขอแล้ว"));
+      }
+    } catch (error) {
+      $("message").textContent = "";
+      setError(error);
+    } finally {
+      runningAction = false;
+      button.disabled = false;
+      if (refreshAfterAction) { refreshAfterAction = false; void load(); }
+    }
+  }
+
+  async function load(force = false) {
+    if (runningAction && !force) { refreshAfterAction = true; return; }
+    const token = ++sequence, tab = selected;
+    $("list").setAttribute("aria-busy", "true");
+    if (force || !$("list").children.length) $("list").innerHTML = '<p class="card hint" role="status">กำลังโหลดคำขอ…</p>';
+    try {
+      const [rows, counts] = await Promise.all([loadRows(tab), gradeQueueCounts().catch(() => null)]);
+      if (token !== sequence) return;
+      const count = counts ? [
+        academic && counts.academic > 0 ? `รอวิชาการ ${counts.academic} รายการ` : "",
+        director && counts.director > 0 ? `รอ ผอ. ${counts.director} รายการ` : "",
+        counts.mine_returned > 0 ? `คำขอถูกส่งกลับ ${counts.mine_returned} รายการ` : "",
+        counts.mine_open > 0 ? `ได้รับอนุมัติให้แก้ ${counts.mine_open} รายการ` : ""
+      ].filter(Boolean).join(" · ") : "";
+      if ($("counts").textContent !== count) $("counts").textContent = count;
+      $("list").replaceChildren(...rows.map(renderCard));
+      if (!rows.length) $("list").innerHTML = '<p class="card empty">ไม่มีคำขอในคิวนี้</p>';
+    } catch (error) {
+      if (token !== sequence) return;
+      $("list").replaceChildren();
+      setError(error);
+    } finally { if (token === sequence) $("list").setAttribute("aria-busy", "false"); }
+  }
+
+  $("retry").onclick = () => { setError(null); void load(true); };
+  selectTab(selected);
+  watchGradeRequests("grade-edit-requests-page", load);
+}
+</script>
+</body>
+</html>

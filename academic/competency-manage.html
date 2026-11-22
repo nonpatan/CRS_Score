@@ -231,7 +231,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261120-1"></script>
+    <script src="../app-shell.js?v=20261122-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -390,6 +390,7 @@
 
 <script type="module">
 import { isRegularStudent, sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment, GRADE_ORDER } from "../supabase-client.js?v=20261121-2";
+import { gradeLockError, gradeRpc } from "./grade-lock.js?v=2";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -880,7 +881,16 @@ function renderStudents(){if(!current)return;const grade=$("filter-grade").value
 $("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,termChoice=$("f-term").value;const sourceType=$("f-type").value;if(!name||!year||!termChoice){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const term=termChoice==="all"?null:termChoice;const ownerId=isAdmin?($("f-owner").value||session.user.id):session.user.id;const payload={name,year,term,source_type:sourceType,owner_id:ownerId,activity_category:sourceType==="กิจกรรม"?($("f-activity-category").value||null):null};if(!activityCategories.length)delete payload.activity_category;const {data,error}=await sb.from("competency_assessments").insert(payload).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year)){assessmentYears.push(year);refreshAssessmentYearFilter();}$("f-name").value="";$("f-activity-category").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
 $("sel-competency").onchange=renderElements;
 $("btn-add-target").onclick=async()=>{if(!canEdit())return;const chosen=[...$("element-options").querySelectorAll("[data-element]:checked")];if(!chosen.length){toast("เลือกองค์ประกอบก่อน",false);return;}const start=targets.length+1;const rows=chosen.map((c,i)=>({assessment_id:current.id,competency_id:$("sel-competency").value,element_id:c.dataset.element,max_score:Number($("element-options").querySelector("[data-score='"+c.dataset.element+"']").value),seq:start+i}));if(rows.some(r=>!r.max_score||r.max_score<=0)){toast("คะแนนเต็มต้องมากกว่า 0",false);return;}const {error}=await sb.from("competency_assessment_targets").insert(rows);if(error){toast("บันทึกไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มองค์ประกอบแล้ว");};
-async function removeTarget(t){if(!await window.crsAskConfirm({title:"ลบองค์ประกอบ",message:"คะแนนที่เคยกรอกขององค์ประกอบนี้จะถูกลบด้วย",okLabel:"ลบองค์ประกอบ"}))return;const {error}=await sb.from("competency_assessment_targets").delete().eq("id",t.id);if(error){toast("ลบไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("ลบแล้ว");}
+async function allowAssessmentStructureDelete(assessment) {
+  try {
+    const status = await gradeRpc("assessment_lock_status", { p_assessment_id:assessment.id });
+    if (!status) throw new Error("ไม่พบสถานะล็อกของรายการนี้");
+    if (!status.locked) return true;
+    toast("ภาคเรียนนี้อนุมัติผลแล้ว จึงลบโครงสร้างรายการประเมินไม่ได้", false);
+  } catch (error) { toast("ตรวจสถานะล็อกก่อนลบไม่สำเร็จ · " + error.message, false); }
+  return false;
+}
+async function removeTarget(t){const assessment=current;if(!await window.crsAskConfirm({title:"ลบองค์ประกอบ",message:"คะแนนที่เคยกรอกขององค์ประกอบนี้จะถูกลบด้วย",okLabel:"ลบองค์ประกอบ"}))return;if(!await allowAssessmentStructureDelete(assessment)||current!==assessment)return;const {error}=await sb.from("competency_assessment_targets").delete().eq("id",t.id);if(error){toast(gradeLockError(error) || ("ลบไม่สำเร็จ: "+error.message),false);return;}await selectAssessment(current.id);toast("ลบแล้ว");}
 let editingTarget=null;
 function openTargetModal(target){editingTarget=target;$("target-modal-label").textContent=(target.competency&&target.competency.name||"สมรรถนะหลัก")+" · "+(target.element&&target.element.name||"องค์ประกอบ");$("target-modal-max").value=target.max_score;$("target-overlay").classList.add("show");setTimeout(()=>$("target-modal-max").focus(),0);}
 function closeTargetModal(){$("target-overlay").classList.remove("show");editingTarget=null;}
@@ -965,8 +975,9 @@ async function removeAssessment(assessment){
     okLabel:"ลบรายการ"
   });
   if(!confirmed){toast("ยกเลิกการลบรายการ");return;}
+  if (!await allowAssessmentStructureDelete(assessment)) return;
   const {error}=await sb.from("competency_assessments").delete().eq("id",assessment.id);
-  if(error){toast("ลบรายการไม่สำเร็จ: "+error.message,false);return;}
+  if(error){toast(gradeLockError(error) || ("ลบรายการไม่สำเร็จ: "+error.message),false);return;}
   assessments=assessments.filter(item=>item.id!==assessment.id);
   if(current&&current.id===assessment.id){current=null;targets=[];members=[];students=[];assessmentTeachers=[];$("detail").style.display="none";}
   renderAssessments(); toast("ลบรายการและข้อมูลที่เกี่ยวข้องแล้ว");
@@ -1041,7 +1052,9 @@ async function removeMember(m){
             await selectAssessment(assessment.id);return;
           }
         }catch(error){
-          toast("เอาออกไม่สำเร็จขณะลบ"+step.label+": "+error.message+progress+" · ลองกดเอาออกอีกครั้ง",false);
+          const lockedMessage=gradeLockError(error);
+          toast(lockedMessage ? lockedMessage+progress
+            : "เอาออกไม่สำเร็จขณะลบ"+step.label+": "+error.message+progress+" · ลองกดเอาออกอีกครั้ง",false);
           await selectAssessment(assessment.id);return;
         }
         completed.push(step.label);

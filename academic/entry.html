@@ -186,7 +186,7 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 <div class="nav">
 <a href="entry.html">กรอกคะแนน</a><a href="competency-manage.html">กำหนดกิจกรรม/กิจวัตร</a><a href="competency-core.html">กำหนดสมรรถนะหลัก</a><a href="competency-entry.html">กรอกคะแนนกิจกรรม/กิจวัตร</a><a href="attendance.html">เช็คชื่อ</a><a href="summary.html">สรุปผลการเรียน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="students.html">นักเรียน</a><a href="retention.html">เรียนซ้ำชั้น</a><a href="warning.html">เฝ้าระวัง มส.</a><a href="rollover.html">ขึ้นปีใหม่</a><a href="#" id="btn-signout">ออกจากระบบ</a>
 </div>
-<script src="../app-shell.js?v=20261120-1"></script>
+<script src="../app-shell.js?v=20261122-1"></script>
 </header>
 <main class="academic-content">
 <section id="subjects-view">
@@ -218,6 +218,8 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, fetchAllRowsByIds, ID_CHUNK, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261121-2";
 const $ = id => document.getElementById(id);
 function escapeHtml(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=2";
+
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login
@@ -407,22 +409,93 @@ $("filter-year").addEventListener("change", () => { setActiveYear($("filter-year
 $("filter-term").addEventListener("change", renderSubjects);
 $("show-all").addEventListener("click", () => { showAll = true; renderSubjects(); });
 function fillDesktopSubjectSelect() { const list = filterSubjects(); $("desktop-subject-select").innerHTML = list.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(subjectLabel(s))}</option>`).join(""); $("desktop-subject-select").value = currentSubject.id; }
+let entryLock = {};
+
+function entryScoreLock() {
+  return isPrimaryEntry() && entryHalf === "กลางปี" ? entryLock.mid : entryLock.full;
+}
+
+async function loadEntryLock(subject) {
+  const scope = { year:subject.year, kind:"วิชา", target:subject.id };
+  const load = (term, mid = false) => readGradeLock({ ...scope, term }, { mid, userId:session.user.id })
+    .catch(error => ({ error:error.message }));
+  const full = load(subject.term || "2");
+  if (subject.term) return { full:await full };
+  const [mid, annual] = await Promise.all([load("1", true), full]);
+  return { mid, full:annual };
+}
+
+async function refreshEntryLock(error, success) {
+  if (error) { showToast(gradeLockError(error) || error.message, false); }
+  if (!currentSubject) return;
+  const id = currentSubject.id;
+  const status = await loadEntryLock(currentSubject);
+  if (currentSubject?.id !== id) return;
+  entryLock = status;
+  applyEntryLock();
+  renderSaveBar();
+  if (!error && success) showToast(success, true);
+}
+
+function applyEntryLock() {
+  const state = entryScoreLock();
+  if (!state?.locked && !state?.error && !document.querySelector(".grade-lock-banner")) return;
+  const userId = session.user.id;
+  const actions = { userId, canFinishRepair:canEdit(currentSubject), academic:isAdminUser,
+    onChange:refreshEntryLock, canClose:() => !busy && (!dirtyCount() ||
+      (showToast("บันทึกคะแนนที่แก้ก่อนปิดสิทธิ์", false), false)) };
+  for (const root of [$("subject-view"), $("entry-view")]) {
+    renderGradeLockBanner(root, state, visibleStudents(), { ...actions, canRequest:canEdit(currentSubject) });
+  }
+  for (const input of document.querySelectorAll("[data-score-key]")) {
+    const key = input.dataset.scoreKey, studentId = key.split(":").at(-1);
+    const locked = gradeRowLocked(state, studentId);
+    if (locked) {
+      const saved = inputOriginal.get(key) ?? "";
+      inputNext.set(key, saved);
+      input.value = saved;
+    }
+    input.readOnly = locked;
+    input.toggleAttribute("data-grade-readonly", locked);
+    if (locked) input.setAttribute("aria-description", "คะแนนถูกล็อกหลังอนุมัติผล");
+    else input.removeAttribute("aria-description");
+    const row = input.closest("tr,.student-row");
+    renderGradeLockRow(row.querySelector(".student-name-cell") || row.firstElementChild, state, studentId, actions);
+  }
+  const remarkStudents = new Map(remarkRecords.map(row => [row.id, row.student_id]));
+  for (const button of document.querySelectorAll("[data-add-remark],[data-remove-remark]")) {
+    const studentId = button.dataset.addRemark || remarkStudents.get(button.dataset.removeRemark);
+    button.disabled = gradeRowLocked(entryLock.full, studentId);
+    button.title = button.disabled ? "ภาคเรียนนี้อนุมัติผลแล้ว" : "";
+  }
+  for (const button of document.querySelectorAll("#toggle-exam")) {
+    button.disabled = !isPrimaryEntry() && Boolean(state?.locked);
+    button.title = button.disabled ? "ภาคเรียนนี้อนุมัติผลแล้ว จึงเปลี่ยนสถานะคะแนนสอบไม่ได้" : "";
+    button.toggleAttribute("data-grade-readonly", button.disabled);
+  }
+  updateInputStyles();
+}
+
 async function openSubject(id, push = true) {
   if (!await allowLeave()) return; const subject = subjectById(id); if (!canEdit(subject)) { showToast("คุณไม่ใช่เจ้าของวิชานี้", false); return; }
   busy = true;
   try {
-    const [data, roster, remarksResult] = await Promise.all([
+    const [data, roster, remarksResult, lock] = await Promise.all([
       loadEntrySubjectData(id), getRosterForSubject(id),
-      fetchAllRows(() => sb.from("remarks").select("id,student_id,reason,code,student:student_id(id,name,classroom,grade_level)").eq("subject_id",id).eq("code","ร."))
+      fetchAllRows(() => sb.from("remarks").select("id,student_id,reason,code,student:student_id(id,name,classroom,grade_level)").eq("subject_id",id).eq("code","ร.")),
+      loadEntryLock(subject)
     ]);
     if (remarksResult.error) throw new Error(remarksResult.error.message);
-    currentSubject = data.subject; subjectData = data; students = roster; currentExamScores = data.examScores || [];
+    entryLock = lock; currentSubject = data.subject; subjectData = data; students = roster; currentExamScores = data.examScores || [];
     currentGradeWeight = gradeWeights.find(
       row => row.year === currentSubject.year && row.level === currentSubject.level
     ) || null;
     entryHalf = halfForSubject(currentSubject);
     roomFilter = ""; tab = "วิชา"; selection = null; remarkOnly = false; examDetailsExpanded = false; remarkRecords = remarksResult.data || []; resetInputs(); fillDesktopSubjectSelect();
     const params = new URLSearchParams(location.search);
+    if (!push && params.get("subject") === id && isPrimaryEntry() && ["กลางปี", "ปลายปี"].includes(params.get("half"))) {
+      entryHalf = params.get("half");
+    }
     const requestedCollection = !push && params.get("subject") === id ? params.get("collection") : null;
     const action = nextEntryAction(progress());
     if (isTableMode() && !requestedCollection && ["collection","view"].includes(action.type)) {
@@ -463,6 +536,7 @@ function renderWorkspace() {
   renderTree(); renderRightPane(); syncTreeVisibility();
   if (view === "entry") renderMobileEntry();
   if (tab === "สอบ") applyRemarkFilter();
+  applyEntryLock();
   renderSaveBar();
 }
 async function changeEntryHalf(half) {
@@ -871,13 +945,14 @@ document.querySelector("main").addEventListener("click", event => {
   const more = event.target.closest("[data-exam-more]"); if (more) { examDetailsExpanded = !examDetailsExpanded; const status = more.closest(".exam-status"); status.querySelector(".status-detail").hidden = !examDetailsExpanded; more.setAttribute("aria-expanded", String(examDetailsExpanded)); more.textContent = examDetailsExpanded ? "ย่อ" : "อ่านเพิ่ม"; }
 });
 async function addRemark() {
-  if (remarkSubmitting || !remarkDialogStudent) return;
+  if (remarkSubmitting || !remarkDialogStudent || gradeRowLocked(entryLock.full, remarkDialogStudent.id)) return;
   const lines = remarkDialogLines();
   if (!lines.length) { $("remark-error").textContent = "ติ๊กงานที่ค้างอย่างน้อย 1 รายการ หรือกรอกหมายเหตุ"; $("remark-error").hidden = false; $("remark-note").focus(); return; }
   const student = remarkDialogStudent, reason = lines.join("\n");
   remarkSubmitting = true; $("remark-submit").disabled = true;
   try {
     const { data, error } = await sb.from("remarks").insert({ subject_id:currentSubject.id, student_id:student.id, code:"ร.", reason }).select("id,student_id,reason,code");
+    if (gradeLockError(error)) { await refreshEntryLock(error); return; }
     if (error || data?.length !== 1) { showToast("บันทึก ร. ไม่สำเร็จ: " + (error?.message || "กรุณาตรวจสิทธิ์วิชา"), false); return; }
     remarkRecords.push({ ...data[0], student }); closeRemarkDialog(false); renderWorkspace();
     [...document.querySelectorAll(`[data-student-id="${CSS.escape(student.id)}"] [data-remove-remark]`)].find(button => button.offsetParent !== null)?.focus();
@@ -891,6 +966,7 @@ async function removeRemark(id) {
   const message = (student?.student_no || "—") + " · " + (student?.name || "นักเรียนที่ไม่มีข้อมูลแล้ว") + "\n" + remarkReasonLines(r.reason).map(line => "• " + line).join("\n") + "\nถอดแล้ววิชานี้จะกลับไปคิดเกรดตามคะแนนปกติ";
   if (!await window.crsAskConfirm({ title:"ถอดผลการเรียน ร.", message, okLabel:"ถอด ร." })) return;
   const { data, error } = await sb.from("remarks").delete().eq("id",id).select("id");
+  if (gradeLockError(error)) { await refreshEntryLock(error); return; }
   if (error || data?.length !== 1) { showToast("ถอด ร. ไม่สำเร็จ", false); return; }
   remarkRecords = remarkRecords.filter(row => row.id !== id); renderWorkspace(); showToast("ถอด ร. แล้ว", true);
 }
@@ -995,6 +1071,7 @@ async function saveScores() {
     for (let start = 0; start < rows.length; start += 1000) {
       const chunk = rows.slice(start, start + 1000);
       const result = await sb.from(table).upsert(chunk,{ onConflict:exam ? "subject_id,student_id,half" : "student_id,collection_id" }).select("id");
+      if (gradeLockError(result.error)) throw result.error;
       if (result.error || result.data?.length !== chunk.length) {
         success = false;
         reason = result.error?.message || "บันทึกได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา";
@@ -1015,6 +1092,7 @@ async function saveScores() {
           }
           // scale-ok: แบ่งรหัสนักเรียนสำหรับลบผลทีละไม่เกิน ID_CHUNK
           const result = await query.in("student_id", chunk).select("id");
+          if (gradeLockError(result.error)) throw result.error;
           if (result.error || result.data?.length !== chunk.length) {
             success = false;
             reason += " ลบได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา";
@@ -1028,6 +1106,18 @@ async function saveScores() {
     resetInputs(); renderWorkspace();
     showToast(success ? "บันทึกแล้ว " + (upserts.length+deletes.length) + " ช่อง" : "บันทึกได้ไม่ครบ กรุณาตรวจสิทธิ์วิชา: " + reason, success);
   } catch (error) {
+    if (gradeLockError(error)) {
+      // อ่านค่าที่เขียนสำเร็จในก้อนก่อนหน้า แล้วคงข้อมูลที่รอบนี้ยังแก้ได้
+      const draft = new Map([...inputNext].filter(([key, value]) => value !== (inputOriginal.get(key) ?? "")));
+      try {
+        await reloadTouchedScores([...upserts.map(row => row.key), ...deletes], exam, subjectId);
+        resetInputs(); renderWorkspace();
+        for (const [key, value] of draft) inputNext.set(key, value);
+        for (const input of document.querySelectorAll("[data-score-key]")) input.value = inputNext.get(input.dataset.scoreKey) ?? "";
+      } catch { /* คงค่าที่แก้ไว้เมื่อโหลดคะแนนจริงไม่สำเร็จ */ }
+      await refreshEntryLock(error);
+      return;
+    }
     try { await reloadTouchedScores([...upserts.map(row => row.key), ...deletes], exam, subjectId); resetInputs(); renderWorkspace(); }
     catch (reloadError) { showToast("โหลดคะแนนหลังบันทึกไม่สำเร็จ: " + reloadError.message, false); return; }
     showToast("บันทึกไม่สำเร็จ: " + error.message, false);
@@ -1084,7 +1174,16 @@ async function deleteCollection(id) {
   if (countError) { showToast("ตรวจสอบคะแนนก่อนลบไม่สำเร็จ: " + countError.message,false); return; }
   const agreed = await askConfirm({ title:"ลบ" + label, message:count > 0 ? label + " มีคะแนนของนักเรียน " + count + " คน คะแนนทั้งหมดจะหายและกู้คืนไม่ได้" : label + " ยังไม่มีคะแนนนักเรียน", requireText:count > 0 ? label : null, okLabel:"ลบ" + label });
   if (!agreed) return;
+  const subject = currentSubject;
+  const status = await loadEntryLock(subject);
+  if (currentSubject !== subject) return;
+  const lock = isPrimaryEntry() && (target.half ?? "กลางปี") === "กลางปี" ? status.mid : status.full;
+  if (lock?.error || lock?.locked) {
+    showToast(lock.error || "ภาคเรียนนี้อนุมัติผลแล้ว จึงลบครั้งเก็บคะแนนไม่ได้", false);
+    return;
+  }
   const { data:deleted,error } = await sb.from("collections").delete().eq("id",id).select("id");
+  if (gradeLockError(error)) { await refreshEntryLock(error); return; }
   if (error || !deleted?.length) { showToast("ลบครั้งที่ไม่สำเร็จ: " + (error?.message || "บัญชีนี้ไม่มีสิทธิ์ลบ"),false); return; }
   indicator.collections = indicator.collections.filter(c => c.id !== id);
   if (!await resequenceCollections(indicator)) { subjectData = await loadEntrySubjectData(currentSubject.id); renderWorkspace(); return; }
@@ -1115,6 +1214,7 @@ async function toggleExam() {
   if (currentSubject.id !== subjectId) return;
   if (!await window.crsAskConfirm({ title:closed ? "ยกเลิกการปิดคะแนนสอบ" : "ปิดคะแนนสอบวิชานี้", message, okLabel:closed ? "ยกเลิกการปิด" : "ปิดคะแนนสอบ", danger:!closed })) return;
   const {data,error} = await sb.rpc("set_subject_exam_closed",{p_subject_id:subjectId,p_closed:!closed});
+  if (gradeLockError(error)) { await refreshEntryLock(error); return; }
   if (error) { showToast("เปลี่ยนสถานะคะแนนสอบไม่สำเร็จ: " + error.message,false); return; }
   clearMyExamCloseCache();
   currentSubject.exam_closed_at = closed ? null : data; const source = subjectById(subjectId); if (source) source.exam_closed_at = currentSubject.exam_closed_at; renderWorkspace(); showToast(closed ? "ยกเลิกการปิดคะแนนสอบแล้ว" : "ปิดคะแนนสอบแล้ว",true);

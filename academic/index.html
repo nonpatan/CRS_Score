@@ -352,7 +352,7 @@
       <a href="retention.html">เรียนซ้ำชั้น</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261120-1"></script>
+    <script src="../app-shell.js?v=20261122-1"></script>
   </header>
 
   <main class="academic-content">
@@ -362,6 +362,11 @@
       <select class="year-chip" id="filter-year" aria-label="ปีการศึกษา"><option value="">กำลังโหลด…</option></select>
     </div>
 
+    <section class="card" id="grade-queue-card" hidden aria-labelledby="grade-queue-heading">
+      <h2 id="grade-queue-heading">คำขอแก้คะแนน</h2>
+      <p id="grade-queue-status" role="status" aria-atomic="true"></p>
+      <a href="grade-edit-requests.html?tab=academic">ไปที่คิวฝ่ายวิชาการ →</a>
+    </section>
     <div id="content" hidden>
       <section class="card panel" id="my-alerts" aria-labelledby="my-alerts-title">
         <div class="panel-head"><h2 class="panel-title" id="my-alerts-title"><svg class="symbol" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4H9zM7 5H5v16h14V5h-2M9 12h6M9 16h4"/></svg>ต้องจัดการ</h2><span class="alert-count" id="my-alerts-count">—</span></div>
@@ -431,11 +436,28 @@ import {
   themeWorkDaysLeft, THEME_WORK_REMINDER_LEAD_DAYS
 } from "../supabase-client.js?v=20261121-2";
 
+import { gradeQueueCounts, watchGradeRequests } from "./grade-lock.js?v=2";
+
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้
 } else {
 document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
+
+async function refreshGradeQueue() {
+  try {
+    const counts = await gradeQueueCounts();
+    const card = document.getElementById("grade-queue-card");
+    const status = document.getElementById("grade-queue-status");
+    card.hidden = !(counts?.academic > 0 || counts?.open_total > 0);
+    const message = [counts?.academic > 0 ? `รอฝ่ายวิชาการ ${counts.academic} รายการ` : "",
+      counts?.open_total > 0 ? `เปิดให้แก้อยู่ ${counts.open_total} รายการ` : ""].filter(Boolean).join(" · ");
+    if (status.textContent !== message) status.textContent = message;
+    card.querySelector("a").href = counts?.academic > 0 ? "grade-edit-requests.html?tab=academic" : "grade-edit-requests.html?tab=open";
+  } catch { /* ตัวนับคำขอขัดข้องยังใช้ภาพรวมได้ */ }
+}
+void refreshGradeQueue();
+watchGradeRequests("academic-grade-edit-requests", refreshGradeQueue);
 
 const elYear     = document.getElementById("filter-year");
 const elScope    = document.getElementById("scope-note");

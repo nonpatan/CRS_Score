@@ -11,7 +11,7 @@
 @media(max-width:400px){.card{padding:14px}.save-bar{padding-left:12px;padding-right:12px}.save-bar #save{min-width:86px;padding-inline:10px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style><link rel="stylesheet" href="../app-shell.css?v=20261003-1"></head>
-<body><a class="skip" href="#main">ข้ามไปเนื้อหา</a><div class="wrap"><header><h1>ประเมินคุณลักษณะ</h1><p>ให้ระดับทีละคน อ่านคำอธิบายและประเมินครบทุกข้อ</p><div class="nav"><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261120-1"></script></header>
+<body><a class="skip" href="#main">ข้ามไปเนื้อหา</a><div class="wrap"><header><h1>ประเมินคุณลักษณะ</h1><p>ให้ระดับทีละคน อ่านคำอธิบายและประเมินครบทุกข้อ</p><div class="nav"><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261122-1"></script></header>
 <main id="main" class="academic-content">
 <section class="card" aria-labelledby="filters-title"><h2 id="filters-title">เลือกห้องและช่วงประเมิน</h2><div class="filters">
 <div class="field"><label for="year">ปีการศึกษา</label><select id="year" disabled></select></div>
@@ -35,16 +35,40 @@
 </main></div><script type="module">
 import {sb,requireAuth,signOut,getProfile,checkDepartment,isAcademicHead,getAcademicYears,getActiveYear,
   fetchAllRows,isRegularStudent,isAutoPresentStudent,GRADE_ORDER} from "../supabase-client.js?v=20261121-2";
+import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=2";
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const key=(student,trait)=>student+"|"+trait;
 const roomKey=r=>r.grade_level+"|"+r.classroom;
 let traits=[],placements=[],rooms=[],roster=[],original=new Map(),values=new Map(),busy=false,ready=false,manage=false,myStaffId=null;
+let traitLock = null, gradeAcademic = false;
 let scope={year:"",room:"",term:"1"},studentIndex=0,initialized=false,retryYear=true,undoFill=null;
 const expandedDescriptions=new Set(),desktop=matchMedia("(min-width:1024px)");
 const session=await requireAuth();
+const gradeLink=new URLSearchParams(location.search);
+let initializedRoomLink=false;
 function currentStudent(){return roster[studentIndex]||null;}
-function changes(studentId=null){return [...values].filter(([k,v])=>v!==original.get(k)&&(!studentId||k.startsWith(studentId+"|")));}
+function changes(studentId=null){return [...values].filter(([k,v])=>v!==original.get(k)&&(!studentId||k.startsWith(studentId+"|"))&&!gradeRowLocked(traitLock,k.split("|")[0]));}
+function readTraitLock(period) {
+  return readGradeLock({ year:period.year, term:period.term, kind:"คุณลักษณะ", target:null }, { userId:session.user.id })
+    .catch(error => ({ error:error.message }));
+}
+async function refreshTraitLock(error, success) {
+  if (error) message(gradeLockError(error) || error.message, true);
+  const period = scope;
+  const status = await readTraitLock(period);
+  if (scope !== period) return;
+  traitLock = status;
+  renderStudent();
+  if (!error && success) message(success);
+}
+function applyTraitLock(student) {
+  const actions = { userId:session.user.id, academic:gradeAcademic, onChange:refreshTraitLock,
+    canClose:() => !busy && (!changes().length || (message("บันทึกคุณลักษณะที่แก้ก่อนปิดสิทธิ์", true), false)) };
+  renderGradeLockBanner(el("editor"), traitLock, roster.map(p => ({ id:p.student_id, name:p.student?.name })),
+    { ...actions, canRequest:true });
+  renderGradeLockRow(el("student-meta").parentElement, student ? traitLock : null, student?.student_id, actions);
+}
 function studentProgress(student){const count=traits.filter(t=>values.has(key(student.student_id,t.id))).length;return {count,complete:traits.length>0&&count===traits.length,text:count===0?"ยังไม่เริ่ม":count===traits.length?`ครบ ${count}/${traits.length} ✓`:`${count}/${traits.length}`};}
 function updateControls(){
   document.querySelectorAll("main button,main select,main input").forEach(n=>n.disabled=busy);
@@ -52,7 +76,15 @@ function updateControls(){
   el("room").disabled=busy||!rooms.length;el("year").disabled=busy||!initialized;el("term").disabled=busy||!ready;
   for(const id of ["fill","fill-person"])el(id).disabled=busy||!ready||!roster.length||!traits.length;
   const student=currentStudent();
-  if(student)el("fill-person").disabled=busy||traits.every(t=>values.has(key(student.student_id,t.id)));
+  if(student)el("fill-person").disabled=busy||gradeRowLocked(traitLock,student.student_id)||traits.every(t=>values.has(key(student.student_id,t.id)));
+  if (traitLock?.locked) {
+    el("fill").disabled ||= !roster.some(p => !gradeRowLocked(traitLock,p.student_id));
+    el("grid").querySelectorAll('input[type="radio"]').forEach(input => {
+      const locked=gradeRowLocked(traitLock,input.dataset.student);
+      input.disabled=busy||locked;
+      input.toggleAttribute("data-grade-readonly",locked);
+    });
+  }
   el("previous").disabled=busy||!ready||studentIndex===0;el("next").disabled=busy||!ready||studentIndex>=roster.length-1;
   el("student-picker").disabled=busy||!ready||!roster.length;
   el("save").disabled=busy||!ready||!changes().length;
@@ -89,6 +121,7 @@ function renderStudent(focus=false){
     return `<fieldset class="trait-item"><legend>${i+1}. ${esc(t.name)} <span id="dirty-${i}" class="dirty-tag" hidden>ยังไม่บันทึก</span></legend><div class="description-row"><p id="description-${i}" class="description-text${expanded?"":" collapsed"}">${esc(t.description||"ไม่มีคำอธิบายเพิ่มเติม")}</p><button id="read-more-${i}" type="button" class="read-more" data-description="${i}" aria-controls="description-${i}" aria-expanded="${expanded}">${expanded?"ย่อ":"อ่านต่อ"}</button></div><div class="level-options">${[3,2,1,0].map(n=>`<label class="level-choice"><input type="radio" id="level-${studentIndex}-${i}-${n}" name="trait-${i}" value="${n}" data-student="${esc(student.student_id)}" data-trait="${esc(t.id)}" aria-describedby="description-${i}" ${values.get(k)===n?"checked":""}><span class="choice-text">${["ไม่ผ่าน","ผ่าน","ดี","ดีเยี่ยม"][n]}<span class="tick" aria-hidden="true">✓</span></span></label>`).join("")}</div></fieldset>`;
   }).join(""):'<p class="empty">ยังไม่มีนักเรียนปกติที่กำลังศึกษาในห้องนี้ · ตรวจรายชื่อและประเภทนักเรียนที่ฝ่ายวิชาการ</p>';
   el("undo-fill").hidden=!undoFill||undoFill.studentId!==student?.student_id;
+  applyTraitLock(student);
   updateProgress();requestAnimationFrame(updateDescriptionButtons);
   if(focus){if(desktop.matches)el("roster-list").querySelector('[aria-current="true"]')?.scrollIntoView({block:"nearest"});el("student-heading").focus({preventScroll:true});el("student-heading").scrollIntoView({block:"start"});}
 }
@@ -100,6 +133,7 @@ async function loadRoom(){
   roster=inRoom.filter(p=>isRegularStudent(p.student)).sort((a,b)=>String(a.student?.student_no||"").localeCompare(String(b.student?.student_no||""),"th",{numeric:true}));
   // อ่านผลทั้งห้องครั้งเดียว ไม่อ่านเพิ่มเมื่อเปลี่ยนคนหรือขยายคำอธิบาย
   if(roster.length){const result=await fetchAllRows(()=>sb.from("student_trait_results").select("id,student_id,trait_id,level").eq("year",scope.year).eq("term",scope.term).in("student_id",roster.map(p=>p.student_id)));if(result.error)throw result.error;for(const r of result.data||[])original.set(key(r.student_id,r.trait_id),r.level);} // scale-ok: เฉพาะรายชื่อนักเรียนห้องที่เลือก
+  traitLock=await readTraitLock(scope);
   values=new Map(original);ready=true;el("editor").hidden=false;
   el("context-summary").textContent=`${room.grade_level}/${room.classroom} · ${el("term").selectedOptions[0].textContent}`;
   el("special-count").textContent=`นักเรียนพิเศษที่ระบบกำหนดให้ ${inRoom.filter(p=>isAutoPresentStudent(p.student)).length} คน · ไม่ต้องประเมินในหน้านี้`;
@@ -115,6 +149,11 @@ async function loadYear(){
   const own=new Set((h.data||[]).map(roomKey));
   rooms=[...new Map([...placements,...(h.data||[])].filter(p=>(p.grade_level?.startsWith("ป.")||p.grade_level?.startsWith("ม."))&&(manage||own.has(roomKey(p)))).map(p=>[roomKey(p),{grade_level:p.grade_level,classroom:p.classroom}])).values()].sort((a,b)=>GRADE_ORDER.indexOf(a.grade_level)-GRADE_ORDER.indexOf(b.grade_level)||String(a.classroom).localeCompare(String(b.classroom),"th",{numeric:true}));
   el("room").innerHTML=rooms.map(r=>`<option value="${esc(roomKey(r))}">${esc(r.grade_level)}/${esc(r.classroom)}</option>`).join("");
+  if (!initializedRoomLink) {
+    initializedRoomLink=true;
+    const linkedRoom=gradeLink.get("room");
+    if (rooms.some(room=>roomKey(room)===linkedRoom)) el("room").value=linkedRoom;
+  }
   original=new Map();values=new Map();scope={year,room:el("room").value,term:el("term").value};
   if(rooms.length)await loadRoom();else el("access").textContent=manage?"ปีนี้ยังไม่มีห้องประถมหรือมัธยม · ตรวจการจัดห้องที่ฝ่ายวิชาการ":"หน้านี้สำหรับครูประจำชั้น";
 }
@@ -131,7 +170,7 @@ async function saveChanges(studentId=null){
     const remaining=changed.filter(([k,v])=>original.get(k)!==v);undoFill=null;el("undo-fill").hidden=true;
     if(remaining.length)throw new Error("บันทึกได้ "+(changed.length-remaining.length)+" ช่อง ยังมีช่องค้าง กรุณาตรวจสิทธิ์แล้วลองอีกครั้ง");
     message(`บันทึกแล้ว ${changed.length} ช่อง · ${new Set(payload.map(r=>r.student_id)).size} คน`);return true;
-  }catch(error){message("บันทึกไม่สำเร็จ: "+error.message+" · ระดับที่แก้ยังอยู่ กดบันทึกหรือเปลี่ยนคนอีกครั้งเพื่อลองใหม่",true);return false;}
+  }catch(error){if(gradeLockError(error))await refreshTraitLock(error);else message("บันทึกไม่สำเร็จ: "+error.message+" · ระดับที่แก้ยังอยู่ กดบันทึกหรือเปลี่ยนคนอีกครั้งเพื่อลองใหม่",true);return false;}
   finally{updateProgress();lock(false);}
 }
 async function selectStudent(index){
@@ -139,7 +178,7 @@ async function selectStudent(index){
   if(!await saveChanges(currentStudent().student_id))return false;
   studentIndex=index;undoFill=null;renderStudent(true);return true;
 }
-function fillEmpty(studentIds){const filled=[];for(const p of roster.filter(p=>studentIds.has(p.student_id)))for(const t of traits){const k=key(p.student_id,t.id);if(!values.has(k)){values.set(k,2);filled.push(k);}}return filled;}
+function fillEmpty(studentIds){const filled=[];for(const p of roster.filter(p=>studentIds.has(p.student_id)))for(const t of traits){const k=key(p.student_id,t.id);if(!gradeRowLocked(traitLock,p.student_id)&&!values.has(k)){values.set(k,2);filled.push(k);}}return filled;}
 el("previous").addEventListener("click",()=>selectStudent(studentIndex-1));el("next").addEventListener("click",()=>selectStudent(studentIndex+1));
 el("roster-list").addEventListener("click",event=>{const button=event.target.closest("button[data-index]");if(button)void selectStudent(Number(button.dataset.index));});
 el("student-picker").addEventListener("click",()=>{if(busy||!ready)return;if(!desktop.matches)el("workspace").dataset.listOpen=String(el("workspace").dataset.listOpen!=="true");el("student-picker").setAttribute("aria-expanded",String(desktop.matches||el("workspace").dataset.listOpen==="true"));if(desktop.matches||el("workspace").dataset.listOpen==="true")el("roster-list").querySelector('[aria-current="true"]')?.focus();});
@@ -169,8 +208,11 @@ async function initialize(){
   try{
     const [profile,dept,head,staff,years,items]=await Promise.all([getProfile(session.user.id),checkDepartment("วิชาการ"),isAcademicHead(),sb.from("staff").select("id").eq("user_id",session.user.id).maybeSingle(),getAcademicYears(),sb.from("core_traits").select("id,name,description,seq").eq("active",true).order("seq")]);
     if(staff.error)throw staff.error;if(items.error)throw items.error;
-    manage=profile?.role==="admin"||dept||head;myStaffId=staff.data?.id;traits=items.data||[];
+    gradeAcademic=profile?.role==="admin"||dept;
+    manage=gradeAcademic||head;myStaffId=staff.data?.id;traits=items.data||[];
     el("year").innerHTML=years.map(y=>`<option>${esc(y.year)}</option>`).join("");if(years.some(y=>y.year===getActiveYear()))el("year").value=getActiveYear();
+    if(years.some(y=>y.year===gradeLink.get("year")))el("year").value=gradeLink.get("year");
+    if(["1","2"].includes(gradeLink.get("term")))el("term").value=gradeLink.get("term");
     if(!traits.length)throw new Error("ยังไม่มีรายการคุณลักษณะที่เปิดใช้ กรุณาติดต่อฝ่ายวิชาการ");
     if(!years.length)throw new Error("ยังไม่มีปีการศึกษา กรุณาติดต่อฝ่ายวิชาการ");
     initialized=true;retryYear=true;await loadYear();

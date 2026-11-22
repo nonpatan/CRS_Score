@@ -125,7 +125,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261120-1"></script>
+    <script src="../app-shell.js?v=20261122-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -173,6 +173,7 @@
 </div>
 <script type="module">
 import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements, getSetting, availableCompetencyStages, fetchAllRowsByIds, ID_CHUNK } from "../supabase-client.js?v=20261121-2";
+import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=2";
 const session=await requireAuth();
 if(!session){
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -181,7 +182,7 @@ document.getElementById("btn-signout").addEventListener("click",e=>{e.preventDef
 const profile = await getProfile(session.user.id);
 const isAdmin = profile && profile.role === "admin";
 let assessments = [];
-let current = null;
+let current = null, assessmentLock = null, assessmentLoadSeq = 0, activityPassSaving = false;
 let targets = [];
 let sessions = [];
 let currentSession = null;
@@ -396,11 +397,80 @@ function renderAssessments() {
   if (rows.some(a => a.id === keep)) $("sel-assessment").value = keep;
 }
 
+function loadAssessmentLock(assessment) {
+  return readGradeLock({ year:assessment.year, term:assessment.term || "2", kind:"กิจกรรม/กิจวัตร", target:assessment.id },
+    { userId:session.user.id }).catch(error => ({ error:error.message }));
+}
+
+function assessmentLockActions() {
+  return {
+    userId:session.user.id, academic:isAdmin, onChange:refreshAssessmentLock,
+    canClose:() => {
+      if (activityPassSaving) return false;
+      if (current?.source_type !== "กิจกรรม") return true;
+      const existing = new Map(activityPassResults.map(row => [row.student_id, row]));
+      const dirty = [...$("activity-pass-list").querySelectorAll(".activity-result-row")].some(row => {
+        const saved = existing.get(row.dataset.studentId);
+        const status = saved ? (saved.passed ? "pass" : "fail") : "";
+        const select = row.querySelector(".activity-pass-status");
+        return !select.disabled && (select.value !== status ||
+          (select.value && row.querySelector(".activity-pass-note").value.trim() !== (saved?.note || "")));
+      });
+      if (dirty) toast("บันทึกผลกิจกรรมที่แก้ก่อนปิดคำขอ", false);
+      return !dirty;
+    }
+  };
+}
+
+function applyAssessmentLock() {
+  const actions = assessmentLockActions();
+  renderGradeLockBanner($("targets-wrap").parentElement, assessmentLock, sortedAssessmentMembers(),
+    { ...actions, canRequest:canEdit() });
+  for (const row of $("activity-pass-list").querySelectorAll(".activity-result-row")) {
+    const select = row.querySelector(".activity-pass-status");
+    const note = row.querySelector(".activity-pass-note");
+    const locked = gradeRowLocked(assessmentLock, row.dataset.studentId);
+    const saved = locked ? activityPassResults.find(item => item.student_id === row.dataset.studentId) : null;
+    if (locked) {
+      select.value = saved ? (saved.passed ? "pass" : "fail") : "";
+      note.value = saved?.note || "";
+    }
+    select.disabled = !canEdit() || locked;
+    note.readOnly = locked;
+    row.querySelectorAll(".pass-choices button").forEach(button => { button.disabled = select.disabled; });
+    renderGradeLockRow(row.firstElementChild, assessmentLock, row.dataset.studentId, actions);
+  }
+  if (current?.source_type === "กิจกรรม") {
+    const editable = canEdit() && assessmentMembers.some(student => !gradeRowLocked(assessmentLock, student.id));
+    for (const id of ["btn-activity-all-pass", "btn-save-activity-pass"]) $(id).disabled = activityPassSaving || !editable;
+    updateActivityPassSummary();
+    syncPassButtons();
+  }
+}
+
+async function refreshAssessmentLock(error, success) {
+  if (error) toast(gradeLockError(error) || error.message, false);
+  const assessment = current;
+  if (!assessment) return;
+  const request = assessmentLoadSeq;
+  const lock = await loadAssessmentLock(assessment);
+  if (request !== assessmentLoadSeq) return;
+  assessmentLock = lock;
+  applyAssessmentLock();
+  if (currentSession) renderScores();
+  if (!error && success) toast(success);
+}
+
 async function selectAssessment() {
   const id = $("sel-assessment").value;
+  const request = ++assessmentLoadSeq;
   current = assessments.find(a => a.id === id) || null;
+  const assessment = current;
+  assessmentLock = null;
+  renderGradeLockBanner($("targets-wrap").parentElement, null, [], {});
   currentSession = null;
   currentTarget = null;
+  closeScoreModal();
   activityPassResults = [];
   $("scores-card").style.display = "none";
   $("activity-pass-card").style.display = "none";
@@ -410,13 +480,15 @@ async function selectAssessment() {
     $("targets-wrap").style.display = "none";
     return;
   }
-  const [t, s] = await Promise.all([
+  const [t, s, lock] = await Promise.all([
     sb.from("competency_assessment_targets")
       .select("*, competency:competency_id(*), element:element_id(*)")
       .eq("assessment_id", id).order("seq"),
     sb.from("competency_assessment_sessions")
-      .select("*").eq("assessment_id", id).order("attempt_no")
+      .select("*").eq("assessment_id", id).order("attempt_no"),
+    loadAssessmentLock(assessment)
   ]);
+  if (request !== assessmentLoadSeq) return;
   if (t.error || s.error) {
     toast("โหลดองค์ประกอบหรือครั้งประเมินไม่สำเร็จ: " + (t.error || s.error).message, false);
     return;
@@ -424,6 +496,7 @@ async function selectAssessment() {
   targets = t.data || [];
   sessions = s.data || [];
   const membersResult = await loadAssessmentMembersForYear(current.id, current.year);
+  if (request !== assessmentLoadSeq) return;
   if (membersResult.error) {
     toast("โหลดผู้เข้าร่วมตามปีการศึกษาไม่สำเร็จ: " + membersResult.error.message, false);
     return;
@@ -431,13 +504,16 @@ async function selectAssessment() {
   assessmentMembers = membersResult.data;
   if (current.source_type === "กิจกรรม") {
     const passResult = await loadActivityPassResults(current.id);
+    if (request !== assessmentLoadSeq) return;
     if (passResult.error) {
       toast("โหลดผลกิจกรรมไม่สำเร็จ: " + passResult.error.message, false);
       return;
     }
     activityPassResults = passResult.data || [];
   }
+  assessmentLock = lock;
   renderActivityPassResults();
+  if (assessmentLock?.locked || assessmentLock?.error) applyAssessmentLock();
   renderStageOptions();
   $("targets-wrap").style.display = "block";
   renderTargets();
@@ -446,18 +522,19 @@ async function selectAssessment() {
 $("btn-activity-all-pass").addEventListener("click", () => {
   if (!canEdit()) return;
   $("activity-pass-list").querySelectorAll(".activity-pass-status").forEach(select => {
-    select.value = "pass";
+    if (!select.disabled) select.value = "pass";
   });
   updateActivityPassSummary();
   toast("ติ๊กผ่านทุกคนบนหน้าจอแล้ว — กดบันทึกผลกิจกรรมเพื่อยืนยัน");
 });
 
 $("btn-save-activity-pass").addEventListener("click", async () => {
-  if (!current || current.source_type !== "กิจกรรม" || !canEdit()) return;
+  if (!current || current.source_type !== "กิจกรรม" || !canEdit() || activityPassSaving) return;
   const existingIds = new Set(activityPassResults.map(row => row.student_id));
   const rows = [], removeIds = [];
   for (const wrapper of $("activity-pass-list").querySelectorAll(".activity-result-row")) {
     const studentId = wrapper.dataset.studentId;
+    if (gradeRowLocked(assessmentLock, studentId)) continue;
     const status = wrapper.querySelector(".activity-pass-status").value;
     if (!status) {
       if (existingIds.has(studentId)) removeIds.push(studentId);
@@ -473,6 +550,7 @@ $("btn-save-activity-pass").addEventListener("click", async () => {
   }
   const button = $("btn-save-activity-pass");
   button.disabled = true;
+  activityPassSaving = true;
   const assessmentId = current.id;
   const saveRows = async () => {
     let saved = 0;
@@ -507,11 +585,17 @@ $("btn-save-activity-pass").addEventListener("click", async () => {
   // อ่านสถานะจริงหลังบันทึกบางก้อน โดยคงค่าที่กรอกบนจอไว้ให้กดบันทึกซ้ำได้
   const refreshed = await loadActivityPassResults(assessmentId);
   button.disabled = false;
+  activityPassSaving = false;
   if (current?.id !== assessmentId) return;
   if (!refreshed.error) activityPassResults = refreshed.data || [];
+  if (gradeLockError(saveResult.error) || gradeLockError(deleteResult.error)) {
+    await refreshAssessmentLock(gradeLockError(saveResult.error) ? saveResult.error : deleteResult.error);
+    return;
+  }
   if (failureMessage) { toast(failureMessage, false); return; }
   if (refreshed.error) { toast("โหลดผลหลังบันทึกไม่สำเร็จ: " + refreshed.error.message, false); return; }
   renderActivityPassResults();
+  if (assessmentLock?.locked || assessmentLock?.error) applyAssessmentLock();
   toast("บันทึกผลกิจกรรม " + rows.length + " คน" + (removeIds.length ? " · ล้างเป็นยังไม่ประเมิน " + removeIds.length + " คน" : ""));
 });
 
@@ -722,7 +806,18 @@ async function removeSession(target, attempt) {
         message: "ครั้งนี้ยังไม่มีคะแนนของนักเรียนคนไหน"
       });
   if (!agreed) { toast("ยกเลิกการลบ"); return; }
+  const assessment = current;
+  const lock = await loadAssessmentLock(assessment);
+  if (current !== assessment) return;
+  if (lock.error || lock.locked) {
+    assessmentLock = lock;
+    applyAssessmentLock();
+    if (currentSession) renderScores();
+    toast(lock.error || "ภาคเรียนนี้อนุมัติผลแล้ว จึงลบครั้งประเมินไม่ได้", false);
+    return;
+  }
   const { error } = await sb.from("competency_assessment_sessions").delete().eq("id", attempt.id);
+  if (gradeLockError(error)) { await refreshAssessmentLock(error); return; }
   if (error) { toast("ลบครั้งประเมินไม่สำเร็จ: " + error.message, false); return; }
   sessions = sessions.filter(s => s.id !== attempt.id);
   if (currentSession && currentSession.id === attempt.id) {
@@ -805,14 +900,16 @@ function renderScores() {
       "<div class='meta'>" + esc(student.placementMissing ? "ไม่พบชั้น/ห้อง ปี " + current.year : student.grade_level + "/" + student.classroom) +
       " · " + esc(student.student_no) + "</div></div>" +
       "<div class='score-control'></div>";
-    const box = document.createElement(canEdit() ? "button" : "span");
+    const editable = canEdit() && !gradeRowLocked(assessmentLock, student.id);
+    const box = document.createElement(editable ? "button" : "span");
     box.className = "score-box" + (value === "" ? " pending" : "");
     box.textContent = value === "" ? "—" : String(value);
-    if (canEdit()) {
+    if (editable) {
       box.type = "button";
       box.setAttribute("aria-label", "แก้ไขคะแนน " + student.name);
       box.onclick = () => openScoreModal(student, currentTarget, value);
     }
+    renderGradeLockRow(row.firstElementChild, assessmentLock, student.id, assessmentLockActions());
     row.querySelector(".score-control").appendChild(box);
     el.appendChild(row);
   }
@@ -883,10 +980,10 @@ async function addLateMembers(late, button) {
   await loadSession(sessionId);
 }
 let editingScore=null;
-function openScoreModal(student,target,value){editingScore={student,target};$("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");const cap=sessionMax(currentSession,target);$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+cap+")";$("score-modal-value").value=value;$("score-modal-value").max=cap;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}
+function openScoreModal(student,target,value){editingScore={student,target};$("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");const cap=sessionMax(currentSession,target);$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+cap+")";if($("score-modal-value").readOnly)$("score-modal-value").readOnly=false;$("score-modal-value").value=value;$("score-modal-value").max=cap;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}
 function closeScoreModal(){$("score-overlay").classList.remove("show");editingScore=null;}
 $("score-modal-cancel").onclick=closeScoreModal;$("score-overlay").addEventListener("click",event=>{if(event.target===$("score-overlay"))closeScoreModal();});
-$("score-modal-save").onclick=async()=>{if(!editingScore||!currentSession)return;const input=$("score-modal-value"),raw=Number(input.value),target=editingScore.target,cap=sessionMax(currentSession,target);if(input.value===""||!Number.isFinite(raw)||raw<0||raw>cap){toast("คะแนนต้องอยู่ระหว่าง 0 ถึง "+cap,false);input.focus();return;}const button=$("score-modal-save");button.disabled=true;const sessionId=currentSession.id,studentId=editingScore.student.id;const {error}=await sb.from("competency_assessment_scores").upsert({session_id:sessionId,target_id:target.id,student_id:studentId,raw_score:raw,updated_at:new Date().toISOString()},{onConflict:"session_id,target_id,student_id"});button.disabled=false;if(error){toast("บันทึกคะแนนไม่สำเร็จ: "+error.message,false);return;}closeScoreModal();
+$("score-modal-save").onclick=async()=>{if(!editingScore||!currentSession||gradeRowLocked(assessmentLock,editingScore.student.id))return;const input=$("score-modal-value"),raw=Number(input.value),target=editingScore.target,cap=sessionMax(currentSession,target);if(input.value===""||!Number.isFinite(raw)||raw<0||raw>cap){toast("คะแนนต้องอยู่ระหว่าง 0 ถึง "+cap,false);input.focus();return;}const button=$("score-modal-save");button.disabled=true;const sessionId=currentSession.id,studentId=editingScore.student.id;const {error}=await sb.from("competency_assessment_scores").upsert({session_id:sessionId,target_id:target.id,student_id:studentId,raw_score:raw,updated_at:new Date().toISOString()},{onConflict:"session_id,target_id,student_id"});button.disabled=false;if(gradeLockError(error)){await refreshAssessmentLock(error);if(gradeRowLocked(assessmentLock,studentId))input.readOnly=true;return;}if(error){toast("บันทึกคะแนนไม่สำเร็จ: "+error.message,false);return;}closeScoreModal();
 // ลด log Supabase (2026-10-26): เดิมเรียก loadSession ยิงใหม่ 3 GET ต่อการบันทึก 1 คน — อัปเดตคะแนนในเครื่องแทน หน้าจอเหมือนเดิม
 if(currentSession&&currentSession.id===sessionId){scoreMap.set(studentId,raw);renderScores();}toast("บันทึกคะแนนแล้ว");}
 $("f-year").onchange=()=>{setActiveYear($("f-year").value);renderAssessments();$("sel-assessment").value="";selectAssessment()};

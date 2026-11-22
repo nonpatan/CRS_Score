@@ -82,6 +82,7 @@ function syncFinanceKpiTones() {
     title = "ยืนยันการทำรายการ",
     message = "",
     requireText = null,
+    checkbox = null,
     okLabel = "ยืนยัน",
     cancelLabel = "ยกเลิก",
     danger = true
@@ -101,6 +102,9 @@ function syncFinanceKpiTones() {
           .crs-confirm-field label{display:block;margin-bottom:6px;color:var(--ink,#1f2a2e);font-weight:600;font-size:.92rem}
           .crs-confirm-field input{box-sizing:border-box;width:100%;min-height:44px;border:1px solid var(--line,#dfe4e3);border-radius:10px;background:var(--white,#fff);color:var(--ink,#1f2a2e);font:inherit;font-size:16px;padding:9px 11px}
           .crs-confirm-field input:focus{outline:3px solid rgba(15,110,86,.18);border-color:var(--teal,#0f6e56)}
+          .crs-confirm-option{display:flex;align-items:center;gap:8px;min-height:44px;margin-top:8px}
+          .crs-confirm-option[hidden]{display:none}
+          .crs-confirm-option input{width:18px;height:18px;min-height:0;margin:0;flex:none}
           .crs-confirm-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
           .crs-confirm-actions button{min-height:44px;border:0;border-radius:10px;font:inherit;font-weight:700;padding:9px 16px;cursor:pointer}
           .crs-confirm-cancel{background:var(--teal-soft,#e1f5ee);color:var(--ink,#1f2a2e)}
@@ -126,6 +130,7 @@ function syncFinanceKpiTones() {
               <label for="crs-confirm-input" id="crs-confirm-label"></label>
               <input id="crs-confirm-input" type="text" autocomplete="off">
             </div>
+            <label class="crs-confirm-option" hidden><input id="crs-confirm-checkbox" type="checkbox"><span></span></label>
             <div class="crs-confirm-actions">
               <button type="button" class="crs-confirm-cancel" id="crs-confirm-cancel">ยกเลิก</button>
               <button type="button" class="crs-confirm-ok" id="crs-confirm-ok"></button>
@@ -140,6 +145,7 @@ function syncFinanceKpiTones() {
       const field = document.getElementById("crs-confirm-field");
       const label = document.getElementById("crs-confirm-label");
       const input = document.getElementById("crs-confirm-input");
+      const check = document.getElementById("crs-confirm-checkbox");
       const cancel = document.getElementById("crs-confirm-cancel");
       const ok = document.getElementById("crs-confirm-ok");
       const required = requireText == null ? null : String(requireText);
@@ -150,6 +156,11 @@ function syncFinanceKpiTones() {
       field.hidden = required == null;
       label.textContent = required == null ? "" : `พิมพ์ “${required}” เพื่อยืนยัน`;
       input.value = "";
+      if (check) {
+        check.parentElement.hidden = !checkbox;
+        check.nextElementSibling.textContent = checkbox?.label || "";
+        check.checked = checkbox?.checked === true;
+      }
       ok.textContent = okLabel;
       cancel.textContent = cancelLabel;
       // ⚠ ห้ามใช้ชื่อคลาส "danger" ตรง ๆ — app-shell.css มีกฎ `button.danger,.danger{...!important}`
@@ -166,12 +177,12 @@ function syncFinanceKpiTones() {
         cancel.onclick = null;
         ok.onclick = null;
         if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
-        resolve(result);
+        resolve(result && checkbox ? { checked:check.checked } : result);
       };
       const onOutsideClick = event => { if (event.target === overlay) finish(false); };
       const onKeyDown = event => {
         if (event.key === "Escape") finish(false);
-        if (event.key === "Enter" && !ok.disabled) finish(true);
+        if (event.key === "Enter" && !ok.disabled && (!checkbox || event.target !== check)) finish(true);
       };
 
       cancel.onclick = () => finish(false);
@@ -224,6 +235,7 @@ function syncFinanceKpiTones() {
           items: [
             ["attendance.html", "เช็คชื่อ"],
             ["entry.html", "กรอกคะแนน"],
+            ["grade-edit-requests.html", "คำขอแก้คะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
             ["theme-works.html", "ส่งผลงานตามธีม"],
             ["lesson-plans.html", "แผนการสอนของฉัน"],
@@ -306,6 +318,11 @@ function syncFinanceKpiTones() {
           title: "รายงานโครงการ/กิจกรรม",
           description: "สรุปทั้งปีว่าทำอะไรไปบ้าง ใช้งบเท่าไหร่ และมีอะไรค้างต้องตาม",
           steps: ["เลือกปี", "ดูสิ่งที่ต้องตาม", "ดูรายการทั้งหมด"]
+        },
+        "grade-edit-requests.html": {
+          title: "คำขอแก้คะแนน",
+          description: "ติดตามคำขอแก้คะแนนและผลพิจารณา",
+          steps: []
         },
         "entry.html": {
           title: "กรอกคะแนน",
@@ -919,6 +936,42 @@ function syncFinanceKpiTones() {
   // บนมือถือ/แท็บเล็ต เมนูเป็นแถบเลื่อนแนวนอน จึงเลื่อนปุ่มหน้าปัจจุบันให้เห็นเอง
   const active = nav.querySelector("a.active");
   if (active) requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "nearest" }));
+
+  if (moduleKey === "academic") {
+    const gradeLink = [...nav.querySelectorAll("a")].find(link => new URL(link.href).pathname.endsWith("/grade-edit-requests.html"));
+    if (gradeLink) {
+      const badge = document.createElement("span");
+      badge.hidden = true;
+      badge.setAttribute("aria-hidden", "true");
+      gradeLink.append(badge);
+      window.addEventListener("crs-grade-queue-counts", event => {
+        const counts = event.detail || {};
+        const labels = [
+          counts.academic > 0 ? `รอวิชาการ ${counts.academic} รายการ` : "",
+          counts.director > 0 ? `รอ ผอ. ${counts.director} รายการ` : "",
+          counts.mine_returned > 0 ? `คำขอถูกส่งกลับ ${counts.mine_returned} รายการ` : "",
+          counts.mine_open > 0 ? `ได้รับอนุมัติให้แก้ ${counts.mine_open} รายการ` : ""
+        ].filter(Boolean);
+        const total = (counts.academic || 0) + (counts.director || 0) + (counts.mine_returned || 0) + (counts.mine_open || 0);
+        badge.hidden = !total;
+        badge.textContent = total ? " (" + total + ")" : "";
+        gradeLink.setAttribute("aria-label", ["คำขอแก้คะแนน", ...labels].join(" · "));
+      });
+      if (!["index.html", "grade-edit-requests.html"].includes(current)) {
+        const readCount = async () => {
+          try {
+            const { sb } = await import(new URL("supabase-client.js?v=20261121-2", appRootUrl).href);
+            const { data } = await sb.auth.getSession();
+            if (!data.session) return;
+            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=1", appRootUrl).href);
+            await gradeQueueCounts();
+          } catch { /* ตัวนับขัดข้องยังเปิดเมนูได้ */ }
+        };
+        void readCount();
+        document.addEventListener("visibilitychange", () => { if (!document.hidden) void readCount(); });
+      }
+    }
+  }
 
   // ให้หน้าเริ่มแสดงอย่างนุ่มนวล โดยข้ามทันทีหากผู้ใช้ตั้งค่าให้ลดการเคลื่อนไหว
   const preparePageReveal = () => {

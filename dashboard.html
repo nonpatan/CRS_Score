@@ -379,7 +379,7 @@
     <nav class="bottom-nav" aria-label="เมนูด้านล่าง"></nav>
   </div>
 </div>
-<script src="app-shell.js?v=20261120-1"></script>
+<script src="app-shell.js?v=20261122-1"></script>
 <script>
   (() => {
     const menu = window.crsShellMenu;
@@ -450,6 +450,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     isProjectApprover, isMakeupApprover, listPendingMakeupRequests,
     bangkokNow, toDateStr, formatMoney, evalThaiDateStr, thaiShortDateText
   } from "./supabase-client.js?v=20261121-2";
+import { gradeQueueCounts, watchGradeRequests } from "./academic/grade-lock.js?v=2";
 
   document.querySelectorAll("[data-dashboard-signout]").forEach(button => {
     button.addEventListener("click", event => {
@@ -589,7 +590,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
 
   function renderMyAlerts(alertsResult, dailyResult, today, pendingApprovals, approver,
     pendingMakeups = 0, makeupApproverFlag = false, dutyMonths = [], swapAlertsResult = null, lessonPlanAlertsResult = null,
-    evalRows = []) {
+    evalRows = [], gradeCounts = null) {
     try {
       const loaded = resultValue(alertsResult) || {};
       let daily = null;
@@ -619,6 +620,12 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       }
       const lessonPlanData = lessonPlanAlertsResult?.value?.data;
       if (lessonPlanData && !lessonPlanAlertsResult.value.error) rows.push(...lessonPlanAlertRows(lessonPlanData));
+      if (gradeCounts?.director > 0) rows.push({kind:"คำขอแก้คะแนน",text:`รอ ผอ. พิจารณา ${gradeCounts.director} รายการ`,
+        href:"academic/grade-edit-requests.html?tab=director",linkLabel:"ไปพิจารณา"});
+      if (gradeCounts?.mine_returned > 0) rows.push({kind:"คำขอแก้คะแนน",text:`คำขอถูกส่งกลับ ${gradeCounts.mine_returned} รายการ`,
+        href:"academic/grade-edit-requests.html?tab=mine",linkLabel:"ดูคำขอ"});
+      if (gradeCounts?.mine_open > 0) rows.push({kind:"คำขอแก้คะแนน",text:`ได้รับอนุมัติให้แก้ ${gradeCounts.mine_open} รายการ`,
+        href:"academic/grade-edit-requests.html?tab=mine",linkLabel:"ดูคำขอ"});
       if (Array.isArray(evalRows)) rows.unshift(...evalRows);
       if (!rows.length) {
         hideMyAlerts();
@@ -1065,7 +1072,7 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     // การ์ดที่อ่านฐานข้อมูลยิงพร้อมกันทั้งหมด; daily attendance โหลดครั้งเดียว
     // แล้วนำผลสรุปชุดเดียวกันไปใช้ทั้ง "นักเรียนมาวันนี้" และ "ห้องที่ยังไม่เช็คชื่อ"
     const [dailyResult, calendarResult, projectResult, approverResult, makeupApproverResult,
-      myAlertsResult, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckResult, evalCommentResult] = await Promise.all([
+      myAlertsResult, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckResult, evalCommentResult, initialGradeCounts] = await Promise.all([
       capture(loadDailyAttendanceToday(year, today, years)),
       capture(Promise.all([
         loadAcademicCalendar(year),
@@ -1079,8 +1086,10 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       capture(sb.rpc('my_timetable_swap_alerts')),
       me ? capture(sb.rpc('my_lesson_plan_alerts')) : Promise.resolve(null),
       me ? loadEvalAckAlerts(me.id).catch(() => []) : Promise.resolve([]),
-      me ? loadEvalCommentAlerts(me.id, session.user.id).catch(() => []) : []
+      me ? loadEvalCommentAlerts(me.id, session.user.id).catch(() => []) : [],
+      gradeQueueCounts().catch(() => null)
     ]);
+    let currentGradeCounts = initialGradeCounts;
     evalAckRows = [...(evalAckResult || []), ...evalCommentResult];
     // 🔑 พังแล้วถือว่าไม่ใช่ผู้อนุมัติ ไม่ใช่โยน error ให้หน้าแรกล่มทั้งหน้า
     isApprover = approverResult?.value === true;
@@ -1119,8 +1128,15 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
     } catch {
       pendingApprovals = 0;
     }
-    renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-      pendingMakeups, makeupApprover, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckRows);
+    let renderCurrentMyAlerts = () => renderMyAlerts(myAlertsResult, dailyResult, today, pendingApprovals, isApprover,
+      pendingMakeups, makeupApprover, dutyMonths, swapAlertsResult, lessonPlanAlertsResult, evalAckRows, currentGradeCounts);
+    renderCurrentMyAlerts();
+    watchGradeRequests("dashboard-grade-edit-requests", async () => {
+      try {
+        currentGradeCounts = await gradeQueueCounts();
+        renderCurrentMyAlerts();
+      } catch { /* การ์ดคำขอขัดข้องยังแสดงรายการล่าสุด */ }
+    });
 
     let upcomingResult;
     let leadDays = resolveCalendarLeadDays(null);
@@ -1174,9 +1190,9 @@ import { lessonPlanAlertRows } from "./academic/lesson-plans.js?v=5";
       let lastSwapResult = swapAlertsResult;
       let lastLessonPlanResult = lessonPlanAlertsResult;
       let syncPending = false;
-      const renderCurrentMyAlerts = () => renderMyAlerts(
+      renderCurrentMyAlerts = () => renderMyAlerts(
         lastAlertsResult, dailyResult, today, pendingApprovals, isApprover,
-        pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult, lastLessonPlanResult, evalAckRows
+        pendingMakeups, makeupApprover, lastDutyMonths, lastSwapResult, lastLessonPlanResult, evalAckRows, currentGradeCounts
       );
       async function syncDashboardAlerts(parts) {
         if (syncPending) return;
