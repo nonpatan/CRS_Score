@@ -1,11 +1,14 @@
-import { sb, fetchAllRows, getStudentPlacements, isRegularStudent, GRADE_ORDER,
+import { sb, fetchAllRows, fetchAllRowsByIds, getStudentPlacements, isRegularStudent, isAutoPresentStudent, isAutoAbsentStudent, GRADE_ORDER,
   getActiveYear, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr } from "../supabase-client.js?v=20261121-2";
-import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=1";
+import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=2";
 
 const today = () => toDateStr(bangkokNow());
 const annual = grade => grade.startsWith("ป.");
 const roomName = room => room.grade + "/" + room.room;
 const roomKey = room => [room.grade, room.room].join("|");
+const compareRooms = (a, b) => GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade) ||
+  String(a.room).localeCompare(String(b.room), "th", { numeric:true });
+const halfFor = term => term === "1" ? "กลางปี" : "ปลายปี";
 
 export function releaseRooms(placements) {
   const rooms = new Map();
@@ -16,8 +19,7 @@ export function releaseRooms(placements) {
     if (!rooms.has(key)) rooms.set(key, { ...room, students:[] });
     if (isRegularStudent(p.student)) rooms.get(key).students.push({ ...p.student, grade_level:room.grade, classroom:room.room });
   }
-  return [...rooms.values()].sort((a, b) => GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade) ||
-    String(a.room).localeCompare(String(b.room), "th", { numeric:true }));
+  return [...rooms.values()].sort(compareRooms);
 }
 
 export function gradeRepairCandidates(results, blockedSubjectsFor, parentByMember) {
@@ -56,20 +58,25 @@ export function competencyPublishRows(perStudent) {
   })));
 }
 
-export async function runGradeRelease({ rooms, cancelled, progress, compute, publish, repairs, approve }) {
-  let published = 0;
+async function visitReleaseRooms({ rooms, cancelled, progress, compute, onRows }) {
   for (const [index, room] of rooms.entries()) {
-    if (cancelled()) return { cancelled:true, published };
+    if (cancelled()) return;
     progress(`ห้อง ${index + 1}/${rooms.length} · ${roomName(room)}`, index, rooms.length);
     if (!room.students.length) continue;
     try {
       const rows = await compute(room);
-      if (cancelled()) return { cancelled:true, published };
-      if (rows.length) { await publish(rows); published++; }
+      if (cancelled()) return;
+      if (rows.length) await onRows(rows);
     } catch (error) {
       throw new Error(`ห้อง ${roomName(room)} · ${error.message}`);
     }
   }
+}
+
+export async function runGradeRelease({ rooms, cancelled, progress, compute, publish, repairs, approve }) {
+  let published = 0;
+  await visitReleaseRooms({ rooms, cancelled, progress, compute,
+    onRows:async rows => { await publish(rows); published++; } });
   if (cancelled()) return { cancelled:true, published };
   if (!approve) return { published };
   progress("กำลังรวบรวมรายชื่อนักเรียนที่ติด ร./มส.", rooms.length, rooms.length);
@@ -86,12 +93,114 @@ const read = async promise => {
   return data;
 };
 
+// ประถมใช้วิชารายปี แต่คะแนนเก็บและคะแนนสอบต้องอยู่ในช่วงที่ตรวจ
+function inReleasePeriod(subject, term, value, external = false) {
+  if (!subject || !/^[ปม]\./.test(subject.grade_level || "")) return false;
+  if (annual(subject.grade_level)) return value === halfFor(term);
+  return subject.term === term && (!external || value === "ทั้งวิชา");
+}
+
+async function loadPrecheckEvidence({ year, term, scopedSubjects }, cancelled) {
+  const subjects = new Map(scopedSubjects.map(row => [row.id, row]));
+  const ids = [...subjects.keys()];
+  const bySubject = (table, columns) => read(fetchAllRowsByIds(chunk =>
+    sb.from(table).select(columns).in("subject_id", chunk), ids));
+  const [enrollments, exams, external, traits, collections] = await Promise.all([
+    bySubject("enrollments", "id,subject_id,student_id"),
+    bySubject("exam_scores", "id,subject_id,student_id,half"),
+    bySubject("external_subject_results", "id,subject_id,student_id,part"),
+    read(fetchAllRows(() => sb.from("student_trait_results").select("id,student_id")
+      .eq("year", year).eq("term", term))),
+    read(fetchAllRowsByIds(chunk => sb.from("collections")
+      .select("id,half,indicator:indicators!inner(unit:units!inner(subject_id))")
+      .in("indicator.unit.subject_id", chunk), ids))
+  ]);
+  if (cancelled()) return;
+  const collectionSubjects = new Map();
+  for (const row of collections) {
+    const subjectId = row.indicator.unit.subject_id;
+    if (inReleasePeriod(subjects.get(subjectId), term, row.half)) collectionSubjects.set(row.id, subjectId);
+  }
+  const scores = await read(fetchAllRowsByIds(chunk => sb.from("scores").select("id,student_id,collection_id")
+    .in("collection_id", chunk), [...collectionSubjects.keys()]));
+  const pair = row => row.subject_id + "|" + row.student_id;
+  const enrolled = new Set(enrollments.map(pair)), scored = new Set();
+  for (const row of exams) {
+    if (enrolled.has(pair(row)) && inReleasePeriod(subjects.get(row.subject_id), term, row.half)) scored.add(row.student_id);
+  }
+  for (const row of scores) {
+    if (enrolled.has(collectionSubjects.get(row.collection_id) + "|" + row.student_id)) scored.add(row.student_id);
+  }
+  return {
+    scored,
+    external:new Set(external.filter(row => inReleasePeriod(subjects.get(row.subject_id), term, row.part)).map(row => row.student_id)),
+    traits:new Set(traits.map(row => row.student_id))
+  };
+}
+
+export function precheckWarnings({ placements, typeDates, termStart, repairRows, incomplete, scored, external, traits }) {
+  const warnings = { competency:[], type:[], scores:[], special:[], traits:[] };
+  const repairs = new Set(repairRows.map(row => row.student_id));
+  const startsAt = termStart ? Date.parse(termStart + "T00:00:00+07:00") : NaN;
+  for (const { student, grade_level:grade, classroom:room } of placements) {
+    if (!student || isAutoAbsentStudent(student) || !/^[ปม]\./.test(grade || "")) continue;
+    const entry = { id:student.id, name:student.name, grade, room };
+    const changedAt = typeDates.get(student.id);
+    if (Date.parse(changedAt) >= startsAt) {
+      warnings.type.push({ ...entry, changedAt, type:student.student_type || "ปกติ", regular:isRegularStudent(student) });
+    }
+    if (isRegularStudent(student)) {
+      const count = incomplete.get(student.id);
+      if (count && !repairs.has(student.id)) warnings.competency.push({ ...entry, count });
+      if (!scored.has(student.id) && !external.has(student.id)) warnings.scores.push(entry);
+      if (!traits.has(student.id)) warnings.traits.push(entry);
+    }
+    if (isAutoPresentStudent(student) && !external.has(student.id)) warnings.special.push(entry);
+  }
+  for (const rows of Object.values(warnings)) rows.sort((a, b) => compareRooms(a, b) || a.name.localeCompare(b.name, "th"));
+  return warnings;
+}
+
+export async function runGradePrecheck(scope, run, cancelled, progress) {
+  const incomplete = new Map();
+  await visitReleaseRooms({ rooms:run.rooms, cancelled, progress, compute:run.compute, onRows:rows => {
+    for (const row of rows) {
+      if (!row.complete) incomplete.set(row.student_id, (incomplete.get(row.student_id) || 0) + 1);
+    }
+  } });
+  if (cancelled()) return;
+  progress("กำลังรวบรวมรายชื่อนักเรียนที่ติด ร./มส.", run.rooms.length, run.rooms.length);
+  const repairRows = await run.repairs();
+  if (cancelled()) return;
+  progress("กำลังตรวจคะแนน ผลโอน และคุณลักษณะ…", run.rooms.length, run.rooms.length);
+  const [evidence, dates] = await Promise.all([
+    loadPrecheckEvidence(scope, cancelled),
+    read(fetchAllRowsByIds(ids => sb.from("students").select("id,student_type_at").in("id", ids),
+      run.placements.map(row => row.student_id)))
+  ]);
+  if (cancelled()) return;
+  const typeDates = new Map(dates.map(row => [row.id, row.student_type_at]));
+  return { warnings:precheckWarnings({ ...evidence, placements:run.placements, typeDates, termStart:scope.termStart,
+    repairRows, incomplete }), repairs:run.repairReport(repairRows) };
+}
+
+export function gradeRepairCsv(rows) {
+  const cell = value => '"' + String(value ?? "").replaceAll('"', '""') + '"';
+  const header = ["ห้อง", "นักเรียน", "วิชา", "ผล", "ผ่านวิชาบูรณาการ"];
+  return "\ufeff" + [header, ...rows.map(row => [row.room, row.name, row.subject, row.code, row.integrated])]
+    .map(row => row.map(cell).join(",")).join("\r\n") + "\r\n";
+}
+
 const openRequests = (year, term) => read(fetchAllRows(() => {
   const query = sb.from("grade_edit_requests")
     .select("id,kind,term,subject:subjects(name),assessment:competency_assessments(name),grade_edit_request_students(student_id)")
     .eq("year", year).eq("status", "เปิดให้แก้");
   return term === "2" ? query.in("term", ["1", "2"]) : query.eq("term", term);
 }));
+
+const loadReleaseSubjects = (year, term) => read(fetchAllRows(() => sb.from("subjects")
+  .select("id,name,grade_level,term,exam_closed_at").eq("year", year).or(`term.eq.${term},term.is.null`)));
+const openExamCount = (subjects, term) => subjects.filter(row => row.term === term && row.exam_closed_at === null).length;
 
 async function loadLockedRelease(year, term) {
   const [requests, repairs, placements, logs, published] = await Promise.all([
@@ -116,6 +225,62 @@ const list = (items, empty) => items.length
   ? `<ul>${items.map(item => `<li>${gradeEscape(item)}</li>`).join("")}</ul>`
   : `<p class="hint">${gradeEscape(empty)}</p>`;
 
+const warningTitles = {
+  competency:"นักเรียนปกติสรุปสมรรถนะไม่ได้ ทั้งที่ไม่ติด ร./มส.",
+  type:"ประเภทนักเรียนเปลี่ยนหลังเปิดภาคนี้",
+  scores:"ไม่มีคะแนนภาคนี้เลยและไม่มีผลโอน",
+  special:"ฮาฟีเซาะ/ฝากเรียนยังไม่มีผลสุ่ม",
+  traits:"ยังไม่ประเมินคุณลักษณะ"
+};
+
+const periodLink = (file, { year, term }, params = {}, hash = "") =>
+  file + "?" + new URLSearchParams({ year, term, ...params }) + hash;
+
+function warningStudent(kind, row, scope) {
+  let detail = "", file, params;
+  if (kind === "competency") {
+    detail = ` · ค้าง ${row.count} ด้าน`;
+    file = "summary.html";
+    params = { grade:row.grade, room:row.room, student:row.id };
+  } else if (kind === "type" || kind === "scores") {
+    if (kind === "type") detail = ` · ${row.type} · ${gradeDate(row.changedAt)} · ภาคนี้อาจยังไม่มีผลตามประเภทเดิม`;
+    if (kind === "scores" || row.regular) { file = "transfer-results.html"; params = { student:row.id }; }
+  } else if (kind === "special") {
+    file = "special-results.html";
+    params = { grade:row.grade };
+  } else {
+    file = "traits.html";
+    params = { room:roomKey(row) };
+  }
+  const label = gradeEscape(`${roomName(row)} · ${row.name}`);
+  return `<li>${file ? `<a href="${gradeEscape(periodLink(file, scope, params, kind === "competency" ? "#competency" : ""))}">${label}</a>` : label}${gradeEscape(detail)}</li>`;
+}
+
+function warningGroup(label, count, unit, body) {
+  return `<details class="release-warning"><summary><span aria-hidden="true">⚠</span>
+    <span>${label} · ${count} ${unit}</span></summary>${body}</details>`;
+}
+
+function renderPrecheck(result, scope) {
+  const { warnings, repairs } = result;
+  const incompleteExams = scope.openExams ? warningGroup("ยังไม่ปิดคะแนนสอบ", scope.openExams, "วิชา",
+    `<p><a href="exam-close-report.html?${gradeEscape(new URLSearchParams({ year:scope.year }))}">ดูรายงานปิดคะแนนสอบ</a></p>`) : "";
+  const groups = Object.entries(warnings).filter(([, rows]) => rows.length);
+  const needsReview = Boolean(incompleteExams || groups.length);
+  const r = repairs.filter(row => row.code === "ร.").length;
+  return `<h3>ผลตรวจก่อนอนุมัติ</h3>
+    ${scope.termStart ? "" : '<p class="hint">ยังไม่ได้ตั้งวันเริ่มภาคนี้ จึงตรวจการเปลี่ยนประเภทนักเรียนไม่ได้</p>'}
+    ${incompleteExams}${groups.map(([kind, rows]) =>
+      warningGroup(warningTitles[kind], rows.length, "คน", `<ul>${rows.map(row => warningStudent(kind, row, scope)).join("")}</ul>`)).join("")}
+    ${needsReview ? "" : '<p>ไม่พบรายการที่ต้องตรวจ</p>'}
+    <div class="release-repairs">
+      <h4>รายชื่อซ่อม</h4>
+      <p>ร. ${r} รายการ · มส. ${repairs.length - r} รายการ · ${new Set(repairs.map(row => row.id)).size} คน</p>
+      <button type="button" class="ghost" id="release-csv">ดาวน์โหลดรายชื่อซ่อม (CSV)</button>
+    </div>
+    ${needsReview ? '<label class="release-reviewed"><input type="checkbox" id="release-reviewed"> ตรวจรายการเตือนแล้ว</label>' : ""}`;
+}
+
 export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   installGradeStyles();
   const find = id => host.querySelector("#release-" + id);
@@ -123,7 +288,21 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   const status = find("status"), errorBox = find("error"), progress = find("progress");
   const content = find("content"), yearInput = find("year"), termInput = find("term");
   const stop = find("stop"), retry = find("retry");
-  let scope, sequence = 0, busy = false, cancelled = false, retryAction = null;
+  let years = [], scope, precheck, sequence = 0, busy = false, cancelled = false, retryAction = null;
+
+  function mayApprove() {
+    return Boolean(precheck && precheck.scope === scope &&
+      scope.year === yearInput.value && scope.term === termInput.value &&
+      (find("reviewed")?.checked ?? true));
+  }
+
+  function updateApproval() {
+    const button = find("approve");
+    if (!button) return;
+    const ready = mayApprove();
+    button.disabled = busy || !ready;
+    find("approve-hint").textContent = ready ? "" : precheck ? "ติ๊กยืนยันหลังตรวจรายการเตือน" : "ตรวจก่อนอนุมัติเพื่อเปิดปุ่มนี้";
+  }
 
   function showError(error, action) {
     errorBox.textContent = error ? error.message : "";
@@ -134,6 +313,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   function toggleBusy(value) {
     busy = value;
     for (const control of host.querySelectorAll("select,input,button:not(#release-stop)")) control.disabled = value;
+    updateApproval();
   }
 
   function updateProgress(message, done = 0, total = 0) {
@@ -146,6 +326,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   async function load() {
     const year = yearInput.value, term = termInput.value, token = ++sequence;
     scope = null;
+    precheck = null;
     content.replaceChildren();
     updateProgress("กำลังโหลดสถานะภาคเรียน…");
     showError(null);
@@ -153,13 +334,14 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
       const [release, scopedSubjects, releases] = await Promise.all([
         read(sb.from("grade_releases").select("id,locked_at,calendar:academic_calendar!calendar_id(start_date)")
           .eq("year", year).eq("term", term).maybeSingle()),
-        read(fetchAllRows(() => sb.from("subjects").select("id,grade_level,term,exam_closed_at")
-          .eq("year", year).or(`term.eq.${term},term.is.null`))),
+        loadReleaseSubjects(year, term),
         term === "1" ? read(sb.from("grade_releases").select("locked_at").eq("year", year).eq("term", "2").maybeSingle()) : null
       ]);
       const locked = release?.locked_at ? await loadLockedRelease(year, term) : null;
       if (token !== sequence) return;
-      scope = { year, term, release, scopedSubjects, locked, otherLock:releases?.locked_at };
+      const academicYear = years.find(row => row.year === year);
+      scope = { year, term, release, scopedSubjects, locked, otherLock:releases?.locked_at,
+        termStart:term === "1" ? academicYear?.start_date : academicYear?.term2_start_date };
       render();
       updateProgress("");
     } catch (error) {
@@ -173,20 +355,23 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
     const { release, scopedSubjects, locked, otherLock } = scope;
     const releaseDate = release?.calendar?.start_date;
     const exams = scopedSubjects.filter(row => row.term === scope.term);
-    scope.openExams = exams.filter(row => row.exam_closed_at === null).length;
+    scope.openExams = openExamCount(scopedSubjects, scope.term);
     const lead = release
       ? locked ? `อนุมัติแล้ว ${gradeDate(release.locked_at, true)} · ผู้ปกครองเห็น ${gradeDate(releaseDate)}`
         : `${releaseDate > today() ? "กำหนดประกาศ" : "ประกาศแล้ว"} ${gradeDate(releaseDate)} · ${otherLock ? "ล็อกจากการอนุมัติภาค 2" : "ยังไม่ล็อก"}`
       : otherLock ? "ล็อกจากการอนุมัติภาค 2 · ยังไม่มีวันประกาศของภาคนี้" : "ยังไม่ได้อนุมัติผล";
     let html = `<p><strong>${gradeEscape(lead)}</strong></p>`;
     if (!locked) {
-      html += `<p class="hint">ยังไม่ปิดคะแนนสอบ ${scope.openExams} วิชา</p>`;
+      html += `<p class="hint" id="release-exams">ยังไม่ปิดคะแนนสอบ ${scope.openExams} วิชา</p>`;
       if (!release && !exams.length) html += '<p class="empty">ยังไม่มีรายวิชาที่ระบุภาคเรียนนี้ กรุณาตรวจสอบการตั้งค่ารายวิชา</p>';
       else {
         if (!release) html += `<div class="field"><label for="release-date">วันที่ผู้ปกครองเห็นผล</label>
           <input id="release-date" type="date" min="${today()}" required></div>`;
-        html += `<div class="grade-lock-actions"><button type="button" class="primary" id="release-approve">
-          ${release ? "อนุมัติย้อนหลัง (ล็อกคะแนน)" : "อนุมัติผลและประกาศ"}</button></div>`;
+        html += `<div class="grade-lock-actions"><button type="button" class="ghost" id="release-check">ตรวจก่อนอนุมัติ</button></div>
+          <section id="release-check-result" hidden></section>
+          <div class="grade-lock-actions"><button type="button" class="primary" id="release-approve"
+            aria-describedby="release-approve-hint" disabled>${release ? "อนุมัติย้อนหลัง (ล็อกคะแนน)" : "อนุมัติผลและประกาศ"}</button>
+            <span class="hint" id="release-approve-hint"></span></div>`;
       }
     } else {
       const counts = new Map();
@@ -200,6 +385,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
         <h3>ซ่อม ร./มส. ที่ยังไม่ปิด</h3>
         ${list([...counts.values()].map(([name, count]) => `${name} · ${count} คน`), "ไม่มีรายการซ่อมที่ยังเปิดอยู่")}
         <h3>ห้องที่ต้องบันทึกสมรรถนะใหม่</h3>
+        <p class="hint">รวมการโอนผลและสุ่มผลหลังล็อก</p>
         ${list(locked.stale.map(roomName), "ไม่มีห้องที่ต้องบันทึกใหม่")}
         ${locked.stale.length ? `<div class="grade-lock-actions"><button type="button" class="primary" id="release-refresh">บันทึกสมรรถนะใหม่ ${locked.stale.length} ห้อง</button></div>` : ""}`;
     }
@@ -211,9 +397,63 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
           : '<span class="hint">ถึงวันประกาศแล้ว · ยกเลิกได้เฉพาะผู้ดูแลระบบ</span>'}</div>`;
     }
     content.innerHTML = html;
+    find("check")?.addEventListener("click", check);
     find("approve")?.addEventListener("click", approve);
     find("refresh")?.addEventListener("click", refresh);
     find("revoke")?.addEventListener("click", revoke);
+    updateApproval();
+  }
+
+  async function check() {
+    if (busy || !scope || scope.locked) return;
+    const current = scope, resultBox = find("check-result"), examsHint = find("exams");
+    precheck = null;
+    resultBox.hidden = true;
+    resultBox.replaceChildren();
+    examsHint.hidden = false;
+    cancelled = false;
+    toggleBusy(true);
+    showError(null);
+    stop.hidden = false;
+    stop.disabled = false;
+    updateProgress("กำลังเตรียมข้อมูล…");
+    try {
+      current.scopedSubjects = await loadReleaseSubjects(current.year, current.term);
+      let result;
+      if (!cancelled) {
+        current.openExams = openExamCount(current.scopedSubjects, current.term);
+        examsHint.textContent = `ยังไม่ปิดคะแนนสอบ ${current.openExams} วิชา`;
+        const run = await prepareRun(current, true, () => cancelled);
+        result = await runGradePrecheck(current, run, () => cancelled, updateProgress);
+      }
+      if (cancelled) {
+        updateProgress("หยุดการตรวจแล้ว");
+        showError(null, check);
+        return;
+      }
+      resultBox.innerHTML = renderPrecheck(result, current);
+      find("reviewed")?.addEventListener("change", updateApproval);
+      find("csv").addEventListener("click", () => {
+        const url = URL.createObjectURL(new Blob([gradeRepairCsv(result.repairs)], { type:"text/csv;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `รายชื่อซ่อม-ภาค${current.term}-${current.year}.csv`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      });
+      precheck = { scope:current };
+      resultBox.hidden = false;
+      examsHint.hidden = true;
+      updateProgress("ตรวจเสร็จแล้ว");
+    } catch (error) {
+      updateProgress(cancelled ? "หยุดการตรวจแล้ว" : "");
+      showError(cancelled ? null : new Error("ตรวจก่อนอนุมัติไม่สำเร็จ · " + error.message), check);
+    } finally {
+      stop.hidden = true;
+      progress.hidden = true;
+      toggleBusy(false);
+      if (precheck) find("check").focus();
+    }
   }
 
   async function execute(operation, date, publishRooms = true) {
@@ -259,7 +499,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   }
 
   async function approve() {
-    if (!scope || busy) return;
+    if (busy || !mayApprove()) return;
     const { year, term, release, openExams } = scope;
     const dateInput = find("date");
     const date = dateInput?.value || null;
@@ -311,7 +551,7 @@ export async function initGradeReleaseTab(host, { admin, prepareRun }) {
   retry.onclick = () => retryAction?.();
   yearInput.onchange = termInput.onchange = () => { if (!busy) void load(); };
   try {
-    const years = await getAcademicYears();
+    years = await getAcademicYears();
     if (!years.length) {
       toggleBusy(true);
       updateProgress("ยังไม่มีปีการศึกษา · กำหนดปีการศึกษาก่อนอนุมัติผล");

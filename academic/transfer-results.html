@@ -24,6 +24,7 @@
 <script type="module">
 import {sb,requireAuth,signOut,getProfile,checkDepartment,getAcademicYears,getActiveYear,getStudentPlacements,
   fetchAllRows,pickCountableSubjects,percentToGrade,isAutoPresentStudent,isRegularStudent,GRADE_ORDER} from "../supabase-client.js?v=20261121-2";
+import {gradeLockError} from "./grade-lock.js?v=2";
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let subjects=[],competencies=[],traits=[],traitRows=[],activityRows=[],activityCategories=[],transferLevels=[],memberLinks=[],placements=[],subjectRows=[],competencyRows=[],busy=false,loading=false,studentLoading=false,loadSeq=0,studentSeq=0;
@@ -82,7 +83,7 @@ function updateTransferLevel(f){
   const level=transferLevels.slice().sort((a,b)=>Number(b.min_score)-Number(a.min_score)).find(l=>n!==null&&Number.isFinite(n)&&n>=Number(l.min_score));
   f.level.textContent=n===null?"—":level?.label||"ยังไม่มีเกณฑ์แปลผลที่ตรงกับคะแนนนี้";
 }
-async function selectTransferStudent(studentId){
+async function selectTransferStudent(studentId,preferredTerm="1"){
   if(busy||loading||!await confirmTransferDiscard())return;
   const token=++studentSeq,year=el("year").value,placement=placements.find(p=>p.student_id===studentId);
   transferStudent=null;transferFields=[];studentLoading=true;el("transfer-form").hidden=true;el("transfer-empty").hidden=true;lock(false);transferMessage("กำลังโหลดผลเดิมและตรวจการลงทะเบียน…");
@@ -98,7 +99,8 @@ async function selectTransferStudent(studentId){
     if(token!==studentSeq)return;
     for(const result of [enrolled,s,c,t,a])if(result.error)throw result.error;
     subjectRows=s.data||[];competencyRows=c.data||[];traitRows=t.data||[];activityRows=a.data||[];
-    transferStudent={...placement,enrolledIds:new Set((enrolled.data||[]).map(r=>r.subject_id))};transferYear=year;transferTerm="1";el("transfer-term").value="1";
+    transferStudent={...placement,enrolledIds:new Set((enrolled.data||[]).map(r=>r.subject_id))};transferYear=year;
+    el("transfer-term").value=placement.grade_level.startsWith("ม.")&&preferredTerm==="2"?"2":"1";
     renderTransferForm();transferMessage("เติมผลเดิมแล้ว · แก้เฉพาะช่องที่ต้องการโอน");
   }catch(error){if(token!==studentSeq)return;el("transfer-form").hidden=true;transferFields=[];transferMessage("โหลดไม่สำเร็จ: "+error.message+" · กดเลือกนักเรียนอีกครั้ง",true);}
   finally{if(token===studentSeq){studentLoading=false;lock(false);}}
@@ -143,7 +145,7 @@ el("transfer-form").addEventListener("submit",async event=>{
     }));
     const report=[],failed=[];
     results.forEach((result,index)=>{
-      const group=groups[index];if(result.status==="rejected"){failed.push(transferNames[group.kind]+": "+(result.reason?.message||String(result.reason)));return;}
+      const group=groups[index];if(result.status==="rejected"){failed.push(transferNames[group.kind]+": "+(gradeLockError(result.reason)||result.reason?.message||String(result.reason)));return;}
       let saved=0;for(const f of group.fields){const payload=transferPayload(f);const row=result.value.find(r=>r.student_id===payload.student_id&&r[f.column]===f.id&&(f.kind==="subject"?r.part===payload.part:r.term===payload.term)&&String(r[f.valueColumn])===transferFieldValue(f)&&r.source==="โอน");if(!row)continue;
         f.original=transferFieldValue(f);f.row=row;saved++;const label=f.input.closest(".field").querySelector(".transfer-source");if(label)label.textContent="โอน";
         const cache=f.kind==="subject"?subjectRows:f.kind==="competency"?competencyRows:f.kind==="trait"?traitRows:activityRows;
@@ -152,7 +154,7 @@ el("transfer-form").addEventListener("submit",async event=>{
       report.push(`${transferNames[group.kind]} ${saved} ช่อง`);if(saved!==group.fields.length)failed.push(transferNames[group.kind]+": ฐานคืนผลไม่ครบ กรุณาตรวจสิทธิ์แล้วลองใหม่");
     });
     transferMessage((report.length?"บันทึกแล้ว: "+report.join(" · "):"")+(failed.length?"\nบันทึกไม่สำเร็จ: "+failed.join(" · ")+" · ค่าที่กรอกยังอยู่ กดบันทึกอีกครั้งเฉพาะช่องค้างได้":""),!!failed.length);
-  }catch(error){transferMessage("บันทึกไม่สำเร็จ: "+error.message+" · ค่าที่กรอกยังอยู่ ลองอีกครั้งได้",true);}finally{el("transfer-save").textContent="บันทึกผลโอน";el("transfer-save").setAttribute("aria-busy","false");lock(false);}
+  }catch(error){transferMessage("บันทึกไม่สำเร็จ: "+(gradeLockError(error)||error.message)+" · ค่าที่กรอกยังอยู่ ลองอีกครั้งได้",true);}finally{el("transfer-save").textContent="บันทึกผลโอน";el("transfer-save").setAttribute("aria-busy","false");lock(false);}
 });
 window.addEventListener("beforeunload",event=>{if(transferChanges().length){event.preventDefault();event.returnValue="";}});
 document.addEventListener("click",async event=>{const a=event.target.closest("a[href]");if(!a||a.id==="btn-signout"||a.hash||a.target==="_blank"||event.metaKey||event.ctrlKey||!transferChanges().length)return;event.preventDefault();if(busy||loading)return;if(await confirmTransferDiscard()){resetTransfer();location.href=a.href;}});
@@ -163,8 +165,20 @@ if(session){
   el("btn-signout").addEventListener("click",async event=>{event.preventDefault();if(busy||loading)return;if(await confirmTransferDiscard()){resetTransfer();signOut();}});
   try{const profile=await getProfile(session.user.id);if(profile?.role!=="admin"&&!await checkDepartment("วิชาการ")){el("access").textContent="หน้านี้สำหรับ admin หรือฝ่ายวิชาการที่ได้รับอนุญาต";}else{
     const years=await getAcademicYears();el("year").innerHTML=years.slice().sort((a,b)=>String(b.year).localeCompare(String(a.year))).map(row=>`<option>${esc(row.year)}</option>`).join("");
-    if(years.some(row=>String(row.year)===String(getActiveYear())))el("year").value=getActiveYear();
-    el("access").hidden=true;el("workspace").hidden=false;if(years.length)await loadYear();else{el("load-status").textContent="ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน";}
+    const link=new URLSearchParams(location.search);
+    const selectedYear=[link.get("year"),getActiveYear()].find(year=>years.some(row=>String(row.year)===year));
+    if(selectedYear)el("year").value=selectedYear;
+    el("access").hidden=true;el("workspace").hidden=false;
+    if(years.length){
+      await loadYear();
+      const placement=placements.find(p=>p.student_id===link.get("student")&&p.student&&isRegularStudent(p.student)&&
+        !p.student.graduated&&!p.student.left_school&&/^[ปม]\./.test(p.grade_level));
+      if(placement){
+        el("transfer-search").value=placement.student.name;
+        renderTransferStudents();
+        await selectTransferStudent(placement.student_id,link.get("term"));
+      }
+    }else el("load-status").textContent="ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน";
   }}catch(error){el("access").hidden=false;el("access").textContent="เปิดหน้าไม่สำเร็จ: "+error.message+" · เข้าสู่ระบบใหม่แล้วลองอีกครั้ง";}
 }
 </script></body></html>

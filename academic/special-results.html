@@ -19,6 +19,7 @@
 <script type="module">
 import {sb,requireAuth,signOut,getProfile,checkDepartment,getAcademicYears,getActiveYear,getStudentPlacements,
   fetchAllRows,pickCountableSubjects,pickOnePerCode,percentToGrade,isAutoPresentStudent,GRADE_ORDER} from "../supabase-client.js?v=20261121-2";
+import {gradeLockError} from "./grade-lock.js?v=2";
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TYPES=["ฝากเรียน","โปรแกรมพิเศษ"];
@@ -136,7 +137,7 @@ el("generate").addEventListener("click",async()=>{
     const result=typeof data==="string"?JSON.parse(data):data;
     await loadYear();
     message(`สุ่มแล้ว: นักเรียน ${result.students} คน · ${result.subjects} วิชา · ${result.part}\nบันทึกผลวิชา ${result.subject_rows} แถว · สมรรถนะ ${result.competency_rows} แถว · คุณลักษณะ ${result.trait_rows??0} แถว · กิจกรรม ${result.activity_rows??0} แถว${result.cleared_rows>0?` · ล้างผลสุ่มซ้ำบนวิชารหัสเดียวกัน ${result.cleared_rows} แถว`:""}${result.locked?"\nถึงวันประกาศผลแล้ว ผลเดิมไม่ถูกเปลี่ยน (สุ่มเฉพาะคนที่ยังไม่มีผล)":""}`,false,result.locked);
-  }catch(error){message("สุ่มไม่สำเร็จ: "+error.message+" · ตรวจช่วงคะแนนแล้วลองอีกครั้ง",true);}
+  }catch(error){message("สุ่มไม่สำเร็จ: "+(gradeLockError(error)||error.message+" · ตรวจช่วงคะแนนแล้วลองอีกครั้ง"),true);}
   finally{el("generate").textContent="สุ่มผลและบันทึก";lock(false);}
 });
 el("grade").addEventListener("change",changeScope);el("term").addEventListener("change",changeScope);el("year").addEventListener("change",()=>{el("operation").hidden=true;void loadYear();});el("retry").addEventListener("click",loadYear);
@@ -144,8 +145,16 @@ if(session){
   el("btn-signout").addEventListener("click",async event=>{event.preventDefault();if(busy||loading)return;signOut();});
   try{const profile=await getProfile(session.user.id);if(profile?.role!=="admin"&&!await checkDepartment("วิชาการ")){el("access").textContent="หน้านี้สำหรับ admin หรือฝ่ายวิชาการที่ได้รับอนุญาต";}else{
     const years=await getAcademicYears();el("year").innerHTML=years.slice().sort((a,b)=>String(b.year).localeCompare(String(a.year))).map(row=>`<option>${esc(row.year)}</option>`).join("");
-    if(years.some(row=>String(row.year)===String(getActiveYear())))el("year").value=getActiveYear();
-    el("access").hidden=true;el("workspace").hidden=false;if(years.length)await loadYear();else{el("load-status").textContent="ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน";}
+    const link=new URLSearchParams(location.search),term=link.get("term");
+    const selectedYear=[link.get("year"),getActiveYear()].find(year=>years.some(row=>String(row.year)===year));
+    if(selectedYear)el("year").value=selectedYear;
+    if(["1","2"].includes(term))el("term").value=term;
+    el("access").hidden=true;el("workspace").hidden=false;
+    if(years.length){
+      await loadYear();
+      const grade=link.get("grade");
+      if([...el("grade").options].some(option=>option.value===grade)){el("grade").value=grade;changeScope();}
+    }else el("load-status").textContent="ยังไม่มีปีการศึกษา กรุณาตั้งค่าปีการศึกษาก่อน";
   }}catch(error){el("access").hidden=false;el("access").textContent="เปิดหน้าไม่สำเร็จ: "+error.message+" · เข้าสู่ระบบใหม่แล้วลองอีกครั้ง";}
 }
 </script></body></html>
