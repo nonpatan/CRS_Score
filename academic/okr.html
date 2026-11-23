@@ -105,6 +105,9 @@
   .progress > span { display: block; height: 100%; background: var(--teal); }
   .trend { margin-top: 5px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
   .link-row { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(190px, 1.3fr) auto; gap: 8px; align-items: end; margin-bottom: 8px; }
+  .evidence-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; grid-column: 1 / -1; }
+  .evidence-upload-status.err { color: var(--danger); }
+  .evidence-upload-status a { color: var(--teal); }
   .subform { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
   .copy-row, .threshold-row { display: grid; grid-template-columns: minmax(180px, 1fr) auto; gap: 8px; align-items: end; margin: 12px 0; }
   .threshold-row { grid-template-columns: repeat(2, minmax(130px, 1fr)) auto; }
@@ -215,7 +218,7 @@
             <div class="field wide"><label for="c-method">วิธีได้มา</label><textarea id="c-method" maxlength="2000"></textarea></div>
             <div class="field"><label for="c-source-kind">ประเภทแหล่งข้อมูล</label><select id="c-source-kind"><option>ครูรายงาน</option><option>ระบบภายใน</option><option>ผลสอบ/ข้อมูลทางการ</option><option>แบบสำรวจ</option><option>เอกสารภายนอก</option><option>หลายแหล่งประกอบกัน</option></select></div>
             <div class="field"><label for="c-source-detail">ผู้ให้ข้อมูล / ได้มายังไง</label><input id="c-source-detail" type="text" maxlength="1000"></div>
-            <div class="field wide"><label>ลิงก์หลักฐาน</label><div id="evidence-link-list"></div><button class="ghost" id="add-evidence-link" type="button">เพิ่มหลักฐาน</button><div class="hint">URL ต้องขึ้นต้นด้วย http:// หรือ https://</div></div>
+            <div class="field wide"><label>ลิงก์หลักฐาน</label><div id="evidence-link-list"></div><button class="ghost" id="add-evidence-link" type="button">เพิ่มหลักฐาน</button><div class="hint" id="evidence-link-hint">URL ต้องขึ้นต้นด้วย http:// หรือ https://</div></div>
           </div>
           <div class="toolbar"><button class="primary" id="save-checkin" type="submit">บันทึกผลวัด</button><button class="ghost" id="cancel-checkin" type="button">ยกเลิก</button></div>
         </form>
@@ -259,8 +262,9 @@ import {
   loadProjectPlan, saveProjectPlan, deleteProjectPlan, carryProjectPlan, replaceProjectPlanOkrs, replaceProjectPlanMembers,
   loadSchoolOkrs, loadOkrCheckins, loadOkrLineage, loadOkrThresholds,
   buildOkrTree, okrProgress, okrScore, okrObjectiveScore, projectApprovalBadge,
-  indexCheckinsByOkr, okrCoverage, projectPlanKrCoverage, buildOkrTrend, suggestOkrValue, setSetting, PRE_SCHOOL_GRADE
+  indexCheckinsByOkr, okrCoverage, projectPlanKrCoverage, buildOkrTrend, suggestOkrValue, getSetting, setSetting, PRE_SCHOOL_GRADE
 } from "../supabase-client.js?v=20261121-2";
+import { pdfFileError, driveFileId, readPdfBase64, driveRequest, trashDriveFiles, driveUploadUrl, DRIVE_UPLOAD_ERROR } from "../shared/drive-upload.js?v=20261120-1";
 
 const session = await requireAuth();
 if (!session) {
@@ -284,10 +288,12 @@ if (!session) {
 
   el("btn-signout")?.addEventListener("click", event => { event.preventDefault(); signOut(); });
 
-  const [profile, canEditAll] = await Promise.all([
+  const [profile, canEditAll, checkinDriveUrl] = await Promise.all([
     getProfile(session.user.id),
-    checkDepartment("วิชาการ")
+    checkDepartment("วิชาการ"),
+    driveUploadUrl(getSetting)
   ]);
+  if (checkinDriveUrl) el("evidence-link-hint").textContent = "อัปไฟล์ PDF ได้เลย · รูปภาพหรือชีตให้วางลิงก์ที่ตั้งแชร์แล้ว";
   const isAdmin = profile?.role === "admin";
   const SCHOOL_OKRS_TABLE = "school_okrs";
 
@@ -314,6 +320,13 @@ if (!session) {
   let editingCheckinKrId = null;
   let carriedFromId = null;
   let currentSuggestion = null;
+  let checkinFormVersion = 0;
+  let evidenceUploadRowId = 0;
+  let evidenceUploadsInFlight = 0;
+  let checkinSaving = false;
+  let okrDeleting = false;
+  let originalUrls = [];
+  const uploadedThisSession = new Set();
 
   // พัก node เดิมพร้อมค่าและ listener ก่อนเขียน innerHTML ทับรายการ
   function homeForm(box) {
@@ -693,6 +706,7 @@ if (!session) {
 
   function openPlanForm(row = null) {
     if (!canEditAll || planBusy) return;
+    if (evidenceUploadsInFlight) return;
     editingPlanId = row?.id || null;
     el("plan-form").reset();
     el("plan-form-title").textContent = row ? "แก้ไขรายการในทะเบียน" : "เพิ่มรายการในทะเบียน";
@@ -731,7 +745,7 @@ if (!session) {
 
   function setPlanBusy(busy) {
     planBusy = busy;
-    el("filter-year").disabled = busy;
+    el("filter-year").disabled = busy || evidenceFormLocked();
     el("plan-card").querySelectorAll("button, input, select, textarea").forEach(control => { control.disabled = busy; });
   }
 
@@ -957,7 +971,119 @@ if (!session) {
     const row = document.createElement("div");
     row.className = "link-row";
     row.innerHTML = `<div class="field"><label>ชื่อเอกสาร</label><input class="${prefix}-label" type="text" maxlength="300" value="${esc(link.label || "")}"></div><div class="field"><label>URL</label><input class="${prefix}-url" type="url" inputmode="url" value="${esc(link.url || "")}" placeholder="https://…"></div><button class="danger remove-link" type="button">เอาออก</button>`;
+    if (checkinDriveUrl) attachEvidenceUpload(row);
     el(containerId).appendChild(row);
+  }
+
+  function evidenceFormLocked() {
+    return Boolean(checkinDriveUrl) && (evidenceUploadsInFlight > 0 || checkinSaving || okrDeleting);
+  }
+
+  function syncCheckinBusy() {
+    const locked = evidenceFormLocked();
+    el("save-checkin").disabled = checkinSaving || locked;
+    if (!checkinDriveUrl) return;
+    el("checkin-form").setAttribute("aria-busy", String(evidenceUploadsInFlight > 0));
+    el("cancel-checkin").disabled = locked;
+    el("filter-year").disabled = planBusy || locked;
+  }
+
+  function trashUnusedEvidence(savedLinks) {
+    if (!checkinDriveUrl) return;
+    const unused = new Set(uploadedThisSession);
+    if (savedLinks) {
+      for (const url of originalUrls) unused.add(driveFileId(url));
+      for (const link of savedLinks) unused.delete(driveFileId(link.url));
+    }
+    trashDriveFiles(sb, checkinDriveUrl, [...unused]);
+    uploadedThisSession.clear();
+    originalUrls = [];
+  }
+
+  function attachEvidenceUpload(row) {
+    const id = `evidence-upload-${++evidenceUploadRowId}`;
+    const name = row.querySelector(".evidence-link-label");
+    const url = row.querySelector(".evidence-link-url");
+    const [nameLabel, urlLabel] = row.querySelectorAll("label");
+    name.setAttribute("id", `${id}-name`);
+    nameLabel.setAttribute("for", name.id);
+    name.setAttribute("aria-describedby", `${id}-status`);
+    url.setAttribute("id", `${id}-url`);
+    urlLabel.setAttribute("for", url.id);
+
+    const controls = document.createElement("div");
+    controls.className = "evidence-upload";
+    controls.innerHTML = `<label for="${id}-file" hidden>ไฟล์ PDF</label>
+      <input id="${id}-file" type="file" accept="application/pdf,.pdf" hidden>
+      <button type="button" class="ghost evidence-upload-button" aria-describedby="${id}-status">อัปโหลด PDF</button>
+      <div id="${id}-status" class="hint evidence-upload-status" role="status"></div>`;
+    row.appendChild(controls);
+    const input = controls.querySelector("input");
+    const button = controls.querySelector("button");
+    const status = controls.querySelector(".evidence-upload-status");
+    const syncName = () => button.setAttribute("aria-label", `อัปโหลด PDF สำหรับ ${name.value.trim() || "หลักฐานแถวนี้"}`);
+    syncName();
+    name.addEventListener("input", syncName);
+    url.addEventListener("input", () => { status.textContent = ""; });
+
+    function evidenceLabel() {
+      const label = name.value.trim();
+      if (label) return label;
+      status.classList.add("err");
+      status.textContent = "ใส่ชื่อเอกสารก่อนอัปไฟล์";
+      name.focus();
+      return "";
+    }
+
+    button.addEventListener("click", () => {
+      if (!checkinSaving && !okrDeleting && evidenceLabel()) input.click();
+    });
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      input.value = "";
+      const kr = okrs.find(row => row.id === editingCheckinKrId);
+      if (!file || !kr || checkinSaving || okrDeleting || input.disabled) return;
+      const label = evidenceLabel();
+      if (!label) return;
+      const fileError = pdfFileError(file);
+      if (fileError) {
+        status.classList.add("err");
+        status.textContent = fileError;
+        button.focus();
+        return;
+      }
+      const remove = row.querySelector(".remove-link");
+      const hadFocus = document.activeElement === button;
+      evidenceUploadsInFlight++;
+      syncCheckinBusy();
+      button.disabled = input.disabled = remove.disabled = true;
+      url.readOnly = name.readOnly = true;
+      status.classList.remove("err");
+      status.textContent = "กำลังอัปไฟล์…";
+      const retryMessage = "อัปโหลดไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วเลือกไฟล์อีกครั้ง";
+      try {
+        const base64 = await readPdfBase64(file).catch(() => {
+          throw new Error("อ่านไฟล์ไม่สำเร็จ กรุณาเลือกไฟล์อีกครั้ง");
+        });
+        const result = await driveRequest(sb, checkinDriveUrl, {
+          action:"upload", purpose:"okr", year:kr.year, krCode:kr.code || "KR", label, title:label, base64
+        });
+        const fileId = driveFileId(result.url);
+        if (!fileId || fileId !== result.fileId) throw new Error(retryMessage);
+        uploadedThisSession.add(fileId);
+        url.value = result.url;
+        status.innerHTML = `อัปแล้ว · <a href="${esc(result.url)}" target="_blank" rel="noopener noreferrer">เปิดไฟล์</a>`;
+      } catch (error) {
+        status.classList.add("err");
+        status.textContent = error.message === DRIVE_UPLOAD_ERROR ? retryMessage : error.message;
+      } finally {
+        button.disabled = input.disabled = remove.disabled = false;
+        url.readOnly = name.readOnly = false;
+        evidenceUploadsInFlight--;
+        syncCheckinBusy();
+        if (hadFocus && document.activeElement === document.body) button.focus();
+      }
+    });
   }
 
   function readLinks(containerId, prefix) {
@@ -1005,6 +1131,7 @@ if (!session) {
 
   function openOkrForm(okr = null, parentId = null) {
     if (!canEditAll) return;
+    if (evidenceFormLocked()) return;
     editingOkrId = okr?.id || null;
     addingKrParentId = parentId;
     const isKr = Boolean(okr?.parent_id || parentId);
@@ -1075,9 +1202,13 @@ if (!session) {
   }
 
   async function openCheckinForm(kr) {
-    if (!canEditAll) return;
+    if (!canEditAll || !kr || evidenceFormLocked()) return;
+    if (editingCheckinKrId) closeCheckinForm();
+    const formVersion = checkinFormVersion;
     editingCheckinKrId = kr.id;
     const checkin = checkinsByOkr.get(kr.id) || null;
+    const evidence = evidenceByCheckin.get(checkin?.id) || [];
+    originalUrls = checkinDriveUrl ? evidence.map(link => link.url) : [];
     el("checkin-form-title").textContent = `บันทึกผลวัด ${kr.code || "KR"}`;
     el("checkin-year").textContent = `ปีที่วัด: ปีการศึกษา ${kr.year}`;
     el("c-passed").value = checkin?.population_passed ?? "";
@@ -1088,19 +1219,21 @@ if (!session) {
     el("c-source-kind").value = checkin?.source_kind || "ครูรายงาน";
     el("c-source-detail").value = checkin?.source_detail || "";
     el("evidence-link-list").innerHTML = "";
-    (evidenceByCheckin.get(checkin?.id) || []).forEach(link => addLinkRow("evidence-link-list", "evidence-link", link));
+    evidence.forEach(link => addLinkRow("evidence-link-list", "evidence-link", link));
     currentSuggestion = null;
     el("suggestion-box").hidden = true;
     if (kr.auto_source) {
       try {
         const ctx = { range:academicYearRange(kr.year, years), projects };
         if (kr.auto_source === "จำนวนนักเรียน") ctx.studentCounts = await studentCountsFor(kr);
+        if (formVersion !== checkinFormVersion) return;
         currentSuggestion = suggestOkrValue(kr, ctx);
         el("suggestion-value").textContent = currentSuggestion.value == null ? "ระบบยังคำนวณค่าไม่ได้" : `ระบบคำนวณได้ ${currentSuggestion.value}`;
         el("suggestion-explain").textContent = currentSuggestion.explain;
         el("use-suggestion").hidden = currentSuggestion.value == null;
         el("suggestion-box").hidden = false;
       } catch (error) {
+        if (formVersion !== checkinFormVersion) return;
         toast("คำนวณค่าแนะนำไม่สำเร็จ: " + error.message, true);
       }
     }
@@ -1112,7 +1245,10 @@ if (!session) {
     focusForm(el("checkin-form-box"));
   }
 
-  function closeCheckinForm() {
+  function closeCheckinForm(savedLinks) {
+    if (evidenceFormLocked()) return;
+    trashUnusedEvidence(savedLinks);
+    checkinFormVersion++;
     editingCheckinKrId = null;
     currentSuggestion = null;
     el("checkin-form").reset();
@@ -1189,6 +1325,10 @@ if (!session) {
   }
 
   el("filter-year").addEventListener("change", async () => {
+    if (evidenceFormLocked()) {
+      el("filter-year").value = getActiveYear();
+      return;
+    }
     setActiveYear(el("filter-year").value); closeOkrForm(); closeCheckinForm(); closePlanForm(); planSourceYears();
     const target = el("filter-year").value;
     el("copy-source-year").innerHTML = '<option value="">— เลือกปีต้นทาง —</option>' + years.filter(row => row.year !== target).sort((a,b) => b.year.localeCompare(a.year, "th", {numeric:true})).map(row => `<option value="${esc(row.year)}">ปีการศึกษา ${esc(row.year)}</option>`).join("");
@@ -1200,10 +1340,18 @@ if (!session) {
   el("c-total").addEventListener("input", denominatorWarning);
   el("add-objective").addEventListener("click", () => openOkrForm());
   el("cancel-okr").addEventListener("click", closeOkrForm);
-  el("cancel-checkin").addEventListener("click", closeCheckinForm);
+  el("cancel-checkin").addEventListener("click", () => closeCheckinForm());
+  if (checkinDriveUrl) el("checkin-form").addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    closeCheckinForm();
+  });
   el("clear-carried").addEventListener("click", () => { carriedFromId = null; el("o-carried-field").hidden = true; });
   el("add-evidence-link").addEventListener("click", () => addLinkRow("evidence-link-list", "evidence-link"));
-  el("evidence-link-list").addEventListener("click", event => event.target.closest(".remove-link")?.closest(".link-row")?.remove());
+  el("evidence-link-list").addEventListener("click", event => {
+    const remove = event.target.closest(".remove-link");
+    if (remove && !remove.disabled) remove.closest(".link-row").remove();
+  });
   el("use-suggestion").addEventListener("click", () => { if (currentSuggestion?.value != null) el("c-actual").value = currentSuggestion.value; });
 
   el("okr-list").addEventListener("click", async event => {
@@ -1214,19 +1362,39 @@ if (!session) {
     const check = event.target.closest("[data-checkin]");
     if (check) return openCheckinForm(okrs.find(row => row.id === check.dataset.checkin));
     const remove = event.target.closest("[data-delete-okr]");
-    if (!remove) return;
+    if (!remove || evidenceFormLocked()) return;
     const okr = okrs.find(row => row.id === remove.dataset.deleteOkr);
     const children = okrs.filter(row => row.parent_id === okr?.id);
-    const affectedCheckins = (okr?.parent_id ? [okr] : children).filter(row => checkinsByOkr.has(row.id)).length;
+    const affectedKrs = okr?.parent_id ? [okr] : children;
+    const affectedCheckins = affectedKrs.filter(row => checkinsByOkr.has(row.id)).length;
     const linkedProjects = projects.filter(project => (project.okrs || []).some(row => row.id === okr.id || children.some(child => child.id === row.id))).length;
     const label = okr.code || okr.objective || okr.key_result;
     const message = okr.parent_id
       ? `ลบ “${label}” หรือไม่? ผลวัด ${affectedCheckins} รายการและการผูกโครงการ ${linkedProjects} รายการจะหายตาม`
       : `ลบ “${label}” หรือไม่? KR ลูก ${children.length} ข้อ ผลวัด ${affectedCheckins} รายการ และการผูกโครงการ ${linkedProjects} รายการจะหายตาม`;
     if (!await window.crsAskConfirm({ title:"ลบ OKR", message:message + " · การลบกู้คืนไม่ได้", okLabel:"ลบ OKR", requireText:label, danger:true })) return;
+    if (evidenceFormLocked()) return;
+    const fileIds = checkinDriveUrl ? affectedKrs.flatMap(kr => {
+      const checkin = checkinsByOkr.get(kr.id);
+      return (evidenceByCheckin.get(checkin?.id) || []).map(link => driveFileId(link.url));
+    }) : [];
     remove.disabled = true;
-    const { error } = await sb.from(SCHOOL_OKRS_TABLE).delete().eq("id", okr.id);
-    if (error) { remove.disabled = false; return toast("ลบ OKR ไม่สำเร็จ: " + error.message, true); }
+    okrDeleting = true;
+    syncCheckinBusy();
+    try {
+      const { error } = await sb.from(SCHOOL_OKRS_TABLE).delete().eq("id", okr.id);
+      if (error) throw error;
+    } catch (error) {
+      remove.disabled = false;
+      return toast("ลบ OKR ไม่สำเร็จ: " + error.message, true);
+    } finally {
+      okrDeleting = false;
+      syncCheckinBusy();
+    }
+    if (checkinDriveUrl) {
+      if (affectedKrs.some(kr => kr.id === editingCheckinKrId)) closeCheckinForm();
+      trashDriveFiles(sb, checkinDriveUrl, fileIds);
+    }
     toast("ลบ OKR แล้ว"); await loadData();
   });
 
@@ -1264,7 +1432,9 @@ if (!session) {
 
   el("checkin-form").addEventListener("submit", async event => {
     event.preventDefault();
+    if (checkinSaving || evidenceFormLocked()) return;
     const kr = okrs.find(row => row.id === editingCheckinKrId);
+    if (!kr) return;
     const passed = numberOrNull("c-passed");
     const total = numberOrNull("c-total");
     if ((passed == null) !== (total == null)) return toast("ช่องผ่านกี่คนและจากกี่คนต้องกรอกคู่กัน", true);
@@ -1281,15 +1451,20 @@ if (!session) {
       suggested_value:currentSuggestion?.value ?? null, score:okrScore(kr, prospective), recorded_by:session.user.id,
       updated_at:new Date().toISOString()
     };
-    const button = el("save-checkin"); button.disabled = true;
+    checkinSaving = true;
+    syncCheckinBusy();
     try {
       const { data, error } = await sb.from("okr_checkins").upsert(payload, { onConflict:"okr_id" }).select("id").single();
       if (error) throw error;
       await replaceEvidence(data.id, links);
-      toast("บันทึกผลวัดแล้ว"); closeCheckinForm(); await loadData();
+      checkinSaving = false;
+      toast("บันทึกผลวัดแล้ว"); closeCheckinForm(links); await loadData();
       scrollToOkr(kr.id);
     } catch (error) { toast("บันทึกผลวัดไม่สำเร็จ: " + error.message, true); }
-    finally { button.disabled = false; }
+    finally {
+      checkinSaving = false;
+      syncCheckinBusy();
+    }
   });
 
   el("save-thresholds").addEventListener("click", async () => {
