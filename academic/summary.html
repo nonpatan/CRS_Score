@@ -3492,14 +3492,22 @@ async function computeCompetencyRoom(scope, roster, { cancelled, onStart, onProg
   if (!shared.ok || stopped()) return shared;
   const batch = await loadCompetencyRoomBatch(roster, shared);
   if (!batch.ok || stopped()) return batch;
+  const externalStudentIds = new Set();
+  if (publishing) {
+    const externalTerms = primary ? (scope.half === "ปลายปี" ? ["1", "2"] : ["1"]) : [scope.term];
+    for (const row of shared.externalRows || []) {
+      if (externalTerms.includes(row.term)) externalStudentIds.add(row.student_id);
+    }
+  }
   onStart?.();
   const computedRows = new Array(roster.length);
   let next = 0, done = 0;
   const worker = async () => {
     while (!stopped() && next < roster.length) {
       const index = next++, student = roster[index], prefetched = batch.byStudent.get(student.id);
-      // รอบอัตโนมัติบันทึกเฉพาะนักเรียนที่ลงทะเบียนในช่วงนี้
-      if (publishing && (!prefetched?.enrolledIds.size || !shared.subjectRows.some(row => prefetched.enrolledIds.has(row.id)))) continue;
+      // รอบอัตโนมัติรับทั้งผลโอน/สุ่มและผลจากวิชาที่ลงทะเบียนในช่วงนี้
+      if (publishing && !externalStudentIds.has(student.id) &&
+          (!prefetched?.enrolledIds.size || !shared.subjectRows.some(row => prefetched.enrolledIds.has(row.id)))) continue;
       try {
         const calculate = primary ? computePrimaryCompetencyForStudent : computeCompetencyForStudent;
         computedRows[index] = await calculate(student, blockedLoad.results, scope, shared, prefetched);
