@@ -24,8 +24,11 @@ textarea { min-height:90px; resize:vertical; } .row2,.docs { display:grid; grid-
 .stars { color:var(--amber); } .comment { padding:8px 12px; border-radius:8px; background:var(--bg); white-space:pre-wrap; overflow-wrap:anywhere; } .comment.fix { background:var(--amber-soft); }
 .teacher-note { margin:8px 0; padding:10px 12px; background:var(--blue-soft); border-left:4px solid var(--blue); border-radius:8px; color:var(--ink); white-space:pre-wrap; overflow-wrap:anywhere; }
 .teacher-note strong { display:block; color:var(--blue); margin-bottom:2px; }
+.text-link { color:var(--teal); text-decoration:underline; overflow-wrap:anywhere; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+.previous-review { white-space:pre-wrap; overflow-wrap:anywhere; }
 .st.note { background:var(--blue-soft); color:var(--blue); }
-.doc { border:1px solid var(--line); border-radius:10px; padding:12px; } .doc a { display:inline-flex; align-items:center; min-height:44px; } .doc h3 { margin-bottom:8px; }
+.doc { border:1px solid var(--line); border-radius:10px; padding:12px; } .doc > a { display:inline-flex; align-items:center; min-height:44px; } .doc h3 { margin-bottom:8px; }
 .toast { display:none; position:sticky; bottom:12px; z-index:120; padding:12px; border-radius:10px; color:var(--teal); background:var(--teal-soft); box-shadow:0 2px 12px var(--line); } .toast.show { display:block; } .toast.err { color:var(--danger); background:var(--danger-soft); }
 .overlay { position:fixed; inset:0; z-index:200; background:var(--scrim); padding:16px; display:grid; place-items:center; }
 .modal { width:100%; max-width:650px; max-height:calc(100dvh - 32px); overflow-y:auto; background:var(--white); border-radius:12px; padding:20px; }
@@ -65,7 +68,7 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
 import { sb, requireAuth, signOut, getProfile, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, GRADE_ORDER, fetchAllRows } from '../supabase-client.js?v=20261121-2';
-import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, samplingSummary, queueLabel, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS } from './lesson-plans.js?v=5';
+import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, samplingSummary, queueLabel, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS, linkifyText } from './lesson-plans.js?v=9';
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
@@ -112,17 +115,17 @@ if (!session) {} else {
     const plans = [...subjectPlans(subject.id)].sort((a,b) => a.seq-b.seq), sample = sampleFor(subject.id), count = coverage.sampling.get(subject.id) ?? coverage.defaultCount;
     $('review-detail').innerHTML = `<h2 id="subject-heading" tabindex="-1">${esc(subject.name)}</h2><p class="meta">${subjectMeta(subject)} · ${esc(coverage.profiles.get(subject.owner_id) || 'ไม่ระบุชื่อครู')}</p><p>สุ่มแล้ว ${sample.sampled}/${sample.target} · ส่งแล้ว ${plans.length} แผน</p>
       ${canSetSampling ? samplingForm('subject',count) : `<p class="hint">วิชานี้สุ่ม ${count} แผน${coverage.sampling.has(subject.id) ? ' (กำหนดเฉพาะวิชานี้)' : ' (ใช้ค่ากลาง)'}</p>`}
-      <ul class="sample-plans">${plans.map(plan => `<li><h3>แผนที่ ${plan.seq} · ${esc(plan.title)}${plan.teacher_note ? ' <span class="st note">มีหมายเหตุ</span>' : ''}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} คาบ</p><div class="docs">${[['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']].map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${esc(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${esc(plan.teacher_note)}</div>` : ''}
+      <ul class="sample-plans">${plans.map(plan => `<li><h3>แผนที่ ${plan.seq} · ${esc(plan.title)}${plan.teacher_note ? ' <span class="st note">มีหมายเหตุ</span>' : ''}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} คาบ</p><div class="docs">${[['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']].map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${linkifyText(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
       ${!canReview(plan) && isReviewer && plan.created_by === session.user.id && !isAdmin ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : !hasReviewed(plan) && canReview(plan) ? `<button type="button" class="ghost" data-review="${esc(plan.id)}">เลือกตรวจแผนนี้</button>` : ''}</li>`).join('')}</ul>`;
     if (moveFocus) { $('subject-heading').focus(); if (matchMedia('(max-width:899px)').matches) $('subject-heading').scrollIntoView({block:'start'}); }
   }
   function reviewPart(plan,key,label,doc) {
     const waiting = needsReview(plan[key+'_status']), editable = waiting && canReview(plan);
     return `<fieldset class="rv-part"><legend>${label}</legend>${docLink(plan[key+'_url'])}
-      ${editable ? `${plan[key+'_reviewed_at'] ? `<p class="hint">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${esc(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
+      ${editable ? `${plan[key+'_reviewed_at'] ? `<p class="hint previous-review">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${linkifyText(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
       <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-rating"><div class="star-options">${Array.from({length:MAX_STARS},(_,i) => i+1).map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"><label for="${key}-star-${n}" aria-hidden="true">☆</label></span>`).join('')}</div><span class="star-value" aria-hidden="true">ยังไม่ได้ให้ดาว</span></div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
       <fieldset class="verdict" aria-describedby="${key}-verdict-error"><legend>ผลตรวจ *</legend><label><input type="radio" name="${key}-verdict" value="ผ่าน" aria-describedby="${key}-verdict-error">✓ ผ่าน</label><label><input type="radio" name="${key}-verdict" value="ขอให้แก้" aria-describedby="${key}-verdict-error">⚠ ขอให้แก้</label><div class="err" id="${key}-verdict-error" role="alert"></div></fieldset>
-      <div class="field"><label for="${key}-comment">ข้อเสนอแนะ (บังคับเมื่อขอให้แก้)</label><textarea id="${key}-comment" name="${key}-comment" aria-describedby="${key}-comment-error"></textarea><div class="err" id="${key}-comment-error" role="alert"></div></div>` : `<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment ${plan[key+'_status'] === 'ขอให้แก้' ? 'fix' : ''}">${esc(plan[key+'_comment'])}</p>` : ''}${!waiting ? '<p class="hint">ครูไม่ได้เปลี่ยนลิงก์นี้ — ไม่ต้องตรวจซ้ำ</p>' : ''}`}</fieldset>`;
+      <div class="field"><label for="${key}-comment">ข้อเสนอแนะ (บังคับเมื่อขอให้แก้)</label><textarea id="${key}-comment" name="${key}-comment" aria-describedby="${key}-comment-hint ${key}-comment-error"></textarea><p class="hint" id="${key}-comment-hint">วางลิงก์ที่ขึ้นต้นด้วย https:// ได้ ครูกดเปิดได้เลย</p><div class="err" id="${key}-comment-error" role="alert"></div></div>` : `<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment ${plan[key+'_status'] === 'ขอให้แก้' ? 'fix' : ''}">${linkifyText(plan[key+'_comment'])}</p>` : ''}${!waiting ? '<p class="hint">ครูไม่ได้เปลี่ยนลิงก์นี้ — ไม่ต้องตรวจซ้ำ</p>' : ''}`}</fieldset>`;
   }
   function renderStarOptions(options,preview = null) {
     const value = Number(options.querySelector('input:checked')?.value || 0), shown = preview ?? value;
@@ -138,7 +141,7 @@ if (!session) {} else {
     const subject = coverage.subjects.find(row => row.id === plan.subject_id), own = plan.created_by === session.user.id && !isAdmin;
     $('review-detail').innerHTML = `<button id="back-subject" type="button">ดูแผนของวิชานี้</button><h2 id="review-heading" tabindex="-1">${esc(subject?.name || 'ไม่พบวิชา')} · แผนที่ ${plan.seq} · ${esc(plan.title)}</h2><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${subjectMeta(subject)} · ${esc(plan.planned_periods)} คาบ</p>
       ${own ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : ''}
-      ${isReviewer && !own ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewPart(plan,'plan','แผนการสอน','แผน')}${reviewPart(plan,'assessment','การวัดและประเมินผล','วัดผล')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${esc(plan.teacher_note)}</div>` : ''}
+      ${isReviewer && !own ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewPart(plan,'plan','แผนการสอน','แผน')}${reviewPart(plan,'assessment','การวัดและประเมินผล','วัดผล')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
       ${isReviewer && !own ? '<button id="save-review" class="primary" type="submit">บันทึกผลตรวจ</button></form>' : '</div>'}
       <details class="hist" id="history" data-plan="${esc(plan.id)}"><summary>ประวัติการตรวจแผนนี้</summary><div id="history-content" class="hint">เปิดเพื่อดูประวัติการตรวจ</div></details>`;
     $('review-detail').querySelectorAll('.star-options').forEach(options => {
@@ -171,7 +174,7 @@ if (!session) {} else {
     const id = event.target.dataset.plan, detail = event.target, content = detail.querySelector('#history-content');
     content.textContent = 'กำลังโหลดประวัติ…';
     if (!histories.has(id)) histories.set(id,(async () => check(await sb.from('lesson_plan_reviews').select('doc,stars,verdict,comment,url,reviewed_by_name,reviewed_at').eq('plan_id',id).order('reviewed_at',{ascending:false})))());
-    try { const rows = await histories.get(id); if (!detail.isConnected) return; content.innerHTML = rows.length ? rows.map(row => `<div class="comment"><strong>${esc(row.doc === 'แผน' ? 'แผนการสอน' : 'การวัดและประเมินผล')}</strong> ${badge(row.verdict)} ${stars(row.stars)}<p>${esc(row.comment || 'ไม่มีข้อเสนอแนะ')}</p><p class="meta">${esc(row.reviewed_by_name || 'ผู้ตรวจ')} · ${esc(date(row.reviewed_at))}</p>${docLink(row.url,'เปิดไฟล์ที่ตรวจ')}</div>`).join('') : '<p class="empty">ยังไม่มีประวัติการตรวจ</p>'; }
+    try { const rows = await histories.get(id); if (!detail.isConnected) return; content.innerHTML = rows.length ? rows.map(row => `<div class="comment"><strong>${esc(row.doc === 'แผน' ? 'แผนการสอน' : 'การวัดและประเมินผล')}</strong> ${badge(row.verdict)} ${stars(row.stars)}<p>${linkifyText(row.comment || 'ไม่มีข้อเสนอแนะ')}</p><p class="meta">${esc(row.reviewed_by_name || 'ผู้ตรวจ')} · ${esc(date(row.reviewed_at))}</p>${docLink(row.url,'เปิดไฟล์ที่ตรวจ')}</div>`).join('') : '<p class="empty">ยังไม่มีประวัติการตรวจ</p>'; }
     catch (error) { histories.delete(id); if (detail.isConnected) content.textContent = 'โหลดประวัติไม่สำเร็จ: '+error.message+' · ปิดแล้วเปิดประวัติอีกครั้งเพื่อลองใหม่'; }
   },true);
   $('review-detail').addEventListener('submit',async event => {

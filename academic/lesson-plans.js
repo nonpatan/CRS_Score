@@ -1,5 +1,48 @@
 export { pdfFileError, driveFileId, MAX_PDF_BYTES } from '../shared/drive-upload.js?v=20261120-1';
 
+const escapeText = value => value.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+function trimUrlEnd(url) {
+  if (!/[.,;:!?)}\]]$/.test(url)) return url;
+
+  // เก็บวงเล็บที่จับคู่ได้ใน URL ส่วนวงเล็บปิดเกินคู่และเครื่องหมายท้ายคืนให้ข้อความเดิม
+  const opening = {')':'(', ']':'[', '}':'{'};
+  const counts = {'(':0, '[':0, '{':0};
+  const unmatched = new Set();
+  for (const bracket of url.matchAll(/[()[\]{}]/g)) {
+    const [ch] = bracket;
+    const pair = opening[ch];
+    if (!pair) counts[ch]++;
+    else if (counts[pair]) counts[pair]--;
+    else unmatched.add(bracket.index);
+  }
+  let end = url.length;
+  while (end && (/[.,;:!?]/.test(url[end - 1]) || unmatched.has(end - 1))) end--;
+  return url.slice(0, end);
+}
+
+export function linkifyText(text) {
+  const input = String(text ?? '');
+  let html = '';
+  let start = 0;
+  // ข้อความไทยที่พิมพ์ติดท้ายลิงก์ให้แสดงต่อจากลิงก์
+  for (const match of input.matchAll(/https?:\/\/[^\s<>"'\u0E00-\u0E7F]+/gi)) {
+    const [candidate] = match;
+    const url = trimUrlEnd(candidate);
+    let parsed;
+    try { parsed = new URL(url); } catch { continue; }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+
+    const label = parsed.hostname.replace(/^www\./i, '') + (parsed.pathname === '/' ? '' : '/…');
+    const href = escapeText(url);
+    html += escapeText(input.slice(start, match.index));
+    html += `<a href="${href}" target="_blank" rel="noopener noreferrer" title="${href}" class="text-link">${escapeText(label)} ↗<span class="sr-only"> (เปิดแท็บใหม่)</span></a>`;
+    html += escapeText(candidate.slice(url.length));
+    start = match.index + candidate.length;
+  }
+  return html + escapeText(input.slice(start));
+}
+
 // ต้องตรงกับ check constraint lesson_plans_plan_url_ok ใน schema.sql ทุกตัวอักษร
 export const PLAN_PDF_URL_RE = /^https:\/\/(drive\.google\.com\/(file\/d\/[A-Za-z0-9_-]+|open\?id=[A-Za-z0-9_-]+)|\S+\.pdf([?#]\S*)?$)/i;
 export function pdfUrlError(url) {
