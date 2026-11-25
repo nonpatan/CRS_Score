@@ -39,6 +39,8 @@ textarea { min-height:90px; resize:vertical; } .row2,.docs { display:grid; grid-
 .review-grid { display:grid; grid-template-columns:minmax(210px,.7fr) minmax(0,1.3fr); gap:16px; align-items:start; } .queue { list-style:none; padding:0; margin:0; } .queue button { width:100%; border:0; border-bottom:1px solid var(--line); background:var(--white); text-align:left; display:grid; gap:4px; padding:12px 8px; overflow-wrap:anywhere; } .queue [aria-current=true] { background:var(--teal-soft); }
 .sampling-settings label { font-weight:600; } .sampling-settings input[type=number] { max-width:120px; } .sample-plans { list-style:none; padding:0; } .sample-plans > li { border-top:1px solid var(--line); padding:12px 0; } .sample-plans h3 { margin:4px 0; }
 .rv-parts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+#review-form[data-amending] [data-amend] { display:none; }
+.amend-actions .primary { width:auto; }
 @media(max-width:1199px) { .rv-parts { grid-template-columns:1fr; } }
 .rv-part { border:1px solid var(--line); border-radius:10px; padding:12px; margin:12px 0; } legend { font-weight:600; padding:0 4px; }
 .star-input { border:0; padding:0; margin:8px 0 0; } .star-rating { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; } .star-options { display:flex; gap:4px; } .star-value { color:var(--muted); font-size:14px; } .star-option { position:relative; } .star-option input { position:absolute; width:1px; height:1px; opacity:0; } .star-option label { display:grid; place-items:center; width:44px; height:44px; font-size:28px; cursor:pointer; border:0; border-radius:8px; color:var(--muted); } .star-option label.on { color:var(--amber); } .star-option label:active { background:var(--amber-soft); } .star-option input:focus-visible + label { outline:3px solid var(--teal); outline-offset:2px; }
@@ -87,6 +89,10 @@ if (!session) {} else {
   const subjectMeta = subject => subject ? `${esc(subject.grade_level)} · ${subject.term == null ? 'ทั้งปี '+esc(subject.year) : 'ภาค '+esc(subject.term)+'/'+esc(subject.year)}` : 'ไม่พบข้อมูลวิชา';
   const canReview = plan => isReviewer && (isAdmin || plan.created_by !== session.user.id);
   const needsReview = status => ['ส่งแล้ว','รอตรวจ'].includes(status);
+  const isReviewed = status => ['ผ่าน','ขอให้แก้'].includes(status);
+  const reviewDocs = [['plan','แผน'],['assessment','วัดผล']];
+  // ประวัติเรียงจากผลล่าสุดด้วยลำดับเดียวกับ RPC
+  const canAmend = (rows,doc,admin,userId) => admin || rows.find(row => row.doc === doc)?.reviewed_by === userId;
   const hasReviewed = plan => !!(plan.plan_reviewed_at || plan.assessment_reviewed_at);
   const subjectPlans = id => coverage.plans.filter(plan => plan.subject_id === id);
   const sampleFor = id => samplingSummary({plans:subjectPlans(id),sampleCount:coverage.sampling.get(id),defaultCount:coverage.defaultCount});
@@ -109,6 +115,12 @@ if (!session) {} else {
   function renderSamplingSettings() {
     $('sampling-settings').innerHTML = canSetSampling ? samplingForm('default',coverage.defaultCount) : '<p>สุ่มตรวจวิชาละ '+coverage.defaultCount+' แผน</p><p class="hint">0 = ไม่ต้องสุ่มตรวจ</p>';
   }
+  function subjectPlanAction(plan) {
+    if (!canReview(plan)) return isReviewer ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : '';
+    if (!hasReviewed(plan)) return `<button type="button" class="ghost" data-review="${esc(plan.id)}">เลือกตรวจแผนนี้</button>`;
+    if (reviewDocs.some(([key]) => isReviewed(plan[key+'_status']))) return `<button type="button" class="ghost" data-reviewed-plan="${esc(plan.id)}">ดูผลตรวจ</button>`;
+    return '';
+  }
   function renderSubject(moveFocus = false) {
     const subject = coverage?.subjects.find(row => row.id === selectedSubjectId);
     if (!subject) { $('review-detail').innerHTML = '<p class="empty">เลือกวิชาเพื่อดูแผน หรือเลือกแผนรอตรวจซ้ำ</p>'; return; }
@@ -116,16 +128,19 @@ if (!session) {} else {
     $('review-detail').innerHTML = `<h2 id="subject-heading" tabindex="-1">${esc(subject.name)}</h2><p class="meta">${subjectMeta(subject)} · ${esc(coverage.profiles.get(subject.owner_id) || 'ไม่ระบุชื่อครู')}</p><p>สุ่มแล้ว ${sample.sampled}/${sample.target} · ส่งแล้ว ${plans.length} แผน</p>
       ${canSetSampling ? samplingForm('subject',count) : `<p class="hint">วิชานี้สุ่ม ${count} แผน${coverage.sampling.has(subject.id) ? ' (กำหนดเฉพาะวิชานี้)' : ' (ใช้ค่ากลาง)'}</p>`}
       <ul class="sample-plans">${plans.map(plan => `<li><h3>แผนที่ ${plan.seq} · ${esc(plan.title)}${plan.teacher_note ? ' <span class="st note">มีหมายเหตุ</span>' : ''}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} คาบ</p><div class="docs">${[['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']].map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${linkifyText(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
-      ${!canReview(plan) && isReviewer && plan.created_by === session.user.id && !isAdmin ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : !hasReviewed(plan) && canReview(plan) ? `<button type="button" class="ghost" data-review="${esc(plan.id)}">เลือกตรวจแผนนี้</button>` : ''}</li>`).join('')}</ul>`;
+      ${subjectPlanAction(plan)}</li>`).join('')}</ul>`;
     if (moveFocus) { $('subject-heading').focus(); if (matchMedia('(max-width:899px)').matches) $('subject-heading').scrollIntoView({block:'start'}); }
   }
-  function reviewPart(plan,key,label,doc) {
-    const waiting = needsReview(plan[key+'_status']), editable = waiting && canReview(plan);
-    return `<fieldset class="rv-part"><legend>${label}</legend>${docLink(plan[key+'_url'])}
-      ${editable ? `${plan[key+'_reviewed_at'] ? `<p class="hint previous-review">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${linkifyText(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
-      <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-rating"><div class="star-options">${Array.from({length:MAX_STARS},(_,i) => i+1).map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"><label for="${key}-star-${n}" aria-hidden="true">☆</label></span>`).join('')}</div><span class="star-value" aria-hidden="true">ยังไม่ได้ให้ดาว</span></div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
-      <fieldset class="verdict" aria-describedby="${key}-verdict-error"><legend>ผลตรวจ *</legend><label><input type="radio" name="${key}-verdict" value="ผ่าน" aria-describedby="${key}-verdict-error">✓ ผ่าน</label><label><input type="radio" name="${key}-verdict" value="ขอให้แก้" aria-describedby="${key}-verdict-error">⚠ ขอให้แก้</label><div class="err" id="${key}-verdict-error" role="alert"></div></fieldset>
-      <div class="field"><label for="${key}-comment">ข้อเสนอแนะ (บังคับเมื่อขอให้แก้)</label><textarea id="${key}-comment" name="${key}-comment" aria-describedby="${key}-comment-hint ${key}-comment-error"></textarea><p class="hint" id="${key}-comment-hint">วางลิงก์ที่ขึ้นต้นด้วย https:// ได้ ครูกดเปิดได้เลย</p><div class="err" id="${key}-comment-error" role="alert"></div></div>` : `<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment ${plan[key+'_status'] === 'ขอให้แก้' ? 'fix' : ''}">${linkifyText(plan[key+'_comment'])}</p>` : ''}${!waiting ? '<p class="hint">ครูไม่ได้เปลี่ยนลิงก์นี้ — ไม่ต้องตรวจซ้ำ</p>' : ''}`}</fieldset>`;
+  function reviewPart(plan,key,amending = false) {
+    const status = plan[key+'_status'], waiting = needsReview(status), editable = waiting && canReview(plan);
+    const label = key === 'plan' ? 'แผนการสอน' : 'การวัดและประเมินผล';
+    const initialStars = amending ? Math.min(Number(plan[key+'_stars']),MAX_STARS) : 0;
+    return `<fieldset class="rv-part" data-part="${key}"><legend>${label}</legend>${docLink(plan[key+'_url'])}
+      ${editable || amending ? `${amending ? '<p class="hint">กำลังแก้ผลตรวจ · ครูจะได้รับแจ้งเตือนอีกครั้ง</p>' : plan[key+'_reviewed_at'] ? `<p class="hint previous-review">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${linkifyText(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
+      <fieldset class="star-input" aria-describedby="${key}-stars-error"><legend>ให้ดาว *</legend><div class="star-rating"><div class="star-options">${Array.from({length:MAX_STARS},(_,i) => i+1).map(n => `<span class="star-option"><input id="${key}-star-${n}" type="radio" name="${key}-stars" value="${n}" aria-label="${n} ดาว" aria-describedby="${key}-stars-error"${n === initialStars ? ' checked' : ''}><label for="${key}-star-${n}" aria-hidden="true">☆</label></span>`).join('')}</div><span class="star-value" aria-hidden="true">ยังไม่ได้ให้ดาว</span></div><div class="err" id="${key}-stars-error" role="alert"></div></fieldset>
+      <fieldset class="verdict" aria-describedby="${key}-verdict-error"><legend>ผลตรวจ *</legend><label><input type="radio" name="${key}-verdict" value="ผ่าน" aria-describedby="${key}-verdict-error"${amending && status === 'ผ่าน' ? ' checked' : ''}>✓ ผ่าน</label><label><input type="radio" name="${key}-verdict" value="ขอให้แก้" aria-describedby="${key}-verdict-error"${amending && status === 'ขอให้แก้' ? ' checked' : ''}>⚠ ขอให้แก้</label><div class="err" id="${key}-verdict-error" role="alert"></div></fieldset>
+      <div class="field"><label for="${key}-comment">ข้อเสนอแนะ (บังคับเมื่อขอให้แก้)</label><textarea id="${key}-comment" name="${key}-comment" aria-describedby="${key}-comment-hint ${key}-comment-error"></textarea><p class="hint" id="${key}-comment-hint">วางลิงก์ที่ขึ้นต้นด้วย https:// ได้ ครูกดเปิดได้เลย</p><div class="err" id="${key}-comment-error" role="alert"></div></div>
+      ${amending ? '<div class="actions amend-actions"><button type="button" class="primary" data-save-amend>บันทึกการแก้</button><button type="button" data-cancel-amend>ยกเลิก</button></div>' : ''}` : `<p>${badge(status)} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment ${status === 'ขอให้แก้' ? 'fix' : ''}">${linkifyText(plan[key+'_comment'])}</p>` : ''}${!waiting ? '<p class="hint">ครูไม่ได้เปลี่ยนลิงก์นี้ — ไม่ต้องตรวจซ้ำ</p>' : ''}${canReview(plan) && isReviewed(status) ? `<button class="ghost" type="button" data-amend="${key}" hidden>แก้ผลตรวจ</button>` : ''}`}</fieldset>`;
   }
   function renderStarOptions(options,preview = null) {
     const value = Number(options.querySelector('input:checked')?.value || 0), shown = preview ?? value;
@@ -135,16 +150,8 @@ if (!session) {} else {
     });
     options.closest('.star-rating').querySelector('.star-value').textContent = value ? value+' จาก '+MAX_STARS+' ดาว' : 'ยังไม่ได้ให้ดาว';
   }
-  function renderSelected(moveFocus = false) {
-    const plan = coverage?.plans.find(row => row.id === selectedId);
-    if (!plan) { renderSubject(moveFocus); return; }
-    const subject = coverage.subjects.find(row => row.id === plan.subject_id), own = plan.created_by === session.user.id && !isAdmin;
-    $('review-detail').innerHTML = `<button id="back-subject" type="button">ดูแผนของวิชานี้</button><h2 id="review-heading" tabindex="-1">${esc(subject?.name || 'ไม่พบวิชา')} · แผนที่ ${plan.seq} · ${esc(plan.title)}</h2><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${subjectMeta(subject)} · ${esc(plan.planned_periods)} คาบ</p>
-      ${own ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : ''}
-      ${isReviewer && !own ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewPart(plan,'plan','แผนการสอน','แผน')}${reviewPart(plan,'assessment','การวัดและประเมินผล','วัดผล')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
-      ${isReviewer && !own ? '<button id="save-review" class="primary" type="submit">บันทึกผลตรวจ</button></form>' : '</div>'}
-      <details class="hist" id="history" data-plan="${esc(plan.id)}"><summary>ประวัติการตรวจแผนนี้</summary><div id="history-content" class="hint">เปิดเพื่อดูประวัติการตรวจ</div></details>`;
-    $('review-detail').querySelectorAll('.star-options').forEach(options => {
+  function bindStarOptions(container) {
+    container.querySelectorAll('.star-options').forEach(options => {
       renderStarOptions(options);
       options.addEventListener('change', () => renderStarOptions(options));
       // แสดงตัวอย่างเฉพาะอุปกรณ์ที่มี hover โดยไม่เปลี่ยนค่าของ radio
@@ -154,6 +161,43 @@ if (!session) {} else {
       });
       options.addEventListener('mouseleave', () => renderStarOptions(options));
     });
+  }
+  function loadHistory(id) {
+    if (!histories.has(id)) {
+      const request = (async () => check(await sb.from('lesson_plan_reviews').select('doc,stars,verdict,comment,url,reviewed_by,reviewed_by_name,reviewed_at,amended').eq('plan_id',id).order('reviewed_at',{ascending:false}).order('id',{ascending:false})))();
+      histories.set(id,request);
+      request.catch(() => { if (histories.get(id) === request) histories.delete(id); });
+    }
+    return histories.get(id);
+  }
+  function showAmendActions(form,rows) {
+    for (const [key,doc] of reviewDocs) {
+      const button = form?.querySelector(`[data-amend="${key}"]`);
+      if (button) button.hidden = !canAmend(rows,doc,isAdmin,session.user.id);
+    }
+  }
+  async function loadAmendActions(form) {
+    if (!form?.querySelector('[data-amend][hidden]')) return;
+    try {
+      const rows = await loadHistory($('history').dataset.plan);
+      if (form.isConnected) showAmendActions(form,rows);
+    } catch { /* แสดงข้อผิดพลาดเมื่อเปิดประวัติเท่านั้น */ }
+  }
+  function renderSelected(moveFocus = false) {
+    const plan = coverage?.plans.find(row => row.id === selectedId);
+    if (!plan) { renderSubject(moveFocus); return; }
+    const subject = coverage.subjects.find(row => row.id === plan.subject_id), own = plan.created_by === session.user.id && !isAdmin;
+    const hasPending = reviewDocs.some(([key]) => needsReview(plan[key+'_status']));
+    $('review-detail').innerHTML = `<button id="back-subject" type="button">ดูแผนของวิชานี้</button><h2 id="review-heading" tabindex="-1">${esc(subject?.name || 'ไม่พบวิชา')} · แผนที่ ${plan.seq} · ${esc(plan.title)}</h2><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${subjectMeta(subject)} · ${esc(plan.planned_periods)} คาบ</p>
+      ${own ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : ''}
+      ${canReview(plan) ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewDocs.map(([key]) => reviewPart(plan,key)).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
+      ${canReview(plan) ? `${hasPending ? '<button id="save-review" class="primary" type="submit">บันทึกผลตรวจ</button>' : ''}</form>` : '</div>'}
+      <details class="hist" id="history" data-plan="${esc(plan.id)}"><summary>ประวัติการตรวจแผนนี้</summary><div id="history-content" class="hint">เปิดเพื่อดูประวัติการตรวจ</div></details>`;
+    const form = $('review-form');
+    if (form) {
+      bindStarOptions(form);
+      if (currentTab === 'queue') loadAmendActions(form);
+    }
     if (moveFocus) { $('review-heading').focus(); if (matchMedia('(max-width:899px)').matches) $('review-heading').scrollIntoView({block:'start'}); }
   }
   function selectPlan(id) {
@@ -167,26 +211,94 @@ if (!session) {} else {
     if (busy) return;
     const button = event.target.closest('[data-review]');
     if (button) { const plan = coverage?.plans.find(row => row.id === button.dataset.review); if (plan && !hasReviewed(plan) && canReview(plan)) selectPlan(plan.id); }
-    else if (event.target.closest('#back-subject')) { selectedId = ''; renderQueue(); renderSubject(true); }
+    const reviewed = event.target.closest('[data-reviewed-plan]');
+    if (reviewed) { const plan = coverage?.plans.find(row => row.id === reviewed.dataset.reviewedPlan); if (plan && canReview(plan)) selectPlan(plan.id); }
+    if (event.target.closest('#back-subject')) { selectedId = ''; renderQueue(); renderSubject(true); }
   });
   $('review-detail').addEventListener('toggle',async event => {
     if (event.target.id !== 'history' || !event.target.open) return;
     const id = event.target.dataset.plan, detail = event.target, content = detail.querySelector('#history-content');
     content.textContent = 'กำลังโหลดประวัติ…';
-    if (!histories.has(id)) histories.set(id,(async () => check(await sb.from('lesson_plan_reviews').select('doc,stars,verdict,comment,url,reviewed_by_name,reviewed_at').eq('plan_id',id).order('reviewed_at',{ascending:false})))());
-    try { const rows = await histories.get(id); if (!detail.isConnected) return; content.innerHTML = rows.length ? rows.map(row => `<div class="comment"><strong>${esc(row.doc === 'แผน' ? 'แผนการสอน' : 'การวัดและประเมินผล')}</strong> ${badge(row.verdict)} ${stars(row.stars)}<p>${linkifyText(row.comment || 'ไม่มีข้อเสนอแนะ')}</p><p class="meta">${esc(row.reviewed_by_name || 'ผู้ตรวจ')} · ${esc(date(row.reviewed_at))}</p>${docLink(row.url,'เปิดไฟล์ที่ตรวจ')}</div>`).join('') : '<p class="empty">ยังไม่มีประวัติการตรวจ</p>'; }
-    catch (error) { histories.delete(id); if (detail.isConnected) content.textContent = 'โหลดประวัติไม่สำเร็จ: '+error.message+' · ปิดแล้วเปิดประวัติอีกครั้งเพื่อลองใหม่'; }
+    try {
+      const rows = await loadHistory(id); if (!detail.isConnected) return;
+      showAmendActions($('review-form'),rows);
+      content.innerHTML = rows.length ? rows.map(row => `<div class="comment"><strong>${esc(row.doc === 'แผน' ? 'แผนการสอน' : 'การวัดและประเมินผล')}</strong> ${badge(row.verdict)} ${row.amended ? '<span class="st note">แก้ผลตรวจ</span>' : ''} ${stars(row.stars)}<p>${linkifyText(row.comment || 'ไม่มีข้อเสนอแนะ')}</p><p class="meta">${esc(row.reviewed_by_name || 'ผู้ตรวจ')} · ${esc(date(row.reviewed_at))}</p>${docLink(row.url,'เปิดไฟล์ที่ตรวจ')}</div>`).join('') : '<p class="empty">ยังไม่มีประวัติการตรวจ</p>';
+    }
+    catch (error) { if (detail.isConnected) content.textContent = 'โหลดประวัติไม่สำเร็จ: '+error.message+' · ปิดแล้วเปิดประวัติอีกครั้งเพื่อลองใหม่'; }
   },true);
+  function readReview(form,key,doc) {
+    const starsValue = form.querySelector(`[name="${key}-stars"]:checked`);
+    const verdict = form.querySelector(`[name="${key}-verdict"]:checked`);
+    const comment = $(key+'-comment'), commentText = comment.value.trim();
+    const fields = [
+      ['stars',starsValue ? '' : 'เลือก 1–'+MAX_STARS+' ดาว',form.querySelectorAll(`[name="${key}-stars"]`)],
+      ['verdict',verdict ? '' : 'เลือกผ่านหรือขอให้แก้',form.querySelectorAll(`[name="${key}-verdict"]`)],
+      ['comment',verdict?.value === 'ขอให้แก้' && !commentText ? 'ระบุสิ่งที่ต้องแก้ก่อนบันทึก' : '',[comment]]
+    ];
+    let firstInvalid = null;
+    for (const [field,message,inputs] of fields) {
+      $(key+'-'+field+'-error').textContent = message;
+      inputs.forEach(input => input.setAttribute('aria-invalid',String(!!message)));
+      if (message) firstInvalid ??= inputs[0];
+    }
+    return {review:{doc,stars:Number(starsValue?.value),verdict:verdict?.value,comment:commentText},firstInvalid};
+  }
+  function closeAmend(plan,form,key) {
+    delete form.dataset.amending;
+    form.querySelector(`[data-part="${key}"]`).outerHTML = reviewPart(plan,key);
+    const button = form.querySelector(`[data-amend="${key}"]`);
+    button.hidden = false; button.focus();
+  }
+  async function saveAmend(plan,form,key,button) {
+    const doc = reviewDocs.find(([part]) => part === key)[1];
+    const {review,firstInvalid} = readReview(form,key,doc);
+    if (review.stars === Math.min(Number(plan[key+'_stars']),MAX_STARS) && review.verdict === plan[key+'_status'] && review.comment === (plan[key+'_comment'] ?? '').trim()) {
+      closeAmend(plan,form,key); toast('ไม่มีอะไรเปลี่ยน'); return;
+    }
+    if (firstInvalid) { firstInvalid.focus(); return; }
+    setBusy(true); button.textContent = 'กำลังบันทึก…';
+    try {
+      const updated = check(await sb.rpc('amend_lesson_plan_review',{p_plan_id:plan.id,p_doc:doc,p_stars:review.stars,p_verdict:review.verdict,p_comment:review.comment}));
+      // เก็บร่างตรวจอีกเอกสารไว้ถ้าระหว่างบันทึกครูยังไม่ได้เปลี่ยนไฟล์นั้น
+      const otherKey = reviewDocs.find(([part]) => part !== key)[0];
+      const keepDraft = needsReview(plan[otherKey+'_status']) && ['status','url','reviewed_at'].every(field => plan[otherKey+'_'+field] === updated[otherKey+'_'+field]);
+      const draftSelector = `[data-part="${otherKey}"]`, draft = keepDraft ? form.querySelector(draftSelector) : null;
+      const historyOpen = $('history').open;
+      coverage.plans = coverage.plans.map(row => row.id === plan.id ? {...row,...updated} : row);
+      histories.delete(plan.id);
+      renderQueue(); renderCoverage(); renderSelected(true);
+      if (draft) $('review-form').querySelector(draftSelector).replaceWith(draft);
+      $('history').open = historyOpen;
+      toast('แก้ผลตรวจแล้ว ครูจะเห็นผลใหม่');
+    } catch (error) { toast(error.message,false); }
+    finally { setBusy(false); if (button.isConnected) { button.textContent = 'บันทึกการแก้'; button.focus(); } }
+  }
+  $('review-detail').addEventListener('click',event => {
+    const button = event.target.closest('[data-amend], [data-cancel-amend], [data-save-amend]');
+    if (!button || busy) return;
+    const form = button.form, plan = coverage?.plans.find(row => row.id === selectedId);
+    if (!plan || !canReview(plan)) return;
+    if (button.hasAttribute('data-amend')) {
+      if (button.hidden || form.dataset.amending) return;
+      const key = button.dataset.amend;
+      form.dataset.amending = key;
+      button.closest('.rv-part').outerHTML = reviewPart(plan,key,true);
+      const part = form.querySelector(`[data-part="${key}"]`);
+      $(key+'-comment').value = plan[key+'_comment'] ?? '';
+      bindStarOptions(part);
+      (part.querySelector('.star-options input:checked') || part.querySelector('.star-options input')).focus();
+    } else if (button.hasAttribute('data-cancel-amend')) closeAmend(plan,form,form.dataset.amending);
+    else saveAmend(plan,form,form.dataset.amending,button);
+  });
   $('review-detail').addEventListener('submit',async event => {
     if (event.target.id !== 'review-form') return; event.preventDefault(); if (busy) return;
     const form = event.target, plan = coverage?.plans.find(row => row.id === selectedId); if (!plan || !isReviewer || (!isAdmin && plan.created_by === session.user.id)) return;
     const reviews = []; let firstInvalid = null;
-    for (const [key,doc] of [['plan','แผน'],['assessment','วัดผล']]) {
+    for (const [key,doc] of reviewDocs) {
       if (!needsReview(plan[key+'_status'])) continue;
-      const starsValue = form.querySelector(`[name="${key}-stars"]:checked`), verdict = form.querySelector(`[name="${key}-verdict"]:checked`), comment = $(key+'-comment');
-      const fields = [ ['stars',starsValue ? '' : 'เลือก 1–'+MAX_STARS+' ดาว',form.querySelector(`[name="${key}-stars"]`)], ['verdict',verdict ? '' : 'เลือกผ่านหรือขอให้แก้',form.querySelector(`[name="${key}-verdict"]`)], ['comment',verdict?.value === 'ขอให้แก้' && !comment.value.trim() ? 'ระบุสิ่งที่ต้องแก้ก่อนบันทึก' : '',comment] ];
-      for (const [field,message,input] of fields) { $(key+'-'+field+'-error').textContent = message; if (field === 'comment') input.setAttribute('aria-invalid',message ? 'true' : 'false'); else form.querySelectorAll(`[name="${key}-${field}"]`).forEach(node => node.setAttribute('aria-invalid',message ? 'true' : 'false')); if (message && !firstInvalid) firstInvalid = input; }
-      reviews.push({doc,stars:Number(starsValue?.value),verdict:verdict?.value,comment:comment.value.trim()});
+      const result = readReview(form,key,doc);
+      firstInvalid ??= result.firstInvalid;
+      reviews.push(result.review);
     }
     if (firstInvalid) { firstInvalid.focus(); return; }
     if (!reviews.length || (!hasReviewed(plan) && reviews.length !== 2)) return;
@@ -309,6 +421,7 @@ if (!session) {} else {
     if (busy) return; currentTab = tab;
     document.querySelectorAll('[role=tab]').forEach(button => { const selected = button.dataset.tab === tab; button.setAttribute('aria-selected',String(selected)); button.tabIndex = selected ? 0 : -1; });
     $('queue-panel').hidden = tab !== 'queue'; $('coverage-panel').hidden = tab !== 'coverage';
+    if (tab === 'queue') loadAmendActions($('review-form'));
     if (updateUrl) { const url = new URL(location.href); url.searchParams.set('tab',tab); history.replaceState(null,'',url); }
   }
   $('tabs').addEventListener('click',event => { const button = event.target.closest('[data-tab]'); if (button) activateTab(button.dataset.tab); });
