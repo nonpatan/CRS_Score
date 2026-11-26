@@ -58,6 +58,12 @@
   .tasks-head h2 { margin:0; } .tasks-head span { color:var(--muted); font-size:14px; }
   .empty b { display:block; color:var(--ink); font-size:16px; margin-bottom:4px; }
   .result-hero { background:var(--teal-soft); border-radius:9px; padding:12px; margin:10px 0; }
+  .ack-pending { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0 0; }
+  .ack-chip { padding:2px 10px; border-radius:99px; font-size:14px; font-weight:600; background:var(--amber-soft); color:var(--amber); }
+  .ack-pending a { display:inline-flex; align-items:center; min-height:44px; color:var(--teal); font-weight:600; }
+  .ack-group { background:var(--teal-soft); border-top:0; border-left:4px solid var(--teal); border-radius:8px; padding:12px; scroll-margin-block:96px; }
+  /* พื้นช่องกรอกจาก app-shell ใช้ !important */
+  .ack-group textarea { background:var(--white) !important; }
   .result-hero b { font-size:20px; color:var(--teal); } .result-table { width:100%; border-collapse:collapse; font-size:14px; }
   .result-table th,.result-table td { border-bottom:1px solid var(--line); padding:7px; text-align:left; }
   .result-table th { background:var(--bg); } .result-table td:last-child { text-align:right; }
@@ -158,11 +164,16 @@ if (!session) {
           deptHeadNotes.map(note => '<li>' + esc(note) + '</li>').join("") + '</ul></div>' : "";
         const parts = (computed.sections || []).filter(row => row.weight > 0);
         const starFails = (computed.stars || []).filter(row => row.fail);
-        html += '<section class="card result-card" data-result="' + esc(item.target_id) + '"><h2>ผลประเมินของฉัน · ' +
+        const ackPending = !item.acknowledgement;
+        const targetId = esc(item.target_id);
+        html += '<section class="card result-card" data-result="' + targetId + '"><h2>ผลประเมินของฉัน · ' +
           esc(item.round.academic_year + " ครั้งที่ " + item.round.round_no) + '</h2>' +
           '<div class="result-hero"><b>' + esc(evalDecisionLabel(decision.final)) + '</b><div>รวม ' +
           (computed.total == null ? "—" : Number(computed.total).toFixed(2)) + ' · ' + esc(computed.level || "—") +
-          ' · ประกาศเมื่อ ' + esc(publishedDay ? thaiShortDateText(publishedDay) : "—") + '</div></div>' +
+          ' · ประกาศเมื่อ ' + esc(publishedDay ? thaiShortDateText(publishedDay) : "—") + '</div>' +
+          (ackPending ? '<p class="ack-pending" data-ack-pending><span class="ack-chip">ยังไม่รับทราบผล</span>' +
+            '<a href="#ack-' + targetId + '" data-ack-jump="' + targetId + '">ไปที่ปุ่มรับทราบ ↓</a></p>' : '') +
+          '</div>' +
           '<table class="result-table"><thead><tr><th>ส่วน</th><th>เฉลี่ย</th><th>น้ำหนัก</th></tr></thead><tbody>' +
           parts.map(row => '<tr><td>' + esc(row.title) + (row.kind === "peer" ? " (ค่าเฉลี่ยเพื่อนครู)" : "") +
             '</td><td>' + (row.avg == null ? "—" : Number(row.avg).toFixed(2)) + '</td><td>' + esc(row.weight) + '%</td></tr>').join("") + '</tbody></table>' +
@@ -172,10 +183,11 @@ if (!session) {
             '<h3>' + esc(row.title) + '</h3><table class="result-table"><tbody>' + (row.items || []).map(score =>
               '<tr><td>' + esc(score.code + " " + score.text) + '</td><td>' +
               (score.value == null ? "—" : Number(score.value).toFixed(2)) + '</td></tr>').join("") + '</tbody></table>').join("") + '</details>' +
-          '<div class="group"><h3>รับทราบผล</h3><p class="hint">การลงนามเป็นการรับทราบผล ไม่ได้หมายความว่าเห็นด้วยกับผลการประเมิน</p>' +
+          (ackPending ? '<div class="group ack-group" id="ack-' + targetId + '">' : '<div class="group">') +
+          '<h3>รับทราบผล</h3><p class="hint">การลงนามเป็นการรับทราบผล ไม่ได้หมายความว่าเห็นด้วยกับผลการประเมิน</p>' +
           (appeal ? '<p>ไม่เห็นด้วยกับผล ติดต่อฝ่ายบุคคลภายใน ' + esc(Number(form.rules?.appeal_working_days || 7)) +
             ' วันทำการ (ถึง ' + esc(thaiShortDateText(appeal)) + ')</p>' : "") +
-          '<p data-ack-status>' + (item.acknowledgement ? 'รับทราบเมื่อ ' + esc(submittedDay(item.acknowledgement.acknowledged_at)) + ' · แก้คำชี้แจงได้' : '') + '</p>' +
+          '<p data-ack-status role="status">' + (item.acknowledgement ? 'รับทราบเมื่อ ' + esc(submittedDay(item.acknowledgement.acknowledged_at)) + ' · แก้คำชี้แจงได้' : '') + '</p>' +
           '<label for="comment-' + esc(item.target_id) + '">คำชี้แจง (ไม่บังคับ)</label>' +
           '<p class="hint" id="comment-help-' + esc(item.target_id) + '">ผอ. และฝ่ายบุคคลจะเห็นคำชี้แจงนี้' +
           (appeal ? ' · ถ้าไม่เห็นด้วยกับผล ให้เขียนเหตุผลที่นี่ และแจ้งฝ่ายบุคคลภายในวันที่ ' + esc(thaiShortDateText(appeal)) : '') +
@@ -235,6 +247,8 @@ if (!session) {
       const side = shortcuts.length ? '<section class="card"><div class="section">สำหรับผู้บริหาร</div>' +
         shortcuts.map(([href, title, hint]) => '<a class="shortcut" href="' + href + '"><span><b>' + esc(title) +
           '</b><small>' + esc(hint) + '</small></span></a>').join("") + '</section>' : "";
+      // จบสถานะโหลดแล้ว ให้ประกาศเฉพาะข้อความรับทราบของการ์ดที่เปลี่ยน
+      app.removeAttribute("role");
       app.className = "eval-layout";
       // งานทั้งหมดอยู่ในการ์ดเดียว — หัวข้อลอยนอกการ์ดจะไปทับแถบหัวสีเขียว (ส่วนที่การ์ดซ้อนขึ้นไป 54px) แล้วมองไม่เห็น
       app.innerHTML = '<div class="eval-main">' + html + '<section class="card tasks-card">' + tasksHead +
@@ -249,11 +263,27 @@ if (!session) {
         }
       }
       app.addEventListener("click", async event => {
+        const jump = event.target.closest("[data-ack-jump]");
+        if (jump) {
+          const group = document.getElementById("ack-" + jump.dataset.ackJump);
+          if (!group) return;
+          event.preventDefault();
+          const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+          group.scrollIntoView({block:"center", behavior:reduceMotion ? "auto" : "smooth"});
+          group.querySelector("[data-ack]").focus({preventScroll:true});
+          return;
+        }
         const button = event.target.closest("[data-ack]"); if (!button) return;
         const card = button.closest(".result-card"); button.disabled = true;
         try {
           const saved = await acknowledgeEvalResult(button.dataset.ack, card.querySelector("textarea").value);
           card.querySelector("[data-ack-status]").textContent = "รับทราบเมื่อ " + submittedDay(saved.acknowledged_at) + " · แก้คำชี้แจงได้";
+          card.querySelector("[data-ack-pending]")?.remove();
+          const group = button.closest(".ack-group");
+          if (group) {
+            group.classList.remove("ack-group");
+            group.removeAttribute("id");
+          }
           button.textContent = "บันทึกคำชี้แจง";
         } catch (error) {
           document.getElementById("toast").textContent = error.message;

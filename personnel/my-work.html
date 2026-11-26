@@ -37,6 +37,8 @@
            border:none; border-radius:8px; cursor:pointer; }
   button.primary { background:var(--teal); color:var(--white); }
   button.ghost { background:var(--teal-soft); color:var(--teal); }
+  button.ack { background:var(--teal); color:var(--white); border:0; font-weight:600; }
+  button.ack::before { content:"✓ "; }
   button.danger { background:var(--danger-soft); color:var(--danger); }
   button:disabled { opacity:.5; cursor:default; }
   label { display:block; font-weight:500; margin-bottom:6px; font-size:15px; }
@@ -143,8 +145,8 @@
   .status-chip { display:inline-flex; padding:2px 8px; border-radius:99px; font-size:12px;
                  font-weight:600; white-space:nowrap; background:var(--amber-soft); color:var(--amber); }
   .status-chip.approved { background:var(--teal-soft); color:var(--teal); }
-  .makeup-actions { margin-top:8px; }
-  .makeup-actions button { width:auto; }
+  .makeup-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .makeup-actions button { width:auto; min-height:44px; }
   .reject-note { margin-top:7px; padding:8px 10px; border-radius:8px;
                  background:var(--amber-soft); color:var(--amber); white-space:pre-wrap; }
   .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -756,20 +758,21 @@ if (session) {
       el("my-makeup-requests").innerHTML = makeups.length ? makeups.map(makeup => {
         const approved = makeup.approval_status === "อนุมัติ";
         const rejected = makeup.approval_status === "ไม่อนุมัติ";
-        const edit = approved ? "" : `<div class="makeup-actions"><button type="button" class="ghost" data-edit-makeup="${escapeHtml(makeup.id)}">${rejected ? "แก้แล้วส่งใหม่" : "แก้ไข"}</button></div>`;
+        // กดรับทราบแล้วแถวเตือนบนหน้าแรกจะหายถาวร — ใบที่ไม่ต้องส่งใหม่จึงไม่ตามเตือนตลอดไป
+        const ack = rejected && !makeup.teacher_seen_at
+          ? `<button type="button" class="ack" data-ack-makeup="${escapeHtml(makeup.id)}">รับทราบผล</button>`
+          : "";
+        const actions = approved ? "" : `<div class="makeup-actions">${ack}<button type="button" class="ghost" data-edit-makeup="${escapeHtml(makeup.id)}">${rejected ? "แก้แล้วส่งใหม่" : "แก้ไข"}</button></div>`;
         const reason = rejected
           ? `<div class="reject-note"><b>เหตุผลที่ไม่อนุมัติ:</b> ${escapeHtml(makeup.approval_note || "ไม่ระบุเหตุผล")}</div>` +
-            // กดรับทราบแล้วแถวเตือนบนหน้าแรกจะหายถาวร — ใบที่ไม่ต้องส่งใหม่จึงไม่ตามเตือนตลอดไป
-            (makeup.teacher_seen_at
-              ? `<div class="field-note">รับทราบแล้ว</div>`
-              : `<div class="makeup-actions"><button type="button" class="ghost" data-ack-makeup="${escapeHtml(makeup.id)}">รับทราบ</button></div>`)
+            (makeup.teacher_seen_at ? `<div class="field-note">รับทราบแล้ว</div>` : "")
           : "";
         return `<div class="makeup-request" data-makeup-id="${escapeHtml(makeup.id)}">
           <div class="makeup-head"><div><b>${escapeHtml(fmt(makeup.makeup_date))} · ${escapeHtml(teachingSubjectName(subjectById.get(makeup.subject_id)))}</b>
             <div class="my-duty-meta">${escapeHtml(makeupTimeLabel(makeup))} · ${escapeHtml(fmtPeriods(makeup.periods))} คาบ</div>
             ${parentNote(parentOfSubjectId(makeup.subject_id))}</div>
             <span class="status-chip${approved ? " approved" : ""}">${escapeHtml(makeup.approval_status || "รออนุมัติ")}</span></div>
-          ${makeup.note ? `<div class="field-note">หมายเหตุ: ${escapeHtml(makeup.note)}</div>` : ""}${reason}${edit}
+          ${makeup.note ? `<div class="field-note">หมายเหตุ: ${escapeHtml(makeup.note)}</div>` : ""}${reason}${actions}
         </div>`;
       }).join("") : '<div class="muted-empty">ยังไม่มีคำขอสอนชด</div>';
       setSection("my-makeup-requests", { todos:makeupTodos(makeups) });
