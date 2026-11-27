@@ -613,7 +613,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261122-1"></script>
+    <script src="../app-shell.js?v=20261127-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -655,7 +655,7 @@
     </div>
     <div id="subject-student-detail" tabindex="-1"><div class="card hint">เลือกนักเรียนเพื่อดูคะแนนรายละเอียด</div></div>
   </div>
-  <div class="card hint" id="empty-hint">เลือกวิชาเพื่อดูสรุปคะแนน</div>
+  <div class="card hint" id="empty-hint" role="status">เลือกวิชาเพื่อดูสรุปคะแนน</div>
   </div>
 
   <div id="attendance-report" style="display:none">
@@ -785,7 +785,7 @@
 import {
   sb, requireAuth, signOut, getRosterForSubject,
   loadGradeWeights, loadSubjectData, loadSubjectsData, computeSubjectResult, computeIntegratedResult,
-  computeStudentSubjectResults, computeGpa, percentToGrade,
+  computeStudentSubjectResults, computeGpa, percentToGrade, isKindergartenSubject,
   getActiveYear, setActiveYear, distinctYears, getStudentPlacements,
   computeSubjectCompetencySource, computeAssessmentCompetencySource,
   computeCombinedCompetencyResult, loadCompetencySettings, computeAttendanceRisk, isPrimaryGrade,
@@ -795,8 +795,8 @@ import {
   listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
   isAutoPresentStudent, isAutoAbsentStudent, checkDepartment, getProfile,
-} from "../supabase-client.js?v=20261121-2";
-import { initGradeReleaseTab, loadGradeReleasePlacements, releaseRooms, gradeRepairCandidates, competencyPublishRows } from "./grade-release.js?v=5";
+} from "../supabase-client.js?v=20261127-1";
+import { initGradeReleaseTab, loadGradeReleasePlacements, releaseRooms, gradeRepairCandidates, competencyPublishRows } from "./grade-release.js?v=6";
 import { traitLevel, activityRows, reportTerms, sortReportSubjects, primaryReportRows } from "../shared/report-card.js?v=20261121-2";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
@@ -1006,7 +1006,7 @@ async function loadSubjects() {
   fillYearOptions();
   const res = await sb.from("subjects").select("*").order("created_at");
   if (res.error) { showEmpty("โหลดวิชาไม่สำเร็จ: " + res.error.message); return; }
-  allSubjects = res.data || [];
+  allSubjects = (res.data || []).filter(subject => !isKindergartenSubject(subject));
 
   loadClassroomsByGrade(elFilterGrade.value);
 
@@ -1016,9 +1016,12 @@ async function loadSubjects() {
     .from("integration_members")
     .select("member_subject_id,integrated_subject_id");
   if (memErr) { showEmpty("โหลดข้อมูลวิชาบูรณาการไม่สำเร็จ: " + memErr.message); return; }
-  memberIdSet = new Set((memberRows || []).map(r => r.member_subject_id));
-  integratedParentIdSet = new Set((memberRows || []).map(r => r.integrated_subject_id));
-  integratedParentByMember = new Map((memberRows || []).map(r => [r.member_subject_id, r.integrated_subject_id]));
+  const kindergartenIds = new Set((res.data || []).filter(isKindergartenSubject).map(subject => subject.id));
+  const gradeLinks = (memberRows || []).filter(row =>
+    !kindergartenIds.has(row.member_subject_id) && !kindergartenIds.has(row.integrated_subject_id));
+  memberIdSet = new Set(gradeLinks.map(r => r.member_subject_id));
+  integratedParentIdSet = new Set(gradeLinks.map(r => r.integrated_subject_id));
+  integratedParentByMember = new Map(gradeLinks.map(r => [r.member_subject_id, r.integrated_subject_id]));
 
   fillYearOptions();
   applySubjectFilter();
@@ -1137,8 +1140,9 @@ elClassroom.addEventListener("change", () => {
 });
 
 // ---------- เลือกวิชา: โหลดข้อมูลนักเรียนและคำนวณผล ----------
-elSubject.addEventListener("change", async () => {
-  const id = elSubject.value;
+elSubject.addEventListener("change", () => loadSummarySubject(elSubject.value));
+
+async function loadSummarySubject(id) {
   resetSubjectSelection();
   openMemberIds = new Set();
   if (!id) { currentSubject = null; showEmpty("เลือกวิชาเพื่อดูสรุปคะแนน"); return; }
@@ -1149,6 +1153,11 @@ elSubject.addEventListener("change", async () => {
 
   const { data: subj, error: subjError } = await sb.from("subjects").select("*").eq("id", id).single();
   if (subjError || !subj) { showEmpty("โหลดรายวิชาไม่สำเร็จ: " + (subjError ? subjError.message : "ไม่พบรายวิชา")); return; }
+  if (isKindergartenSubject(subj)) {
+    currentSubject = null;
+    showEmpty("วิชาอนุบาล — หน้ากรอกพัฒนาการยังไม่เปิดใช้");
+    return;
+  }
   currentSubject = subj;
   if (subj.level === "ประถม") {
     const years = await getAcademicYears();
@@ -1170,7 +1179,7 @@ elSubject.addEventListener("change", async () => {
       .select("*, member:member_subject_id(*)")
       .eq("integrated_subject_id", id);
     if (memErr) { showEmpty("โหลดวิชาย่อยไม่สำเร็จ: " + memErr.message); return; }
-    integrationMembers = memberRows || [];
+    integrationMembers = (memberRows || []).filter(row => row.member && !isKindergartenSubject(row.member));
     openMemberIds = new Set(integrationMembers
       .filter(m => m.member.owner_id === session.user.id)
       .map(m => m.member_subject_id));
@@ -1225,7 +1234,7 @@ elSubject.addEventListener("change", async () => {
   await loadClassroomsByGrade(currentSubject.grade_level, currentSubject.year);
 
   render();
-});
+}
 
 elSearch.addEventListener("input", renderSubjectStudentList);
 elStudentList.addEventListener("click", event => {
@@ -4812,6 +4821,16 @@ pageReady = (async () => {
   await loadSubjects();
 })();
 await pageReady;
+const subjectLink = new URLSearchParams(location.search).get("subject");
+if (subjectLink && (!location.hash || location.hash === "#subject")) {
+  const subject = allSubjects.find(row => row.id === subjectLink);
+  if (subject) {
+    elFilterYear.value = subject.year || "";
+    applySubjectFilter();
+    elSubject.value = subjectLink;
+  }
+  await loadSummarySubject(subjectLink);
+}
 if (location.hash === "#competency") {
   setReportMode("competency");
   const link = new URLSearchParams(location.search);

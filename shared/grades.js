@@ -1,6 +1,10 @@
 // สูตรกลาง CRS MIS / แอปผู้ปกครอง — ย้ายจาก supabase-client.js โดยไม่เปลี่ยนผล
 // โมดูลบริสุทธิ์: ไม่โหลดฐานข้อมูล เครือข่าย หรือ DOM
 
+export const isKindergartenSubject = s => s?.level === "อนุบาล";
+export const isPrimaryLikeSubject = s => s?.level === "ประถม" || isKindergartenSubject(s);
+export const isKindergartenGrade = g => String(g || "").startsWith("อ.") || String(g || "").trim() === "เตรียมอนุบาล";
+
 export const MS_RETAKE_RATIO = 0.40;          // ขาดดิบเกินนี้ = เรียนซ้ำรายวิชา ชดเชยช่วยไม่ได้
 export const MS_MAKEUP_RATIO = 0.20;          // ขาดสุทธิเกินนี้ = ต้องเรียนเพิ่มให้ครบเวลา
 export const MS_MAKEUP_GRADE_CAP = 1;
@@ -393,7 +397,7 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   //   ขาดสะสม > 20% ของคาบเต็มตามรอบวิชา และ <= 40%  → "เรียนเพิ่มเติมให้ครบเวลา" ใช้ชั่วโมงชดเชย
   //     ลบยอดขาดสุทธิให้ไม่เกิน 20% ได้
   //   ขาดสะสม > 40% ของคาบเต็มตามรอบวิชา               → "เรียนซ้ำรายวิชา" ชั่วโมงชดเชยช่วยไม่ได้เลย
-  if (subj.level !== "ประถม" && !skipMs && subj.total_periods && sessionsArr.length > 0) {
+  if (subj.level === "มัธยม" && !skipMs && subj.total_periods && sessionsArr.length > 0) {
     const rawMissed = computeMissedPeriods(studentId, sessionsArr);
     const maxMissedRetake = subj.total_periods * MS_RETAKE_RATIO;
     const maxMissedMakeup = subj.total_periods * MS_MAKEUP_RATIO;
@@ -413,14 +417,14 @@ export function computeSubjectResult(studentId, subj, unitsTree, remarksArr, ses
   }
 
   // 2) เช็ค ร. ที่ครูระบุเอง ก่อน ร. จากคะแนนสอบที่ขาด
-  const remark = subj.level !== "ประถม" && remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
+  const remark = subj.level === "มัธยม" && remarksArr.find(r => r.student_id === studentId && r.code === "ร.");
   if (remark) {
     return { subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring, result: { type: "ร.", reason: remark.reason } };
   }
 
   // ร. ที่ระบบคำนวณจากการไม่มีคะแนนสอบ — เกิดหลังครูปิดคะแนนสอบเท่านั้น
   // ไม่เขียนลง remarks เพื่อให้หายเองเมื่อเปิดคะแนนหรือกรอกคะแนนย้อนหลัง
-  if (subj.level !== "ประถม" && subj.exam_closed_at && !examRow) {
+  if (subj.level === "มัธยม" && subj.exam_closed_at && !examRow) {
     return {
       subjectUnits, competencyUnits, subjectScaled, collectPercent, collectPart, examPart, scoring,
       result: { type: "ร.", reason: "ไม่มีคะแนนสอบปลายภาค/ปลายปี" }
@@ -548,7 +552,7 @@ export function computeIntegratedResult(studentId, memberDataList) {
   // 1) เช็ค มส. รวมก่อน (มส. ชนะ ร.) — ต้องมีฐานเวลากับข้อมูลเช็คชื่ออย่างน้อย 1 ครั้งถึงเช็คได้
   let overall = null;
   let msCapped = false;
-  if (memberDataList[0]?.subject?.level !== "ประถม" && totalBase > 0 && anySessions) {
+  if (memberDataList[0]?.subject?.level === "มัธยม" && totalBase > 0 && anySessions) {
     const maxMissedRetake = totalBase * MS_RETAKE_RATIO;
     const maxMissedMakeup = totalBase * MS_MAKEUP_RATIO;
     if (rawMissed > maxMissedRetake) {

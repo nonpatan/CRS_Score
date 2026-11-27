@@ -274,7 +274,7 @@
       <a href="academic-settings.html">ตั้งค่างานวิชาการ</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261122-1"></script>
+    <script src="../app-shell.js?v=20261127-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -353,6 +353,7 @@
     <div role="tabpanel" id="tab-structure" aria-labelledby="tab-button-structure">
   <!-- โครงสร้างคะแนน: คะแนนวิชา + สมรรถนะหลัก (เฉพาะวิชาพื้นฐาน) -->
   <div id="structure-card">
+    <p id="kindergarten-structure-note" class="hint" hidden>โครงสร้างวิชาอนุบาลเปิดให้ดูอย่างเดียว</p>
     <div id="manage-half-bar" hidden></div>
     <div class="structure-heading"><h3 class="section-title">คะแนนวิชา</h3><div class="fold-tools"><button type="button" class="ghost small" id="expand-units">กางทั้งหมด</button><button type="button" class="ghost small" id="collapse-units">พับทั้งหมด</button></div></div>
     <div id="units-vicha"></div>
@@ -557,7 +558,7 @@
 </div>
 
 <script type="module">
-import { isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261121-2";
+import { isKindergartenSubject, isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261127-1";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -682,11 +683,11 @@ function canEditCurrentSubject() {
 }
 
 function canEditStructureOf() {
-  return canEditCurrentSubject() || canEditAcademicSettings;
+  return !isKindergartenSubject(currentSubject) && (canEditCurrentSubject() || canEditAcademicSettings);
 }
 
 function canEditExamStatus() {
-  return Boolean(currentSubject) &&
+  return Boolean(currentSubject) && !isKindergartenSubject(currentSubject) &&
     (canEditAcademicSettings || currentSubject.owner_id === myUserId);
 }
 
@@ -707,7 +708,7 @@ async function loadSubjectStudentIds(tableName, subjectId, half = null) {
 }
 
 async function loadExamControl() {
-  if (!currentSubject || currentSubject.subject_type !== "พื้นฐาน") {
+  if (!currentSubject || isKindergartenSubject(currentSubject) || currentSubject.subject_type !== "พื้นฐาน") {
     elExamControlCard.style.display = "none";
     return;
   }
@@ -836,24 +837,32 @@ function setSubjectInfoDisabled(disabled) {
 
 // RLS เป็นตัวกันจริง: หัวหน้าวิชาการแก้ข้อมูลวิชาและโครงสร้างได้ แต่ลบ/กรอกคะแนนไม่ได้
 function applyEditPermissionUI() {
+  const kindergarten = isKindergartenSubject(currentSubject);
   const canEditStructure = canEditStructureOf();
   const canEditSubject = canEditCurrentSubject();
-  const canEditInfo = canEditAcademicSettings;
+  const canEditInfo = canEditAcademicSettings && !kindergarten;
+  document.getElementById("kindergarten-structure-note").hidden = !kindergarten;
+  document.getElementById("subject-form-body").hidden = kindergarten;
 
   // ข้อมูลวิชา: หัวหน้าวิชาการหรือ admin; ลบวิชา: admin เท่านั้น
   document.getElementById("btn-save-subject").style.display = canEditInfo ? "block" : "none";
   setSubjectInfoDisabled(!canEditInfo);
-  elDelSubject.style.display = (isAdminUser && currentSubject) ? "block" : "none";
+  elDelSubject.style.display = (isAdminUser && currentSubject && !kindergarten) ? "block" : "none";
 
   // โครงสร้าง: เจ้าของ, หัวหน้าวิชาการ หรือ admin; สมาชิก: เจ้าของหรือ admin
   document.getElementById("btn-add-unit-vicha").style.display = canEditStructure ? "inline-block" : "none";
   document.getElementById("btn-add-unit-competency").style.display = canEditStructure ? "inline-block" : "none";
-  document.getElementById("btn-add-member").style.display = canEditSubject ? "inline-block" : "none";
-  elSelAddMember.style.display = canEditSubject ? "block" : "none";
+  document.getElementById("btn-add-member").style.display = canEditSubject && !kindergarten ? "inline-block" : "none";
+  elSelAddMember.style.display = canEditSubject && !kindergarten ? "block" : "none";
 
   // แบนเนอร์อธิบายสิทธิ์
   const banner = document.getElementById("readonly-banner");
-  if (isAdminUser) {
+  if (kindergarten) {
+    banner.textContent = "ข้อมูลวิชาอนุบาลเปิดให้ดูอย่างเดียว";
+    banner.style.background = "var(--bg)";
+    banner.style.color = "var(--ink)";
+    banner.style.display = "block";
+  } else if (isAdminUser) {
     banner.style.display = "none";
   } else if (canEditSubject) {
     banner.textContent = canEditAcademicSettings
@@ -945,7 +954,7 @@ function updateTypeDependentUI() {
   updateCreditsUI();
   document.getElementById("field-periods").style.display = isIntegrated ? "none" : "block";
   if (currentSubject) {
-    elExamControlCard.style.display = isIntegrated ? "none" : "block";
+    elExamControlCard.style.display = isIntegrated || isKindergartenSubject(currentSubject) ? "none" : "block";
     elStructure.style.display = isIntegrated ? "none" : "block";
     elEnrollCard.style.display = isIntegrated ? "none" : "block";
     elMembersCard.style.display = isIntegrated ? "block" : "none";
@@ -1128,6 +1137,7 @@ function fillSelect(el, items, getLabel, placeholder) {
 // โชว์ปีเสมอ เพื่อกันเลือกวิชาผิดปีเมื่อมีวิชาชื่อซ้ำหลายปี (ยืนยันกับผู้ใช้แล้ว)
 function subjectLabel(s) {
   const parts = [s.code || "(ไม่มีรหัส)", s.name];
+  if (isKindergartenSubject(s)) parts.push("อนุบาล");
   if (s.year) parts.push("ปี " + s.year);
   if (s.grade_level) parts.push("ชั้น " + s.grade_level);
   if (s.term) parts.push("เทอม " + s.term);
@@ -1178,7 +1188,7 @@ function resetStructureCopySource(message = "เลือกวิชาต้�
 
 function fillCopyFilterOptions() {
   const candidates = allSubjects.filter(subject =>
-    subject.subject_type === "พื้นฐาน" && subject.id !== currentSubject.id
+    subject.subject_type === "พื้นฐาน" && !isKindergartenSubject(subject) && subject.id !== currentSubject.id
   );
   const years = distinctYears(candidates);
   elCopyFilterYear.innerHTML = "<option value=''>— ทุกปี —</option>";
@@ -1214,7 +1224,7 @@ function applyCopySubjectFilter() {
   const grade = elCopyFilterGrade.value;
   const term = elCopyFilterTerm.value;
   const candidates = allSubjects.filter(subject => {
-    if (subject.subject_type !== "พื้นฐาน" || subject.id === currentSubject.id) return false;
+    if (subject.subject_type !== "พื้นฐาน" || isKindergartenSubject(subject) || subject.id === currentSubject.id) return false;
     if (year && subject.year !== year) return false;
     if (grade && subject.grade_level !== grade) return false;
     if (term && subject.term !== term) return false;
@@ -1289,7 +1299,7 @@ btnCopyStructure.addEventListener("click", async () => {
   const targetId = currentSubject.id;
   const sourceId = elCopySourceSubject.value;
   const sourceSubject = allSubjects.find(subject => subject.id === sourceId);
-  if (!sourceId || !sourceSubject || sourceId === targetId) {
+  if (!sourceSubject || isKindergartenSubject(sourceSubject) || sourceId === targetId) {
     showToast("เลือกวิชาต้นทางก่อน", false);
     return;
   }
@@ -1469,6 +1479,7 @@ elSubject.addEventListener("change", async () => {
   if (!id) { hideAll(); return; }
   const { data: subj, error } = await sb.from("subjects").select("*").eq("id", id).single();
   if (error) { showToast("โหลดวิชาไม่สำเร็จ", false); return; }
+  if (elSubject.value !== id) return;
   currentSubject = subj;
   if (subj.level === "ประถม") {
     const start = selectableYears.find(row => row.year === subj.year)?.term2_start_date;
@@ -1555,6 +1566,7 @@ document.getElementById("collapse-units").addEventListener("click", () => {
 
 // ---------- บันทึกข้อมูลวิชา (สร้างใหม่ หรือแก้ไข) ----------
 document.getElementById("btn-save-subject").addEventListener("click", async () => {
+  if (isKindergartenSubject(currentSubject)) return;
   const name = fName.value.trim();
   if (!name) { showToast("กรุณากรอกชื่อวิชา", false); return; }
   const code = fCode.value.trim();
@@ -1654,7 +1666,7 @@ async function countScoresOfSubject(subjectId) {
 
 // ---------- ลบวิชา (กันไว้ถ้ามีคะแนน หรือยังเป็นสมาชิกของวิชาบูรณาการอื่นอยู่) ----------
 elDelSubject.addEventListener("click", async () => {
-  if (!currentSubject) return;
+  if (!currentSubject || isKindergartenSubject(currentSubject)) return;
 
   let confirmMsg = "ยืนยันลบวิชา \"" + currentSubject.name + "\" ?";
 
@@ -1714,11 +1726,13 @@ elDelSubject.addEventListener("click", async () => {
 
 // ---------- โหลดต้นไม้โครงสร้างของวิชา ----------
 async function loadStructure() {
+  const subjectId = currentSubject.id;
   const { data, error } = await sb
     .from("units")
     .select("*, indicators(id,unit_id,name,max_score,seq,counts_score,core_competency_element_id,collections(*, scores(id)))")
-    .eq("subject_id", currentSubject.id)
+    .eq("subject_id", subjectId)
     .order("seq");
+  if (currentSubject?.id !== subjectId) return;
   if (error) { showToast("โหลดโครงสร้างไม่สำเร็จ: " + error.message, false); return; }
   units = data || [];
   // เรียงลำดับชั้นล่างให้เป็นระเบียบ (PostgREST ไม่การันตีลำดับ nested)
@@ -1786,7 +1800,7 @@ function renderStructure() {
 
 function renderUnit(unit) {
   const canEdit = canEditStructureOf();
-  const canDelete = canEditCurrentSubject();
+  const canDelete = !isKindergartenSubject(currentSubject) && canEditCurrentSubject();
   const isUnitNotScored = unit.counts_score === false;
   const block = document.createElement("div");
   block.className = "unit-block" + (isUnitNotScored ? " not-scored-unit" : "");
@@ -1966,6 +1980,7 @@ async function updateUnitCountsScore(unit, checkbox) {
 }
 
 async function updateIndicatorCountsScore(indicator, checkbox) {
+  if (!canEditStructureOf()) { checkbox.checked = indicator.counts_score !== false; return; }
   const nextValue = checkbox.checked;
   const wasNotScored = indicator.counts_score === false;
   if (nextValue === !wasNotScored) return;
@@ -2036,7 +2051,8 @@ document.getElementById("btn-add-unit-competency").addEventListener("click", () 
 // ---------- popup เพิ่ม/แก้ node ----------
 // context เก็บ: type (unit/indicator/collection), mode (add/edit), node (ตอนแก้), parent/kind (ตอนเพิ่ม)
 function openNodeModal(type, mode, ref) {
-  modalContext = { type, mode };
+  if (!currentSubject || !canEditStructureOf()) return;
+  modalContext = { type, mode, subjectId:currentSubject.id };
   clearCollectionMaxError();
   document.getElementById("collection-max-note").style.display = type === "collection" && mode === "edit" ? "block" : "none";
   mNote.style.display = "none";
@@ -2166,6 +2182,7 @@ elOverlay.addEventListener("click", (e) => { if (e.target === elOverlay) elOverl
 document.getElementById("m-save").addEventListener("click", saveNode);
 
 async function saveNode() {
+  if (!modalContext || currentSubject?.id !== modalContext.subjectId || !canEditStructureOf()) return;
   const { type, mode } = modalContext;
   const seq = Number(mSeq.value);
   const max = Number(mMax.value);
@@ -2289,6 +2306,7 @@ async function deleteCollection(coll) {
   await doDelete("collections", coll.id);
 }
 async function doDelete(table, id) {
+  if (isKindergartenSubject(currentSubject)) return;
   const { error } = await sb.from(table).delete().eq("id", id);
   if (error) { showToast("ลบไม่สำเร็จ: " + error.message, false); return; }
   showToast("ลบแล้ว", true);
@@ -2526,7 +2544,7 @@ function renderMembers() {
   if (members.length === 0) {
     elMemberList.innerHTML = "<div class='hint' style='margin-bottom:10px'>ยังไม่มีวิชาพื้นฐานในวิชาบูรณาการนี้</div>";
   }
-  const canEdit = canEditCurrentSubject();
+  const canEdit = !isKindergartenSubject(currentSubject) && canEditCurrentSubject();
   for (const m of members) {
     const row = document.createElement("div");
     row.className = "member-row";
@@ -2545,6 +2563,7 @@ function renderMembers() {
   const memberIds = new Set(members.map(m => m.member_subject_id));
   const candidates = allSubjects.filter(s =>
     s.subject_type === "พื้นฐาน" &&
+    !isKindergartenSubject(s) &&
     s.id !== currentSubject.id &&
     !memberIds.has(s.id) &&
     s.year === currentSubject.year &&
@@ -2559,7 +2578,9 @@ function renderMembers() {
 }
 
 document.getElementById("btn-add-member").addEventListener("click", async () => {
+  if (!currentSubject || isKindergartenSubject(currentSubject)) return;
   const memberId = elSelAddMember.value;
+  if (allSubjects.some(subject => subject.id === memberId && isKindergartenSubject(subject))) return;
   if (!memberId) { showToast("เลือกวิชาพื้นฐานก่อน", false); return; }
   const { error } = await sb.from("integration_members").insert({
     integrated_subject_id: currentSubject.id,
@@ -2571,6 +2592,7 @@ document.getElementById("btn-add-member").addEventListener("click", async () => 
 });
 
 async function removeMember(m) {
+  if (isKindergartenSubject(currentSubject)) return;
   if (!await window.crsAskConfirm({
     title: "เอาวิชาออกจากวิชาบูรณาการ",
     message: "วิชา \"" + m.member.name + "\" · คะแนนเดิมของวิชานั้นจะไม่ถูกลบ",
@@ -2600,6 +2622,11 @@ function renderSubjectHead() {
     chip.textContent = text;
     elSubjectHeadChips.appendChild(chip);
   };
+  if (isKindergartenSubject(s)) {
+    addChip("อนุบาล");
+    addChip(s.subject_type === "บูรณาการ" ? members.length + " วิชาย่อย" : currentEnrollments.length + " คน", "muted");
+    return;
+  }
   if (s.level === "มัธยม") addChip(Number(s.credits) > 0 ? Number(s.credits).toFixed(1) + " หน่วยกิต" : "ยังไม่ตั้งหน่วยกิต", Number(s.credits) > 0 ? "" : "amber");
   else addChip(Number(s.total_periods) > 0 ? s.total_periods + " คาบ" : "ยังไม่ตั้งคาบ", Number(s.total_periods) > 0 ? "" : "amber");
   const integrated = s.subject_type === "บูรณาการ";

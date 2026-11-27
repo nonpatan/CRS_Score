@@ -186,11 +186,12 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 <div class="nav">
 <a href="entry.html">กรอกคะแนน</a><a href="competency-manage.html">กำหนดกิจกรรม/กิจวัตร</a><a href="competency-core.html">กำหนดสมรรถนะหลัก</a><a href="competency-entry.html">กรอกคะแนนกิจกรรม/กิจวัตร</a><a href="attendance.html">เช็คชื่อ</a><a href="summary.html">สรุปผลการเรียน</a><a href="manage.html">จัดการโครงสร้าง</a><a href="students.html">นักเรียน</a><a href="retention.html">เรียนซ้ำชั้น</a><a href="warning.html">เฝ้าระวัง มส.</a><a href="rollover.html">ขึ้นปีใหม่</a><a href="#" id="btn-signout">ออกจากระบบ</a>
 </div>
-<script src="../app-shell.js?v=20261122-1"></script>
+<script src="../app-shell.js?v=20261127-1"></script>
 </header>
 <main class="academic-content">
 <section id="subjects-view">
   <div class="card"><div class="section">วิชาของฉัน</div><div class="filter-strip"><div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"></select></div><div class="field"><label for="filter-term">ภาคเรียน</label><select id="filter-term"><option value="">ทุกภาคเรียน</option><option value="1">ภาคเรียน 1</option><option value="2">ภาคเรียน 2</option></select></div></div><div class="hint">เลือกวิชาเพื่อดูโครงสร้างคะแนนและความคืบหน้า</div></div>
+  <div id="subject-availability" class="hint" role="status"></div>
   <div id="subject-list" class="empty">กำลังโหลดวิชา…</div>
   <button id="show-all" class="ghost" hidden>ดูวิชาทั้งหมดของโรงเรียน ›</button>
 </section>
@@ -215,10 +216,10 @@ input[data-score-key] { scroll-margin-top:24px; scroll-margin-bottom:108px; }
 <div id="toast" class="toast"></div>
 </main></div>
 <script type="module">
-import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, fetchAllRows, fetchAllRowsByIds, ID_CHUNK, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261121-2";
+import { clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, getRosterForSubject, loadGradeWeights, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, loadSubjectData, computeSubjectResult, isKindergartenSubject, fetchAllRows, fetchAllRowsByIds, ID_CHUNK, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, attendanceRoomLabel, computeEntryProgress, buildEntryRooms, diffScoreInputs, renderPrimaryHalfBar } from "../supabase-client.js?v=20261127-1";
 const $ = id => document.getElementById(id);
 function escapeHtml(value) { return String(value ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=2";
+import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=3";
 
 const session = await requireAuth();
 if (!session) {
@@ -305,7 +306,7 @@ function askConfirm({ title, message, requireText = null, okLabel = "ยืน�
 }
 function filterSubjects() {
   const year = $("filter-year").value, term = $("filter-term").value;
-  return allSubjects.filter(s => s.subject_type !== "บูรณาการ" && (!year || s.year === year) && (!term || !s.term || s.term === term) && (showAll ? isAdminUser : s.owner_id === session.user.id))
+  return allSubjects.filter(s => !isKindergartenSubject(s) && s.subject_type !== "บูรณาการ" && (!year || s.year === year) && (!term || !s.term || s.term === term) && (showAll ? isAdminUser : s.owner_id === session.user.id))
     .sort((a,b) => showAll ? Number(b.owner_id === session.user.id) - Number(a.owner_id === session.user.id) : 0);
 }
 function setView(next, push = true) {
@@ -329,7 +330,7 @@ window.addEventListener("popstate", async event => {
   resetInputs();
   const target = event.state || { view:"subjects" };
   if (!target.subjectId || target.view === "subjects") { returnToSubjects(false); return; }
-  if (target.subjectId && target.subjectId !== currentSubject?.id) await openSubject(target.subjectId, false);
+  if (target.subjectId !== currentSubject?.id && !await openSubject(target.subjectId, false)) return;
   if (target.collectionId) selectCollection(target.collectionId, false);
   else setView(target.view === "entry" ? "subject" : target.view, false);
 });
@@ -396,14 +397,17 @@ async function loadSubjects() {
   if (subjectResult.error) throw new Error(subjectResult.error.message); if (memberResult.error) throw new Error(memberResult.error.message);
   allSubjects = subjectResult.data || []; memberships = new Map((memberResult.data || []).map(row => [row.member_subject_id, row.integrated]));
   academicYears = years;
-  const yearsAvailable = distinctYears(allSubjects); $("filter-year").innerHTML = "<option value=''>ทุกปี</option>" + yearsAvailable.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+  const yearsAvailable = distinctYears(allSubjects.filter(s => !isKindergartenSubject(s))); $("filter-year").innerHTML = "<option value=''>ทุกปี</option>" + yearsAvailable.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
   const saved = getActiveYear(); $("filter-year").value = yearsAvailable.includes(saved) ? saved : "";
   const today = toDateStr(bangkokNow()), currentYear = academicYearOf(today, years);
   $("filter-term").value = String(saved) === String(currentYear) ? (academicTermOf(today, years) || "") : "";
   gradeWeights = await loadGradeWeights(); await renderSubjects();
   const params = new URLSearchParams(location.search); const id = params.get("subject");
-  if (id && subjectById(id) && canEdit(subjectById(id))) { await openSubject(id, false); const collectionId = params.get("collection"); if (collectionId) selectCollection(collectionId, false); }
-  else history.replaceState({ view:"subjects" }, "", location.pathname);
+  const requested = subjectById(id);
+  if (requested && (isKindergartenSubject(requested) || canEdit(requested))) {
+    const collectionId = params.get("collection");
+    if (await openSubject(id, false) && collectionId) selectCollection(collectionId, false);
+  } else history.replaceState({ view:"subjects" }, "", location.pathname);
 }
 $("filter-year").addEventListener("change", () => { setActiveYear($("filter-year").value); renderSubjects(); });
 $("filter-term").addEventListener("change", renderSubjects);
@@ -477,7 +481,14 @@ function applyEntryLock() {
 }
 
 async function openSubject(id, push = true) {
-  if (!await allowLeave()) return; const subject = subjectById(id); if (!canEdit(subject)) { showToast("คุณไม่ใช่เจ้าของวิชานี้", false); return; }
+  if (!await allowLeave()) return;
+  const subject = subjectById(id);
+  if (isKindergartenSubject(subject)) {
+    $("subject-availability").textContent = "วิชาอนุบาล — หน้ากรอกพัฒนาการยังไม่เปิดใช้";
+    return false;
+  }
+  if (!canEdit(subject)) { showToast("คุณไม่ใช่เจ้าของวิชานี้", false); return; }
+  $("subject-availability").textContent = "";
   busy = true;
   try {
     const [data, roster, remarksResult, lock] = await Promise.all([

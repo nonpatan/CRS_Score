@@ -960,10 +960,10 @@ function syncFinanceKpiTones() {
       if (!["index.html", "grade-edit-requests.html"].includes(current)) {
         const readCount = async () => {
           try {
-            const { sb } = await import(new URL("supabase-client.js?v=20261121-2", appRootUrl).href);
+            const { sb } = await import(new URL("supabase-client.js?v=20261127-1", appRootUrl).href);
             const { data } = await sb.auth.getSession();
             if (!data.session) return;
-            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=1", appRootUrl).href);
+            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=3", appRootUrl).href);
             await gradeQueueCounts();
           } catch { /* ตัวนับขัดข้องยังเปิดเมนูได้ */ }
         };

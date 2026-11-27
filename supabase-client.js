@@ -2,13 +2,15 @@ import {
   MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_MAKEUP_GRADE_CAP, msMakeupCutoff, isLateMakeup,
   MS_WARN_PERCENT_SECONDARY, MS_WARN_PERCENT_PRIMARY, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS, computePrimaryDailyAttendance,
   percentToGrade, computeMissedPeriods, computeAttendanceRisk, gradeWeightFor, PRIMARY_HALVES,
+  isKindergartenSubject, isPrimaryLikeSubject, isKindergartenGrade,
   computePrimaryHalves, computeSubjectResult, computeIntegratedResult, pickCountableSubjects, subjectCodeKey, pickOnePerCode, subjectCreditInfo,
   externalSubjectEntry, mergeExternalHalf, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
-} from "./shared/grades.js?v=20261117-1";
+} from "./shared/grades.js?v=20261127-1";
 export {
   MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_MAKEUP_GRADE_CAP, msMakeupCutoff, isLateMakeup,
   MS_WARN_PERCENT_SECONDARY, MS_WARN_PERCENT_PRIMARY, PRIMARY_SCHOOL_DAYS, PRIMARY_MAX_MISSED_DAYS, computePrimaryDailyAttendance,
   percentToGrade, computeMissedPeriods, computeAttendanceRisk, gradeWeightFor, PRIMARY_HALVES,
+  isKindergartenSubject, isPrimaryLikeSubject, isKindergartenGrade,
   computePrimaryHalves, computeSubjectResult, computeIntegratedResult, pickCountableSubjects, subjectCodeKey, pickOnePerCode, subjectCreditInfo,
   externalSubjectEntry, mergeExternalHalf, assembleStudentResults, computeGpa, fromGradeRpc, subjectTotalScore, subjectCurrentScore,
 };
@@ -2062,23 +2064,22 @@ export function renderPrimaryHalfBar(container, half, summary, onChange) {
 // computeSubjectResult().result / computeIntegratedResult().overall) — โยน Error ถ้าโหลดไม่สำเร็จ
 export async function computeStudentSubjectResults({ grade, year, term } = {}) {
   const out = new Map();
-  if (!grade || !year) return out;
+  if (!grade || !year || isKindergartenGrade(grade)) return out;
 
   const { data: allSubj, error: subjErr } = await sb
     .from("subjects").select("*").eq("grade_level", grade).eq("year", year);
   if (subjErr) throw new Error("โหลดวิชาไม่สำเร็จ: " + subjErr.message);
-  if (!allSubj || allSubj.length === 0) return out;
-
-  // มัธยมส่ง term มา = คิดเฉพาะวิชาของเทอมนั้น; ประถมไม่ส่ง term จึงรวมทั้งปี (ยืนยันแล้ว)
-  const scopedSubj = term ? allSubj.filter(s => s.term === term) : allSubj;
+  // มัธยมส่ง term มา = คิดเฉพาะเทอมนั้น; ประถมไม่ส่ง term จึงรวมทั้งปี
+  const scopedSubj = (allSubj || []).filter(s => !isKindergartenSubject(s) && (!term || s.term === term));
   if (scopedSubj.length === 0) return out;
 
   // วิชาบูรณาการในชุดนี้ + วิชาพื้นฐานสมาชิกของมัน (นับที่วิชาบูรณาการตัวเดียว กันนับซ้ำ)
   const integratedIds = scopedSubj.filter(s => s.subject_type === "บูรณาการ").map(s => s.id);
   let memberLinks = [];
   if (integratedIds.length > 0) {
-    const { data } = await sb.from("integration_members").select("*").in("integrated_subject_id", integratedIds);
-    memberLinks = data || [];
+    const { data } = await sb.from("integration_members")
+      .select("*,member:member_subject_id(level)").in("integrated_subject_id", integratedIds);
+    memberLinks = (data || []).filter(link => !isKindergartenSubject(link.member));
   }
   const memberSubjectIds = new Set(memberLinks.map(m => m.member_subject_id));
   const countableSubjects = pickCountableSubjects(scopedSubj, memberLinks);
@@ -2304,11 +2305,12 @@ export async function loadAcademicOverviewData(year) {
   };
   if (!year) return empty;
 
-  const { data: subjects, error: subjErr } = await sb.from("subjects")
+  const { data: yearSubjects, error: subjErr } = await sb.from("subjects")
     .select("id,name,code,level,grade_level,subject_type,total_periods,owner_id,term")
     .eq("year", year);
   if (subjErr) throw new Error("โหลดรายวิชาไม่สำเร็จ: " + subjErr.message);
-  if (!subjects || subjects.length === 0) return empty;
+  const subjects = (yearSubjects || []).filter(s => !isKindergartenSubject(s));
+  if (subjects.length === 0) return empty;
 
   const subjectIds = subjects.map(s => s.id);
   const [enrollRes, memberRes, sessionRes, makeupRes, remarkRes, placementRes, yearlessRes, activeStudents] =
@@ -2321,7 +2323,7 @@ export async function loadAcademicOverviewData(year) {
       fetchAllRows(() => sb.from("remarks").select("id,student_id,subject_id,code,reason,created_at").in("subject_id", subjectIds)),
       getStudentPlacements(year),
       // วิชาที่ยังไม่กรอกปีการศึกษา — หาไม่เจอด้วย query ที่กรองด้วยปี จึงต้องถามแยก
-      sb.from("subjects").select("id,name,code,grade_level").is("year", null),
+      sb.from("subjects").select("id,name,code,grade_level,level").is("year", null),
       getActiveStudents()
     ]);
 
@@ -2337,7 +2339,7 @@ export async function loadAcademicOverviewData(year) {
     makeupRows: makeupRes.data || [],
     remarks: remarkRes.data || [],
     placements: placementRes.data || [],
-    yearlessSubjects: yearlessRes.data || [],
+    yearlessSubjects: (yearlessRes.data || []).filter(s => !isKindergartenSubject(s)),
     activeStudents: activeStudents || []
   };
 }

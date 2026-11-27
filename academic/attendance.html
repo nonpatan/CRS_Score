@@ -414,7 +414,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261122-1"></script>
+    <script src="../app-shell.js?v=20261127-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -633,11 +633,11 @@
 </div>
 
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadLessonPlanChoices, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder, fetchAllRows, fetchAllRowsByIds } from "../supabase-client.js?v=20261121-2";
+import { sb, requireAuth, signOut, getProfile, getRosterForSubject, computeMissedPeriods, isKindergartenSubject, computeAttendanceRisk, MS_RETAKE_RATIO, MS_MAKEUP_RATIO, MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, isLateMakeup, isPrimaryGrade, getAcademicYears, academicYearOf, academicTermOf, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, getSetting, getMyCoverageFor, loadDailyPrefill, getStudentPlacements, roomsFromPlacements, attendanceRoomLabel, attendanceSessionRooms, loadLessonLogBySession, loadLessonLogPlanOptions, loadLessonLogPlan, loadLessonPlanChoices, loadUnlinkedSessions, saveLessonLog, summarizeLessonLogSessions, lessonSessionAttendanceCounts, loadMyThemeWorkReminder, fetchAllRows, fetchAllRowsByIds } from "../supabase-client.js?v=20261127-1";
 import { planOverallStatus } from "./lesson-plans.js?v=5";
 import { loadTimetableForDate, daySlots, normalizeDetails, attendancePeriodsOf } from "./timetable-fet.js?v=20261102-3";
 
-import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=2";
+import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=3";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -660,7 +660,7 @@ function canEdit(subj) {
 // ชั่วโมงชดเชยยังเป็นสิทธิ์ของเจ้าของวิชา/admin เท่านั้น ไม่รวมคนที่มาสอนแทน
 // ต้องเป็น synchronous เช่นเดียวกับ canEdit() เพื่อใช้กรองวิชาในโหมดบูรณาการได้
 function canEditMakeup(subj) {
-  return !!subj && subj.level !== "ประถม" && (isAdminUser || subj.owner_id === session.user.id);
+  return !!subj && subj.level === "มัธยม" && (isAdminUser || subj.owner_id === session.user.id);
 }
 
 // สิทธิ์ลบครั้งที่เช็คชื่อ = เจ้าของวิชา/admin เท่านั้น ให้ตรงกับ policy attendance_sessions_delete
@@ -1716,7 +1716,7 @@ async function loadSubjects() {
     .select("*")
     .order("created_at");
   if (error) { showToast("โหลดวิชาไม่สำเร็จ: " + error.message, false); return; }
-  allSubjects = data || [];
+  allSubjects = (data || []).filter(subject => !isKindergartenSubject(subject));
 
   // วิชาพื้นฐานที่เป็นสมาชิกของวิชาบูรณาการ ไม่โชว์ใน dropdown หลัก (ยืนยันแล้ว 2026-07)
   // — ให้เลือกวิชาบูรณาการก่อน แล้วค่อยเลือกวิชาย่อยจากในนั้น กันรายการวิชายาวและกันสับสน
@@ -1845,7 +1845,7 @@ async function loadMemberOptions(integratedId, seq = loadSeq) {
     .eq("integrated_subject_id", integratedId);
   if (seq !== loadSeq) return;
   if (error) { showToast("โหลดวิชาย่อยไม่สำเร็จ: " + error.message, false); return; }
-  const allMembers = (rows || []).map(r => r.member).filter(Boolean);
+  const allMembers = (rows || []).map(r => r.member).filter(subject => subject && !isKindergartenSubject(subject));
   if (allMembers.length === 0) {
     elMemberList.innerHTML = "<div class='hint'>วิชาบูรณาการนี้ยังไม่มีวิชาย่อย — ไปเพิ่มที่หน้า \"จัดการโครงสร้าง\" ก่อน</div>";
     return;

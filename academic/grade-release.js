@@ -1,6 +1,6 @@
 import { sb, fetchAllRows, fetchAllRowsByIds, isRegularStudent, isAutoPresentStudent, isAutoAbsentStudent, GRADE_ORDER,
-  getActiveYear, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr } from "../supabase-client.js?v=20261121-2";
-import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=2";
+  getActiveYear, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, isKindergartenSubject } from "../supabase-client.js?v=20261127-1";
+import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=3";
 
 const today = () => toDateStr(bangkokNow());
 const annual = grade => grade.startsWith("ป.");
@@ -201,15 +201,18 @@ const openRequests = (year, term) => read(fetchAllRows(() => {
   return term === "2" ? query.in("term", ["1", "2"]) : query.eq("term", term);
 }));
 
-const loadReleaseSubjects = (year, term) => read(fetchAllRows(() => sb.from("subjects")
-  .select("id,name,grade_level,term").eq("year", year).or(`term.eq.${term},term.is.null`)));
+async function loadReleaseSubjects(year, term) {
+  const rows = await read(fetchAllRows(() => sb.from("subjects")
+    .select("id,name,grade_level,term,level").eq("year", year).or(`term.eq.${term},term.is.null`)));
+  return rows.filter(subject => !isKindergartenSubject(subject));
+}
 
 async function loadPendingExams(year, term) {
   try {
     const rows = await read(fetchAllRows(() => sb.rpc("exam_close_pending", { p_year:year, p_mine:false }),
       ["grade_level", "code", "subject_id"]));
     // วิชารายปีของประถมปิดคะแนนสอบครั้งเดียวเมื่อจบภาค 2
-    return rows.filter(row => row.term === term || (term === "2" && row.term === null));
+    return rows.filter(row => !isKindergartenSubject(row) && (row.term === term || (term === "2" && row.term === null)));
   } catch {
     return null;
   }

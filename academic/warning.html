@@ -322,7 +322,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261122-1"></script>
+    <script src="../app-shell.js?v=20261127-1"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -387,14 +387,14 @@
 
 <script type="module">
   import {
-    sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER,
+    sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, GRADE_ORDER, isKindergartenSubject, isKindergartenGrade,
     getActiveStudents, fetchAllRowsByIds, loadGradeWeights, loadSubjectsData, computeAttendanceRisk, isPrimaryGrade,
     MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, MS_MAKEUP_RATIO,
     getSetting, homeroomAuditRoomLabel, SCHOOL_LETTER_CSS, renderSchoolLetter,
     bangkokNow, toDateStr, addDaysStr, thaiLetterDateText, thaiShortDateText,
     loadLetterSigners, listHomeroomTeachers, issueStudentLetter, loadIssuedLetters,
     bindDatePickOnly, DATE_PICK_ONLY_NOTE, TIME_PICK_ONLY_NOTE
-  } from "../supabase-client.js?v=20261121-2";
+  } from "../supabase-client.js?v=20261127-1";
 
   document.head.insertAdjacentHTML("beforeend", `<style>${SCHOOL_LETTER_CSS}</style>`);
 
@@ -639,7 +639,7 @@
     }
 
     allActiveStudents = await getActiveStudents();
-    const gSet = new Set(allActiveStudents.map(s => s.grade_level).filter(Boolean));
+    const gSet = new Set(allActiveStudents.map(s => s.grade_level).filter(g => g && !isKindergartenGrade(g)));
     const gradeRank = (g) => { const i = GRADE_ORDER.indexOf(g); return i === -1 ? 99 : i; };
     const sortedGrades = [...gSet].sort((a,b) => gradeRank(a) - gradeRank(b));
     sortedGrades.forEach(g => {
@@ -649,8 +649,8 @@
     });
     updateTermAvailability();
 
-    const { data: subjs } = await sb.from("subjects").select("year");
-    const yList = distinctYears(subjs || []);
+    const { data: subjs } = await sb.from("subjects").select("year,level");
+    const yList = distinctYears((subjs || []).filter(s => !isKindergartenSubject(s)));
     const active = getActiveYear();
     yList.forEach(y => {
       const opt = document.createElement("option");
@@ -916,7 +916,7 @@ function decorateWarningReport(total, grade, warnPercent) {
     const year = elYear.value;
     const term = elTerm.value;
     const grade = elGrade.value;
-    if (!year || !grade) {
+    if (!year || !grade || isKindergartenGrade(grade)) {
       showToast("กรุณาเลือก ปีการศึกษา และระดับชั้นให้ครบ", false);
       return;
     }
@@ -957,10 +957,11 @@ function decorateWarningReport(total, grade, warnPercent) {
       if (term) {
         query = query.eq("term", term);
       }
-      const { data: subjects, error: errSubj } = await query;
+      const { data, error: errSubj } = await query;
 
       if (errSubj) throw errSubj;
-      if (!subjects || subjects.length === 0) {
+      const subjects = (data || []).filter(s => !isKindergartenSubject(s));
+      if (subjects.length === 0) {
         elResults.innerHTML = "<div class='card hint'>ไม่พบรายวิชาที่เปิดสอนตามเงื่อนไขที่เลือก</div>";
         return;
       }
@@ -992,6 +993,7 @@ function decorateWarningReport(total, grade, warnPercent) {
       // จัดกลุ่ม member_subject_id ให้วิชาบูรณาการ
       const intMap = {};
       (intMembers || []).forEach(m => {
+        if (!m.member || isKindergartenSubject(m.member)) return;
         if (!intMap[m.integrated_subject_id]) intMap[m.integrated_subject_id] = [];
         intMap[m.integrated_subject_id].push(m);
       });

@@ -77,7 +77,7 @@ th { background:var(--bg); }
 <h1>นำเข้าตารางสอน</h1>
 <p>นำผลจัดตารางจาก FET เข้าระบบเป็นร่าง ตรวจคู่ชื่อก่อนให้ครูใช้งาน</p>
 <div class="nav"><a href="academic-settings.html">ตั้งค่างานวิชาการ</a><a href="timetable-import.html">นำเข้าตารางสอน</a><a href="index.html">ภาพรวมวิชาการ</a><a href="#" id="btn-signout">ออกจากระบบ</a></div>
-<script src="../app-shell.js?v=20261122-1"></script>
+<script src="../app-shell.js?v=20261127-1"></script>
 
 </header>
 <main class="academic-content">
@@ -114,7 +114,7 @@ th { background:var(--bg); }
 </div><div id="toast" class="toast" aria-live="polite"></div>
 </main></div>
 <script type="module">
-import { sb, requireAuth, signOut, checkDepartment, getActiveYear, getAcademicYears, listStaffPicker, fetchAllRows } from '../supabase-client.js?v=20261121-2';
+import { sb, requireAuth, signOut, checkDepartment, getActiveYear, getAcademicYears, listStaffPicker, fetchAllRows, isKindergartenSubject } from '../supabase-client.js?v=20261127-1';
 import { parseFet, groupLessons, buildImportPayload, buildGrid } from './timetable-fet.js?v=20261102-3';
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -254,13 +254,13 @@ async function loadMatches() {
     const year=$('import-year').value, term=$('import-term').value;
     const [staffRows,subjectResult,facilityResult,mapResult,integrationResult,placementResult]=await Promise.all([
       listStaffPicker(), // วิชาประถมเป็นรายปี (term = null) ส่วนมัธยมแยกภาค ⟹ เลือกภาคแล้วต้องได้ทั้งวิชาภาคนั้นและวิชารายปี
-      (term ? sb.from('subjects').select('id,code,name,grade_level,subject_type').eq('year',year).or(`term.eq.${term},term.is.null`) : sb.from('subjects').select('id,code,name,grade_level,subject_type').eq('year',year).is('term',null)).limit(1000),
+      (term ? sb.from('subjects').select('id,code,name,grade_level,subject_type,level').eq('year',year).or(`term.eq.${term},term.is.null`) : sb.from('subjects').select('id,code,name,grade_level,subject_type,level').eq('year',year).is('term',null)).limit(1000),
       sb.from('facilities').select('id,name').eq('is_active',true).order('sort_order'),
       sb.from('timetable_import_maps').select('*').limit(1000),
       sb.from('integration_members').select('integrated_subject_id,member_subject_id').limit(1000),
       fetchAllRows(()=>sb.from('student_year_placements').select('grade_level,classroom').eq('year',year),['grade_level','classroom','student_id'])
     ]);
-    staff=staffRows; subjects=fail(subjectResult,'โหลดวิชา'); facilities=fail(facilityResult,'โหลดห้องปฏิบัติการ'); savedMaps=fail(mapResult,'โหลดคู่ชื่อเดิม'); integrationMembers=fail(integrationResult,'โหลดวิชาบูรณาการ');
+    staff=staffRows; subjects=fail(subjectResult,'โหลดวิชา').filter(subject=>!isKindergartenSubject(subject)); facilities=fail(facilityResult,'โหลดห้องปฏิบัติการ'); savedMaps=fail(mapResult,'โหลดคู่ชื่อเดิม'); integrationMembers=fail(integrationResult,'โหลดวิชาบูรณาการ');
     const placements=fail(placementResult,'โหลดห้องที่มีนักเรียน');
     renderMaps();
     const present=new Set(placements.map(row=>`${row.grade_level}/${row.classroom}`));

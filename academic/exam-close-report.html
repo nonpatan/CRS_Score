@@ -63,7 +63,7 @@ tr { break-inside:avoid; }
 </head>
 <body>
 <div class="wrap">
-<header class="no-print"><h1>รายชื่อวิชาที่ยังไม่ปิดคะแนนสอบ</h1><p>ตรวจรายชื่อและพิมพ์แจกครูผู้สอน</p><div class="nav"><a href="index.html">ภาพรวมวิชาการ</a><a href="remark-report.html">นักเรียนติด ร.</a><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261122-1"></script></header>
+<header class="no-print"><h1>รายชื่อวิชาที่ยังไม่ปิดคะแนนสอบ</h1><p>ตรวจรายชื่อและพิมพ์แจกครูผู้สอน</p><div class="nav"><a href="index.html">ภาพรวมวิชาการ</a><a href="remark-report.html">นักเรียนติด ร.</a><a href="#" id="btn-signout">ออกจากระบบ</a></div><script src="../app-shell.js?v=20261127-1"></script></header>
 <main class="academic-content no-print">
   <section class="card"><div class="filters"><div class="field"><label for="filter-year">ปีการศึกษา</label><select id="filter-year"></select></div><div class="field"><label for="filter-term">ภาคเรียน</label><select id="filter-term"><option value="1">ภาคเรียนที่ 1</option><option value="2">ภาคเรียนที่ 2</option><option value="all">ทั้งปี</option></select></div></div></section>
   <div class="card" id="report-state" role="status">กำลังโหลดข้อมูล…</div>
@@ -71,7 +71,7 @@ tr { break-inside:avoid; }
 </main></div>
 <div id="print-area" aria-hidden="true"></div>
 <script type="module">
-import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, getSetting, loadLetterSigners, bangkokNow, toDateStr, thaiLetterDateText } from "../supabase-client.js?v=20261121-2";
+import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, getSetting, loadLetterSigners, bangkokNow, toDateStr, thaiLetterDateText, isKindergartenSubject } from "../supabase-client.js?v=20261127-1";
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[ch]);
 const yearEl = $("filter-year"), termEl = $("filter-term"), stateEl = $("report-state"), contentEl = $("report-content");
@@ -109,7 +109,7 @@ async function loadReport() {
       if (mine !== token) return;
       const head = (await loadLetterSigners(year, null, null)).academicHeadName;
       if (mine !== token) return;
-      allRows = data || []; loadedYear = year; loadedAt = bangkokNow(); selectedOwners.clear(); academicHead = head;
+      allRows = (data || []).filter(row => !isKindergartenSubject(row)); loadedYear = year; loadedAt = bangkokNow(); selectedOwners.clear(); academicHead = head;
     }
     if (mine !== token) return;
     render();
@@ -141,10 +141,10 @@ async function init() {
     const { data:viewer, error:viewerError } = await sb.rpc("theme_work_viewer");
     if (viewerError) throw viewerError;
     if (viewer !== true) { stateEl.textContent = "คุณไม่มีสิทธิ์ดูรายงานนี้"; return; }
-    const [subjects, school] = await Promise.all([sb.from("subjects").select("year"), getSetting("receipt_school_name").catch(() => "")]);
+    const [subjects, school] = await Promise.all([sb.from("subjects").select("year,level"), getSetting("receipt_school_name").catch(() => "")]);
     if (subjects.error) throw subjects.error;
     schoolName = String(school || "").trim();
-    const years = distinctYears(subjects.data || []);
+    const years = distinctYears((subjects.data || []).filter(s => !isKindergartenSubject(s)));
     yearEl.innerHTML = years.map(year => `<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("");
     const requested = new URLSearchParams(location.search).get("year"), active = getActiveYear();
     if (years.includes(requested)) yearEl.value = requested; else if (years.includes(active)) yearEl.value = active;
