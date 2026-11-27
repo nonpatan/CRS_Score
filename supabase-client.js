@@ -413,6 +413,37 @@ export async function canUseDepartment(userId, department, profile = null) {
   return mine.includes(department);
 }
 
+// สิทธิ์หน้าอนุบาล: เจ้าของแก้เฉพาะวิชาของตน ฝ่ายวิชาการเห็นวิชาอื่นแบบอ่านอย่างเดียว
+export async function getKgEntryAccess(userId) {
+  const profile = await getProfile(userId);
+  if (profile?.role === "admin") return { isAdmin: true, canViewAll: true };
+  const [departments, head] = await Promise.all([getMyDepartments(userId), isAcademicHead()]);
+  return { isAdmin: false, canViewAll: head || departments.includes("วิชาการ") };
+}
+
+export const KG_LEVELS = [{ v:3, label:"ดี" }, { v:2, label:"พอใช้" }, { v:1, label:"ควรเสริม" }];
+export const KG_HALF_LABEL = { "กลางปี":"ภาค 1", "ปลายปี":"ภาค 2" };
+export const kgCodeOf = name => (String(name || "").match(/^(\d+(?:\.\d+)+)\s/) || [])[1] || "";
+export const kgIsGrowthState = code => code === "1.1.1";
+
+// นับเฉพาะระดับที่กรอกจริง และคืนทุกระดับที่มีความถี่สูงสุดเมื่อเสมอ
+export function kgMode(levels) {
+  const counts = new Map(KG_LEVELS.map(({ v }) => [v, 0]));
+  for (const level of levels || []) {
+    if (counts.has(level)) counts.set(level, counts.get(level) + 1);
+  }
+  const max = Math.max(...counts.values());
+  if (!max) return { level: null };
+  const tied = KG_LEVELS.map(({ v }) => v).filter(v => counts.get(v) === max);
+  return tied.length === 1 ? { level: tied[0] } : { tied };
+}
+
+export function kgStateTermResult(scoresOfState, tieChoice) {
+  const { level = null, tied = [] } = kgMode(scoresOfState);
+  const validChoice = tied.includes(tieChoice);
+  return { level: validChoice ? tieChoice : level, tied, needsChoice: tied.length > 0 && !validChoice };
+}
+
 // ------------------------------------------------------------
 // คุมการมองเห็นเมนู/หน้าของฝ่ายบุคคล
 // app-shell.js ซ่อนลิงก์ที่เป็นงานฝ่ายบุคคลไว้ก่อนเสมอ (data-restricted + hidden)

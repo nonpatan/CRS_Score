@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>กรอกพัฒนาการอนุบาล — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+<style>
+:root {
+  --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+  --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea;
+  --amber:#8a5a00; --amber-soft:#fff4df;
+}
+body { margin:0; padding:16px; font:16px/1.6 "Sarabun",sans-serif; color:var(--ink); background:var(--bg); }
+.wrap { max-width:760px; margin:0 auto; }
+.kg-content [hidden] { display:none !important; }
+.card { padding:16px; border:1px solid var(--line); margin-bottom:16px; }
+h2, h3, p { margin:0; overflow-wrap:anywhere; }
+h2 { font-size:1.2rem; line-height:1.4; }
+h3 { font-size:1rem; line-height:1.5; }
+.kg-content button, .kg-content select { min-height:44px; font:inherit; border:1px solid var(--line); border-radius:8px; }
+.kg-content button { min-width:44px; background:var(--white); color:var(--ink); padding:6px 10px; cursor:pointer; }
+.kg-content button:not([aria-disabled="true"]):hover { border-color:var(--teal); }
+.kg-content button:not([aria-disabled="true"]):active { box-shadow:inset 0 0 0 1px currentColor; }
+.kg-content button[aria-disabled="true"] { cursor:default; }
+.kg-content :is(button, select, [tabindex="-1"]):focus-visible { outline:2px solid var(--teal) !important; outline-offset:2px; }
+.kg-content select { display:block; width:100%; padding:8px 10px; background:var(--white); color:var(--ink); }
+.field { min-width:0; display:block; }
+.filter-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px 12px; margin-top:12px; }
+.subject-field { grid-column:1/-1; }
+.hint, .empty { color:var(--muted); }
+.hint { font-size:.875rem; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+#load-status:not(:empty) { min-height:2em; margin:0 0 8px; }
+#results[aria-busy="true"] { min-height:7rem; }
+.readonly { color:var(--danger); background:var(--danger-soft); border-radius:8px; padding:8px 12px; margin-top:12px; }
+.student-head, .student-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+.student-head strong { display:block; overflow-wrap:anywhere; }
+.progress { color:var(--teal); font-size:.875rem; font-weight:600; }
+.roster-list { list-style:none; display:grid; gap:8px; margin:12px 0 0; padding:0; }
+.kg-content .roster-row {
+  display:flex; width:100%; flex-wrap:wrap; justify-content:space-between; align-items:center;
+  gap:0 12px; min-height:52px; padding:8px 12px; text-align:start; overflow-wrap:anywhere;
+}
+.roster-name { font-weight:600; }
+.standard > h2 { margin-bottom:12px; }
+.indicator-group + .indicator-group { margin-top:20px; }
+.indicator-group > h3 { color:var(--ink); padding:8px 10px; border-inline-start:3px solid var(--line); background:var(--bg); }
+.state-row { padding:12px 0; border-bottom:1px solid var(--line); }
+.state-name { font-weight:600; }
+.state-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:8px; }
+.levels, .tie-levels { display:flex; flex-wrap:wrap; gap:8px; }
+.kg-content .level { font-size:.875rem; font-weight:600; }
+.kg-content .level[aria-checked="true"] { background:var(--teal); border-color:var(--teal); color:var(--white); }
+.level[aria-checked="true"]::before { content:"✓ "; }
+.term-result { color:var(--muted); font-size:.875rem; overflow-wrap:anywhere; }
+.term-result[data-resolved] { color:var(--teal); font-weight:600; }
+.term-result[data-tied] { color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:4px 8px; }
+.kg-content .tie-toggle { color:var(--amber); background:var(--amber-soft); font-size:.875rem; font-weight:600; }
+.tie-panel { padding:8px 12px; margin-top:8px; border-radius:8px; background:var(--amber-soft); }
+.tie-panel p { margin-bottom:8px; font-size:.875rem; }
+.save-status { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; }
+.save-status [aria-live]:not(:empty) { margin-top:6px; font-size:.875rem; }
+.save-status[data-error] { color:var(--danger); }
+.kg-content .retry { color:var(--danger); border-color:var(--danger); font-size:.875rem; }
+.kg-content .student-actions .primary { width:auto; }
+@media (max-width:380px) {
+  .kg-content .level { padding-inline:8px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>กรอกพัฒนาการอนุบาล</h1>
+  <div class="nav">
+    <a href="../dashboard.html">ภาพรวม</a><a href="index.html">ฝ่ายวิชาการ</a><a href="entry.html">กรอกคะแนน</a>
+    <a href="manage.html">จัดการโครงสร้าง</a><a href="#" id="btn-signout">ออกจากระบบ</a>
+  </div>
+  <script src="../app-shell.js?v=20261127-3"></script>
+</header>
+<main class="academic-content kg-content">
+  <div class="card">
+    <p id="load-status" role="status">กำลังโหลดวิชาอนุบาล…</p>
+    <button id="retry-load" type="button" class="retry" hidden>ลองโหลดอีกครั้ง</button>
+    <div id="context" hidden>
+      <p id="class-heading"></p>
+      <div class="filter-grid">
+        <label id="subject-field" class="field subject-field">วิชา <select id="subject"></select></label>
+        <label class="field">ภาค <select id="half"><option value="กลางปี">ภาค 1</option><option value="ปลายปี">ภาค 2</option></select></label>
+        <label class="field">ครั้งที่ <select id="round"></select></label>
+      </div>
+      <p id="readonly" class="readonly" hidden>คุณมีสิทธิ์ดูพัฒนาการอย่างเดียว เจ้าของวิชาหรือผู้ดูแลระบบเป็นผู้บันทึกผล</p>
+    </div>
+  </div>
+  <div id="results" aria-busy="true"></div>
+</main>
+</div>
+<script type="module">
+import {
+  sb, requireAuth, signOut, getActiveYear, bangkokNow, toDateStr,
+  fetchAllRows, fetchAllRowsByIds, getKgEntryAccess,
+  KG_HALF_LABEL, KG_LEVELS, kgCodeOf, kgIsGrowthState, kgStateTermResult
+} from "../supabase-client.js?v=20261127-2";
+
+const session = await requireAuth();
+if (session) {
+  const $ = id => document.getElementById(id);
+  const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  }[char]));
+  const levels = new Map(KG_LEVELS.map(({ v, label }) => [v, label]));
+  const collator = new Intl.Collator("th", { numeric:true });
+  const bySeq = (a, b) => a.seq - b.seq;
+  const ownerId = session.user.id;
+  const collectionColumns = "id,indicator_id,seq,half";
+  const tieColumns = "student_id,scope_key,level";
+  const tieConflict = "subject_id,student_id,half,scope,scope_key";
+  const models = new Map();
+  let access, subjects, years, route, model, pendingWrites = 0;
+  let screenRequest = 0;
+
+  $("btn-signout").addEventListener("click", event => { event.preventDefault(); void signOut(); });
+  window.crsHasUnsavedChanges = () => pendingWrites > 0;
+  window.addEventListener("beforeunload", event => {
+    if (!pendingWrites || window.crsLeavingConfirmed) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+  history.scrollRestoration = "manual";
+
+  function rows({ data, error }) {
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function loadSubjects() {
+    access = await getKgEntryAccess(ownerId);
+    const [subjectResult, yearResult] = await Promise.all([
+      fetchAllRows(() => {
+        const query = sb.from("subjects").select("id,name,level,grade_level,year,owner_id,curriculum_id").eq("level", "อนุบาล");
+        return access.canViewAll ? query : query.eq("owner_id", ownerId);
+      }, ["id"]),
+      sb.from("academic_years").select("year,term2_start_date")
+    ]);
+    const list = rows(subjectResult).sort((a, b) =>
+      collator.compare(b.year, a.year) || collator.compare(a.grade_level, b.grade_level) || collator.compare(a.name, b.name));
+    years = rows(yearResult);
+    subjects = list;
+    window.dispatchEvent(new CustomEvent("crs-kg-entry-access", { detail: access.canViewAll || subjects.length > 0 }));
+  }
+
+  function canEdit(subject) {
+    return access.isAdmin || subject.owner_id === ownerId;
+  }
+
+  async function loadModel(subject, half) {
+    const key = subject.id + ":" + half;
+    if (!models.has(key)) {
+      models.set(key, fetchModel(subject, half).catch(error => {
+        models.delete(key);
+        throw error;
+      }));
+    }
+    return models.get(key);
+  }
+
+  async function fetchModel(subject, half) {
+    const [unitResult, rosterResult, labelResult] = await Promise.all([
+      fetchAllRows(() => sb.from("units").select("id,name,seq").eq("subject_id", subject.id).eq("kind", "วิชา")),
+      fetchAllRows(() => sb.from("enrollments").select("id,student:student_id(id,name,student_no)").eq("subject_id", subject.id)),
+      subject.curriculum_id
+        ? fetchAllRows(() => sb.from("curriculum_items").select("id,code,text").eq("curriculum_id", subject.curriculum_id).eq("kind", "ตัวบ่งชี้"))
+        : { data:[] }
+    ]);
+    const units = rows(unitResult).sort(bySeq);
+    const roster = rows(rosterResult).map(row => row.student).filter(Boolean)
+      .sort((a, b) => collator.compare(a.student_no || "", b.student_no || "") || collator.compare(a.name, b.name));
+    const labels = new Map(rows(labelResult).map(row => [row.code, row.text]));
+    const indicators = rows(await fetchAllRowsByIds(ids => sb.from("indicators").select("id,unit_id,name,seq").in("unit_id", ids), units.map(unit => unit.id)));
+    const byUnit = new Map();
+    const states = new Map();
+    for (const indicator of indicators) {
+      const code = kgCodeOf(indicator.name);
+      const state = { ...indicator, code, growth:kgIsGrowthState(code), collections:new Map() };
+      states.set(state.id, state);
+      if (!byUnit.has(state.unit_id)) byUnit.set(state.unit_id, []);
+      byUnit.get(state.unit_id).push(state);
+    }
+    const standards = units.map(unit => {
+      const groups = new Map();
+      const ordered = (byUnit.get(unit.id) || []).sort((a, b) => collator.compare(a.code, b.code) || bySeq(a, b));
+      for (const state of ordered) {
+        const code = state.code.split(".").slice(0, -1).join(".");
+        if (!groups.has(code)) groups.set(code, []);
+        groups.get(code).push(state);
+      }
+      return { ...unit, groups };
+    }).filter(unit => unit.groups.size);
+    const scorable = [...states.values()].filter(state => !state.growth);
+    const collections = rows(await fetchAllRowsByIds(ids => sb.from("collections").select(collectionColumns).in("indicator_id", ids).eq("half", half), scorable.map(state => state.id)));
+    const collectionScores = new Map();
+    const rounds = new Set();
+    for (const collection of collections) {
+      const state = states.get(collection.indicator_id);
+      if (!state.collections.has(collection.seq)) state.collections.set(collection.seq, collection.id);
+      rounds.add(collection.seq);
+      collectionScores.set(collection.id, new Map());
+    }
+    const [scoreResult, tieResult] = await Promise.all([
+      fetchAllRowsByIds(ids => sb.from("scores").select("id,student_id,collection_id,raw_score").in("collection_id", ids), [...collectionScores.keys()]),
+      roster.length && scorable.length
+        ? fetchAllRows(() => sb.from("kg_tie_choices").select("id," + tieColumns)
+          .eq("subject_id", subject.id).eq("half", half).eq("scope", "สภาพ"))
+        : { data:[] }
+    ]);
+    for (const score of rows(scoreResult)) {
+      if (levels.has(score.raw_score)) collectionScores.get(score.collection_id).set(score.student_id, score.raw_score);
+    }
+    const ties = new Map(rows(tieResult).map(choice => [rowKey(choice.student_id, choice.scope_key), choice.level]));
+    return { subject, half, roster, labels, standards, states, scorable, rounds, collectionScores, ties, writes:new Map() };
+  }
+
+  const rowKey = (studentId, stateId) => studentId + ":" + stateId;
+  const rosterKey = ({ subjectId, half, round }) => [subjectId, half, round].join(":");
+  const subjectLabel = subject => [subject.grade_level, "ปี " + subject.year, subject.name].filter(Boolean).join(" · ");
+  const studentLabel = student => [student.student_no, student.name].filter(Boolean).join(" · ");
+  const scoreAt = (loaded, state, studentId, round) => loaded.collectionScores.get(state.collections.get(round))?.get(studentId);
+  const resultFor = (loaded, state, studentId) => kgStateTermResult(
+    [...state.collections.keys()].map(round => scoreAt(loaded, state, studentId, round)),
+    loaded.ties.get(rowKey(studentId, state.id))
+  );
+  function progressFor(loaded, studentId) {
+    const count = loaded.scorable.filter(state => scoreAt(loaded, state, studentId, route.round) != null).length;
+    return "กรอกแล้ว " + count + "/58";
+  }
+
+  function readRoute() {
+    const query = new URLSearchParams(location.search);
+    return { subjectId:query.get("subject"), half:query.get("half"), round:Number(query.get("round")), studentId:query.get("student") };
+  }
+
+  function writeRoute(value, push = false, extra = {}) {
+    const url = new URL(location.href);
+    for (const [key, val] of Object.entries({ subject:value.subjectId, half:value.half, round:value.round, student:value.studentId })) {
+      if (val) url.searchParams.set(key, val);
+      else url.searchParams.delete(key);
+    }
+    history[push ? "pushState" : "replaceState"]({ kgEntry:true, ...extra }, "", url);
+  }
+
+  function showRoundOptions() {
+    const available = [...new Set([1, route.round, ...(model?.rounds || [])])].sort((a, b) => a - b);
+    $("round").innerHTML = available.map(n => `<option value="${n}">ครั้งที่ ${n}</option>`).join("") +
+      (model && canEdit(model.subject) ? '<option value="new">+ ครั้งใหม่</option>' : "");
+    $("round").value = String(route.round);
+  }
+
+  async function navigate(next = readRoute(), { push = false, extra = history.state, focus = false } = {}) {
+    const request = ++screenRequest;
+    $("retry-load").hidden = true;
+    try {
+      if (!subjects) {
+        $("results").setAttribute("aria-busy", "true");
+        await loadSubjects();
+      }
+      if (request !== screenRequest) return;
+      const subject = next.subjectId
+        ? subjects.find(item => item.id === next.subjectId)
+        : subjects.find(item => item.year === getActiveYear()) || subjects[0];
+      if (!subject) {
+        $("load-status").textContent = next.subjectId
+          ? "ไม่พบวิชาอนุบาลนี้ในสิทธิ์ของคุณ หากต้องการเข้าถึง กรุณาติดต่อฝ่ายวิชาการ"
+          : "ยังไม่มีวิชาอนุบาลสำหรับคุณ กรุณาติดต่อฝ่ายวิชาการเพื่อตรวจรายวิชาและครูผู้รับผิดชอบ";
+        $("context").hidden = true;
+        $("results").replaceChildren();
+        return;
+      }
+
+      const start = years.find(row => String(row.year) === String(subject.year))?.term2_start_date;
+      const half = Object.hasOwn(KG_HALF_LABEL, next.half) ? next.half
+        : start && toDateStr(bangkokNow()) >= start ? "ปลายปี" : "กลางปี";
+      const round = Number.isInteger(next.round) && next.round > 0 && next.round <= 2147483647 ? next.round : 1;
+      route = { subjectId:subject.id, half, round, studentId:next.studentId || null };
+      writeRoute(route, push, extra);
+
+      $("context").hidden = false;
+      $("class-heading").textContent = subject.grade_level + " · ปีการศึกษา " + subject.year;
+      $("subject-field").hidden = subjects.length < 2;
+      $("subject").innerHTML = subjects.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(subjectLabel(item))}</option>`).join("");
+      $("subject").value = subject.id;
+      $("half").value = half;
+      $("readonly").hidden = canEdit(subject);
+      if (!model || model.subject.id !== subject.id || model.half !== half) {
+        model = null;
+        showRoundOptions();
+        $("round").disabled = true;
+        $("load-status").textContent = "กำลังโหลดรายชื่อและผลพัฒนาการ…";
+        $("results").setAttribute("aria-busy", "true");
+        $("results").replaceChildren();
+        const loaded = await loadModel(subject, half);
+        if (request !== screenRequest) return;
+        model = loaded;
+      }
+      $("round").disabled = false;
+      showRoundOptions();
+      $("load-status").textContent = "";
+      if (route.studentId && !model.roster.some(student => student.id === route.studentId)) {
+        route.studentId = null;
+        writeRoute(route, false, extra);
+        $("load-status").textContent = "ไม่พบนักเรียนในรายชื่อของวิชานี้";
+      }
+      render();
+      if (route.studentId && focus) {
+        $("student-heading")?.focus();
+      } else if (!route.studentId && extra?.rosterScroll != null) {
+        document.getElementById("student-" + extra.rosterStudent)?.focus({ preventScroll:true });
+        window.scrollTo(0, extra.rosterScroll);
+      } else if (focus) {
+        $("roster-heading")?.focus();
+      }
+    } catch {
+      if (request !== screenRequest) return;
+      $("load-status").textContent = "โหลดข้อมูลพัฒนาการไม่สำเร็จ กรุณาตรวจการเชื่อมต่อแล้วลองอีกครั้ง หากยังไม่ได้ให้ติดต่อฝ่ายวิชาการ";
+      $("retry-load").hidden = false;
+    } finally {
+      if (request === screenRequest) $("results").setAttribute("aria-busy", "false");
+    }
+  }
+
+  function render() {
+    if (!model.roster.length || !model.standards.length) {
+      const message = !model.roster.length
+        ? "ยังไม่มีเด็กลงทะเบียนในวิชานี้ กรุณาติดต่อเจ้าของวิชาหรือฝ่ายวิชาการเพื่อเพิ่มรายชื่อ"
+        : "ยังไม่มีรายการพัฒนาการสำหรับวิชานี้ กรุณาติดต่อฝ่ายวิชาการเพื่อตรวจข้อมูลหลักสูตร";
+      $("results").innerHTML = `<div class="card empty">${message}</div>`;
+      return;
+    }
+    if (route.studentId) {
+      renderStudent(model.roster.find(student => student.id === route.studentId));
+    } else {
+      $("results").innerHTML = `<div class="card"><h2 id="roster-heading" tabindex="-1">รายชื่อเด็ก</h2>
+        <span class="visually-hidden" id="roster-progress" role="status" aria-atomic="true"></span>
+        <ul class="roster-list">${model.roster.map(student => `<li>
+          <button type="button" class="roster-row" id="student-${escapeHtml(student.id)}" data-student="${escapeHtml(student.id)}">
+            <span class="roster-name">${escapeHtml(studentLabel(student))}</span><span class="progress">${progressFor(model, student.id)}</span>
+          </button></li>`).join("")}</ul></div>`;
+    }
+  }
+
+  function renderStudent(student) {
+    const canGoNext = model.roster.at(-1).id !== student.id;
+    $("results").innerHTML = `
+      <div class="card student-head">
+        <div><strong id="student-heading" tabindex="-1">${escapeHtml(studentLabel(student))}</strong>
+          <p class="progress" id="student-progress" role="status" aria-atomic="true">${progressFor(model, student.id)}</p></div>
+        <button type="button" class="ghost" data-action="back">กลับรายชื่อ</button>
+      </div>
+      ${model.standards.map(unit => `<section class="card standard" aria-labelledby="standard-${escapeHtml(unit.id)}">
+        <h2 id="standard-${escapeHtml(unit.id)}">${escapeHtml(unit.name)}</h2>
+        ${[...unit.groups].map(([code, list]) => `<div class="indicator-group">
+          <h3>${escapeHtml([code, model.labels.get(code)].filter(Boolean).join(" ") || "ตัวบ่งชี้")}</h3>
+          ${list.map(stateMarkup).join("")}</div>`).join("")}
+      </section>`).join("")}
+      <div class="card student-actions">
+        <button type="button" class="ghost" data-action="back">กลับรายชื่อ</button>
+        ${canGoNext ? '<button type="button" class="primary" data-action="next">เด็กคนถัดไป</button>' : ""}
+      </div>`;
+    for (const state of model.scorable) paintRow(state);
+  }
+
+  function stateMarkup(state) {
+    const id = escapeHtml(state.id);
+    return `<div class="state-row" id="state-${id}" data-state="${id}">
+      <p class="state-name" id="name-${id}">${escapeHtml(state.name)}</p>
+      ${state.growth ? '<p class="hint">คิดจากน้ำหนัก/ส่วนสูง — ยังไม่เปิดใช้</p>' : `
+      <div class="state-controls">
+        <div class="levels" role="radiogroup" aria-labelledby="name-${id}" aria-describedby="status-${id}">
+          ${KG_LEVELS.map(({ v, label }) => `<button type="button" class="level" role="radio" aria-checked="false" aria-label="${v} ${label}"
+            tabindex="-1" data-action="score" data-level="${v}">${v} ${label}</button>`).join("")}
+        </div>
+        <span class="term-result"></span>
+        <button type="button" class="tie-toggle" data-action="toggle-tie" aria-controls="tie-${id}" aria-expanded="false" hidden>เสมอ — เลือกผล</button>
+      </div>
+      <div class="tie-panel" id="tie-${id}" hidden>
+        <p>เลือกระดับที่เสมอเพื่อใช้เป็นผลของภาค</p>
+        <div class="tie-levels" role="group" aria-label="เลือกระดับที่เสมอ">
+          ${KG_LEVELS.map(({ v, label }) => `<button type="button" data-action="tie" data-level="${v}" hidden>${v} ${label}</button>`).join("")}
+        </div>
+      </div>
+      <div class="save-status"><span id="status-${id}" aria-live="polite" aria-atomic="true"></span>
+        <button type="button" class="retry" data-action="retry" hidden>แตะเพื่อลองใหม่</button></div>`}
+    </div>`;
+  }
+
+  function paintRow(state) {
+    const row = $("state-" + state.id);
+    if (!row) return;
+    const studentId = route.studentId;
+    const current = scoreAt(model, state, studentId, route.round);
+    const result = resultFor(model, state, studentId);
+    const write = model.writes.get(rowKey(studentId, state.id));
+    const relevant = write?.operation.type !== "score" || write?.operation.round === route.round;
+    const busy = write?.status === "saving";
+    const readOnly = !canEdit(model.subject);
+    const radios = [...row.querySelectorAll('[role="radio"]')];
+    const tabStop = radios.find(button => button === document.activeElement)
+      || radios.find(button => Number(button.dataset.level) === current) || radios[0];
+    for (const button of radios) {
+      button.setAttribute("aria-checked", String(Number(button.dataset.level) === current));
+      button.setAttribute("aria-disabled", String(readOnly || busy));
+      button.tabIndex = button === tabStop ? 0 : -1;
+    }
+    const term = row.querySelector(".term-result");
+    term.toggleAttribute("data-resolved", result.level != null);
+    term.toggleAttribute("data-tied", readOnly && result.needsChoice);
+    term.textContent = result.level != null ? "ผลภาค: " + levels.get(result.level)
+      : result.needsChoice ? (readOnly ? "ผลภาค: เสมอ — รอครูเลือกผล" : "") : "ผลภาค: ยังไม่ได้กรอก";
+
+    const toggle = row.querySelector(".tie-toggle");
+    toggle.hidden = readOnly || !result.tied.length;
+    toggle.textContent = result.needsChoice ? "เสมอ — เลือกผล" : "เปลี่ยนผลที่เสมอ";
+    toggle.setAttribute("aria-disabled", String(busy));
+    const panel = row.querySelector(".tie-panel");
+    if (toggle.hidden) setTiePanel(row, false);
+    for (const button of panel.querySelectorAll("button")) {
+      button.hidden = !result.tied.includes(Number(button.dataset.level));
+      button.setAttribute("aria-disabled", String(busy));
+    }
+
+    const status = row.querySelector(".save-status");
+    const message = relevant ? write?.message || "" : "";
+    const live = status.querySelector("[aria-live]");
+    if (live.textContent !== message) live.textContent = message;
+    const failed = relevant && write?.status === "error";
+    status.toggleAttribute("data-error", Boolean(failed));
+    const retry = status.querySelector("button");
+    retry.hidden = !failed && !(relevant && busy && write.retrying);
+    retry.setAttribute("aria-disabled", String(busy));
+  }
+
+  function setTiePanel(row, open) {
+    const toggle = row.querySelector(".tie-toggle");
+    toggle.setAttribute("aria-expanded", String(open));
+    row.querySelector(".tie-panel").hidden = !open;
+  }
+
+  // คีย์คงที่ทำให้การสร้างครั้งเดียวกันจากคนละแท็บหรือคนละเครื่องชน primary key เดิม
+  async function collectionIdFor(stateId, half, round) {
+    const bytes = new TextEncoder().encode(JSON.stringify(["crs-kg-collection", stateId, half, round]));
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)).slice(0, 16);
+    hash[6] = (hash[6] & 0x0f) | 0x80;
+    hash[8] = (hash[8] & 0x3f) | 0x80;
+    const hex = Array.from(hash, byte => byte.toString(16).padStart(2, "0")).join("");
+    return [hex.slice(0,8), hex.slice(8,12), hex.slice(12,16), hex.slice(16,20), hex.slice(20)].join("-");
+  }
+
+  async function ensureCollection(loaded, state, round) {
+    if (state.collections.has(round)) return state.collections.get(round);
+    const find = () => sb.from("collections").select("id").eq("indicator_id", state.id)
+      .eq("half", loaded.half).eq("seq", round).order("id").limit(1);
+    let [existing] = rows(await find());
+    if (!existing) {
+      const id = await collectionIdFor(state.id, loaded.half, round);
+      const inserted = await sb.from("collections").insert({
+        id, indicator_id:state.id, seq:round, max_score:3, half:loaded.half
+      }).select("id");
+      // อีกแท็บอาจสร้างเสร็จระหว่างอ่านกับ insert
+      [existing] = rows(inserted.error?.code === "23505" ? await find() : inserted);
+      if (!existing) throw new Error("collection unavailable");
+    }
+    state.collections.set(round, existing.id);
+    loaded.rounds.add(round);
+    if (!loaded.collectionScores.has(existing.id)) loaded.collectionScores.set(existing.id, new Map());
+    return existing.id;
+  }
+
+  function tieRow(loaded, state, studentId) {
+    return { subject_id:loaded.subject.id, student_id:studentId, half:loaded.half, scope:"สภาพ", scope_key:state.id };
+  }
+
+  function repaintAfterWrite(loaded, state, studentId) {
+    if (loaded !== model) return;
+    if (route.studentId === studentId) {
+      paintRow(state);
+      const progress = $("student-progress");
+      const text = progressFor(loaded, studentId);
+      if (progress && progress.textContent !== text) progress.textContent = text;
+    } else if (!route.studentId) {
+      const row = $("student-" + studentId);
+      const progress = row?.querySelector(".progress");
+      const text = progressFor(loaded, studentId);
+      if (progress && progress.textContent !== text) {
+        progress.textContent = text;
+        $("roster-progress").textContent = row.querySelector(".roster-name").textContent + " " + text;
+      }
+    }
+  }
+
+  async function save(state, operation, trigger) {
+    if (!model || !route.studentId || !canEdit(model.subject) || state.growth) return;
+    const loaded = model;
+    const studentId = route.studentId;
+    const key = rowKey(studentId, state.id);
+    if (loaded.writes.get(key)?.status === "saving") return;
+
+    const { type, level, round } = operation;
+    if (type === "score" && scoreAt(loaded, state, studentId, round) === level) return;
+    if (type === "tie" && (loaded.ties.get(key) === level || !resultFor(loaded, state, studentId).tied.includes(level))) return;
+    const putStatus = (status, message, action = operation) => {
+      loaded.writes.set(key, { status, message, operation:action, retrying:trigger.dataset.action === "retry" });
+      repaintAfterWrite(loaded, state, studentId);
+    };
+    pendingWrites++;
+    putStatus("saving", "กำลังบันทึก…");
+    let action = operation;
+    try {
+      if (type === "score") {
+        const collectionId = await ensureCollection(loaded, state, round);
+        const saved = rows(await sb.from("scores").upsert({
+          collection_id:collectionId, student_id:studentId, raw_score:level, updated_at:new Date().toISOString()
+        }, { onConflict:"student_id,collection_id" }).select("id"));
+        if (!saved.length) throw new Error("score not saved");
+        loaded.collectionScores.get(collectionId).set(studentId, level);
+      }
+      if (type === "tie") {
+        const saved = rows(await sb.from("kg_tie_choices").upsert({
+          ...tieRow(loaded, state, studentId), level, chosen_by:ownerId, chosen_at:new Date().toISOString()
+        }, { onConflict:tieConflict }).select("id"));
+        if (!saved.length) throw new Error("tie not saved");
+        loaded.ties.set(key, level);
+      }
+
+      const oldChoice = loaded.ties.get(key);
+      if (oldChoice != null && !resultFor(loaded, state, studentId).tied.includes(oldChoice)) {
+        action = { type:"cleanup" };
+        // ลบเฉพาะค่าค้างที่อ่านมา เผื่ออีกคนเพิ่งบันทึกค่าที่ต่างออกไป
+        const filter = tieRow(loaded, state, studentId);
+        const removed = rows(await sb.from("kg_tie_choices").delete().match(filter).eq("level", oldChoice).select("id"));
+        if (removed.length) loaded.ties.delete(key);
+        else {
+          const [current] = rows(await sb.from("kg_tie_choices").select("level").match(filter));
+          if (current?.level === oldChoice) throw new Error("tie not removed");
+          if (current) loaded.ties.set(key, current.level);
+          else loaded.ties.delete(key);
+        }
+      }
+
+      const row = trigger.closest("[data-state]");
+      if (trigger.isConnected && (row.contains(document.activeElement) || document.activeElement === document.body)) {
+        if (type === "tie") row.querySelector(".tie-toggle").focus();
+        else if (trigger.dataset.action === "retry") {
+          (row.querySelector('[aria-checked="true"]') || row.querySelector('[role="radio"]')).focus();
+        }
+      }
+      if (type === "tie" && row.isConnected) setTiePanel(row, false);
+      putStatus("saved", type === "tie" ? "บันทึกผลภาคแล้ว" : "บันทึกแล้ว");
+    } catch (error) {
+      const reason = navigator.onLine === false ? "ไม่มีการเชื่อมต่ออินเทอร์เน็ต"
+        : error.code === "42501" ? "ตรวจสิทธิ์บันทึกกับฝ่ายวิชาการ" : "ระบบยังไม่ยืนยันการบันทึก";
+      const message = action.type === "cleanup"
+        ? "บันทึกระดับแล้ว แต่ล้างผลเสมอเดิมไม่สำเร็จ — " + reason
+        : "บันทึกไม่สำเร็จ — " + reason;
+      putStatus("error", message, action);
+    } finally {
+      pendingWrites--;
+    }
+  }
+
+  $("subject").addEventListener("change", () => void navigate({ subjectId:$("subject").value }, { extra:{} }));
+  $("half").addEventListener("change", () => void navigate({ ...route, half:$("half").value, round:1 }, { extra:route.studentId ? history.state : {} }));
+  $("round").addEventListener("change", () => {
+    if (!model) return;
+    const value = $("round").value;
+    const round = value === "new" ? Math.max(1, route.round, ...model.rounds) + 1 : Number(value);
+    void navigate({ ...route, round }, { extra:route.studentId ? history.state : {} });
+  });
+  $("retry-load").addEventListener("click", () => void navigate());
+  window.addEventListener("popstate", () => void navigate(readRoute(), { focus:true }));
+  $("results").addEventListener("click", event => {
+    const button = event.target.closest("button");
+    if (!button || button.getAttribute("aria-disabled") === "true") return;
+    if (button.dataset.student) {
+      const position = { rosterScroll:window.scrollY, rosterStudent:button.dataset.student };
+      writeRoute(route, false, position);
+      void navigate({ ...route, studentId:button.dataset.student }, { push:true, extra:{ ...position, fromRoster:rosterKey(route) }, focus:true });
+      return;
+    }
+    const action = button.dataset.action;
+    if (action === "back") {
+      if (history.state?.fromRoster === rosterKey(route)) history.back();
+      else {
+        const { rosterScroll, rosterStudent } = history.state || {};
+        void navigate({ ...route, studentId:null }, { extra:{ rosterScroll, rosterStudent }, focus:true });
+      }
+      return;
+    }
+    if (action === "next") {
+      const next = model.roster[model.roster.findIndex(student => student.id === route.studentId) + 1];
+      if (next) void navigate({ ...route, studentId:next.id }, { focus:true });
+      return;
+    }
+    const row = button.closest("[data-state]");
+    if (!row) return;
+    const state = model.states.get(row.dataset.state);
+    const level = Number(button.dataset.level);
+    if (action === "toggle-tie") {
+      const open = button.getAttribute("aria-expanded") !== "true";
+      setTiePanel(row, open);
+      if (open) row.querySelector('.tie-levels button:not([hidden])')?.focus();
+    } else if (action === "retry") {
+      const failed = model.writes.get(rowKey(route.studentId, state.id));
+      if (failed?.status === "error") void save(state, failed.operation, button);
+    } else if (action === "score" || action === "tie") {
+      void save(state, { type:action, level, round:route.round }, button);
+    }
+  });
+  $("results").addEventListener("keydown", event => {
+    if (event.key === "Escape" && event.target.closest(".tie-panel")) {
+      const row = event.target.closest("[data-state]");
+      row.querySelector(".tie-toggle").focus();
+      setTiePanel(row, false);
+    }
+    const directions = { ArrowLeft:-1, ArrowUp:-1, ArrowRight:1, ArrowDown:1 };
+    const button = event.target.closest('[role="radio"]');
+    if (!button || !Object.hasOwn(directions, event.key)) return;
+    event.preventDefault();
+    if (button.getAttribute("aria-disabled") === "true") return;
+    const radios = [...button.parentElement.querySelectorAll('[role="radio"]')];
+    const next = radios[(radios.indexOf(button) + directions[event.key] + radios.length) % radios.length];
+    button.tabIndex = -1;
+    next.tabIndex = 0;
+    next.focus();
+    next.click();
+  });
+
+  await navigate();
+}
+</script>
+</body>
+</html>

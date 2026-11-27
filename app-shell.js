@@ -235,6 +235,7 @@ function syncFinanceKpiTones() {
           items: [
             ["attendance.html", "เช็คชื่อ"],
             ["entry.html", "กรอกคะแนน"],
+            ["kg-entry.html", "กรอกพัฒนาการอนุบาล", { kgEntry: true }],
             ["grade-edit-requests.html", "คำขอแก้คะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
             ["theme-works.html", "ส่งผลงานตามธีม"],
@@ -289,6 +290,10 @@ function syncFinanceKpiTones() {
         }
       ],
       workflows: {
+        "kg-entry.html": {
+          title: "กรอกพัฒนาการอนุบาล",
+          steps: ["เลือกภาคและครั้งที่", "เลือกเด็ก", "กรอกพัฒนาการ"]
+        },
         "calendar.html": {
           title: "จัดการปฏิทินปฏิบัติงาน",
           description: "เลือกปีและเดือน แล้วตรวจ เพิ่ม หรือแก้กำหนดการของฝ่ายวิชาการ",
@@ -873,7 +878,7 @@ function syncFinanceKpiTones() {
   // การรีเนมกระทบ CSS ของหน้าที่ใช้งานจริงโดยไม่ได้ประโยชน์ทางสายตา จึงเพิ่ม class ฝ่ายไว้แทน
   document.body.classList.add("academic-shell", "academic-" + pageName, "shell-module-" + moduleKey);
 
-  const buildLink = (href, label, extraClass) => {
+  const buildLink = (href, label, extraClass, metadata) => {
     const target = new URL((moduleKey === "system" ? "" : moduleKey + "/") + href, appRootUrl);
     // ส่ง cache version ไปกับลิงก์หน้า HTML ด้วย เพื่อให้การนำทางหลัง deploy
     // ไม่ดึง document รุ่นเก่าจาก browser/GitHub Pages cache
@@ -882,7 +887,8 @@ function syncFinanceKpiTones() {
     const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || []), ...(mod.reportOnly || []), ...(mod.adminOnly || [])].includes(href)
       ? ' data-restricted="1" hidden'
       : "";
-    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}>${label}</a>`;
+    const kgEntry = metadata?.kgEntry ? ' data-kg-entry hidden' : "";
+    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}${kgEntry}>${label}</a>`;
   };
 
   const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link">${dashboardIcon}ภาพรวม</a>`;
@@ -892,7 +898,7 @@ function syncFinanceKpiTones() {
 
   nav.innerHTML = dashboardLink + moduleHomeLink + mod.groups.map(group => {
     const isCurrent = group.items.some(([href]) => href === current);
-    const links = group.items.map(([href, label]) => buildLink(href, label)).join("");
+    const links = group.items.map(([href, label, metadata]) => buildLink(href, label, "", metadata)).join("");
     return `<span class="shell-nav-sep" aria-hidden="true"></span><div class="nav-group${isCurrent ? " current" : ""}"><span class="nav-group-label">${group.label}</span><div class="nav-group-links">${links}</div></div>`;
   }).join("") + `<div class="shell-side-foot"><a href="#" id="btn-signout" class="crs-signout">${signoutIcon}${signoutLabel}</a></div>`;
 
@@ -938,6 +944,38 @@ function syncFinanceKpiTones() {
   if (active) requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "nearest" }));
 
   if (moduleKey === "academic") {
+    const kgLink = nav.querySelector("[data-kg-entry]");
+    if (kgLink && current === "kg-entry.html") {
+      window.addEventListener("crs-kg-entry-access", event => {
+        kgLink.hidden = !event.detail;
+        if (!kgLink.hidden && !window.matchMedia("(min-width: 1200px)").matches) {
+          kgLink.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      }, { once: true });
+    } else if (kgLink) {
+      void (async () => {
+        try {
+          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261127-2", appRootUrl).href);
+          const { data: { session } } = await sb.auth.getSession();
+          if (!session) return;
+          const userId = session.user.id;
+          // จำเฉพาะการแสดงเมนู หน้ากรอกยังตรวจสิทธิ์จากบัญชีจริงทุกครั้ง
+          const key = "crs.kg-entry-menu:" + userId;
+          let cached;
+          try { cached = sessionStorage.getItem(key); } catch { /* ใช้คิวรีเมื่ออ่านแคชไม่ได้ */ }
+          if (cached === "1" || cached === "0") {
+            kgLink.hidden = cached === "0";
+            return;
+          }
+          const { data, error } = await sb.from("subjects").select("id").eq("level", "อนุบาล").eq("owner_id", userId).limit(1);
+          const visible = Boolean(data?.length) || (await getKgEntryAccess(userId)).canViewAll;
+          kgLink.hidden = !visible;
+          if (!error) {
+            try { sessionStorage.setItem(key, visible ? "1" : "0"); } catch { /* คิวรีใหม่เมื่อเปิดหน้าถัดไป */ }
+          }
+        } catch { /* อ่านสิทธิ์ไม่ได้ ให้คงเมนูนี้เป็นซ่อน */ }
+      })();
+    }
     const gradeLink = [...nav.querySelectorAll("a")].find(link => new URL(link.href).pathname.endsWith("/grade-edit-requests.html"));
     if (gradeLink) {
       const badge = document.createElement("span");
@@ -960,10 +998,10 @@ function syncFinanceKpiTones() {
       if (!["index.html", "grade-edit-requests.html"].includes(current)) {
         const readCount = async () => {
           try {
-            const { sb } = await import(new URL("supabase-client.js?v=20261127-1", appRootUrl).href);
+            const { sb } = await import(new URL("supabase-client.js?v=20261127-2", appRootUrl).href);
             const { data } = await sb.auth.getSession();
             if (!data.session) return;
-            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=3", appRootUrl).href);
+            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=4", appRootUrl).href);
             await gradeQueueCounts();
           } catch { /* ตัวนับขัดข้องยังเปิดเมนูได้ */ }
         };
