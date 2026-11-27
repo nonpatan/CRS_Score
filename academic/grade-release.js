@@ -1,6 +1,6 @@
 import { sb, fetchAllRows, fetchAllRowsByIds, isRegularStudent, isAutoPresentStudent, isAutoAbsentStudent, GRADE_ORDER,
-  getActiveYear, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, isKindergartenSubject } from "../supabase-client.js?v=20261127-2";
-import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=4";
+  getActiveYear, getAcademicYears, academicYearOf, academicTermOf, bangkokNow, toDateStr, isKindergartenSubject } from "../supabase-client.js?v=20261128-1";
+import { gradeDate, gradeEscape, gradeRpc, installGradeStyles } from "./grade-lock.js?v=5";
 
 const today = () => toDateStr(bangkokNow());
 const annual = grade => grade.startsWith("ป.");

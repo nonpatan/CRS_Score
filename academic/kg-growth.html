@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>น้ำหนัก/ส่วนสูงอนุบาล — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+<style>
+:root {
+  --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+  --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:16px; font:16px/1.55 "Sarabun",sans-serif; color:var(--ink); background:var(--bg); }
+.wrap { max-width:1040px; margin:0 auto; }
+.growth-content { container-type:inline-size; }
+.growth-content [hidden] { display:none !important; }
+.growth-content :is(h2, h3, p) { margin:0; overflow-wrap:anywhere; }
+.growth-content h2 { font-size:1.1rem; margin-bottom:8px; }
+.growth-content h3 { font-size:1.04rem; }
+.growth-content :is(input, select, button, summary, a):focus-visible { outline:2px solid var(--teal) !important; outline-offset:2px; }
+.growth-content :is(select, input[type="date"], input[type="text"]) {
+  font:inherit; font-size:16px; width:100%; min-width:0; min-height:44px;
+  padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--white); color:var(--ink);
+}
+.growth-content :is(button, summary) { min-height:44px; cursor:pointer; }
+.growth-content a { color:var(--teal); }
+.growth-content .card { margin:0 !important; }
+.growth-layout, #controls { display:grid; gap:12px; align-content:start; align-items:start; min-width:0; }
+#controls, .kid { padding:12px 14px; }
+.filter-pair { display:grid; grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); gap:10px; }
+.filter-pair label { min-width:0; }
+.filter-pair input[type="date"] { appearance:none; text-align:start; }
+.growth-content label { display:grid; gap:4px; font-size:.875rem; font-weight:600; }
+.termchip, .band { justify-self:start; border-radius:8px; font-size:.875rem; font-weight:600; padding:3px 8px; }
+.termchip { border-radius:999px; padding:4px 12px; }
+.b3, .termchip { color:var(--teal); background:var(--teal-soft); }
+.b24, .warn { color:var(--amber); background:var(--amber-soft); }
+.b15, .readonly { color:var(--danger); background:var(--danger-soft); }
+.counter { display:flex; flex-wrap:wrap; justify-content:space-between; gap:0 8px; font-size:.9rem; }
+.growth-content progress {
+  display:block; appearance:none; width:100%; height:8px; margin-top:6px;
+  border:0; border-radius:999px; overflow:hidden; background:var(--line); color:var(--teal);
+}
+.growth-content progress::-webkit-progress-bar { background:var(--line); }
+.growth-content progress::-webkit-progress-value { background:var(--teal); }
+.growth-content progress::-moz-progress-bar { background:var(--teal); }
+#results { min-width:0; }
+#results[aria-busy="true"] { min-height:7rem; }
+.measurement-grid { display:grid; gap:12px; }
+.grid-head, .previous { display:none; }
+.kid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:8px 10px; }
+.kid > :is(.kid-name,.age,.kid-history) { grid-column:1/-1; }
+.no, .age, .hint, .empty, .st, .who { color:var(--muted); }
+.no { margin-inline-end:6px; font-weight:500; }
+.age, .hint, .warn, .hist { font-size:.875rem; }
+.fld { min-width:0; display:grid; gap:4px; align-content:start; }
+.inwrap {
+  display:flex; align-items:center; min-height:48px; padding-inline:10px;
+  border:1px solid var(--line); border-radius:10px; background:var(--white);
+}
+.growth-content .inwrap input {
+  padding:0; min-height:46px; border:0; font-size:18px; font-weight:600;
+  background:transparent !important; box-shadow:none; border-radius:0 !important;
+}
+.growth-content .inwrap input:focus { outline:none !important; }
+.inwrap:focus-within { outline:2px solid var(--teal); outline-offset:1px; }
+.inwrap:has([aria-invalid="true"]) { border-color:var(--danger); }
+.inwrap:has([readonly]) { background:var(--bg); }
+.growth-content .inwrap input[readonly] { color:var(--muted); }
+.unit { font-size:.875rem; color:var(--muted); }
+.st { font-size:.84rem; min-height:20px; overflow-wrap:anywhere; }
+.st.ok { color:var(--teal); }
+.st.err, #date-error { color:var(--danger); }
+.st button, .date-button {
+  font:inherit; font-weight:600; color:var(--teal); background:none; border:0;
+  padding:0; text-align:start; text-decoration:underline;
+}
+.st button { color:var(--danger); }
+.warn, .readonly { border-radius:10px; padding:8px 10px; overflow-wrap:anywhere; }
+.warn a { color:inherit; font-weight:700; }
+.hist { border-top:1px dashed var(--line); padding-top:4px; }
+.hist summary { color:var(--muted); font-weight:600; padding-block:10px; }
+.hist table { width:100%; table-layout:fixed; border-collapse:collapse; }
+.hist :is(td,th) { text-align:start; vertical-align:top; padding:4px; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+.hist tr[data-date] { cursor:pointer; }
+.hist th, .who { font-size:.8rem; }
+.hist td:first-child, .hist th:first-child { width:32%; }
+.hist .date-button { width:100%; }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@container (min-width:660px) {
+  #results { background:var(--white); border:1px solid var(--line); border-radius:16px; }
+  #room-heading { margin:0; padding:12px 14px; }
+  .measurement-grid { gap:0; }
+  .grid-head, .kid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,.9fr) repeat(2,minmax(0,1.1fr)) minmax(0,1fr); gap:8px 12px; }
+  .grid-head { background:var(--bg); color:var(--muted); font-size:.875rem; font-weight:600; padding:10px 14px; }
+  .growth-content .card.kid {
+    border:0 !important; border-top:1px solid var(--line) !important;
+    border-radius:0 !important; background:transparent !important; box-shadow:none;
+    padding:10px 14px !important; overflow:visible;
+  }
+  .kid > :is(.kid-name,.age,.kid-history) { grid-column:auto; }
+  .fld > label { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .kid .inwrap { max-width:150px; }
+  .previous { display:inline-block; }
+  .hist { border:0; }
+  .kid:has(.hist[open]) .kid-history { grid-column:1/-1; }
+}
+@container (min-width:924px) {
+  .growth-layout { grid-template-columns:246px minmax(0,1fr); }
+  .filter-pair { grid-template-columns:minmax(0,1fr); }
+}
+@media (min-width:1200px) {
+  #load-status:not(:empty) { background:var(--white); padding:12px 14px; border-radius:12px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>น้ำหนัก/ส่วนสูงอนุบาล</h1>
+  <div class="nav">
+    <a href="../dashboard.html">ภาพรวม</a><a href="index.html">ฝ่ายวิชาการ</a>
+    <a href="kg-entry.html">กรอกพัฒนาการอนุบาล</a><a href="#" id="btn-signout">ออกจากระบบ</a>
+  </div>
+  <script src="../app-shell.js?v=20261128-1"></script>
+</header>
+<main class="academic-content growth-content">
+  <div class="growth-layout">
+    <div id="controls" class="card" hidden>
+      <label>ปีการศึกษา <select id="year"></select></label>
+      <div class="filter-pair">
+        <label>ห้อง <select id="room"></select></label>
+        <label>วันที่วัด <input id="date" type="date" required aria-describedby="date-error"></label>
+      </div>
+      <p id="date-error" class="hint" aria-live="polite"></p>
+      <p id="term" class="termchip" hidden></p>
+      <div id="progress" hidden>
+        <div id="counter" class="counter" role="status" aria-atomic="true"></div>
+        <progress id="bar" value="0" max="1" aria-hidden="true"></progress>
+      </div>
+      <p id="readonly" class="readonly" hidden>คุณดูได้อย่างเดียว · ครูประจำชั้นเป็นผู้กรอก</p>
+    </div>
+    <div>
+      <p id="load-status" class="hint" role="status">กำลังโหลดห้องอนุบาล…</p>
+      <button type="button" id="retry-load" class="ghost" hidden>ลองโหลดอีกครั้ง</button>
+      <section id="results" aria-busy="true" hidden>
+        <h2 id="room-heading" tabindex="-1"></h2>
+        <div id="students"></div>
+      </section>
+    </div>
+  </div>
+</main>
+</div>
+<script type="module">
+import {
+  sb, requireAuth, signOut, fetchAllRows, fetchAllRowsByIds, getKgEntryAccess, loadMyHomeroomRooms,
+  getActiveYear, academicYearRange, bangkokNow, toDateStr, thaiShortDateText,
+  getStaffNamesByUser, KG_GROWTH_FIELDS, KG_GROWTH_COLUMNS, kgAgeMonths, kgGrowthBand,
+  loadKgGrowthReference, loadKgGrowthData
+} from "../supabase-client.js?v=20261128-1";
+
+const session = await requireAuth();
+if (session) {
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  }[char]));
+  const collator = new Intl.Collator("th", { numeric:true });
+  const measuredFields = [
+    { measure:"น้ำหนัก", field:KG_GROWTH_FIELDS["น้ำหนัก"], unit:"กก.", min:5, max:60 },
+    { measure:"ส่วนสูง", field:KG_GROWTH_FIELDS["ส่วนสูง"], unit:"ซม.", min:60, max:160 }
+  ];
+  const editDate = new Intl.DateTimeFormat("th-TH", { timeZone:"Asia/Bangkok", dateStyle:"medium" });
+  const roomKey = (grade, classroom) => grade + "/" + classroom;
+  const today = toDateStr(bangkokNow());
+  const params = new URLSearchParams(location.search);
+  const targetStudent = params.get("student");
+  const roomModels = new Map();
+  let access, years, ownRooms, reference, staffNames, activeYear, activeRoom, model, screenDate, term2Start;
+  let requestId = 0, pending = 0, initial = true;
+
+  $("btn-signout").addEventListener("click", event => { event.preventDefault(); void signOut(); });
+  window.crsHasUnsavedChanges = () => pending > 0;
+  window.addEventListener("beforeunload", event => {
+    if (!pending || window.crsLeavingConfirmed) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  function rows({ data, error }) {
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function initialize() {
+    const [permission, settings] = await Promise.all([
+      getKgEntryAccess(session.user.id),
+      sb.from("academic_years").select("year,start_date,term2_start_date").order("year")
+    ]);
+    access = permission;
+    years = rows(settings);
+    if (!access.isHead) ownRooms = await loadMyHomeroomRooms(session.user.id, { activeOnly:true });
+    const started = years.filter(row => row.start_date <= today);
+    if (!started.length) throw new Error("academic year unavailable");
+    const firstYear = started.find(row => row.year === params.get("year"))
+      || started.find(row => row.year === getActiveYear()) || started.at(-1);
+    $("year").innerHTML = started.reverse().map(row => `<option>${esc(row.year)}</option>`).join("");
+    $("year").value = firstYear.year;
+    $("controls").hidden = false;
+  }
+
+  async function roomsFor(year) {
+    let roomRows;
+    if (access.canViewAll) {
+      const [assigned, placed] = await Promise.all(["homeroom_teachers", "student_year_placements"].map(table =>
+        fetchAllRows(() => sb.from(table).select("grade_level,classroom").eq("year", year).like("grade_level", "อ.%"))
+      ));
+      roomRows = [...rows(assigned), ...rows(placed)];
+    } else {
+      roomRows = [...(ownRooms.get(year) || [])].map(key => {
+        const [grade_level, classroom] = key.split("\u0000");
+        return { grade_level, classroom };
+      }).filter(room => room.grade_level.startsWith("อ."));
+    }
+    return new Map(roomRows.map(room => [roomKey(room.grade_level, room.classroom), room])
+      .sort(([a], [b]) => collator.compare(a, b)));
+  }
+
+  async function loadRoom(year, room) {
+    const { grade_level, classroom } = room;
+    const roster = rows(await fetchAllRows(() => sb.from("student_year_placements")
+      .select("student:student_id(id,name,student_no)").eq("year", year).eq("grade_level", grade_level).eq("classroom", classroom)))
+      .map(row => row.student).filter(Boolean)
+      .sort((a, b) => collator.compare(a.student_no || "", b.student_no || "") || collator.compare(a.name, b.name));
+
+    const [data, ref] = await Promise.all([
+      loadKgGrowthData(year, roster.map(student => student.id)),
+      reference || loadKgGrowthReference()
+    ]);
+    reference = ref;
+    const histories = new Map(roster.map(student => [student.id, new Map()]));
+    for (const row of data.measurements) histories.get(row.student_id).set(row.measured_on, row);
+    return { year, roster, profiles:data.profiles, histories, names:await editorNames(data.measurements), edits:new Map(), queues:new Map() };
+  }
+
+  async function editorNames(measurements, current = new Map()) {
+    const ids = measurements.filter(row => row.updated_at !== row.created_at && row.updated_by && !current.has(row.updated_by))
+      .map(row => row.updated_by);
+    if (!ids.length) return current;
+    try {
+      const [staff, profiles] = await Promise.all([
+        staffNames || getStaffNamesByUser(),
+        fetchAllRowsByIds(ids => sb.from("profiles").select("id,name").in("id", ids), ids)
+      ]);
+      staffNames = staff;
+      for (const { id, name } of profiles.data || []) current.set(id, staff.get(id) || name);
+      for (const id of ids) if (!current.has(id)) current.set(id, staff.get(id) || "");
+    } catch { /* ยังแสดงเวลาแก้ไขได้แม้โหลดชื่อไม่สำเร็จ */ }
+    return current;
+  }
+
+  function dateValid(value) {
+    const input = $("date");
+    return Boolean(value && value >= input.min && value <= input.max);
+  }
+
+  function dateError() {
+    $("date").setAttribute("aria-invalid", "true");
+    $("date-error").textContent = "เลือกวันที่วัดระหว่าง " + thaiShortDateText($("date").min) + " ถึง " + thaiShortDateText($("date").max);
+    $("results").hidden = $("progress").hidden = $("term").hidden = $("readonly").hidden = true;
+  }
+
+  async function refresh({ changeYear = false } = {}) {
+    const request = ++requestId;
+    model = null;
+    $("retry-load").hidden = true;
+    $("results").hidden = $("progress").hidden = $("term").hidden = $("readonly").hidden = true;
+    $("results").setAttribute("aria-busy", "true");
+    $("load-status").textContent = "กำลังโหลดรายชื่อและผลการวัด…";
+    try {
+      if (!$("year").options.length) await initialize();
+      const year = $("year").value;
+      if (year !== activeYear || changeYear) {
+        $("room").disabled = $("date").disabled = true;
+        const choices = await roomsFor(year);
+        const placement = initial && targetStudent && choices.size > 1
+          ? (await sb.from("student_year_placements").select("grade_level,classroom")
+              .eq("year", year).eq("student_id", targetStudent)).data?.[0] : null;
+        if (request !== requestId) return;
+        const preferred = placement ? roomKey(placement.grade_level, placement.classroom) : params.get("room");
+        const range = academicYearRange(year, years);
+        $("date").min = range.start;
+        $("date").max = range.end < today ? range.end : today;
+        const date = initial && /^\d{4}-\d{2}-\d{2}$/.test(params.get("date") || "") ? params.get("date") : $("date").max;
+        $("date").value = dateValid(date) ? date : $("date").max;
+        $("room").innerHTML = [...choices.keys()].map(label => `<option>${esc(label)}</option>`).join("");
+        if (choices.has(preferred)) $("room").value = preferred;
+        $("room").disabled = $("date").disabled = choices.size === 0;
+        activeYear = year;
+        activeRoom = choices;
+        term2Start = years.find(row => row.year === year)?.term2_start_date;
+        if (initial && preferred && !choices.has(preferred)) {
+          $("room").selectedIndex = -1;
+        }
+      }
+      const choice = $("room").value;
+      if (!choice) {
+        $("load-status").textContent = initial && (activeRoom.size || params.has("room"))
+          ? "ห้องนี้ไม่ใช่ห้องของคุณ กรุณาเลือกห้องที่คุณเป็นครูประจำชั้นหรือติดต่อฝ่ายวิชาการ"
+          : "ยังไม่มีห้องอนุบาลที่คุณเปิดได้ในปีนี้ กรุณาตรวจปีการศึกษาหรือติดต่อฝ่ายวิชาการ";
+        return;
+      }
+      if (!dateValid($("date").value)) {
+        $("load-status").textContent = "";
+        dateError();
+        return;
+      }
+      $("date").removeAttribute("aria-invalid");
+      $("date-error").textContent = "";
+      const key = year + ":" + choice;
+      if (!roomModels.has(key)) roomModels.set(key, loadRoom(year, activeRoom.get(choice)).catch(error => {
+        roomModels.delete(key);
+        throw error;
+      }));
+      const loaded = await roomModels.get(key);
+      if (request !== requestId) return;
+      model = loaded;
+      screenDate = $("date").value;
+      $("load-status").textContent = "";
+      render();
+      if (initial && targetStudent) $(targetStudent + "-name")?.scrollIntoView({ block:"nearest" });
+      initial = false;
+    } catch (error) {
+      if (request !== requestId) return;
+      const missingUpdater = ["42703", "PGRST204"].includes(error.code) && error.message?.includes("updated_by");
+      $("load-status").textContent = missingUpdater
+        ? "ยังไม่พบข้อมูลผู้แก้ล่าสุดในฐาน กรุณาแจ้งผู้ดูแลระบบเพื่อตรวจ K5a2"
+        : "โหลดข้อมูลไม่สำเร็จ กรุณาลองอีกครั้ง หากยังไม่ได้ให้ติดต่อฝ่ายวิชาการ";
+      console.warn("โหลดข้อมูล K5 ไม่สำเร็จ", error.code || error.name);
+      $("retry-load").hidden = false;
+    } finally {
+      if (request === requestId) $("results").setAttribute("aria-busy", "false");
+    }
+  }
+
+  const getDate = () => screenDate;
+  const isReadOnly = () => {
+    const room = activeRoom.get($("room").value);
+    return !access.isHead && !ownRooms.get(activeYear)?.has(room.grade_level + "\u0000" + room.classroom);
+  };
+  const halfOf = date => date < term2Start ? 1 : 2;
+  const measured = (loaded, studentId, date) => loaded.histories.get(studentId)?.get(date);
+  const formatAge = months => Math.floor(months / 12) + " ปี " + months % 12 + " เดือน";
+  const bandClass = band => band === 3 ? "b3" : [2, 4].includes(band) ? "b24" : "b15";
+  const inputId = (studentId, field) => studentId + "-" + field;
+  const editKey = (studentId, date, field) => [studentId, date, field].join(":");
+  const fieldValue = value => value == null ? "" : Number(value).toFixed(1);
+  const clean = value => value.trim().replace(",", ".");
+  const validNumber = (value, { min, max }) => /^\d+(?:\.\d)?$/.test(value) && Number(value) >= min && Number(value) <= max;
+
+  function paintCounter() {
+    const dates = new Set();
+    let count = 0;
+    const date = getDate();
+    for (const history of model.histories.values()) {
+      if (history.has(date)) count++;
+      for (const measuredOn of history.keys()) if (measuredOn <= date && halfOf(measuredOn) === halfOf(date)) dates.add(measuredOn);
+    }
+    const total = model.roster.length;
+    const counter = $("counter");
+    const text = "วัดแล้ว " + count + " จาก " + total + " คน";
+    if (counter.firstElementChild?.textContent !== text) {
+      counter.innerHTML = `<span>วัดแล้ว <b>${count} จาก ${total} คน</b></span><span class="age">เหลือ ${total - count} คน</span>`;
+    }
+    $("bar").max = total || 1;
+    $("bar").value = count;
+    $("progress").hidden = !total;
+    $("term").hidden = false;
+    $("term").textContent = term2Start
+      ? "ภาค " + halfOf(date) + (dates.has(date) ? " · วัดครั้งที่ " + dates.size + " ของภาคนี้" : "")
+      : "ยังไม่ได้ตั้งวันเริ่มภาค 2";
+  }
+
+  function render() {
+    $("results").hidden = false;
+    $("readonly").hidden = !isReadOnly();
+    $("room-heading").textContent = $("room").value + " · " + thaiShortDateText(getDate());
+    $("students").innerHTML = model.roster.length ? `<div class="measurement-grid" role="table" aria-labelledby="room-heading">
+      <div class="grid-head" role="row">
+        <span role="columnheader">เลขที่ · ชื่อ</span><span role="columnheader">อายุ</span>
+        <span role="columnheader">น้ำหนัก (กก.)</span><span role="columnheader">ส่วนสูง (ซม.)</span><span role="columnheader">ครั้งก่อน</span>
+      </div>${model.roster.map(studentMarkup).join("")}</div>`
+      : '<p class="card empty">ห้องนี้ยังไม่มีรายชื่อนักเรียนในปีที่เลือก กรุณาติดต่อฝ่ายวิชาการเพื่อตรวจทะเบียนห้อง</p>';
+    for (const student of model.roster) {
+      paintHistory(student.id);
+      for (const field of measuredFields) paintField(student.id, field);
+    }
+    paintCounter();
+  }
+
+  function studentMarkup(student, index) {
+    const id = esc(student.id);
+    const profile = model.profiles.get(student.id);
+    const months = kgAgeMonths(profile?.birth_date, getDate());
+    const missing = [months == null ? "วันเกิด" : "", !profile?.gender ? "เพศ" : ""].filter(Boolean).join("และ");
+    return `<section class="card kid" role="row" aria-labelledby="${id}-name">
+      <div class="kid-name" role="cell"><h3 tabindex="-1" id="${id}-name"><span class="no">${index + 1}</span>${esc(student.name)}</h3></div>
+      <div class="age" role="cell">
+        ${months != null && months >= 0 ? "อายุ " + formatAge(months) + " ณ วันที่วัด" + (profile?.gender ? " · " + esc(profile.gender) : "") : ""}
+        ${missing ? `<p class="warn">ไม่มี${missing}ในข้อมูลประวัติที่เปิดดูได้ · <a href="student-profile.html?id=${encodeURIComponent(student.id)}">${isReadOnly() ? "ดูประวัตินักเรียน" : "ตรวจประวัตินักเรียน"}</a></p>` : ""}
+      </div>
+      ${measuredFields.map(({ measure, field, unit }) => {
+        const input = inputId(id, field);
+        const previous = measured(model, student.id, getDate())?.[field];
+        const edit = model.edits.get(editKey(student.id, getDate(), field));
+        return `<div class="fld" role="cell">
+          <label id="${input}-label" for="${input}">${measure} (${unit})</label>
+          <div class="inwrap"><input id="${input}" type="text" inputmode="decimal" autocomplete="off"
+            data-field="${field}" data-student="${id}" value="${esc(edit?.value ?? fieldValue(previous))}"
+            aria-labelledby="${id}-name ${input}-label" aria-describedby="${input}-band ${input}-status" ${isReadOnly() ? "readonly" : ""}>
+            <span class="unit" aria-hidden="true">${unit}</span></div>
+          <span id="${input}-band" hidden></span>
+          <div class="st"><span id="${input}-status" aria-live="polite" aria-atomic="true"></span>
+            <button type="button" data-retry="${input}" hidden>ลองใหม่</button></div>
+        </div>`;
+      }).join("")}
+      <div class="kid-history" role="cell" id="${id}-history"><span class="age previous"></span>
+        <details class="hist"><summary></summary><div class="history-body"></div></details>
+      </div>
+    </section>`;
+  }
+
+  function paintHistory(studentId) {
+    const container = $(studentId + "-history");
+    const entries = [...model.histories.get(studentId).values()].sort((a, b) => b.measured_on.localeCompare(a.measured_on));
+    const previous = entries.find(row => row.measured_on < getDate());
+    container.querySelector(".previous").textContent = previous
+      ? thaiShortDateText(previous.measured_on) + " · " + (fieldValue(previous.weight_kg) || "—") + " / " + (fieldValue(previous.height_cm) || "—") : "";
+    container.querySelector("summary").textContent = "ประวัติการวัดปีนี้ (" + entries.length + " ครั้ง)";
+    container.querySelector(".history-body").innerHTML = entries.length ? `<table>
+      <thead><tr><th scope="col">วันที่</th><th scope="col">น้ำหนัก</th><th scope="col">ส่วนสูง</th></tr></thead>
+      <tbody>${entries.map(row => `<tr data-date="${esc(row.measured_on)}" data-student="${esc(studentId)}">
+        <td><button class="date-button" type="button">${thaiShortDateText(row.measured_on)}</button>
+          ${row.updated_at !== row.created_at ? `<div class="who">แก้ล่าสุดโดย ${esc(model.names.get(row.updated_by) || "ไม่พบชื่อผู้แก้")} · ${editDate.format(new Date(row.updated_at))}</div>` : ""}</td>
+        ${measuredFields.map(item => {
+          const value = row[item.field];
+          const band = resultFor(model, studentId, row.measured_on, item, value);
+          return `<td>${value == null ? "—" : esc(fieldValue(value) + " · " + (band.label || band.reason))}</td>`;
+        }).join("")}</tr>`).join("")}</tbody></table>`
+      : `<p class="empty">ยังไม่เคยวัดในปีนี้ ${isReadOnly() ? "สอบถามครูประจำชั้นเพื่อเพิ่มค่าวัด" : "กรอกน้ำหนักหรือส่วนสูงเพื่อเริ่มบันทึก"}</p>`;
+  }
+
+  function resultFor(loaded, studentId, date, { measure }, value) {
+    const profile = loaded.profiles.get(studentId);
+    return kgGrowthBand(reference, { sex:profile?.gender, measure, ageMonths:kgAgeMonths(profile?.birth_date, date), value });
+  }
+
+  function paintField(studentId, item) {
+    const id = inputId(studentId, item.field);
+    const input = $(id);
+    if (!input) return;
+    const previous = measured(model, studentId, getDate())?.[item.field];
+    const edit = model.edits.get(editKey(studentId, getDate(), item.field));
+    const value = clean(input.value);
+    const result = validNumber(value, item) ? resultFor(model, studentId, getDate(), item, value) : null;
+    const band = $(id + "-band");
+    band.hidden = !result;
+    band.className = result?.band ? "band " + bandClass(result.band) : "hint";
+    band.textContent = result?.label || result?.reason || "";
+    const invalid = edit?.status === "invalid";
+    if (invalid) input.setAttribute("aria-invalid", "true");
+    else input.removeAttribute("aria-invalid");
+    const status = $(id + "-status");
+    status.parentElement.classList.toggle("err", invalid || edit?.status === "error");
+    status.parentElement.classList.toggle("ok", edit?.status === "saved" || (!edit && previous != null));
+    const message = edit ? edit.message : previous != null ? "✓ บันทึกแล้ว" : "ยังไม่วัด";
+    if (status.textContent !== message) status.textContent = message;
+    const retry = status.nextElementSibling;
+    retry.hidden = edit?.status !== "error";
+  }
+
+  async function save(input, retry = false) {
+    if (!model || input.readOnly || !dateValid(getDate())) return;
+    const loaded = model;
+    const studentId = input.dataset.student;
+    const date = getDate();
+    const item = measuredFields.find(item => item.field === input.dataset.field);
+    const key = editKey(studentId, date, item.field);
+    const old = loaded.edits.get(key);
+    if (old?.status !== (retry ? "error" : "draft")) return;
+    const queueKey = studentId + ":" + date;
+    const raw = input.value;
+    const value = clean(raw);
+    const previous = measured(loaded, studentId, date)?.[item.field];
+    const edit = { value:raw, status:"", message:"" };
+    const isCurrent = () => loaded.edits.get(key) === edit && model === loaded && getDate() === date;
+    const putStatus = (status, message) => {
+      edit.status = status;
+      edit.message = message;
+      if (isCurrent()) paintField(studentId, item);
+    };
+    loaded.edits.set(key, edit);
+    if (!value && previous == null && !loaded.queues.has(queueKey)) {
+      loaded.edits.delete(key);
+      paintField(studentId, item);
+      return;
+    }
+    if (!validNumber(value, item)) {
+      const message = !value ? "ใส่ค่าใหม่เพื่อแก้ค่าที่บันทึกไว้" :
+        `${item.measure}ต้องอยู่ระหว่าง ${item.min}–${item.max} ${item.unit} ทศนิยมไม่เกิน 1 ตำแหน่ง (ยังไม่บันทึก)`;
+      putStatus("invalid", message);
+      return;
+    }
+    putStatus("saving", "กำลังบันทึก…");
+    pending++;
+    // เรียงคำขอของแถวเดียวกัน และส่งเฉพาะคอลัมน์ที่ครูแก้
+    const queued = (loaded.queues.get(queueKey) || Promise.resolve()).then(async () => {
+      const current = measured(loaded, studentId, date);
+      if (!retry && current?.[item.field] != null && Number(value) === Number(current[item.field])) return;
+      const [saved] = rows(await sb.from("kg_growth").upsert({
+        student_id:studentId, measured_on:date, year:loaded.year, [item.field]:Number(value)
+      }, { onConflict:"student_id,measured_on" }).select(KG_GROWTH_COLUMNS));
+      if (!saved) throw new Error("growth not saved");
+      loaded.histories.get(studentId).set(date, saved);
+    });
+    // คิวถัดไปยังทำงานได้เมื่อคำขอก่อนหน้าล้มเหลว
+    const tail = queued.catch(() => {});
+    loaded.queues.set(queueKey, tail);
+    try {
+      await queued;
+      edit.value = fieldValue(Number(value));
+      if (isCurrent()) $(input.id).value = edit.value;
+      putStatus("saved", "✓ บันทึกแล้ว");
+      if (model === loaded) {
+        paintCounter();
+        if (getDate() === date) {
+          for (const other of measuredFields.filter(field => field !== item)) {
+            const otherKey = editKey(studentId, date, other.field);
+            const state = loaded.edits.get(otherKey);
+            if (state && state.status !== "saved") continue;
+            const otherInput = $(inputId(studentId, other.field));
+            loaded.edits.delete(otherKey);
+            otherInput.value = fieldValue(measured(loaded, studentId, date)?.[other.field]);
+            paintField(studentId, other);
+          }
+        }
+      }
+      await editorNames([measured(loaded, studentId, date)].filter(Boolean), loaded.names);
+      if (model === loaded) paintHistory(studentId);
+    } catch (error) {
+      const reason = navigator.onLine === false ? "ไม่มีการเชื่อมต่อ" :
+        error.code === "42501" ? "ตรวจสิทธิ์กับฝ่ายวิชาการ" : "ระบบยังไม่ยืนยัน";
+      putStatus("error", "บันทึกไม่สำเร็จ · " + reason);
+    } finally {
+      if (loaded.queues.get(queueKey) === tail) loaded.queues.delete(queueKey);
+      pending--;
+    }
+  }
+
+  $("year").addEventListener("change", () => void refresh({ changeYear:true }));
+  $("room").addEventListener("change", () => void refresh());
+  $("date").addEventListener("change", () => void refresh());
+  $("retry-load").addEventListener("click", () => void refresh());
+  $("students").addEventListener("input", event => {
+    const input = event.target;
+    if (!model || !input.dataset.field || input.readOnly) return;
+    model.edits.set(editKey(input.dataset.student, getDate(), input.dataset.field), { value:input.value, status:"draft", message:"" });
+    paintField(input.dataset.student, measuredFields.find(item => item.field === input.dataset.field));
+  });
+  $("students").addEventListener("blur", event => {
+    if (event.target.dataset.field) void save(event.target);
+  }, true);
+  $("students").addEventListener("keydown", event => {
+    if (event.key === "Enter" && event.target.dataset.field) event.target.blur();
+  });
+  $("students").addEventListener("click", async event => {
+    const button = event.target.closest("button");
+    if (button?.dataset.retry) {
+      const input = $(button.dataset.retry);
+      input.focus();
+      void save(input, true);
+    }
+    const dateRow = event.target.closest("tr[data-date]");
+    if (dateRow && dateValid(dateRow.dataset.date)) {
+      $("date").value = dateRow.dataset.date;
+      await refresh();
+      $(dateRow.dataset.student + "-name")?.focus();
+    }
+  });
+
+  await refresh();
+}
+</script>
+</body>
+</html>

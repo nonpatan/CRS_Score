@@ -416,9 +416,9 @@ export async function canUseDepartment(userId, department, profile = null) {
 // สิทธิ์หน้าอนุบาล: เจ้าของแก้เฉพาะวิชาของตน ฝ่ายวิชาการเห็นวิชาอื่นแบบอ่านอย่างเดียว
 export async function getKgEntryAccess(userId) {
   const profile = await getProfile(userId);
-  if (profile?.role === "admin") return { isAdmin: true, canViewAll: true };
+  if (profile?.role === "admin") return { isAdmin: true, isHead: true, canViewAll: true };
   const [departments, head] = await Promise.all([getMyDepartments(userId), isAcademicHead()]);
-  return { isAdmin: false, canViewAll: head || departments.includes("วิชาการ") };
+  return { isAdmin: false, isHead: head, canViewAll: head || departments.includes("วิชาการ") };
 }
 
 export const KG_LEVELS = [{ v:3, label:"ดี" }, { v:2, label:"พอใช้" }, { v:1, label:"ควรเสริม" }];
@@ -442,6 +442,89 @@ export function kgStateTermResult(scoresOfState, tieChoice) {
   const { level = null, tied = [] } = kgMode(scoresOfState);
   const validChoice = tied.includes(tieChoice);
   return { level: validChoice ? tieChoice : level, tied, needsChoice: tied.length > 0 && !validChoice };
+}
+
+export const KG_GROWTH_BANDS = {
+  "น้ำหนัก": ["น้อยกว่าเกณฑ์", "ค่อนข้างน้อย", "ตามเกณฑ์", "ค่อนข้างมาก", "มากเกินเกณฑ์"],
+  "ส่วนสูง": ["เตี้ย", "ค่อนข้างเตี้ย", "ตามเกณฑ์", "ค่อนข้างสูง", "สูง"]
+};
+export const KG_GROWTH_FIELDS = { "น้ำหนัก": "weight_kg", "ส่วนสูง": "height_cm" };
+
+// เทียบวันในเดือนก่อนนับเดือนสุดท้าย ไม่ปัดอายุขึ้นแม้เป็นวันสิ้นเดือน
+export function kgAgeMonths(birthDate, onDate) {
+  const birth = thaiDateParts(birthDate);
+  const date = thaiDateParts(onDate);
+  if (!birth || !date) return null;
+  return (date.year - birth.year) * 12 + date.month - birth.month - Number(date.day < birth.day);
+}
+
+export function kgGrowthBand(refRows, { sex, measure, ageMonths, value }) {
+  if (ageMonths == null) return { band: null, reason: "ไม่มีวันเกิด" };
+  if (!sex) return { band: null, reason: "ไม่มีเพศ" };
+  if (value == null || value === "" || !Number.isFinite(Number(value))) {
+    return { band: null, reason: "ไม่มีค่าวัด" };
+  }
+  const references = refRows.filter(row => row.sex === sex && row.measure === measure);
+  const reference = references.find(row => row.age_months === ageMonths);
+  if (!reference) {
+    const ages = references.map(row => row.age_months);
+    if (ages.length && (ageMonths < Math.min(...ages) || ageMonths > Math.max(...ages))) {
+      const ageLabel = months => Math.floor(months / 12) + " ปี " + months % 12 + " เดือน";
+      return { band: null, reason: `อายุนอกช่วงตาราง (${ageLabel(Math.min(...ages))} – ${ageLabel(Math.max(...ages))})` };
+    }
+    return { band: null, reason: "ไม่พบเกณฑ์อ้างอิงสำหรับอายุและเพศนี้" };
+  }
+  const tenths = Math.round(Number(value) * 10);
+  const band = 1 + [reference.b2, reference.b3, reference.b4, reference.b5]
+    .filter(boundary => tenths >= Math.round(Number(boundary) * 10)).length;
+  return { band, label: KG_GROWTH_BANDS[measure][band - 1] };
+}
+
+export function kgGrowthTermResult(measurements, profile, refRows, half, term2Start) {
+  const results = {};
+  for (const [measure, field] of Object.entries(KG_GROWTH_FIELDS)) {
+    if (!term2Start || !Object.hasOwn(KG_HALF_LABEL, half)) {
+      results[field] = { meets: null, measuredOn: null, reason: "ยังไม่ได้ตั้งวันเริ่มภาค 2" };
+      continue;
+    }
+    let latest;
+    for (const row of measurements) {
+      const inHalf = (row.measured_on < term2Start) === (half === "กลางปี");
+      if (inHalf && row[field] != null && (!latest || row.measured_on > latest.measured_on)) latest = row;
+    }
+    if (!latest) {
+      results[field] = { meets: null, measuredOn: null, reason: "ยังไม่มีค่าวัดในภาคนี้" };
+      continue;
+    }
+    const { band, reason } = kgGrowthBand(refRows, {
+      sex: profile?.gender, measure, ageMonths: kgAgeMonths(profile?.birth_date, latest.measured_on), value: latest[field]
+    });
+    results[field] = { meets: band == null ? null : band === 3, measuredOn: latest.measured_on, reason };
+  }
+  return results;
+}
+
+export const KG_GROWTH_COLUMNS = "id,student_id,measured_on,weight_kg,height_cm,created_at,updated_at,updated_by";
+
+export async function loadKgGrowthReference() {
+  const { data, error } = await fetchAllRows(() => sb.from("growth_reference")
+    .select("sex,measure,age_months,b2,b3,b4,b5").eq("source", "DOH2543"), ["sex", "measure", "age_months"]);
+  if (error) throw error;
+  return data;
+}
+
+export async function loadKgGrowthData(year, studentIds) {
+  const [profiles, measurements] = await Promise.all([
+    fetchAllRowsByIds(ids => sb.from("student_profiles").select("student_id,gender,birth_date")
+      .in("student_id", ids), studentIds, "student_id"),
+    fetchAllRowsByIds(ids => sb.from("kg_growth").select(KG_GROWTH_COLUMNS)
+      .eq("year", year).in("student_id", ids), studentIds)
+  ]);
+  if (profiles.error || measurements.error) throw profiles.error || measurements.error;
+  return {
+    profiles: new Map(profiles.data.map(row => [row.student_id, row])),
+    measurements: measurements.data
+  };
 }
 
 // ------------------------------------------------------------
@@ -1249,10 +1332,11 @@ export async function loadAbsenceHistory(year, {
 
 // ห้องประจำชั้นของบัญชี แยกตามปี — ใช้ร่วมกันทั้งหน้ารายงานเต็มและการ์ดภาพรวม
 // ค่าใน Set ใช้รูป grade_level + NUL + classroom ให้ตรงกับคีย์ห้องของทั้งสองหน้า
-export async function loadMyHomeroomRooms(userId) {
+export async function loadMyHomeroomRooms(userId, { activeOnly = false } = {}) {
   const byYear = new Map();
   if (!userId) return byYear;
-  const me = await sb.from("staff").select("id").eq("user_id", userId).maybeSingle();
+  const staff = sb.from("staff").select("id").eq("user_id", userId);
+  const me = await (activeOnly ? staff.eq("is_active", true) : staff).maybeSingle();
   if (me.error) throw new Error("ตรวจข้อมูลครูประจำชั้นไม่สำเร็จ: " + me.error.message);
   if (!me.data) return byYear;
   const result = await sb.from("homeroom_teachers")

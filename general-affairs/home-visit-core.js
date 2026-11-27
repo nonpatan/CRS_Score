@@ -1,4 +1,4 @@
-import { sb, fetchAllRows } from "../supabase-client.js?v=20261104-1";
+import { sb, fetchAllRows } from "../supabase-client.js?v=20261128-1";
 
 export const HV_UTILITIES = ["ไฟฟ้า", "น้ำประปา", "ห้องน้ำในบ้าน", "อินเทอร์เน็ต", "มุมอ่านหนังสือ"];
 export const HV_DEPENDENTS = ["ผู้สูงอายุ", "ผู้พิการ", "ผู้ป่วยเรื้อรัง/ติดเตียง", "เด็กเล็ก"];

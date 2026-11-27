@@ -236,6 +236,7 @@ function syncFinanceKpiTones() {
             ["attendance.html", "เช็คชื่อ"],
             ["entry.html", "กรอกคะแนน"],
             ["kg-entry.html", "กรอกพัฒนาการอนุบาล", { kgEntry: true }],
+            ["kg-growth.html", "น้ำหนัก/ส่วนสูงอนุบาล", { kgEntry: true }],
             ["grade-edit-requests.html", "คำขอแก้คะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
             ["theme-works.html", "ส่งผลงานตามธีม"],
@@ -293,6 +294,11 @@ function syncFinanceKpiTones() {
         "kg-entry.html": {
           title: "กรอกพัฒนาการอนุบาล",
           steps: ["เลือกภาคและครั้งที่", "เลือกเด็ก", "กรอกพัฒนาการ"]
+        },
+        "kg-growth.html": {
+          title: "น้ำหนัก/ส่วนสูงอนุบาล",
+          description: "เลือกห้องและวันที่วัด ระบบแปลผลและบันทึกเมื่อออกจากช่อง",
+          steps: ["เลือกห้องและวันที่", "กรอกค่าวัด", "ตรวจผล"]
         },
         "calendar.html": {
           title: "จัดการปฏิทินปฏิบัติงาน",
@@ -944,18 +950,19 @@ function syncFinanceKpiTones() {
   if (active) requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "nearest" }));
 
   if (moduleKey === "academic") {
-    const kgLink = nav.querySelector("[data-kg-entry]");
-    if (kgLink && current === "kg-entry.html") {
+    const kgLinks = [...nav.querySelectorAll("[data-kg-entry]")];
+    const showKgLinks = visible => kgLinks.forEach(link => { link.hidden = !visible; });
+    if (kgLinks.length && current === "kg-entry.html") {
       window.addEventListener("crs-kg-entry-access", event => {
-        kgLink.hidden = !event.detail;
-        if (!kgLink.hidden && !window.matchMedia("(min-width: 1200px)").matches) {
-          kgLink.scrollIntoView({ block: "nearest", inline: "nearest" });
+        showKgLinks(event.detail);
+        if (event.detail && !window.matchMedia("(min-width: 1200px)").matches) {
+          kgLinks.find(link => link.classList.contains("active"))?.scrollIntoView({ block: "nearest", inline: "nearest" });
         }
       }, { once: true });
-    } else if (kgLink) {
+    } else if (kgLinks.length) {
       void (async () => {
         try {
-          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261127-2", appRootUrl).href);
+          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-1", appRootUrl).href);
           const { data: { session } } = await sb.auth.getSession();
           if (!session) return;
           const userId = session.user.id;
@@ -963,13 +970,19 @@ function syncFinanceKpiTones() {
           const key = "crs.kg-entry-menu:" + userId;
           let cached;
           try { cached = sessionStorage.getItem(key); } catch { /* ใช้คิวรีเมื่ออ่านแคชไม่ได้ */ }
+          const show = visible => {
+            showKgLinks(visible);
+            if (visible && current === "kg-growth.html" && !window.matchMedia("(min-width: 1200px)").matches) {
+              kgLinks.find(link => link.classList.contains("active"))?.scrollIntoView({ block:"nearest", inline:"nearest" });
+            }
+          };
           if (cached === "1" || cached === "0") {
-            kgLink.hidden = cached === "0";
+            show(cached === "1");
             return;
           }
           const { data, error } = await sb.from("subjects").select("id").eq("level", "อนุบาล").eq("owner_id", userId).limit(1);
           const visible = Boolean(data?.length) || (await getKgEntryAccess(userId)).canViewAll;
-          kgLink.hidden = !visible;
+          show(visible);
           if (!error) {
             try { sessionStorage.setItem(key, visible ? "1" : "0"); } catch { /* คิวรีใหม่เมื่อเปิดหน้าถัดไป */ }
           }
@@ -998,10 +1011,10 @@ function syncFinanceKpiTones() {
       if (!["index.html", "grade-edit-requests.html"].includes(current)) {
         const readCount = async () => {
           try {
-            const { sb } = await import(new URL("supabase-client.js?v=20261127-2", appRootUrl).href);
+            const { sb } = await import(new URL("supabase-client.js?v=20261128-1", appRootUrl).href);
             const { data } = await sb.auth.getSession();
             if (!data.session) return;
-            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=4", appRootUrl).href);
+            const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=5", appRootUrl).href);
             await gradeQueueCounts();
           } catch { /* ตัวนับขัดข้องยังเปิดเมนูได้ */ }
         };

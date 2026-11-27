@@ -51,6 +51,13 @@ h3 { font-size:1rem; line-height:1.5; }
 .indicator-group > h3 { color:var(--ink); padding:8px 10px; border-inline-start:3px solid var(--line); background:var(--bg); }
 .state-row { padding:12px 0; border-bottom:1px solid var(--line); }
 .state-name { font-weight:600; }
+.growth-results { display:flex; flex-wrap:wrap; gap:4px 8px; margin-top:6px; }
+.growth-results span { padding:3px 8px; border-radius:8px; font-size:.875rem; }
+.growth-results .meets { color:var(--teal); background:var(--teal-soft); }
+.growth-results .outside { color:var(--danger); background:var(--danger-soft); }
+.growth-results .unavailable { color:var(--muted); background:var(--bg); }
+.growth-note a { display:inline-flex; min-height:44px; align-items:center; color:var(--teal); font-weight:600; }
+.growth-note a:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
 .state-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:8px; }
 .levels, .tie-levels { display:flex; flex-wrap:wrap; gap:8px; }
 .kg-content .level { font-size:.875rem; font-weight:600; }
@@ -80,7 +87,7 @@ h3 { font-size:1rem; line-height:1.5; }
     <a href="../dashboard.html">ภาพรวม</a><a href="index.html">ฝ่ายวิชาการ</a><a href="entry.html">กรอกคะแนน</a>
     <a href="manage.html">จัดการโครงสร้าง</a><a href="#" id="btn-signout">ออกจากระบบ</a>
   </div>
-  <script src="../app-shell.js?v=20261127-3"></script>
+  <script src="../app-shell.js?v=20261128-1"></script>
 </header>
 <main class="academic-content kg-content">
   <div class="card">
@@ -103,8 +110,9 @@ h3 { font-size:1rem; line-height:1.5; }
 import {
   sb, requireAuth, signOut, getActiveYear, bangkokNow, toDateStr,
   fetchAllRows, fetchAllRowsByIds, getKgEntryAccess,
-  KG_HALF_LABEL, KG_LEVELS, kgCodeOf, kgIsGrowthState, kgStateTermResult
-} from "../supabase-client.js?v=20261127-2";
+  KG_HALF_LABEL, KG_LEVELS, kgCodeOf, kgIsGrowthState, kgStateTermResult,
+  KG_GROWTH_FIELDS, kgGrowthTermResult, loadKgGrowthReference, loadKgGrowthData, thaiShortDateText
+} from "../supabase-client.js?v=20261128-1";
 
 const session = await requireAuth();
 if (session) {
@@ -120,6 +128,8 @@ if (session) {
   const tieColumns = "student_id,scope_key,level";
   const tieConflict = "subject_id,student_id,half,scope,scope_key";
   const models = new Map();
+  const growthData = new Map();
+  let growthReference;
   let access, subjects, years, route, model, pendingWrites = 0;
   let screenRequest = 0;
 
@@ -238,6 +248,35 @@ if (session) {
     return "กรอกแล้ว " + count + "/58";
   }
 
+  async function paintGrowth(subject, half, studentId, request) {
+    if (!document.querySelector(".growth-results")) return;
+    const key = subject.year + ":" + studentId;
+    growthReference ??= loadKgGrowthReference().catch(error => {
+      growthReference = null;
+      throw error;
+    });
+    if (!growthData.has(key)) growthData.set(key, loadKgGrowthData(subject.year, [studentId]).catch(error => {
+      growthData.delete(key);
+      throw error;
+    }));
+    let markup;
+    try {
+      const [reference, data] = await Promise.all([growthReference, growthData.get(key)]);
+      const term2Start = years.find(row => row.year === subject.year)?.term2_start_date;
+      const result = kgGrowthTermResult(data.measurements, data.profiles.get(studentId), reference, half, term2Start);
+      markup = Object.entries(KG_GROWTH_FIELDS).map(([measure, field]) => {
+        const { meets, measuredOn, reason } = result[field];
+        const status = meets == null ? reason : meets ? "ตามเกณฑ์" : "ไม่ตามเกณฑ์";
+        const date = measuredOn ? " (วัด " + thaiShortDateText(measuredOn) + ")" : "";
+        return `<span class="${meets == null ? "unavailable" : meets ? "meets" : "outside"}">${measure}: ${escapeHtml(status + date)}</span>`;
+      }).join("");
+    } catch {
+      markup = '<span class="unavailable">โหลดผลการวัดไม่สำเร็จ กรุณาลองเปิดหน้าอีกครั้ง</span>';
+    }
+    if (request !== screenRequest) return;
+    for (const region of document.querySelectorAll(".growth-results")) region.innerHTML = markup;
+  }
+
   function readRoute() {
     const query = new URLSearchParams(location.search);
     return { subjectId:query.get("subject"), half:query.get("half"), round:Number(query.get("round")), studentId:query.get("student") };
@@ -314,6 +353,7 @@ if (session) {
         $("load-status").textContent = "ไม่พบนักเรียนในรายชื่อของวิชานี้";
       }
       render();
+      if (route.studentId) void paintGrowth(subject, half, route.studentId, request);
       if (route.studentId && focus) {
         $("student-heading")?.focus();
       } else if (!route.studentId && extra?.rosterScroll != null) {
@@ -376,7 +416,9 @@ if (session) {
     const id = escapeHtml(state.id);
     return `<div class="state-row" id="state-${id}" data-state="${id}">
       <p class="state-name" id="name-${id}">${escapeHtml(state.name)}</p>
-      ${state.growth ? '<p class="hint">คิดจากน้ำหนัก/ส่วนสูง — ยังไม่เปิดใช้</p>' : `
+      ${state.growth ? `<div class="growth-results" role="status" aria-atomic="true"><span class="unavailable">กำลังโหลดผลการวัด…</span></div>
+        <p class="hint growth-note">ระบบคิดจากการวัดล่าสุดของ${KG_HALF_LABEL[model.half]} แยกตามประเภท
+          <a href="kg-growth.html?year=${encodeURIComponent(model.subject.year)}&amp;student=${encodeURIComponent(route.studentId)}">ไปหน้าน้ำหนัก/ส่วนสูง</a></p>` : `
       <div class="state-controls">
         <div class="levels" role="radiogroup" aria-labelledby="name-${id}" aria-describedby="status-${id}">
           ${KG_LEVELS.map(({ v, label }) => `<button type="button" class="level" role="radio" aria-checked="false" aria-label="${v} ${label}"
@@ -580,6 +622,12 @@ if (session) {
   });
   $("retry-load").addEventListener("click", () => void navigate());
   window.addEventListener("popstate", () => void navigate(readRoute(), { focus:true }));
+  window.addEventListener("pageshow", event => {
+    if (event.persisted && model && route.studentId) {
+      growthData.delete(model.subject.year + ":" + route.studentId);
+      void paintGrowth(model.subject, model.half, route.studentId, ++screenRequest);
+    }
+  });
   $("results").addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button || button.getAttribute("aria-disabled") === "true") return;
