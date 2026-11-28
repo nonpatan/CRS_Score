@@ -1,4 +1,4 @@
-import { sb, fetchAllRows } from "../supabase-client.js?v=20261128-2";
+import { sb, fetchAllRows } from "../supabase-client.js?v=20261128-3";
 
 // The item text is copied verbatim from the approved Thai forms in docs/brief-sdq.md.
 export const SDQ_ITEMS_ADULT = [

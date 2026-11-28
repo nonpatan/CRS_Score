@@ -274,7 +274,8 @@ function syncFinanceKpiTones() {
             ["remark-report.html", "นักเรียนติด ร."],
             ["exam-close-report.html", "ยังไม่ปิดคะแนนสอบ"],
             ["retention.html", "เรียนซ้ำชั้น"],
-            ["lesson-logs.html", "บันทึกหลังสอน"]
+            ["lesson-logs.html", "บันทึกหลังสอน"],
+            ["kg-book.html", "พิมพ์สมุดรายงานอนุบาล", { kgBook: true }]
           ]
         },
         {
@@ -304,6 +305,10 @@ function syncFinanceKpiTones() {
         "kg-notes.html": {
           title: "ความเห็นครูและสุขภาพอนุบาล",
           steps: ["เลือกห้อง", "เขียนความเห็นหรือบันทึกสุขภาพ"]
+        },
+        "kg-book.html": {
+          title: "พิมพ์สมุดรายงานอนุบาล",
+          steps: ["เลือกห้องและตรวจความพร้อม", "ดูตัวอย่างหรือพิมพ์"]
         },
         "calendar.html": {
           title: "จัดการปฏิทินปฏิบัติงาน",
@@ -898,8 +903,8 @@ function syncFinanceKpiTones() {
     const restricted = [...(mod.hrOnly || []), ...(mod.financeOnly || []), ...(mod.reportOnly || []), ...(mod.adminOnly || [])].includes(href)
       ? ' data-restricted="1" hidden'
       : "";
-    const kgEntry = metadata?.kgEntry ? ' data-kg-entry hidden' : "";
-    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}${kgEntry}>${label}</a>`;
+    const kgAccess = metadata?.kgEntry ? ' data-kg-entry hidden' : metadata?.kgBook ? ' data-kg-book hidden' : "";
+    return `<a href="${target.href}"${classes ? ` class="${classes}"` : ""}${href === current ? ' aria-current="page"' : ""}${restricted}${kgAccess}>${label}</a>`;
   };
 
   const dashboardLink = `<a href="${dashboardUrl}" class="dashboard-link">${dashboardIcon}ภาพรวม</a>`;
@@ -955,6 +960,30 @@ function syncFinanceKpiTones() {
   if (active) requestAnimationFrame(() => active.scrollIntoView({ block: "nearest", inline: "nearest" }));
 
   if (moduleKey === "academic") {
+    const bookLink = nav.querySelector("[data-kg-book]");
+    if (bookLink) void (async () => {
+      try {
+        const { sb, getKgEntryAccess, loadMyHomeroomRooms } = await import(new URL("supabase-client.js?v=20261128-3", appRootUrl).href);
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) return;
+        // ผู้มีห้องประจำชั้นอาจไม่ได้เป็นเจ้าของวิชา จึงจำสิทธิ์เมนูสมุดแยกจากหน้ากรอก
+        const userId = session.user.id;
+        const key = "crs.kg-book-menu:" + userId;
+        let cached;
+        try { cached = sessionStorage.getItem(key); } catch { /* อ่านสิทธิ์จากฐาน */ }
+        let visible = cached === "1";
+        if (cached !== "1" && cached !== "0") {
+          const access = await getKgEntryAccess(userId);
+          const rooms = access.canViewAll ? [] : (await loadMyHomeroomRooms(userId, { activeOnly:true })).values();
+          visible = access.canViewAll || [...rooms].some(year => [...year].some(room => room.startsWith("อ.")));
+          try { sessionStorage.setItem(key, visible ? "1" : "0"); } catch { /* คิวรีใหม่เมื่อเปิดหน้าถัดไป */ }
+        }
+        bookLink.hidden = !visible;
+        if (visible && current === "kg-book.html" && !window.matchMedia("(min-width: 1200px)").matches) {
+          bookLink.scrollIntoView({ block:"nearest", inline:"nearest" });
+        }
+      } catch { /* อ่านสิทธิ์ไม่ได้ ให้คงเมนูนี้เป็นซ่อน */ }
+    })();
     const kgLinks = [...nav.querySelectorAll("[data-kg-entry]")];
     const showKgLinks = visible => kgLinks.forEach(link => { link.hidden = !visible; });
     if (kgLinks.length && current === "kg-entry.html") {
@@ -967,7 +996,7 @@ function syncFinanceKpiTones() {
     } else if (kgLinks.length) {
       void (async () => {
         try {
-          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-2", appRootUrl).href);
+          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-3", appRootUrl).href);
           const { data: { session } } = await sb.auth.getSession();
           if (!session) return;
           const userId = session.user.id;
@@ -1016,7 +1045,7 @@ function syncFinanceKpiTones() {
       if (!["index.html", "grade-edit-requests.html"].includes(current)) {
         const readCount = async () => {
           try {
-            const { sb } = await import(new URL("supabase-client.js?v=20261128-2", appRootUrl).href);
+            const { sb } = await import(new URL("supabase-client.js?v=20261128-3", appRootUrl).href);
             const { data } = await sb.auth.getSession();
             if (!data.session) return;
             const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=5", appRootUrl).href);

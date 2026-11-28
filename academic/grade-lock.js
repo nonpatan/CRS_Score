@@ -1,4 +1,4 @@
-import { sb, fetchAllRows } from "../supabase-client.js?v=20261128-2";
+import { sb, fetchAllRows } from "../supabase-client.js?v=20261128-3";
 
 export const pendingGradeRequests = ["รอวิชาการ", "รอผอ.", "ส่งกลับ"];
 export const gradeRequestUrl = "./grade-edit-requests.html";

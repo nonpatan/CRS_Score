@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>พิมพ์สมุดรายงานอนุบาล — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+  --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+  --paper-rule:#555; --paper-fill:#eee;
+  --band-outside:#fbe3e3; --band-borderline:#fdf0d6; --band-normal:#e0f2ea;
+}
+@counter-style kg-thai-digits {
+  system:numeric;
+  symbols:"๐" "๑" "๒" "๓" "๔" "๕" "๖" "๗" "๘" "๙";
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body { margin:0; padding:16px; font:16px/1.55 "Sarabun",sans-serif; color:var(--ink); background:var(--bg); }
+.wrap, .book-controls { max-width:680px; margin:0 auto; }
+.book-controls, .book-card { display:grid; gap:12px; min-width:0; }
+.book-card.card { padding:14px; border:1px solid var(--line); border-radius:16px; background:var(--white); }
+.book-controls :is(h2,p) { margin:0; overflow-wrap:anywhere; }
+.book-controls h2, #preview-title { font-size:17px; }
+.field { display:grid; gap:4px; min-width:0; margin:0; }
+.field label { font-size:14px; font-weight:600; }
+.row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.book-controls :is(select,button) {
+  width:100%; min-width:0; min-height:44px; font:inherit; color:var(--ink);
+  padding:7px 10px; border:1px solid var(--line); border-radius:10px; background:var(--white);
+}
+.book-controls button { font-weight:600; cursor:pointer; overflow-wrap:anywhere; }
+.book-controls :is(button,select,input,summary,a):focus-visible, #preview-title:focus-visible {
+  outline:2px solid var(--teal); outline-offset:2px;
+}
+.book-controls :is(button,select):disabled { opacity:.5; cursor:not-allowed; }
+.book-controls .actions button { min-height:48px; }
+.book-controls .primary { color:var(--white); background:var(--teal); border-color:var(--teal); }
+.book-controls .ghost { background:var(--teal-soft); }
+.hint, .issues { color:var(--muted); font-size:14px; }
+.kids, .issues { margin:0; }
+.kids { list-style:none; padding:0; }
+.kid { padding:4px 0; border-bottom:1px solid var(--line); }
+.kid-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; }
+.kid label { display:flex; align-items:center; gap:10px; min-height:44px; font-weight:600; overflow-wrap:anywhere; cursor:pointer; }
+.kid input { width:22px; height:22px; flex:none; margin:0; accent-color:var(--teal); }
+.kid details, .tie, .kid-message { margin:0 0 6px 32px; }
+.kid summary { cursor:pointer; color:var(--muted); font-size:14px; width:fit-content; }
+.tie-details .tie { margin:4px 0 0; }
+.issues { padding-left:20px; }
+.issues a { color:var(--teal); font-weight:600; }
+.readiness { font-size:14px; font-weight:600; white-space:nowrap; }
+.ok { color:var(--teal); }
+.warn, .tie { color:var(--amber); background:var(--amber-soft); border-radius:8px; }
+.readiness.warn { padding:2px 8px; }
+.tie { padding:8px 10px; display:grid; gap:6px; font-size:14px; }
+.tie-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.book-controls .tie-actions button { width:auto; min-height:44px; font-size:14px; }
+#error, .kid-message.error { color:var(--danger); }
+#preview-title { margin:18px 0 8px; }
+#book-pages { font:11pt/1.35 "Sarabun",sans-serif; color:var(--ink); }
+.sheet { position:relative; width:min(100%,210mm); min-height:250mm; margin:0 auto 16px; padding:12mm 12mm 12mm 18mm;
+  background:var(--white); box-shadow:0 2px 10px rgb(0 0 0 / .12); overflow-wrap:anywhere; }
+.sheet h2 { margin:0 0 3mm; font-size:14pt; text-align:center; }
+.sheet h3 { margin:3mm 0 1mm; font-size:11pt; }
+.sheet p { margin:0 0 2mm; }
+.sheet .paper-heading { margin:2mm 0 1mm; text-align:center; }
+.pno { position:absolute; top:5mm; right:8mm; color:var(--paper-rule); }
+.sheet table { width:100%; margin:1mm 0 2mm; border-collapse:collapse; font-size:10pt; line-height:1.25; }
+.sheet :is(th,td) { border:.7pt solid var(--paper-rule); padding:.8mm 1.3mm; }
+.sheet th { background:var(--paper-fill); text-align:center; }
+.sheet td { vertical-align:top; }
+.sheet :is(.center,.marks td:not(:first-child),.attendance td:not(:first-child),.growth td:not(:first-child)) { text-align:center; }
+.sheet .mark { color:var(--teal); font-weight:700; }
+.sheet .group-row td { background:var(--paper-fill); font-weight:600; }
+.sheet .assessment .standard { width:8mm; }
+.sheet .assessment .rating { width:10mm; }
+.sheet .assessment thead th { padding-inline:.6mm; }
+.sheet .assessment tbody td { padding-block:.6mm; }
+.sheet .paper-subject, .sheet .paper-note { text-align:center; }
+.sheet .paper-note { font-size:11pt; }
+.cover { min-height:280mm; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:5mm; text-align:center; }
+.cover img { width:38mm; height:38mm; object-fit:contain; }
+.cover h2 { font-size:23pt; margin:0; }
+.cover .cover-name { margin-top:7mm; }
+.fill, .write-line { border-bottom:.6pt dotted var(--paper-rule); }
+.fill { display:inline-block; min-width:23mm; padding:0 1mm; }
+.write-line { height:7mm; }
+.photo { float:right; display:grid; place-items:center; width:33mm; height:42mm; margin:0 0 4mm 4mm;
+  border:.7pt solid var(--paper-rule); color:var(--paper-rule); text-align:center; }
+.profile-lines p { margin-bottom:3mm; }
+.chart { display:block; width:100%; height:auto; }
+.chart text { font-family:inherit; }
+.chart-key { display:flex; flex-wrap:wrap; gap:1mm 4mm; margin:0 0 2mm; font-size:11pt; padding:0; list-style:none; }
+.chart-key li { display:flex; align-items:center; gap:1.4mm; }
+.swatch { width:4mm; height:3mm; border:.5pt solid var(--paper-rule); }
+.band-1, .band-5 { fill:var(--band-outside); background:var(--band-outside); }
+.band-2, .band-4 { fill:var(--band-borderline); background:var(--band-borderline); }
+.band-3 { fill:var(--band-normal); background:var(--band-normal); }
+.health-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3mm; }
+.health-pair.long-health { display:block; }
+.health-pair th:last-child { width:34%; }
+.health-pair td { min-height:4.5mm; }
+.growth-check { display:flex; gap:2mm 5mm; flex-wrap:wrap; }
+.growth-check span { white-space:nowrap; }
+.comment-table col:first-child { width:51%; }
+.comment-table td:last-child, .paragraph { white-space:pre-wrap; }
+.signatures { display:flex; flex-wrap:wrap; gap:5mm; margin-top:5mm; }
+.signature { flex:1 1 65mm; text-align:center; line-height:1.65; }
+.signature.parent { text-align:right; margin:2mm 0 4mm; }
+.back-cover li { margin-bottom:1.5mm; }
+
+@media screen and (max-width:540px) {
+  .sheet { padding:9mm 3mm 5mm; min-height:0; }
+  .cover { min-height:136mm; }
+  .pno { top:2mm; right:3mm; }
+  .sheet .assessment .rating { width:auto; }
+}
+@media screen and (max-width:350px) {
+  .row2 { grid-template-columns:minmax(0,1fr); }
+  .kid details, .tie, .kid-message { margin-left:0; }
+}
+@media print {
+  @page { size:A4 portrait; margin:12mm 12mm 12mm 18mm; }
+  html body, html body.academic-shell, html body .wrap, html body .wrap > main.academic-content {
+    display:block !important; position:static !important; width:auto !important; max-width:none !important;
+    min-height:0 !important; margin:0 !important; padding:0 !important; background:var(--white) !important;
+  }
+  html body :is(header.academic-header,.nav,.shell-sidebar,.workflow,.toast,.no-print) { display:none !important; }
+  #book-pages { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+  .student-book + .student-book { break-before:page; }
+  .sheet { width:auto; min-height:0; margin:0; padding:6mm 1mm 0 0; box-shadow:none; break-after:page; }
+  .sheet:last-child { break-after:auto; }
+  .sheet.cover { min-height:265mm; }
+  .pno { top:0; right:1mm; }
+  .sheet thead { display:table-header-group; }
+  .sheet :is(tr,.signature,.cover img,.chart) { break-inside:avoid; }
+  .sheet :is(h2,h3,.group-row) { break-after:avoid; }
+  a[href]::after { content:""; }
+}
+</style>
+<style id="book-print-numbers" media="print"></style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+<header class="no-print">
+  <h1>พิมพ์สมุดรายงานอนุบาล</h1>
+  <div class="nav">
+    <a href="../dashboard.html">ภาพรวม</a><a href="index.html">ฝ่ายวิชาการ</a>
+    <a href="kg-entry.html">กรอกพัฒนาการอนุบาล</a><a href="kg-growth.html">น้ำหนัก/ส่วนสูงอนุบาล</a>
+    <a href="kg-notes.html">ความเห็นครูและสุขภาพอนุบาล</a>
+    <a href="kg-book.html" aria-current="page">พิมพ์สมุดรายงานอนุบาล</a>
+    <a href="#" id="btn-signout">ออกจากระบบ</a>
+  </div>
+  <script src="../app-shell.js?v=20261128-3"></script>
+</header>
+<main class="academic-content">
+  <div class="book-controls no-print">
+    <div id="filters" class="card book-card" hidden>
+      <div class="field"><label for="year">ปีการศึกษา</label><select id="year"></select></div>
+      <div class="row2">
+        <div class="field"><label for="room">ห้อง</label><select id="room"></select></div>
+        <div class="field"><label for="mode">พิมพ์</label><select id="mode">
+          <option value="book">ทั้งเล่ม</option><option value="summary">เฉพาะสรุปปลายปี</option>
+        </select></div>
+      </div>
+      <p id="readiness" class="hint" role="status" aria-atomic="true"></p>
+    </div>
+    <p id="load-status" class="hint" role="status" aria-atomic="true">กำลังโหลดห้องอนุบาล…</p>
+    <button type="button" id="retry" class="ghost" hidden>ลองโหลดอีกครั้ง</button>
+    <section id="roster" class="card book-card" aria-labelledby="roster-title" hidden>
+      <h2 id="roster-title">ตรวจความพร้อมก่อนพิมพ์</h2>
+      <ul id="kids" class="kids"></ul>
+      <div class="row2 actions">
+        <button type="button" id="preview" aria-describedby="print-status">ดูตัวอย่าง</button>
+        <button type="button" id="print" class="primary no-print" aria-describedby="print-status">พิมพ์ 0 คน</button>
+      </div>
+      <p id="print-status" class="hint" role="status" aria-atomic="true"></p>
+      <p id="error" class="hint" role="alert" hidden></p>
+      <p class="hint">พิมพ์ A4 แนวตั้ง · เลือกพิมพ์สองหน้าถ้าเครื่องรองรับ · บันทึกเป็น PDF ได้จากหน้าต่างพิมพ์</p>
+    </section>
+  </div>
+  <section id="preview-panel" aria-labelledby="preview-title" hidden>
+    <h2 id="preview-title" class="no-print" tabindex="-1">ตัวอย่างสมุดรายงาน</h2>
+    <div id="book-pages"></div>
+  </section>
+</main>
+</div>
+<script type="module">
+import {
+  sb, requireAuth, signOut, fetchAllRows, fetchAllRowsByIds, getKgEntryAccess, loadMyHomeroomRooms,
+  getActiveYear, academicYearRange, bangkokNow, toDateStr, thaiShortDateText, getSetting, loadLetterSigners,
+  KG_HALF_LABEL, KG_LEVELS, kgCodeOf, kgIsGrowthState, kgStateTermResult, kgDomainYearResult,
+  KG_GROWTH_FIELDS, KG_GROWTH_BANDS, kgAgeMonths, kgGrowthTermResult, kgGrowthTableColumns,
+  loadKgGrowthReference, loadKgGrowthData, kgMonthlyAttendance, isAutoPresentStudent
+} from "../supabase-client.js?v=20261128-3";
+
+const session = await requireAuth();
+if (session) {
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  }[char]));
+  const collator = new Intl.Collator("th", { numeric:true });
+  const halves = Object.keys(KG_HALF_LABEL);
+  const lastHalf = "ปลายปี";
+  const roomName = room => room.grade_level + "/" + room.classroom;
+  const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+  const bySeq = (a, b) => a.seq - b.seq || collator.compare(a.code || "", b.code || "");
+  const yearOptions = new Map();
+  const roomLists = new Map();
+  const levelLabel = new Map(KG_LEVELS.map(({ v, label }) => [v, label]));
+  const conflictKey = "subject_id,student_id,half,scope,scope_key";
+  const queryBatch = 70; // จำกัดความยาว URL ที่กรองทั้ง collection_id และ student_id
+  let access, ownRooms, years, current, request = 0, preparing = false, pending = 0, reference;
+  let retryLoad = initialize;
+
+  $("btn-signout").addEventListener("click", event => { event.preventDefault(); void signOut(); });
+  window.crsHasUnsavedChanges = () => pending > 0;
+  window.addEventListener("beforeunload", event => {
+    if (!pending || window.crsLeavingConfirmed) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  function rows({ data, error }) {
+    if (error) throw error;
+    return data || [];
+  }
+
+  function groupBy(items, keyFor) {
+    const groups = new Map();
+    for (const item of items) {
+      const key = keyFor(item);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    return groups;
+  }
+
+  const studentRows = (table, columns, ids, filter = query => query, order = "id") =>
+    fetchAllRowsByIds(batch => filter(sb.from(table).select(columns).in("student_id", batch)), ids, order).then(rows);
+
+  async function initialize() {
+    const result = await Promise.all([
+      getKgEntryAccess(session.user.id),
+      sb.from("academic_years").select("year,start_date,term2_start_date").order("year")
+    ]);
+    access = result[0];
+    years = rows(result[1]);
+    ownRooms = access.isHead ? new Map() : await loadMyHomeroomRooms(session.user.id, { activeOnly:true });
+    const today = toDateStr(bangkokNow());
+    const options = years.filter(row => row.start_date && row.start_date <= today).reverse();
+    if (!options.length) throw new Error("academic year unavailable");
+    for (const row of options) yearOptions.set(row.year, row);
+    $("year").innerHTML = options.map(row => `<option>${esc(row.year)}</option>`).join("");
+    $("filters").hidden = false;
+    await restoreRoute();
+  }
+
+  function updateRoute(year, room) {
+    const url = new URL(location.href);
+    url.searchParams.set("year", year);
+    if (room) url.searchParams.set("room", room);
+    else url.searchParams.delete("room");
+    history.replaceState(history.state, "", url);
+  }
+
+  function restoreRoute() {
+    const query = new URLSearchParams(location.search);
+    const year = [query.get("year"), getActiveYear()].find(value => yearOptions.has(value)) || yearOptions.keys().next().value;
+    $("year").value = year;
+    return showRooms(year, query.get("room"));
+  }
+
+  async function roomsFor(year) {
+    if (roomLists.has(year)) return roomLists.get(year);
+    let items;
+    if (access.canViewAll) {
+      const result = await Promise.all(["homeroom_teachers", "student_year_placements"].map(table =>
+        fetchAllRows(() => sb.from(table).select("grade_level,classroom").eq("year", year).like("grade_level", "อ.%"))));
+      items = result.flatMap(rows);
+    } else {
+      items = [...(ownRooms.get(year) || [])].map(key => {
+        const [grade_level, classroom] = key.split("\u0000");
+        return { grade_level, classroom };
+      }).filter(room => room.grade_level.startsWith("อ."));
+    }
+    const options = new Map(items.filter(room => room.classroom).map(room => [roomName(room), room])
+      .sort(([a], [b]) => collator.compare(a, b)));
+    roomLists.set(year, options);
+    return options;
+  }
+
+  async function showRooms(year, preferred) {
+    const id = ++request;
+    resetRoom();
+    $("room").innerHTML = "";
+    $("room").disabled = true;
+    updateRoute(year, preferred);
+    await loadWithRetry(async () => {
+      const rooms = await roomsFor(year);
+      if (id !== request) return;
+      const noAccess = preferred && !rooms.has(preferred);
+      $("room").innerHTML = (noAccess ? '<option value="">เลือกห้องที่คุณดูได้</option>' : "") +
+        [...rooms.keys()].map(name => `<option>${esc(name)}</option>`).join("");
+      $("room").disabled = !rooms.size;
+      if (!rooms.size || noAccess) {
+        $("load-status").textContent = noAccess ? "คุณไม่มีสิทธิ์ดูห้องนี้ในปีที่เลือก"
+          : "ปีนี้ไม่มีห้องอนุบาลที่คุณดูได้";
+        return;
+      }
+      $("room").value = preferred || rooms.keys().next().value;
+      await showRoom(year, $("room").value);
+    }, () => showRooms(year, preferred), id);
+  }
+
+  function resetRoom() {
+    current = null;
+    $("roster").hidden = $("retry").hidden = true;
+    $("readiness").textContent = "";
+    $("load-status").textContent = "กำลังโหลดห้องอนุบาล…";
+    clearPreview();
+  }
+
+  async function loadWithRetry(work, retry, id) {
+    try {
+      await work();
+    } catch {
+      if (id !== request) return;
+      $("load-status").textContent = "โหลดข้อมูลอนุบาลไม่สำเร็จ กรุณาลองอีกครั้ง";
+      retryLoad = retry;
+      $("retry").hidden = false;
+    }
+  }
+
+  async function showRoom(year, label) {
+    const id = ++request;
+    resetRoom();
+    updateRoute(year, label);
+    await loadWithRetry(async () => {
+      const room = (await roomsFor(year)).get(label);
+      if (id !== request) return;
+      if (!room) {
+        $("load-status").textContent = "เลือกห้องอนุบาลที่คุณดูได้";
+        return;
+      }
+      const model = await loadRoom(year, room);
+      if (id !== request) return;
+      if (!model) {
+        $("load-status").textContent = "ห้องนี้ไม่มีรายชื่อนักเรียนในปีการศึกษาที่เลือก";
+        return;
+      }
+      current = model;
+      $("load-status").textContent = "";
+      $("roster").hidden = false;
+      $("kids").innerHTML = model.kids.map((kid, i) => `<li class="kid" id="kid-${i}"></li>`).join("");
+      model.kids.forEach((kid, i) => renderKid(kid, i));
+      updateReadiness();
+      updateActions();
+      if (model.canChoose) void cleanChoices(model);
+    }, () => showRoom(year, label), id);
+  }
+
+  async function loadCurriculum(year, grade) {
+    const matches = rows(await sb.from("subjects").select("id,owner_id,curriculum_id").eq("name", "การจัดประสบการณ์")
+      .eq("level", "อนุบาล").eq("grade_level", grade).eq("year", year).limit(2));
+    const subject = matches.length === 1 ? matches[0] : null;
+    let query = sb.from("curricula").select("id,name,edition");
+    query = subject?.curriculum_id ? query.eq("id", subject.curriculum_id) : query.eq("kind", "ปฐมวัย").eq("edition", "2560");
+    const [curriculum] = rows(await query.limit(1));
+    if (!curriculum) throw new Error("curriculum unavailable");
+    const fields = "id,kind,code,parent_code,text,seq";
+    const [labels, states] = await Promise.all([
+      fetchAllRows(() => sb.from("curriculum_items").select(fields).eq("curriculum_id", curriculum.id)
+        .in("kind", ["ด้าน", "มาตรฐาน", "ตัวบ่งชี้"])).then(rows),
+      fetchAllRows(() => sb.from("curriculum_items").select(fields).eq("curriculum_id", curriculum.id)
+        .eq("kind", "สภาพที่พึงประสงค์").eq("grade_level", grade)).then(rows)
+    ]);
+    const byParent = groupBy([...labels, ...states].sort(bySeq), item => item.parent_code);
+    const domains = labels.filter(item => item.kind === "ด้าน").sort(bySeq).map(domain => {
+      const standards = (byParent.get(domain.code) || []).filter(item => item.kind === "มาตรฐาน").map(standard => ({
+        ...standard,
+        indicators:(byParent.get(standard.code) || []).filter(item => item.kind === "ตัวบ่งชี้").map(indicator => ({
+          ...indicator, states:(byParent.get(indicator.code) || [])
+            .filter(item => item.kind === "สภาพที่พึงประสงค์" && !kgIsGrowthState(item.code))
+        })).filter(indicator => indicator.states.length > 0)
+      }));
+      return { ...domain, standards, states:standards.flatMap(standard => standard.indicators.flatMap(indicator => indicator.states)) };
+    });
+    if (domains.length !== 4 || domains.flatMap(domain => domain.standards).length !== 12 || !states.length) {
+      throw new Error("curriculum structure unavailable");
+    }
+    return { curriculum, subject, domains, states:domains.flatMap(domain => domain.states) };
+  }
+
+  async function loadResults(curriculum, ids) {
+    const subject = curriculum.subject;
+    const states = new Map(), collections = new Map(), ties = new Map(), choices = new Map();
+    if (!subject) return { states, collections, ties, choices };
+
+    const units = rows(await fetchAllRows(() => sb.from("units").select("id,seq").eq("subject_id", subject.id).eq("kind", "วิชา")));
+    const unitStandards = new Map(units.map(unit => [unit.id, String(unit.seq)]));
+    const expected = new Set(curriculum.states.map(state => state.code));
+    const indicators = rows(await fetchAllRowsByIds(batch => sb.from("indicators").select("id,unit_id,name")
+      .in("unit_id", batch), [...unitStandards.keys()]));
+    for (const indicator of indicators) {
+      const code = kgCodeOf(indicator.name);
+      if (!expected.has(code) || code.split(".")[0] !== unitStandards.get(indicator.unit_id)) continue;
+      states.set(code, states.has(code) ? null : indicator.id);
+    }
+    const [collectionRows, tieRows] = await Promise.all([
+      fetchAllRowsByIds(batch => sb.from("collections").select("id,indicator_id,half")
+        .in("indicator_id", batch).in("half", halves), [...states.values()]).then(rows),
+      studentRows("kg_tie_choices", "id,student_id,half,scope,scope_key,level,chosen_at", ids,
+        query => query.eq("subject_id", subject.id))
+    ]);
+
+    for (const row of collectionRows) collections.set(row.id, row);
+    for (const tie of tieRows) {
+      if (tie.scope === "สภาพ") ties.set(keyFor(tie.student_id, tie.half, tie.scope_key), tie.level);
+      if (tie.scope === "ด้าน" && tie.half === lastHalf) choices.set(keyFor(tie.student_id, tie.scope_key), tie);
+    }
+    return { states, collections, ties, choices };
+  }
+
+  const keyFor = (...parts) => parts.join(":");
+
+  async function scoresFor(collections, ids) {
+    const byState = new Map();
+    const collectionIds = [...collections.keys()];
+    for (let i = 0; i < collectionIds.length; i += queryBatch) {
+      const active = collectionIds.slice(i, i + queryBatch);
+      const scores = rows(await fetchAllRowsByIds(batch => sb.from("scores").select("id,student_id,collection_id,raw_score")
+        .in("collection_id", active).in("student_id", batch), ids, "id", queryBatch));
+      for (const score of scores) {
+        const collection = collections.get(score.collection_id);
+        const key = keyFor(score.student_id, collection.half, collection.indicator_id);
+        if (!byState.has(key)) byState.set(key, []);
+        byState.get(key).push(score.raw_score);
+      }
+    }
+    return byState;
+  }
+
+  async function loadRoom(year, room) {
+    const placements = rows(await fetchAllRows(() => sb.from("student_year_placements")
+      .select("id,student:student_id(id,name,student_no,student_type)")
+      .eq("year", year).eq("grade_level", room.grade_level).eq("classroom", room.classroom)));
+    const roster = placements.map(row => row.student).filter(Boolean).sort((a, b) =>
+      collator.compare(a.student_no || "", b.student_no || "") || collator.compare(a.name, b.name));
+    if (!roster.length) return null;
+    const ids = roster.map(student => student.id);
+    const curriculumPromise = loadCurriculum(year, room.grade_level);
+    const [curriculum, comments, growth, results] = await Promise.all([
+      curriculumPromise,
+      studentRows("kg_comments", "id,student_id,half,standard_no,body", ids, query => query.eq("year", year)),
+      loadKgGrowthData(year, ids),
+      curriculumPromise.then(data => loadResults(data, ids))
+    ]);
+    const scores = await scoresFor(results.collections, ids);
+    const commentsByStudent = groupBy(comments, row => row.student_id);
+    const measurementsByStudent = groupBy(growth.measurements, row => row.student_id);
+    const term2Start = yearOptions.get(year).term2_start_date;
+    const canChoose = Boolean(curriculum.subject && (access.isHead || curriculum.subject.owner_id === session.user.id));
+    const model = { ...curriculum, year, room, term2Start, canChoose, kids:[] };
+    model.kids = roster.map(student => {
+      const termResults = new Map();
+      for (const half of halves) {
+        const data = new Map(curriculum.states.map(state => {
+          const indicator = results.states.get(state.code);
+          const key = keyFor(student.id, half, indicator);
+          return [state.code, kgStateTermResult(scores.get(key) || [], results.ties.get(key))];
+        }));
+        termResults.set(half, data);
+      }
+      const choices = new Map(curriculum.domains.flatMap(domain => {
+        const saved = results.choices.get(keyFor(student.id, domain.code));
+        return saved ? [[domain.code, saved]] : [];
+      }));
+      const notes = new Map((commentsByStudent.get(student.id) || []).map(row => [
+        keyFor(row.half, row.standard_no ?? "paragraph"), String(row.body ?? "").trim()
+      ]));
+      return {
+        student, selected:true, termResults, choices, notes, messages:new Map(), writing:new Set(),
+        profile:growth.profiles.get(student.id), measurements:measurementsByStudent.get(student.id) || []
+      };
+    });
+    return model;
+  }
+
+  function domainResult(kid, domain) {
+    const levels = domain.states.map(state => ({ code:state.code, ...kid.termResults.get(lastHalf).get(state.code) }));
+    return kgDomainYearResult(levels, kid.choices.get(domain.code)?.level);
+  }
+
+  function link(path, params) {
+    return path + "?" + new URLSearchParams(params);
+  }
+
+  function issuesFor(kid) {
+    const issues = [];
+    const student = kid.student.id;
+    const room = roomName(current.room);
+    for (const half of halves) {
+      const label = KG_HALF_LABEL[half];
+      const results = kid.termResults.get(half);
+      const missing = [...results.values()].filter(result => result.level == null).length;
+      if (missing) {
+        const subject = current.subject?.id;
+        issues.push([`ผลพัฒนาการ${label}ยังไม่ครบ ${missing} ข้อ`,
+          subject ? link("kg-entry.html", { subject, half, student }) : "kg-entry.html", "ไปกรอก"]);
+      }
+      const count = [...kid.notes].filter(([key, body]) => key.startsWith(half + ":") && body).length;
+      if (count < 13) issues.push([`ความเห็นครู${label}ยังไม่ครบ (${count}/13)`,
+        link("kg-notes.html", { year:current.year, room, half, tab:"comments", student }), "ไปเขียน"]);
+    }
+    const missingProfile = [!kid.profile?.birth_date && "วันเกิด", !kid.profile?.gender && "เพศ"].filter(Boolean);
+    if (missingProfile.length) issues.push([`ไม่มี${missingProfile.join("และ")}ในประวัติ`,
+      link("student-profile.html", { id:student }), "ไปเติม"]);
+    const missingGrowth = Object.entries(KG_GROWTH_FIELDS).filter(([, field]) =>
+      !kid.measurements.some(row => row.measured_on >= current.term2Start && row[field] != null)).map(([measure]) => measure);
+    if (!current.term2Start) issues.push(["ยังไม่ได้ตั้งวันเริ่มภาค 2", "academic-settings.html", "ไปตั้งค่า"]);
+    else if (missingGrowth.length) issues.push([`ไม่มีค่า${missingGrowth.join("และ")}ภาค 2`,
+      link("kg-growth.html", { year:current.year, room, student }), "ไปบันทึก"]);
+    return issues;
+  }
+
+  const tiesFor = kid => current.domains.map(domain => ({ domain, ...domainResult(kid, domain) }))
+    .filter(result => result.tied.length);
+
+  function renderKid(kid, index, focus = false) {
+    const row = $("kid-" + index);
+    const expanded = row.querySelector(".kid-issues")?.open;
+    const openTies = new Set([...row.querySelectorAll(".tie-details[open]")].map(details => details.dataset.code));
+    const issues = issuesFor(kid);
+    const ties = tiesFor(kid);
+    const waiting = ties.filter(result => result.needsChoice);
+    const savedTies = current.canChoose ? ties.filter(result => !result.needsChoice) : [];
+    const missing = issues.length + waiting.length;
+    const status = issues.length ? "ขาด " + missing : waiting.length ? "ต้องเลือก " + waiting.length : "✓ พร้อม";
+    row.innerHTML = `<div class="kid-head">
+      <label for="pick-${index}"><input type="checkbox" id="pick-${index}" data-pick="${index}" ${kid.selected ? "checked" : ""}>
+        <span>${index + 1} ${esc(kid.student.name)}</span></label>
+      <span class="readiness ${missing ? "warn" : "ok"}" role="status" aria-atomic="true">${status}</span>
+    </div>
+    ${issues.length ? `<details class="kid-issues" ${expanded ? "open" : ""}><summary>ข้อมูลที่ขาด ${issues.length} รายการ</summary>
+      <ul class="issues">${issues.map(([reason, href, label]) =>
+        `<li>${esc(reason)} · <a href="${esc(href)}">${label}</a></li>`).join("")}</ul></details>` : ""}
+    ${waiting.map(({ domain, tied }) => tieMarkup(kid, index, domain, tied)).join("")}
+    ${savedTies.map(({ domain, tied, level }) => `<details class="tie-details" data-code="${esc(domain.code)}" ${openTies.has(domain.code) ? "open" : ""}>
+      <summary>เปลี่ยนผล${esc(domain.text)}ที่เสมอ · ${levelLabel.get(level)}</summary>
+      ${tieMarkup(kid, index, domain, tied, tied.filter(option => option !== level))}</details>`).join("")}
+    ${[...kid.messages].map(([code, message]) => `<div class="kid-message hint ${message.error ? "error" : ""}">
+      ${esc(message.text)} ${message.retry ? `<button type="button" data-clean="${esc(code)}" data-kid="${index}">ลองล้างอีกครั้ง</button>` : ""}
+    </div>`).join("")}`;
+    if (focus) row.querySelector("input").focus({ preventScroll:true });
+  }
+
+  function tieMarkup(kid, index, domain, tied, options = tied) {
+    const results = kid.termResults.get(lastHalf);
+    const countFor = level => domain.states.filter(state => results.get(state.code)?.level === level).length;
+    const counts = tied.map(level => levelLabel.get(level) + " " + countFor(level)).join(" · ");
+    return `<div class="tie">
+      <b>สรุป${esc(domain.text)} (ภาค 2) เสมอกัน · ${counts} ข้อ</b>
+      ${current.canChoose ? `<div class="tie-actions">${options.map(level => `<button type="button" data-kid="${index}"
+        data-domain="${esc(domain.code)}" data-level="${level}" ${kid.writing.has(domain.code) ? "disabled" : ""}>
+        ${levelLabel.get(level)}</button>`).join("")}</div>` : "ให้ครูเจ้าของวิชาหรือหัวหน้าวิชาการเลือกผล"}
+    </div>`;
+  }
+
+  function updateReadiness(announcement = "") {
+    const total = current.kids.length;
+    const ready = current.kids.filter(kid => !issuesFor(kid).length && !tiesFor(kid).some(result => result.needsChoice)).length;
+    $("readiness").textContent = `พร้อม ${ready} จาก ${total} คน` +
+      (ready < total ? ` · ขาดข้อมูล ${total - ready} คน (ยังพิมพ์ได้ ช่องที่ขาดจะเว้นว่าง)` : "") +
+      (announcement ? " · " + announcement : "");
+  }
+
+  function updateActions(status) {
+    const count = current?.kids.filter(kid => kid.selected).length || 0;
+    $("print").textContent = "พิมพ์ " + count + " คน";
+    for (const id of ["print", "preview"]) $(id).disabled = preparing || pending > 0 || count === 0;
+    for (const id of ["year", "room", "mode"]) $(id).disabled = preparing || pending > 0;
+    for (const input of $("kids").querySelectorAll("input[data-pick]")) input.disabled = preparing;
+    $("print-status").textContent = status ?? (preparing ? `กำลังเตรียมสมุด ${count} คน…`
+      : pending ? "กำลังบันทึกผลรายด้าน…" : count ? "" : "เลือกนักเรียนอย่างน้อย 1 คนเพื่อดูตัวอย่างหรือพิมพ์");
+  }
+
+  function clearPreview() {
+    $("preview-panel").hidden = true;
+    $("book-pages").replaceChildren();
+    $("book-print-numbers").textContent = "";
+    $("error").hidden = true;
+  }
+
+  async function saveChoice(model, kid, index, domain, level) {
+    if (preparing || !model.canChoose || kid.writing.has(domain.code) || !domainResult(kid, domain).tied.includes(level)) return;
+    if (kid.choices.get(domain.code)?.level === level) return;
+    clearPreview();
+    kid.writing.add(domain.code);
+    kid.messages.delete(domain.code);
+    pending++;
+    renderKid(kid, index, true);
+    updateActions();
+    try {
+      const saved = rows(await sb.from("kg_tie_choices").upsert({
+        subject_id:model.subject.id, student_id:kid.student.id, half:lastHalf, scope:"ด้าน", scope_key:domain.code,
+        level, chosen_by:session.user.id, chosen_at:new Date().toISOString()
+      }, { onConflict:conflictKey }).select("id,level,chosen_at"));
+      if (!saved.length) throw new Error("choice not saved");
+      kid.choices.set(domain.code, saved[0]);
+      kid.messages.set(domain.code, { text:`บันทึกสรุป${domain.text}แล้ว · ${levelLabel.get(level)}` });
+    } catch {
+      kid.messages.set(domain.code, { error:true, text:`บันทึกสรุป${domain.text}ไม่สำเร็จ กรุณาเลือกผลอีกครั้ง` });
+    } finally {
+      kid.writing.delete(domain.code);
+      pending--;
+      const message = kid.messages.get(domain.code).text;
+      const focused = $("kid-" + index).contains(document.activeElement);
+      renderKid(kid, index, focused);
+      updateReadiness(message);
+      updateActions();
+    }
+  }
+
+  async function clearChoice(kid, domain) {
+    const previous = kid.choices.get(domain.code);
+    if (!previous || domainResult(kid, domain).tied.includes(previous.level)) return;
+    // ล้างเฉพาะแถวรุ่นที่อ่านมา เพื่อไม่ทับค่าที่ครูคนอื่นเพิ่งเลือก
+    let deletion = sb.from("kg_tie_choices").delete().eq("id", previous.id).eq("level", previous.level);
+    deletion = previous.chosen_at == null ? deletion.is("chosen_at", null) : deletion.eq("chosen_at", previous.chosen_at);
+    const removed = rows(await deletion.select("id"));
+    if (!removed.length) {
+      const [latest] = rows(await sb.from("kg_tie_choices").select("id,level,chosen_at").eq("id", previous.id));
+      if (latest?.level === previous.level && latest.chosen_at === previous.chosen_at) throw new Error("choice not removed");
+      if (latest) {
+        kid.choices.set(domain.code, latest);
+        return;
+      }
+    }
+    kid.choices.delete(domain.code);
+  }
+
+  async function cleanChoices(model, onlyKid, onlyDomain) {
+    if (preparing || !model.canChoose) return;
+    const tasks = model.kids.flatMap((kid, index) => model.domains
+      .filter(domain => (!onlyKid || kid === onlyKid) && (!onlyDomain || onlyDomain === domain.code)
+        && kid.choices.has(domain.code) && !domainResult(kid, domain).tied.includes(kid.choices.get(domain.code).level)
+        && !kid.writing.has(domain.code))
+      .map(domain => ({ kid, index, domain })));
+    if (!tasks.length) return;
+    clearPreview();
+    pending++;
+    updateActions();
+    for (const { kid, domain } of tasks) kid.writing.add(domain.code);
+    // ทยอยล้างแถวค้างของห้องโดยไม่ส่งคำขอพร้อมกันทั้งหมด
+    for (const { kid, index, domain } of tasks) {
+      kid.messages.delete(domain.code);
+      try {
+        await clearChoice(kid, domain);
+      } catch {
+        kid.messages.set(domain.code, { error:true, retry:true, text:`ล้างผลเสมอเดิมของ${domain.text}ไม่สำเร็จ` });
+      }
+      kid.writing.delete(domain.code);
+      renderKid(kid, index, $("kid-" + index).contains(document.activeElement));
+    }
+    pending--;
+    updateReadiness();
+    updateActions();
+  }
+
+  $("retry").addEventListener("click", () => {
+    $("retry").hidden = true;
+    $("load-status").textContent = "กำลังโหลดห้องอนุบาล…";
+    void loadWithRetry(retryLoad, retryLoad, request);
+  });
+  $("year").addEventListener("change", () => void showRooms($("year").value, null));
+  $("room").addEventListener("change", () => void showRoom($("year").value, $("room").value));
+  $("mode").addEventListener("change", clearPreview);
+  $("kids").addEventListener("change", event => {
+    const index = event.target.dataset.pick;
+    if (index == null || !current) return;
+    current.kids[index].selected = event.target.checked;
+    clearPreview();
+    updateActions();
+  });
+  $("kids").addEventListener("click", event => {
+    const button = event.target.closest("button[data-kid]");
+    if (!button || !current) return;
+    const index = Number(button.dataset.kid);
+    const kid = current.kids[index];
+    if (button.dataset.clean) void cleanChoices(current, kid, button.dataset.clean);
+    else {
+      const domain = current.domains.find(item => item.code === button.dataset.domain);
+      if (domain) void saveChoice(current, kid, index, domain, Number(button.dataset.level));
+    }
+  });
+
+  const profileFields = [
+    "student_id", "citizen_id", "birth_date", "gender", "blood_type", "ethnicity", "nationality", "religion",
+    "chronic_disease", "chronic_none", "birth_order", "sibling_count", "parents_marital", "lives_with",
+    "previous_school", "enrolled_date", "admission_type", "cur_same_as_reg",
+    ...["reg", "cur"].flatMap(prefix => ["house_no", "moo", "road", "subdistrict", "district", "province", "postcode"]
+      .map(suffix => prefix + "_" + suffix))
+  ].join(",");
+
+  async function preparePrint(print) {
+    if (!current || preparing || pending) return;
+    const model = current;
+    const selected = model.kids.filter(kid => kid.selected);
+    if (!selected.length) return;
+    const summaryOnly = $("mode").value === "summary";
+    clearPreview();
+    preparing = true;
+    updateActions();
+    let completion = "";
+    try {
+      const { year, room } = model;
+      const signersPromise = loadLetterSigners(year, room.grade_level, room.classroom);
+      const [signers, data] = await Promise.all([signersPromise, summaryOnly ? {} : loadPrintData(model, selected)]);
+      $("book-pages").innerHTML = selected.map((kid, index) => renderBook(model, kid, signers, data, summaryOnly, index)).join("");
+      if (!summaryOnly && typeof CSSMarginRule !== "undefined") {
+        $("book-print-numbers").textContent = selected.map((_, index) => {
+          // ตัวนับแยกต่อเล่มเพิ่มตามหน้าที่พิมพ์จริง รวมหน้าที่ตารางล้น โดยไม่นับปก
+          const page = "kg-book-" + index;
+          const section = `[data-book-index="${index}"] > .sheet:not(.cover,.back-cover)`;
+          return `@page ${page} { counter-increment:${page}; @top-right {
+            content:counter(${page}, kg-thai-digits); font:11pt "Sarabun", sans-serif;
+            color:var(--paper-rule); padding-right:1mm; vertical-align:bottom;
+          } }
+          ${section} { page:${page}; }
+          ${section} > .pno { display:none; }`;
+        }).join("\n");
+      }
+      $("preview-panel").hidden = false;
+      await document.fonts.ready;
+      await Promise.all([...$("book-pages").querySelectorAll("img")].map(img => img.decode().catch(() => {})));
+      if (print) window.print();
+      else $("preview-title").focus();
+      completion = `เตรียมสมุด ${selected.length} คนแล้ว`;
+    } catch {
+      clearPreview();
+      $("error").textContent = "เตรียมสมุดไม่สำเร็จ กรุณากดดูตัวอย่างหรือพิมพ์อีกครั้ง";
+      $("error").hidden = false;
+    } finally {
+      preparing = false;
+      updateActions(completion);
+    }
+  }
+
+  async function loadPrintData(model, selected) {
+    const { year, room } = model;
+    const ids = selected.map(kid => kid.student.id);
+    const range = academicYearRange(year, years);
+    const [school, ref, profiles, guardians, health, historical, attendance] = await Promise.all([
+      getSetting("receipt_school_name"),
+      reference || loadKgGrowthReference(),
+      // ใช้ตารางเดียวกับหน้าประวัติ สิทธิ์อ่านรายคนตรวจด้วย can_view_student_profile ของระบบ
+      studentRows("student_profiles", profileFields, ids, query => query, "student_id"),
+      studentRows("student_guardians", "id,student_id,relation,prefix,first_name,last_name,phone,occupation,sort_order", ids),
+      studentRows("kg_health", "id,student_id,kind,item,done_on", ids, query => query.eq("year", year)),
+      studentRows("kg_growth", "id,student_id,measured_on,weight_kg,height_cm", ids, query => query.neq("year", year)),
+      range ? fetchAllRows(() => sb.from("daily_attendance").select("id,attend_date,student_id,status")
+        .eq("year", year).eq("grade_level", room.grade_level).eq("classroom", room.classroom)
+        .gte("attend_date", range.start).lte("attend_date", range.end)).then(rows) : []
+    ]);
+    reference = ref;
+    return {
+      school, ref, range,
+      profiles:new Map(profiles.map(row => [row.student_id, row])),
+      guardians:groupBy(guardians.sort((a, b) => a.sort_order - b.sort_order), row => row.student_id),
+      health:groupBy(health.sort((a, b) => a.done_on.localeCompare(b.done_on)), row => row.student_id),
+      history:groupBy(historical, row => row.student_id),
+      roomDays:[...new Set(attendance.map(row => row.attend_date))],
+      attendance:groupBy(attendance, row => row.student_id)
+    };
+  }
+
+  const thaiDigits = value => String(value).replace(/\d/g, digit => "๐๑๒๓๔๕๖๗๘๙"[digit]);
+  const monthNames = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+  const fill = value => `<span class="fill">${esc(value) || "&nbsp;"}</span>`;
+  const lines = count => '<div class="write-line"></div>'.repeat(count);
+  const cells = (values, tag = "td") => values.map(value => `<${tag}>${value ?? ""}</${tag}>`).join("");
+  const mark = (actual, value) => actual === value ? '<span class="mark">✓</span>' : "";
+  const marks = result => cells(KG_LEVELS.map(({ v }) => mark(result, v)));
+  const heading = (text, css = "") => `<h2 class="${css}">${esc(text)}</h2>`;
+
+  function sheet(number, body, css = "") {
+    return `<section class="sheet ${css}" data-page="${number}">${Number.isInteger(number)
+      ? `<span class="pno">${thaiDigits(number)}</span>` : ""}${body}</section>`;
+  }
+
+  function cover(model, kid, school) {
+    const yearOfGrade = model.room.grade_level.split(".")[1];
+    return sheet("cover", `<img src="../logo.png" alt="ตราโรงเรียน">
+      <h2>สมุดรายงานประจำตัวนักเรียน<br>ระดับปฐมวัย</h2>
+      <p>${esc(model.curriculum.name)}</p>
+      <p class="cover-name">ชื่อ ${fill(kid.student.name)}</p>
+      <p>ชั้นอนุบาลปีที่ ${esc(yearOfGrade)} · ห้อง ${esc(roomName(model.room))} · ปีการศึกษา ${esc(model.year)}</p>
+      <p>โรงเรียน ${fill(school)}</p>`, "cover");
+  }
+
+  function address(profile, prefix) {
+    const addressLabels = { house_no:"", moo:"หมู่ ", road:"ถนน", subdistrict:"ตำบล", district:"อำเภอ", province:"จังหวัด", postcode:"" };
+    return Object.entries(addressLabels).map(([field, label]) => profile[prefix + "_" + field]
+      ? label + profile[prefix + "_" + field] : "").filter(Boolean).join(" ");
+  }
+
+  function profilePage(kid, profile = {}, guardians = []) {
+    const guardianLine = guardian => {
+      const name = [guardian.prefix, guardian.first_name, guardian.last_name].filter(Boolean).join(" ");
+      return `ชื่อ ${fill(name)} อาชีพ ${fill(guardian.occupation)} โทรศัพท์ ${fill(guardian.phone)}`;
+    };
+    const family = ["บิดา", "มารดา", "ผู้ปกครอง"].map(relation => {
+      const matching = guardians.filter(person => person.relation === relation);
+      return (matching.length ? matching : [{}]).map(person => `<p>${relation} · ${guardianLine(person)}</p>`).join("");
+    }).join("");
+    return sheet(1, heading("ข้อมูลส่วนตัวผู้เรียน") + `<div class="photo">ติดรูปถ่าย</div>
+      <div class="profile-lines">
+        <p>ชื่อ-นามสกุล ${fill(kid.student.name)} เลขประจำตัว ${fill(kid.student.student_no)}</p>
+        <p>เลขประจำตัวประชาชน ${fill(profile.citizen_id)}</p>
+        <p>วันเกิด ${fill(thaiShortDateText(profile.birth_date))} เพศ ${fill(profile.gender)} กลุ่มเลือด ${fill(profile.blood_type)}</p>
+        <p>เชื้อชาติ ${fill(profile.ethnicity)} สัญชาติ ${fill(profile.nationality)} ศาสนา ${fill(profile.religion)}</p>
+        <p>โรคประจำตัว ${fill(profile.chronic_none ? "ไม่มี" : profile.chronic_disease)}</p>
+        <p>ที่อยู่ปัจจุบัน ${fill(address(profile, profile.cur_same_as_reg ? "reg" : "cur"))}</p>
+        <p>ที่อยู่ตามทะเบียนบ้าน ${fill(address(profile, "reg"))}</p>
+        ${family}
+        <p>เป็นบุตรคนที่ ${fill(profile.birth_order)} มีพี่น้องทั้งหมด ${fill(profile.sibling_count)} คน</p>
+        <p>สถานภาพบิดามารดา ${fill(profile.parents_marital)} อาศัยอยู่กับ ${fill(profile.lives_with)}</p>
+        <h3>ข้อมูลการศึกษา</h3>
+        <p>โรงเรียนเดิม ${fill(profile.previous_school)} วันที่เข้าเรียน ${fill(thaiShortDateText(profile.enrolled_date))}</p>
+        <p>ประเภทการเข้าเรียน ${fill(profile.admission_type)}</p>
+        <h3>บันทึกการเปลี่ยนแปลง</h3>${lines(4)}
+      </div>`);
+  }
+
+  function growthChart(measure, profile, reference, history) {
+    const field = KG_GROWTH_FIELDS[measure];
+    const ref = reference.filter(row => row.sex === profile?.gender && row.measure === measure).sort((a, b) => a.age_months - b.age_months);
+    if (!ref.length) {
+      return `<h3>${measure}ตามอายุ</h3><p>ไม่มีเกณฑ์อ้างอิงสำหรับเพศในประวัติ</p>`;
+    }
+    const points = history.filter(row => row[field] != null).map(row => ({
+      age:kgAgeMonths(profile?.birth_date, row.measured_on), value:Number(row[field]), date:row.measured_on
+    })).filter(point => point.age >= 36 && point.age <= 95 && Number.isFinite(point.value))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const chartValues = points.map(point => point.value);
+    const tickStep = measure === "น้ำหนัก" ? 5 : 10;
+    const min = Math.floor((Math.min(...ref.map(row => Number(row.b2)), ...chartValues) - tickStep) / tickStep) * tickStep;
+    const max = Math.ceil((Math.max(...ref.map(row => Number(row.b5)), ...chartValues) + tickStep) / tickStep) * tickStep;
+    const x = age => 49 + (age - 36) * 600 / 59;
+    const y = value => 245 - (value - min) * 225 / (max - min);
+    const coordinates = (age, value) => `${x(age).toFixed(2)},${y(value).toFixed(2)}`;
+    const boundaries = [() => min, ...["b2", "b3", "b4", "b5"].map(field => row => Number(row[field])), () => max];
+    const bands = KG_GROWTH_BANDS[measure];
+    const polygons = bands.map((_, i) => {
+      const low = ref.map(row => coordinates(row.age_months, boundaries[i](row)));
+      const high = ref.map(row => coordinates(row.age_months, boundaries[i + 1](row))).reverse();
+      return `<polygon class="band-${i + 1}" points="${[...low, ...high].join(" ")}" stroke="var(--paper-rule)" stroke-width=".6"/>`;
+    });
+    const vertical = [36, 48, 60, 72, 84, 95].map(age => `<path d="M${x(age)} 20 V245"/>
+      <text x="${x(age)}" y="264" text-anchor="middle">${age}</text>`);
+    const horizontal = [];
+    for (let value = min; value <= max; value += tickStep) {
+      horizontal.push(`<path d="M49 ${y(value)} H649"/><text x="42" y="${y(value) + 4}" text-anchor="end">${value}</text>`);
+    }
+    return `<h3>${measure}ตามอายุ (${esc(profile.gender)})</h3>
+      <svg class="chart" viewBox="0 0 670 290" role="img" aria-label="${measure}ตามอายุ แสดงเกณฑ์ 5 ระดับและค่าวัด ${points.length} จุด">
+        ${polygons.join("")}
+        <g stroke="var(--paper-rule)" stroke-width=".5" stroke-opacity=".55" fill="var(--ink)" font-size="13">
+          ${horizontal.join("")}${vertical.join("")}
+        </g>
+        <text x="8" y="16" font-size="13">${measure === "น้ำหนัก" ? "กก." : "ซม."}</text>
+        <text x="349" y="285" text-anchor="middle" font-size="14">อายุ (เดือน)</text>
+        <polyline points="${points.map(point => coordinates(point.age, point.value)).join(" ")}" fill="none" stroke="var(--teal)" stroke-width="2.5"/>
+        ${points.map(point => `<circle cx="${x(point.age)}" cy="${y(point.value)}" r="3.4" fill="var(--teal)">
+          <title>${esc(thaiShortDateText(point.date))} · ${point.value}</title></circle>`).join("")}
+      </svg>
+      <ul class="chart-key">${bands.map((band, i) => `<li><span class="swatch band-${i + 1}"></span>${esc(band)}</li>`).join("")}</ul>`;
+  }
+
+  function growthPage(kid, data) {
+    const history = [...(data.history.get(kid.student.id) || []), ...kid.measurements];
+    return sheet(2, heading("กราฟการเจริญเติบโต อายุ 3–7 ปี") + Object.keys(KG_GROWTH_FIELDS)
+      .map(measure => growthChart(measure, kid.profile, data.ref, history)).join("")
+      + '<p class="paper-note">ที่มา กรมอนามัย กระทรวงสาธารณสุข (ชุด 2542)</p>');
+  }
+
+  function attendanceTable(attendance) {
+    const attendanceCells = row => row.full ? [row.full, row.present, row.absent] : ["", "", ""];
+    return `<h2 class="paper-heading">เวลามาเรียนในรอบปี</h2>
+      <table class="attendance"><thead><tr>${cells(["เดือน", "เวลาเต็ม", "มาเรียน", "ไม่มา"], "th")}</tr></thead>
+      <tbody>${attendance.months.map(row => `<tr>${cells([monthNames[row.month - 1], ...attendanceCells(row)])}</tr>`).join("")}
+      <tr>${cells(["รวม", ...attendanceCells(attendance.total)])}</tr></tbody></table>`;
+  }
+
+  function healthTables(health) {
+    const byKind = groupBy(health, row => row.kind);
+    const long = [...byKind.values()].some(items => items.length > 12);
+    return `<h2 class="paper-heading">บริการทางสุขภาพ</h2><div class="health-pair ${long ? "long-health" : ""}">
+      ${["การป้องกันโรค", "การตรวจสุขภาพ"].map(kind => {
+        const items = byKind.get(kind) || [];
+        const body = Array.from({ length:Math.max(4, items.length) }, (_, i) =>
+          `<tr>${cells([esc(items[i]?.item) || "&nbsp;", esc(thaiShortDateText(items[i]?.done_on))])}</tr>`).join("");
+        return `<table><thead><tr>${cells([kind, "วัน เดือน ปี"], "th")}</tr></thead><tbody>${body}</tbody></table>`;
+      }).join("")}</div>`;
+  }
+
+  function growthTable(kid, reference, term2Start) {
+    const columns = kgGrowthTableColumns(kid.measurements, term2Start);
+    const slots = halves.flatMap(half => [columns[half][0], columns[half][1]]);
+    const ages = slots.map(row => {
+      const age = kgAgeMonths(kid.profile?.birth_date, row?.measured_on);
+      return age == null || age < 0 ? "" : `${Math.floor(age / 12)} ปี ${age % 12} เดือน`;
+    });
+    const result = kgGrowthTermResult(kid.measurements, kid.profile, reference, lastHalf, term2Start);
+    return `<h2 class="paper-heading">ความเจริญเติบโต</h2>
+      <table class="growth"><thead>
+        <tr><th rowspan="2">รายการ</th><th colspan="2">ภาค 1</th><th colspan="2">ภาค 2</th></tr>
+        <tr>${cells(slots.map(row => row ? monthNames[Number(row.measured_on.slice(5, 7)) - 1] : ""), "th")}</tr>
+      </thead><tbody><tr>${cells(["อายุ", ...ages])}</tr>
+        ${Object.entries(KG_GROWTH_FIELDS).map(([measure, field]) => `<tr>${cells([
+          measure + (measure === "น้ำหนัก" ? " (กก.)" : " (ซม.)"),
+          ...slots.map(row => row?.[field] == null ? "" : Number(row[field]).toFixed(1))
+        ])}</tr>`).join("")}
+      </tbody></table>
+      <h3>มาตรฐานที่ 1 ตัวบ่งชี้ 1.1 · ค่าล่าสุดภาค 2</h3>
+      <div class="growth-check">${Object.entries(KG_GROWTH_FIELDS).map(([measure, field]) =>
+        `<span>${measure} ${result[field].meets === true ? "☑" : "☐"} ตามเกณฑ์
+          ${result[field].meets === false ? "☑" : "☐"} ไม่ตามเกณฑ์</span>`).join("")}</div>`;
+  }
+
+  function attendancePage(model, kid, data) {
+    const records = isAutoPresentStudent(kid.student)
+      ? data.roomDays.map(attend_date => ({ attend_date, status:"มา" }))
+      : data.attendance.get(kid.student.id) || [];
+    const result = kgMonthlyAttendance(data.roomDays, records, data.range);
+    const missing = result.total.missing;
+    const note = missing ? `<p class="paper-note">วันที่ห้องเช็คชื่อแต่ไม่มีแถวของเด็ก ${missing} วัน</p>` : "";
+    return sheet(3, attendanceTable(result) + note + healthTables(data.health.get(kid.student.id) || [])
+      + growthTable(kid, data.ref, model.term2Start));
+  }
+
+  function assessmentSheet(number, domain, kid) {
+    const headings = KG_LEVELS.map(({ label }) => label === "ควรเสริม" ? "ควร<br>เสริม" : label);
+    const body = domain.standards.map(standard => `<tbody>
+      <tr class="group-row"><td class="center">${esc(standard.code)}</td><td colspan="7">มาตรฐานที่ ${esc(standard.code)} ${esc(standard.text)}</td></tr>
+      ${standard.indicators.map(indicator => `<tr class="group-row"><td></td><td colspan="7">
+        ตัวบ่งชี้ ${esc(indicator.code)} ${esc(indicator.text)}</td></tr>
+        ${indicator.states.map(state => `<tr data-state-code="${esc(state.code)}"><td></td><td>${esc(state.code)} ${esc(state.text)}</td>
+          ${halves.map(half => marks(kid.termResults.get(half).get(state.code)?.level)).join("")}</tr>`).join("")}`).join("")}
+    </tbody>`).join("");
+    return sheet(number, heading(`รายงานผลพัฒนาการ${domain.text}`) +
+      `<table class="assessment"><colgroup><col class="standard"><col>${'<col class="rating">'.repeat(6)}</colgroup>
+      <thead><tr><th rowspan="2" scope="col">มฐ.</th><th rowspan="2" scope="col">พฤติกรรม/สภาพที่พึงประสงค์</th>
+        <th colspan="3" scope="colgroup">ภาค 1</th><th colspan="3" scope="colgroup">ภาค 2</th></tr>
+        <tr>${cells([...headings, ...headings], "th")}</tr></thead>${body}</table>
+      <p class="paper-note">✓ ผลรายภาคจากฐานนิยมหรือผลที่ครูเลือกเมื่อเสมอ${number === 4 ? " · ข้อ 1.1.1 อยู่หน้า ๓" : ""}</p>`);
+  }
+
+  function signature(role, name) {
+    return `<div class="signature">ลงชื่อ ${fill("")} ${esc(role)}<br>(${fill(name)})<br>วันที่ ${fill("")}</div>`;
+  }
+
+  function teacherPage(number, half, domains, kid, signers) {
+    const rows = domains.map(domain => `<tbody><tr class="group-row"><td colspan="2">${esc(domain.text)}</td></tr>
+      ${domain.standards.map(standard => `<tr><td>มฐ. ${esc(standard.code)} ${esc(standard.text)}</td>
+        <td>${esc(kid.notes.get(keyFor(half, standard.code))) || fill("")}</td></tr>`).join("")}</tbody>`).join("");
+    const paragraph = kid.notes.get(keyFor(half, "paragraph"));
+    return sheet(number, heading(`ความเห็นครูประจำชั้น ${KG_HALF_LABEL[half]}`) +
+      `<table class="comment-table"><colgroup><col><col></colgroup>
+      <thead><tr><th>มาตรฐาน</th><th>ความเห็นครู</th></tr></thead>${rows}</table>
+      <h3>พฤติกรรมที่ควรส่งเสริมและพัฒนา</h3>
+      ${paragraph ? `<p class="paragraph">${esc(paragraph)}</p>` : lines(3)}
+      <div class="signatures">${signature("ครูประจำชั้น", signers.homeroomName)}</div>`);
+  }
+
+  function summaryPage(number, model, kid, signers) {
+    return sheet(number, `<p class="paper-subject">${esc(kid.student.name)} · ห้อง ${esc(roomName(model.room))} · ปีการศึกษา ${esc(model.year)}</p>
+      ${[1, 2].map(term => heading("ความเห็นของผู้ปกครอง ภาคเรียนที่ " + term) + lines(2) +
+        '<div class="signature parent">ลงชื่อ ' + fill("") + ' ผู้ปกครอง</div>').join("")}
+      ${heading("สรุปผลการพัฒนาเด็ก")}
+      <table class="marks"><thead><tr>${cells(["พัฒนาการ", ...KG_LEVELS.map(({ label }) => label)], "th")}</tr></thead>
+      <tbody>${model.domains.map(domain => `<tr><td>${esc(domain.text)}</td>${marks(domainResult(kid, domain).level)}</tr>`).join("")}</tbody></table>
+      <p>ระดับคุณภาพ 3 ดี (ปฏิบัติได้คล่องแคล่ว) · 2 พอใช้ (ปฏิบัติได้บางครั้ง) · 1 ควรเสริม (ไม่ชัดเจน)</p>
+      <div class="signatures">${signature("ครูประจำชั้น", signers.homeroomName)}
+        ${signature("ผู้อำนวยการสถานศึกษา", signers.directorName)}</div>`);
+  }
+
+  function backCover(model) {
+    return sheet("back", heading(`มาตรฐานคุณลักษณะที่พึงประสงค์ตามหลักสูตรการศึกษาปฐมวัย พ.ศ. ${model.curriculum.edition}`) +
+      model.domains.map(domain => `<h3>${esc(domain.text)}</h3><ol start="${Number(domain.standards[0]?.code) || 1}">
+        ${domain.standards.map(standard => `<li value="${Number(standard.code)}">${esc(standard.text)}</li>`).join("")}</ol>`).join(""),
+      "back-cover");
+  }
+
+  function renderBook(model, kid, signers, data, summaryOnly, index) {
+    const firstAssessment = 4;
+    const firstComment = firstAssessment + model.domains.length;
+    const summary = summaryPage(firstComment + halves.length, model, kid, signers);
+    if (summaryOnly) return `<article class="student-book">${summary}</article>`;
+    const id = kid.student.id;
+    return `<article class="student-book" data-book-index="${index}">
+      ${cover(model, kid, data.school)}
+      ${profilePage(kid, data.profiles.get(id), data.guardians.get(id))}
+      ${growthPage(kid, data)}
+      ${attendancePage(model, kid, data)}
+      ${model.domains.map((domain, i) => assessmentSheet(firstAssessment + i, domain, kid)).join("")}
+      ${halves.map((half, i) => teacherPage(firstComment + i, half, model.domains, kid, signers)).join("")}
+      ${summary}
+      ${backCover(model)}
+    </article>`;
+  }
+
+  $("preview").addEventListener("click", () => void preparePrint(false));
+  $("print").addEventListener("click", () => void preparePrint(true));
+  await loadWithRetry(initialize, initialize, request);
+}
+</script>
+</body>
+</html>

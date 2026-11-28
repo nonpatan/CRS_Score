@@ -459,6 +459,57 @@ export function kgStandardSuggestion(stateResults) {
   return { text:KG_STANDARD_SUGGESTIONS[level], counts };
 }
 
+// สรุปจากผลภาค 2 ที่ตัดสินแล้วของทุกสภาพฯ ในด้านเดียวกัน
+export function kgDomainYearResult(stateResults, tieChoice) {
+  const results = stateResults.filter(result => !kgIsGrowthState(result.code));
+  if (results.some(result => result.needsChoice)) return { level:null, tied:[], reason:"unresolved" };
+  if (!results.length || results.some(result => !KG_LEVELS.some(({ v }) => v === result.level))) {
+    return { level:null, tied:[], reason:"incomplete" };
+  }
+  const result = kgStateTermResult(results.map(({ level }) => level), tieChoice);
+  return { ...result, reason:result.needsChoice ? "tied" : null };
+}
+
+// นับเฉพาะวันที่มีการเช็คชื่อของห้อง และเก็บวันที่ไม่มีแถวของเด็กแยกจากวันไม่มา
+export function kgMonthlyAttendance(roomDays, studentRows, yearRange) {
+  const months = Array.from({ length:11 }, (_, i) => ({
+    month:(i + 4) % 12 + 1, full:0, present:0, absent:0, missing:0
+  }));
+  const total = { full:0, present:0, absent:0, missing:0 };
+  const byMonth = new Map(months.map(row => [String(row.month).padStart(2, "0"), row]));
+  const byDate = new Map(studentRows.map(row => [row.attend_date, row.status]));
+  if (!yearRange) return { months, total };
+  for (const date of new Set(roomDays)) {
+    if (date < yearRange.start || date > yearRange.end) continue;
+    const month = byMonth.get(date.slice(5, 7));
+    if (!month) continue;
+    const status = byDate.get(date);
+    const field = !byDate.has(date) ? "missing" : status === "มา" || status === "มาสาย" ? "present"
+      : ABSENCE_STATUSES.includes(status) ? "absent" : null;
+    month.full++;
+    total.full++;
+    if (field) {
+      month[field]++;
+      total[field]++;
+    }
+  }
+  return { months, total };
+}
+
+// ตารางในสมุดใช้วันที่วัดครั้งแรกและครั้งล่าสุดของแต่ละภาค
+export function kgGrowthTableColumns(measurements, term2Start) {
+  const columns = { กลางปี:[], ปลายปี:[] };
+  if (!term2Start) return columns;
+  const ordered = [...measurements].sort((a, b) => a.measured_on.localeCompare(b.measured_on));
+  for (const half of Object.keys(columns)) {
+    const inHalf = ordered.filter(row => (row.measured_on < term2Start) === (half === "กลางปี"));
+    const first = inHalf[0], last = inHalf.at(-1);
+    if (first) columns[half].push(first);
+    if (last && last.measured_on !== first.measured_on) columns[half].push(last);
+  }
+  return columns;
+}
+
 export const KG_GROWTH_BANDS = {
   "น้ำหนัก": ["น้อยกว่าเกณฑ์", "ค่อนข้างน้อย", "ตามเกณฑ์", "ค่อนข้างมาก", "มากเกินเกณฑ์"],
   "ส่วนสูง": ["เตี้ย", "ค่อนข้างเตี้ย", "ตามเกณฑ์", "ค่อนข้างสูง", "สูง"]
