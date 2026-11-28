@@ -83,6 +83,17 @@ body { margin:0; padding:16px; font:16px/1.55 "Sarabun",sans-serif; color:var(--
 .sheet .assessment tbody td { padding-block:.6mm; }
 .sheet .paper-subject, .sheet .paper-note { text-align:center; }
 .sheet .paper-note { font-size:11pt; }
+.competency-sheet .paper-subject { padding-inline:8mm; }
+.sheet .competency-results > colgroup:first-child { width:36%; }
+.sheet .competency-results col.score { width:12%; }
+.sheet .competency-results col.level { width:20%; }
+.sheet .competency-results tbody th { background:var(--white); text-align:left; font-weight:400; }
+.sheet .competency-results :is(th,td) { vertical-align:middle; }
+.sheet .competency-score { font-variant-numeric:tabular-nums; }
+.sheet .competency-level { font-weight:700; }
+.sheet .competency-status, .sheet .competency-source { color:var(--paper-rule); }
+.sheet .competency-source { font-size:9pt; }
+.sheet .competency-criteria td { padding-block:.5mm; }
 .cover { min-height:280mm; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:5mm; text-align:center; }
 .cover img { width:38mm; height:38mm; object-fit:contain; }
 .cover h2 { font-size:23pt; margin:0; }
@@ -166,7 +177,7 @@ body { margin:0; padding:16px; font:16px/1.55 "Sarabun",sans-serif; color:var(--
       <div class="row2">
         <div class="field"><label for="room">ห้อง</label><select id="room"></select></div>
         <div class="field"><label for="mode">พิมพ์</label><select id="mode">
-          <option value="book">ทั้งเล่ม</option><option value="summary">เฉพาะสรุปปลายปี</option>
+          <option value="book">ทั้งเล่ม</option><option value="summary">สมรรถนะและสรุปปลายปี (2 หน้า)</option>
         </select></div>
       </div>
       <p id="readiness" class="hint" role="status" aria-atomic="true"></p>
@@ -207,8 +218,12 @@ if (session) {
     "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
   }[char]));
   const collator = new Intl.Collator("th", { numeric:true });
+  const publicationDate = new Intl.DateTimeFormat("th-TH", {
+    timeZone:"Asia/Bangkok", day:"numeric", month:"short", year:"numeric"
+  });
   const halves = Object.keys(KG_HALF_LABEL);
   const lastHalf = "ปลายปี";
+  const competencyTerms = ["1", "2"];
   const roomName = room => room.grade_level + "/" + room.classroom;
   const roomKey = room => room.grade_level + "\u0000" + room.classroom;
   const bySeq = (a, b) => a.seq - b.seq || collator.compare(a.code || "", b.code || "");
@@ -457,18 +472,25 @@ if (session) {
     if (!roster.length) return null;
     const ids = roster.map(student => student.id);
     const curriculumPromise = loadCurriculum(year, room.grade_level);
-    const [curriculum, comments, growth, results] = await Promise.all([
+    const [curriculum, comments, growth, results, competencies, criteria, published] = await Promise.all([
       curriculumPromise,
       studentRows("kg_comments", "id,student_id,half,standard_no,body", ids, query => query.eq("year", year)),
       loadKgGrowthData(year, ids),
-      curriculumPromise.then(data => loadResults(data, ids))
+      curriculumPromise.then(data => loadResults(data, ids)),
+      sb.from("core_competencies").select("id,name").order("seq").then(rows),
+      sb.from("competency_interpretation_levels").select("label,min_score,max_score").eq("year", year).order("seq").then(rows),
+      fetchAllRowsByIds(batch => sb.from("competency_published")
+        .select("student_id,term,competency_id,score,level,complete,published_at")
+        .eq("year", year).in("term", competencyTerms).in("student_id", batch), ids,
+        ["student_id", "term", "competency_id"], 100).then(rows)
     ]);
     const scores = await scoresFor(results.collections, ids);
     const commentsByStudent = groupBy(comments, row => row.student_id);
     const measurementsByStudent = groupBy(growth.measurements, row => row.student_id);
+    const publishedByStudent = groupBy(published, row => row.student_id);
     const term2Start = yearOptions.get(year).term2_start_date;
     const canChoose = Boolean(curriculum.subject && (access.isHead || curriculum.subject.owner_id === session.user.id));
-    const model = { ...curriculum, year, room, term2Start, canChoose, kids:[] };
+    const model = { ...curriculum, year, room, term2Start, canChoose, competencies, criteria, kids:[] };
     model.kids = roster.map(student => {
       const termResults = new Map();
       for (const half of halves) {
@@ -488,6 +510,7 @@ if (session) {
       ]));
       return {
         student, selected:true, termResults, choices, notes, messages:new Map(), writing:new Set(),
+        publishedByTerm:groupBy(publishedByStudent.get(student.id) || [], row => row.term),
         profile:growth.profiles.get(student.id), measurements:measurementsByStudent.get(student.id) || []
       };
     });
@@ -519,6 +542,12 @@ if (session) {
       const count = [...kid.notes].filter(([key, body]) => key.startsWith(half + ":") && body).length;
       if (count < 13) issues.push([`ความเห็นครู${label}ยังไม่ครบ (${count}/13)`,
         link("kg-notes.html", { year:current.year, room, half, tab:"comments", student }), "ไปเขียน"]);
+    }
+    for (const term of competencyTerms) {
+      if (kid.publishedByTerm.has(term)) continue;
+      const href = link("summary.html", { year:current.year, grade:current.room.grade_level,
+        room:current.room.classroom, term }) + "#competency";
+      issues.push([`ผลสมรรถนะภาค ${term} ยังไม่ได้บันทึกให้ผู้ปกครอง`, href, "ไปที่สมรรถนะรายนักเรียน"]);
     }
     const missingProfile = [!kid.profile?.birth_date && "วันเกิด", !kid.profile?.gender && "เพศ"].filter(Boolean);
     if (missingProfile.length) issues.push([`ไม่มี${missingProfile.join("และ")}ในประวัติ`,
@@ -982,8 +1011,46 @@ if (session) {
       <div class="signatures">${signature("ครูประจำชั้น", signers.homeroomName)}</div>`);
   }
 
+  function paperStudent(model, kid) {
+    return `<p class="paper-subject">${esc(kid.student.name)} · ห้อง ${esc(roomName(model.room))} · ปีการศึกษา ${esc(model.year)}</p>`;
+  }
+
+  function competencyPage(number, model, kid) {
+    const results = model.competencies.map(competency =>
+      `<tr><th scope="row">${esc(competency.name)}</th>${competencyTerms.map(term => {
+        const result = kid.publishedByTerm.get(term)?.find(row => row.competency_id === competency.id);
+        if (!result?.complete) return `<td colspan="2" class="center competency-status">${result
+          ? "ยังสรุปไม่ได้" : "ยังไม่บันทึกผล"}</td>`;
+        const score = result.score == null ? "" : Number(result.score).toFixed(1);
+        return `<td class="center competency-score">${score}</td><td class="center competency-level">${esc(result.level)}</td>`;
+      }).join("")}</tr>`).join("");
+
+    const criteria = [];
+    for (let i = 0; i < model.criteria.length; i += 2) {
+      const pair = model.criteria.slice(i, i + 2);
+      criteria.push(`<tr>${cells(pair.flatMap(row => [`${esc(row.min_score)}–${esc(row.max_score)}`, esc(row.label)]))}
+        ${pair.length === 1 ? '<td colspan="2"></td>' : ""}</tr>`);
+    }
+    const timestamps = [...kid.publishedByTerm.values()].flat().map(row => Date.parse(row.published_at)).filter(Number.isFinite);
+    const latest = timestamps.length ? ` · บันทึกผลล่าสุด ${publicationDate.format(Math.max(...timestamps))}` : "";
+    return sheet(number, paperStudent(model, kid) + heading("ผลการประเมินสมรรถนะหลัก") +
+      `<table class="competency-results">
+      <colgroup><col></colgroup>
+      <colgroup><col class="score"><col class="level"></colgroup>
+      <colgroup><col class="score"><col class="level"></colgroup>
+      <thead><tr><th rowspan="2" scope="col">สมรรถนะหลัก</th>
+        <th colspan="2" scope="colgroup">ภาคเรียนที่ 1 (กลางปี)</th>
+        <th colspan="2" scope="colgroup">ภาคเรียนที่ 2 (ปลายปี)</th></tr>
+        <tr><th scope="col">คะแนน</th><th scope="col">ระดับ</th><th scope="col">คะแนน</th><th scope="col">ระดับ</th></tr>
+      </thead><tbody>${results}</tbody></table>
+      <h3>เกณฑ์การแปลผล (ปีการศึกษา ${esc(model.year)})</h3>
+      ${criteria.length ? `<table class="competency-criteria"><tbody>${criteria.join("")}</tbody></table>`
+        : '<p class="competency-status">ยังไม่ได้ตั้งเกณฑ์การแปลผลของปีนี้</p>'}
+      <p class="competency-source">คะแนนรวมจากการจัดประสบการณ์ กิจกรรมเสริม และกิจวัตรประจำวัน · ปลายปี = เฉลี่ยกลางปีกับครึ่งหลัง${latest}</p>`, "competency-sheet");
+  }
+
   function summaryPage(number, model, kid, signers) {
-    return sheet(number, `<p class="paper-subject">${esc(kid.student.name)} · ห้อง ${esc(roomName(model.room))} · ปีการศึกษา ${esc(model.year)}</p>
+    return sheet(number, paperStudent(model, kid) + `
       ${[1, 2].map(term => heading("ความเห็นของผู้ปกครอง ภาคเรียนที่ " + term) + lines(2) +
         '<div class="signature parent">ลงชื่อ ' + fill("") + ' ผู้ปกครอง</div>').join("")}
       ${heading("สรุปผลการพัฒนาเด็ก")}
@@ -1004,7 +1071,8 @@ if (session) {
   function renderBook(model, kid, signers, data, summaryOnly, index) {
     const firstAssessment = 4;
     const firstComment = firstAssessment + model.domains.length;
-    const summary = summaryPage(firstComment + halves.length, model, kid, signers);
+    const competencyNumber = firstComment + halves.length;
+    const summary = competencyPage(competencyNumber, model, kid) + summaryPage(competencyNumber + 1, model, kid, signers);
     if (summaryOnly) return `<article class="student-book">${summary}</article>`;
     const id = kid.student.id;
     return `<article class="student-book" data-book-index="${index}">
