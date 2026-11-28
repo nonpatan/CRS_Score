@@ -1825,7 +1825,7 @@ export async function loadLessonLogs({ createdBy, year, term, subjectId, from, t
   const pageSize = 200;
   for (let offset = 0; ; offset += pageSize) {
     let query = sb.from("lesson_logs")
-      .select("*,subject:subjects!inner(id,name,code,grade_level,year,term),lesson_log_sessions(attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status)))");
+      .select("*,subject:subjects!inner(id,name,code,grade_level,year,term,level,owner_id),plan:lesson_plans!lesson_logs_plan_id_fkey(seq),lesson_log_sessions(attendance_sessions(id,subject_id,session_date,periods_covered,attendance_records(status)))");
     if (createdBy !== "all") query = query.eq("created_by", createdBy);
     if (year) query = query.eq("subject.year", year);
     if (term) query = query.eq("subject.term", term);
@@ -1845,9 +1845,13 @@ export async function loadLessonLogs({ createdBy, year, term, subjectId, from, t
         .sort((a, b) => String(a.session_date).localeCompare(String(b.session_date)))
     };
   });
-  const matchingPlans = new Set(logs.filter(log => (!from && !to) || log.sessions.some(row =>
-    (!from || row.session_date >= from) && (!to || row.session_date <= to)
-  )).map(log => log.continues_log_id || log.id));
+  const inRange = date => (!from || date >= from) && (!to || date <= to);
+  const matchingPlans = new Set(logs.filter(log => {
+    if (!from && !to) return true;
+    // อนุบาลใช้วันเขียนบันทึกตามเวลาไทย เพราะไม่มีวันที่เช็คชื่อ
+    if (log.subject?.level === "อนุบาล") return log.created_at && inRange(new Date(log.created_at).toLocaleDateString("en-CA", { timeZone:"Asia/Bangkok" }));
+    return log.sessions.some(row => inRange(row.session_date));
+  }).map(log => log.continues_log_id || log.id));
   return logs.filter(log => matchingPlans.has(log.continues_log_id || log.id)).sort((a, b) =>
     String(summarizeLessonLogSessions(b.sessions).lastDate || "")
       .localeCompare(String(summarizeLessonLogSessions(a.sessions).lastDate || ""))
@@ -1912,7 +1916,7 @@ export async function loadLessonLogPlan(rootId) {
 }
 
 // นับคาบของเจ้าของวิชา ไม่ขึ้นกับว่าใครเป็นคนเช็คชื่อหรือเขียนบันทึก
-export async function loadLessonLogCoverage({ userId, year, term, subjectId, from, to } = {}) {
+export async function loadLessonLogCoverage({ userId, year, term, subjectId, from, to, includeKindergarten = false } = {}) {
   if (typeof userId !== "string" || !userId.trim()) throw new Error("ไม่พบเจ้าของคาบที่ต้องตรวจสอบ");
   if (from && to && from > to) throw new Error("วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด");
   const sessionResult = await fetchAllRows(() => {
@@ -1956,7 +1960,7 @@ export async function loadLessonLogCoverage({ userId, year, term, subjectId, fro
       }
     }
   }
-  return {
+  const result = {
     total:summarizeLessonLogSessions(sessions).totalPeriods,
     written:summarizeLessonLogSessions(written).totalPeriods,
     missing:missing.map(row => ({
@@ -1968,6 +1972,27 @@ export async function loadLessonLogCoverage({ userId, year, term, subjectId, fro
     // ให้หน้าเติมปี/วิชาได้แม้ยังไม่มีบันทึกสักใบ โดยไม่ต้องโหลดข้อมูลครูอื่น
     subjects:[...new Map(sessions.filter(row => row.subject).map(row => [row.subject.id, row.subject])).values()]
   };
+  if (includeKindergarten && !term) {
+    const kg = await fetchAllRows(() => {
+      let query = sb.from("lesson_plans")
+        .select("id,seq,title,planned_periods,submitted_at,subject:subjects!inner(id,name,grade_level,year,term,level),lesson_logs!lesson_logs_plan_id_fkey(id)")
+        .eq("subject.owner_id",userId).eq("subject.level","อนุบาล");
+      if (year) query = query.eq("subject.year",year);
+      if (subjectId) query = query.eq("subject_id",subjectId);
+      // ตัวกรองของแผนใช้วันที่ส่งตามเวลาไทย
+      if (from) query = query.gte("submitted_at",from+"T00:00:00+07:00");
+      if (to) query = query.lt("submitted_at",addDaysStr(to,1)+"T00:00:00+07:00");
+      return query;
+    });
+    if (kg.error) throw new Error("ตรวจสอบบันทึกรายสัปดาห์ไม่สำเร็จ: " + kg.error.message);
+    const weekly = kg.data || [];
+    result.missingPlans = weekly.filter(row => !row.lesson_logs?.length)
+      .sort((a,b) => a.seq - b.seq || a.id.localeCompare(b.id));
+    const subjects = new Map(result.subjects.map(row => [row.id,row]));
+    for (const row of weekly) if (row.subject) subjects.set(row.subject.id,row.subject);
+    result.subjects = [...subjects.values()];
+  }
+  return result;
 }
 
 export async function loadLessonLogBySession(sessionId) {
@@ -2078,6 +2103,25 @@ export async function saveLessonLog({ logId = null, subjectId, sessionIds, field
     }
   }
   return { ...savedLog, sessionIds:selectedIds };
+}
+
+// บันทึกอนุบาลผูกแผนรายสัปดาห์โดยตรงและไม่มีคาบเช็คชื่อ
+export async function saveKgLessonLog({ logId = null, plan, fields = {} } = {}) {
+  if (!plan?.id || !plan.subject_id) throw new Error("ไม่พบแผนรายสัปดาห์ของบันทึก");
+  const text = key => String(fields[key] ?? "").trim();
+  const payload = {
+    learning_outcome:text("learning_outcome"), problem:text("problem"),
+    improvement:text("improvement") || null, assigned_work:text("assigned_work") || null
+  };
+  if (!payload.learning_outcome) throw new Error("กรอกผลการจัดประสบการณ์ก่อนบันทึก");
+  if (!payload.problem) throw new Error("กรอกปัญหา/อุปสรรค ถ้าไม่มีให้พิมพ์ “ไม่มี”");
+  const table = sb.from("lesson_logs");
+  // เก็บชื่อและจำนวนวัน ณ วันที่เขียนใบแรก
+  const query = logId ? table.update(payload).eq("id",logId).eq("plan_id",plan.id).eq("subject_id",plan.subject_id)
+    : table.insert({...payload,subject_id:plan.subject_id,plan_id:plan.id,plan_name:plan.title,planned_periods:plan.planned_periods});
+  const {data,error} = await query.select("*").single();
+  if (error) throw new Error("บันทึกหลังการจัดประสบการณ์ไม่สำเร็จ: " + error.message);
+  return data;
 }
 
 // แผนที่ส่งแล้วของวิชาในบันทึก — สิทธิ์อ่านคุมด้วย RLS เดิม

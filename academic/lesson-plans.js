@@ -99,6 +99,17 @@ export function subjectsForPlanTerm(subjects, { year, term }) {
 export const PLAN_COLUMNS = 'id,subject_id,seq,title,planned_periods,plan_url,assessment_url,plan_status,plan_stars,plan_comment,plan_reviewed_at,assessment_status,assessment_stars,assessment_comment,assessment_reviewed_at,teacher_seen_at,submitted_at,created_by,created_by_name,teacher_note';
 export const SUBJECT_COLUMNS = 'id,name,code,level,grade_level,term,year,subject_type,owner_id';
 
+export const KG_LOG_FIELDS = [
+  ['learning_outcome','1. ผลการจัดประสบการณ์'],
+  ['problem','2. ปัญหา/อุปสรรค'],
+  ['improvement','3. แนวทางปรับปรุง/ช่วยเหลือ'],
+  ['assigned_work','4. งานที่มอบหมาย/ชิ้นงาน']
+];
+
+export function kgLessonPlanUrl(year, planId) {
+  return 'lesson-plans.html?'+new URLSearchParams({year,plan:planId});
+}
+
 // คืนข้อมูลแถวข้อความล้วนให้การ์ดงานของฉันใช้ renderer/escape เดิม
 export function lessonPlanAlertRows(data) {
   if (!data || typeof data !== 'object') return [];

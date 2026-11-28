@@ -43,6 +43,7 @@ textarea { min-height:90px; resize:vertical; } .row2,.docs { display:grid; grid-
 .amend-actions .primary { width:auto; }
 @media(max-width:1199px) { .rv-parts { grid-template-columns:1fr; } }
 .rv-part { border:1px solid var(--line); border-radius:10px; padding:12px; margin:12px 0; } legend { font-weight:600; padding:0 4px; }
+.rv-parts.kg-review { grid-template-columns:1fr; }
 .star-input { border:0; padding:0; margin:8px 0 0; } .star-rating { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; } .star-options { display:flex; gap:4px; } .star-value { color:var(--muted); font-size:14px; } .star-option { position:relative; } .star-option input { position:absolute; width:1px; height:1px; opacity:0; } .star-option label { display:grid; place-items:center; width:44px; height:44px; font-size:28px; cursor:pointer; border:0; border-radius:8px; color:var(--muted); } .star-option label.on { color:var(--amber); } .star-option label:active { background:var(--amber-soft); } .star-option input:focus-visible + label { outline:3px solid var(--teal); outline-offset:2px; }
 .verdict { padding:0; margin:12px 0; border:0; } .verdict label { display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:6px 10px; margin:4px 8px 4px 0; border:1px solid var(--line); border-radius:8px; cursor:pointer; } .verdict input { width:20px; height:20px; } summary { cursor:pointer; min-height:44px; padding:8px 0; } .hist { margin:12px 0; }
 .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:16px 0; } .kpi { border:1px solid var(--line); border-radius:12px; background:var(--white); padding:12px; } .kpi b { display:block; font-size:24px; } .kpi span { font-size:13px; color:var(--muted); }
@@ -50,7 +51,9 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 @media(max-width:899px) { .review-grid { grid-template-columns:1fr; } }
 @media(max-width:639px) { .cov caption { display:block; width:100%; } .row2,.docs { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } .cov thead { display:none; } table.cov,.cov tbody,.cov tr,.cov td,.cov th { display:block; width:100%!important; } .cov td { border:0; padding:3px 0; } .cov tr:not(.grp) { border-bottom:1px solid var(--line); padding:12px 0; } .cov td.num { text-align:left; } .cov td[data-l]::before { content:attr(data-l) " "; color:var(--muted); } }
 </style>
-<link rel="stylesheet" href="../app-shell.css?v=20261003-1"></head><body><div class="wrap"><header>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+<script type="importmap">{"imports":{"../supabase-client.js?v=20261128-4":"../supabase-client.js?k4=20261128-5"}}</script>
+</head><body><div class="wrap"><header>
 <h1>ตรวจแผนการสอน</h1><p class="hint">ตรวจแผนและเอกสารวัดผลที่ครูส่ง ให้ดาวและข้อเสนอแนะ และดูว่าวิชาไหนยังไม่มีแผน</p>
 <div class="nav"><a href="index.html">ภาพรวมวิชาการ</a> · <a href="lesson-plans.html">แผนการสอนของฉัน</a> · <a href="lesson-plan-review.html">ตรวจแผนการสอน</a> · <a href="#" id="btn-signout">ออกจากระบบ</a></div>
 <script src="../app-shell.js?v=20261128-4"></script></header><main class="academic-content">
@@ -69,8 +72,8 @@ table.cov { width:100%; border-collapse:collapse; table-layout:fixed; font-size:
 <div id="coverage-results" hidden><div id="kpis" class="kpis"></div><div class="card"><p class="hint">จำนวนเป้ารวมไม่นับวิชาที่ยังไม่ตั้งจำนวนแผน</p><table class="cov"><caption class="section">ความครบของแผนการสอน แยกตามชั้น</caption><thead><tr><th scope="col">วิชา</th><th scope="col">ครู</th><th scope="col">สถานะ</th><th scope="col" class="num">ส่ง/เป้า</th><th scope="col" class="num">ผ่าน</th><th scope="col" class="num">รอตรวจซ้ำ</th><th scope="col" class="num">ขอแก้</th><th scope="col" class="num">สุ่มตรวจ</th></tr></thead><tbody id="coverage-body"></tbody></table><p id="coverage-empty" class="empty" hidden>ไม่มีวิชาตรงกับตัวกรองนี้</p></div></div></section></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div></main></div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, GRADE_ORDER, fetchAllRows } from '../supabase-client.js?v=20261128-4';
-import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, samplingSummary, queueLabel, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS, linkifyText } from './lesson-plans.js?v=9';
+import { sb, requireAuth, signOut, getProfile, getAcademicYears, getActiveYear, setActiveYear, academicYearOf, academicTermOf, GRADE_ORDER, fetchAllRows } from '../supabase-client.js?k4=20261128-5';
+import { planOverallStatus, isIntegratedParent, summarizeSubjectPlans, samplingSummary, queueLabel, subjectsForPlanTerm, PLAN_COLUMNS, SUBJECT_COLUMNS, linkifyText } from './lesson-plans.js?v=10';
 const session = await requireAuth();
 if (!session) {} else {
   const $ = id => document.getElementById(id);
@@ -91,17 +94,25 @@ if (!session) {} else {
   const needsReview = status => ['ส่งแล้ว','รอตรวจ'].includes(status);
   const isReviewed = status => ['ผ่าน','ขอให้แก้'].includes(status);
   const reviewDocs = [['plan','แผน'],['assessment','วัดผล']];
+  const isKg = subject => subject?.level === 'อนุบาล';
+  const subjectFor = plan => coverage?.subjects.find(row => row.id === plan.subject_id);
+  const docsFor = plan => isKg(subjectFor(plan)) ? reviewDocs.slice(0,1) : reviewDocs;
+  const weekLabel = (plan,subject) => (isKg(subject) ? 'สัปดาห์ที่ ' : 'แผนที่ ')+plan.seq;
+  const kgDocumentTitle = 'แผนการจัดประสบการณ์ (รวมการวัดผล)';
+  const kgAssessmentText = '— (อยู่ในแผน)';
   // ประวัติเรียงจากผลล่าสุดด้วยลำดับเดียวกับ RPC
   const canAmend = (rows,doc,admin,userId) => admin || rows.find(row => row.doc === doc)?.reviewed_by === userId;
   const hasReviewed = plan => !!(plan.plan_reviewed_at || plan.assessment_reviewed_at);
   const subjectPlans = id => coverage.plans.filter(plan => plan.subject_id === id);
   const sampleFor = id => samplingSummary({plans:subjectPlans(id),sampleCount:coverage.sampling.get(id),defaultCount:coverage.defaultCount});
-  const recheckQueue = () => coverage ? coverage.plans.filter(plan => [plan.plan_status,plan.assessment_status].includes('รอตรวจ')).sort((a,b) => String(a.submitted_at).localeCompare(String(b.submitted_at)) || a.id.localeCompare(b.id)) : [];
+  const recheckQueue = () => coverage ? coverage.plans
+    .filter(plan => plan.plan_status === 'รอตรวจ' || (plan.assessment_status === 'รอตรวจ' && !isKg(subjectFor(plan))))
+    .sort((a,b) => String(a.submitted_at).localeCompare(String(b.submitted_at)) || a.id.localeCompare(b.id)) : [];
   const subjectRows = () => coverage ? subjectsForPlanTerm(coverage.subjects,{year,term}).map(subject => ({subject,summary:summarizeSubjectPlans({target:coverage.targets.find(row => row.subject_id === subject.id),plans:subjectPlans(subject.id)}),sampling:sampleFor(subject.id)})) : [];
   function renderQueue() {
     const queue = recheckQueue();
     $('queue-count').textContent = 'ตรวจซ้ำ '+queue.length+' แผน';
-    $('queue').innerHTML = queue.map(plan => { const subject = coverage.subjects.find(row => row.id === plan.subject_id); return `<li><button type="button" data-plan="${esc(plan.id)}" aria-current="${plan.id === selectedId}"><strong>${esc(subject?.name || 'ไม่พบวิชา')} · แผนที่ ${plan.seq}</strong><span class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(subject?.grade_level || '')} · ${esc(queueLabel(plan))}</span><span class="meta">ส่ง ${esc(date(plan.submitted_at))}</span></button></li>`; }).join('');
+    $('queue').innerHTML = queue.map(plan => { const subject = subjectFor(plan); return `<li><button type="button" data-plan="${esc(plan.id)}" aria-current="${plan.id === selectedId}"><strong>${esc(subject?.name || 'ไม่พบวิชา')} · ${weekLabel(plan,subject)}</strong><span class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(subject?.grade_level || '')} · ${isKg(subject) ? 'ส่งแก้: แผน' : esc(queueLabel(plan))}</span><span class="meta">ส่ง ${esc(date(plan.submitted_at))}</span></button></li>`; }).join('');
     $('queue-empty').hidden = queue.length > 0;
     const rows = subjectRows().filter(row => row.summary.submitted > 0 && ($('show-all').checked || !row.sampling.done));
     $('sample-count').textContent = rows.length+' วิชา';
@@ -118,22 +129,24 @@ if (!session) {} else {
   function subjectPlanAction(plan) {
     if (!canReview(plan)) return isReviewer ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : '';
     if (!hasReviewed(plan)) return `<button type="button" class="ghost" data-review="${esc(plan.id)}">เลือกตรวจแผนนี้</button>`;
-    if (reviewDocs.some(([key]) => isReviewed(plan[key+'_status']))) return `<button type="button" class="ghost" data-reviewed-plan="${esc(plan.id)}">ดูผลตรวจ</button>`;
+    if (docsFor(plan).some(([key]) => isReviewed(plan[key+'_status']))) return `<button type="button" class="ghost" data-reviewed-plan="${esc(plan.id)}">ดูผลตรวจ</button>`;
     return '';
   }
   function renderSubject(moveFocus = false) {
     const subject = coverage?.subjects.find(row => row.id === selectedSubjectId);
     if (!subject) { $('review-detail').innerHTML = '<p class="empty">เลือกวิชาเพื่อดูแผน หรือเลือกแผนรอตรวจซ้ำ</p>'; return; }
+    const kg = isKg(subject);
+    const documents = kg ? [['plan',kgDocumentTitle]] : [['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']];
     const plans = [...subjectPlans(subject.id)].sort((a,b) => a.seq-b.seq), sample = sampleFor(subject.id), count = coverage.sampling.get(subject.id) ?? coverage.defaultCount;
     $('review-detail').innerHTML = `<h2 id="subject-heading" tabindex="-1">${esc(subject.name)}</h2><p class="meta">${subjectMeta(subject)} · ${esc(coverage.profiles.get(subject.owner_id) || 'ไม่ระบุชื่อครู')}</p><p>สุ่มแล้ว ${sample.sampled}/${sample.target} · ส่งแล้ว ${plans.length} แผน</p>
       ${canSetSampling ? samplingForm('subject',count) : `<p class="hint">วิชานี้สุ่ม ${count} แผน${coverage.sampling.has(subject.id) ? ' (กำหนดเฉพาะวิชานี้)' : ' (ใช้ค่ากลาง)'}</p>`}
-      <ul class="sample-plans">${plans.map(plan => `<li><h3>แผนที่ ${plan.seq} · ${esc(plan.title)}${plan.teacher_note ? ' <span class="st note">มีหมายเหตุ</span>' : ''}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} คาบ</p><div class="docs">${[['plan','แผนการสอน'],['assessment','การวัดและประเมินผล']].map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${linkifyText(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
+      <ul class="sample-plans">${plans.map(plan => `<li><h3>${weekLabel(plan,subject)} · ${esc(plan.title)}${plan.teacher_note ? ' <span class="st note">มีหมายเหตุ</span>' : ''}</h3><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${esc(plan.planned_periods)} ${kg ? 'วัน' : 'คาบ'}</p><div class="docs">${documents.map(([key,label]) => `<section class="doc"><h3>${label}</h3>${docLink(plan[key+'_url'])}<p>${badge(plan[key+'_status'])} ${stars(plan[key+'_stars'])}</p>${plan[key+'_comment'] ? `<p class="comment">${linkifyText(plan[key+'_comment'])}</p>` : ''}</section>`).join('')}${kg ? `<p class="meta">วัดผล ${kgAssessmentText}</p>` : ''}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
       ${subjectPlanAction(plan)}</li>`).join('')}</ul>`;
     if (moveFocus) { $('subject-heading').focus(); if (matchMedia('(max-width:899px)').matches) $('subject-heading').scrollIntoView({block:'start'}); }
   }
-  function reviewPart(plan,key,amending = false) {
+  function reviewPart(plan,key,amending = false,kg = false) {
     const status = plan[key+'_status'], waiting = needsReview(status), editable = waiting && canReview(plan);
-    const label = key === 'plan' ? 'แผนการสอน' : 'การวัดและประเมินผล';
+    const label = key === 'plan' ? (kg ? kgDocumentTitle : 'แผนการสอน') : 'การวัดและประเมินผล';
     const initialStars = amending ? Math.min(Number(plan[key+'_stars']),MAX_STARS) : 0;
     return `<fieldset class="rv-part" data-part="${key}"><legend>${label}</legend>${docLink(plan[key+'_url'])}
       ${editable || amending ? `${amending ? '<p class="hint">กำลังแก้ผลตรวจ · ครูจะได้รับแจ้งเตือนอีกครั้ง</p>' : plan[key+'_reviewed_at'] ? `<p class="hint previous-review">ผลตรวจครั้งก่อน: ${stars(plan[key+'_stars'])} ${linkifyText(plan[key+'_comment'] || 'ไม่มีข้อเสนอแนะ')}</p>` : ''}
@@ -186,11 +199,11 @@ if (!session) {} else {
   function renderSelected(moveFocus = false) {
     const plan = coverage?.plans.find(row => row.id === selectedId);
     if (!plan) { renderSubject(moveFocus); return; }
-    const subject = coverage.subjects.find(row => row.id === plan.subject_id), own = plan.created_by === session.user.id && !isAdmin;
-    const hasPending = reviewDocs.some(([key]) => needsReview(plan[key+'_status']));
-    $('review-detail').innerHTML = `<button id="back-subject" type="button">ดูแผนของวิชานี้</button><h2 id="review-heading" tabindex="-1">${esc(subject?.name || 'ไม่พบวิชา')} · แผนที่ ${plan.seq} · ${esc(plan.title)}</h2><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${subjectMeta(subject)} · ${esc(plan.planned_periods)} คาบ</p>
+    const subject = subjectFor(plan), own = plan.created_by === session.user.id && !isAdmin;
+    const docs = docsFor(plan), hasPending = docs.some(([key]) => needsReview(plan[key+'_status']));
+    $('review-detail').innerHTML = `<button id="back-subject" type="button">ดูแผนของวิชานี้</button><h2 id="review-heading" tabindex="-1">${esc(subject?.name || 'ไม่พบวิชา')} · ${weekLabel(plan,subject)} · ${esc(plan.title)}</h2><p class="meta">${esc(plan.created_by_name || 'ไม่ระบุชื่อครู')} · ${subjectMeta(subject)} · ${esc(plan.planned_periods)} ${isKg(subject) ? 'วัน' : 'คาบ'}</p>
       ${own ? '<p class="readonly">แผนของคุณเอง ให้ผู้ดูแลระบบตรวจแทน</p>' : ''}
-      ${canReview(plan) ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts">${reviewDocs.map(([key]) => reviewPart(plan,key)).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
+      ${canReview(plan) ? '<form id="review-form" novalidate>' : '<div class="review-readonly">'}<div class="rv-parts${isKg(subject) ? ' kg-review' : ''}">${docs.map(([key]) => reviewPart(plan,key,false,isKg(subject))).join('')}</div>${plan.teacher_note ? `<div class="teacher-note"><strong><span aria-hidden="true">📝 </span>หมายเหตุจากครู</strong>${linkifyText(plan.teacher_note)}</div>` : ''}
       ${canReview(plan) ? `${hasPending ? '<button id="save-review" class="primary" type="submit">บันทึกผลตรวจ</button>' : ''}</form>` : '</div>'}
       <details class="hist" id="history" data-plan="${esc(plan.id)}"><summary>ประวัติการตรวจแผนนี้</summary><div id="history-content" class="hint">เปิดเพื่อดูประวัติการตรวจ</div></details>`;
     const form = $('review-form');
@@ -245,12 +258,13 @@ if (!session) {} else {
   }
   function closeAmend(plan,form,key) {
     delete form.dataset.amending;
-    form.querySelector(`[data-part="${key}"]`).outerHTML = reviewPart(plan,key);
+    form.querySelector(`[data-part="${key}"]`).outerHTML = reviewPart(plan,key,false,isKg(subjectFor(plan)));
     const button = form.querySelector(`[data-amend="${key}"]`);
     button.hidden = false; button.focus();
   }
   async function saveAmend(plan,form,key,button) {
-    const doc = reviewDocs.find(([part]) => part === key)[1];
+    const docs = docsFor(plan), doc = docs.find(([part]) => part === key)?.[1];
+    if (!doc) return;
     const {review,firstInvalid} = readReview(form,key,doc);
     if (review.stars === Math.min(Number(plan[key+'_stars']),MAX_STARS) && review.verdict === plan[key+'_status'] && review.comment === (plan[key+'_comment'] ?? '').trim()) {
       closeAmend(plan,form,key); toast('ไม่มีอะไรเปลี่ยน'); return;
@@ -260,8 +274,8 @@ if (!session) {} else {
     try {
       const updated = check(await sb.rpc('amend_lesson_plan_review',{p_plan_id:plan.id,p_doc:doc,p_stars:review.stars,p_verdict:review.verdict,p_comment:review.comment}));
       // เก็บร่างตรวจอีกเอกสารไว้ถ้าระหว่างบันทึกครูยังไม่ได้เปลี่ยนไฟล์นั้น
-      const otherKey = reviewDocs.find(([part]) => part !== key)[0];
-      const keepDraft = needsReview(plan[otherKey+'_status']) && ['status','url','reviewed_at'].every(field => plan[otherKey+'_'+field] === updated[otherKey+'_'+field]);
+      const otherKey = docs.find(([part]) => part !== key)?.[0];
+      const keepDraft = otherKey && needsReview(plan[otherKey+'_status']) && ['status','url','reviewed_at'].every(field => plan[otherKey+'_'+field] === updated[otherKey+'_'+field]);
       const draftSelector = `[data-part="${otherKey}"]`, draft = keepDraft ? form.querySelector(draftSelector) : null;
       const historyOpen = $('history').open;
       coverage.plans = coverage.plans.map(row => row.id === plan.id ? {...row,...updated} : row);
@@ -282,7 +296,7 @@ if (!session) {} else {
       if (button.hidden || form.dataset.amending) return;
       const key = button.dataset.amend;
       form.dataset.amending = key;
-      button.closest('.rv-part').outerHTML = reviewPart(plan,key,true);
+      button.closest('.rv-part').outerHTML = reviewPart(plan,key,true,isKg(subjectFor(plan)));
       const part = form.querySelector(`[data-part="${key}"]`);
       $(key+'-comment').value = plan[key+'_comment'] ?? '';
       bindStarOptions(part);
@@ -294,18 +308,19 @@ if (!session) {} else {
     if (event.target.id !== 'review-form') return; event.preventDefault(); if (busy) return;
     const form = event.target, plan = coverage?.plans.find(row => row.id === selectedId); if (!plan || !isReviewer || (!isAdmin && plan.created_by === session.user.id)) return;
     const reviews = []; let firstInvalid = null;
-    for (const [key,doc] of reviewDocs) {
+    const docs = docsFor(plan);
+    for (const [key,doc] of docs) {
       if (!needsReview(plan[key+'_status'])) continue;
       const result = readReview(form,key,doc);
       firstInvalid ??= result.firstInvalid;
       reviews.push(result.review);
     }
     if (firstInvalid) { firstInvalid.focus(); return; }
-    if (!reviews.length || (!hasReviewed(plan) && reviews.length !== 2)) return;
+    if (!reviews.length || (!hasReviewed(plan) && reviews.length !== docs.length)) return;
     const oldQueue = recheckQueue(), index = oldQueue.findIndex(row => row.id === plan.id);
     setBusy(true); $('save-review').textContent = 'กำลังบันทึกผลตรวจ…';
     try {
-      // บันทึกสองเอกสารแบบ atomic ใน RPC ครั้งเดียว
+      // ส่งผลตรวจเอกสารที่ต้องตรวจทั้งหมดใน RPC ครั้งเดียว
       const updated = check(await sb.rpc('review_lesson_plan',{p_plan_id:plan.id,p_reviews:reviews}));
       coverage.plans = coverage.plans.map(row => row.id === plan.id ? {...row,...updated} : row);
       histories.delete(plan.id); selectedId = index >= 0 ? recheckQueue()[index]?.id || recheckQueue()[0]?.id || '' : '';
@@ -381,7 +396,7 @@ if (!session) {} else {
       let header = ''; if (group !== lastGroup) { header = `<tr class="grp"><th scope="rowgroup" colspan="8">${esc(group)}</th></tr>`; lastGroup = group; }
       const member = coverage.members.find(row => row.member_subject_id === subject.id), parent = coverage.allSubjects.find(row => row.id === member?.integrated_subject_id);
       const status = {none:['none','✕ ยังไม่มีแผน'],partial:['fix','◐ ส่งไม่ครบ'],complete:['ok','✓ ครบ']}[summary.state];
-      return header+`<tr><td data-l="วิชา"><strong>${esc(subject.name)}</strong> ${esc(subject.code || '')}${parent ? `<div class="meta">วิชาย่อยของ ${esc(parent.name)}</div>` : ''}</td><td data-l="ครู">${subject.owner_id ? esc(coverage.profiles.get(subject.owner_id) || 'ไม่พบชื่อครู') : '<span class="st none">ไม่มีครูเจ้าของวิชา</span>'}</td><td data-l="สถานะ"><span class="st ${status[0]}">${status[1]}</span></td><td class="num" data-l="ส่ง/เป้า">${summary.submitted}/${summary.target || '—'}</td><td class="num" data-l="ผ่าน">${summary.passed}</td><td class="num" data-l="รอตรวจซ้ำ">${summary.waiting}</td><td class="num" data-l="ขอแก้">${summary.fix}</td><td class="num" data-l="สุ่มตรวจ">${sampling.sampled}/${sampling.target}</td></tr>`;
+      return header+`<tr><td data-l="วิชา"><strong>${esc(subject.name)}</strong> ${esc(subject.code || '')}${parent ? `<div class="meta">วิชาย่อยของ ${esc(parent.name)}</div>` : ''}${isKg(subject) ? `<div class="meta">วัดผล ${kgAssessmentText}</div>` : ''}</td><td data-l="ครู">${subject.owner_id ? esc(coverage.profiles.get(subject.owner_id) || 'ไม่พบชื่อครู') : '<span class="st none">ไม่มีครูเจ้าของวิชา</span>'}</td><td data-l="สถานะ"><span class="st ${status[0]}">${status[1]}</span></td><td class="num" data-l="ส่ง/เป้า">${summary.submitted}/${summary.target || '—'}</td><td class="num" data-l="ผ่าน">${summary.passed}</td><td class="num" data-l="รอตรวจซ้ำ">${summary.waiting}</td><td class="num" data-l="ขอแก้">${summary.fix}</td><td class="num" data-l="สุ่มตรวจ">${sampling.sampled}/${sampling.target}</td></tr>`;
     }).join('');
     $('coverage-empty').hidden = filtered.length > 0;
   }

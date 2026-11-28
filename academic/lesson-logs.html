@@ -155,6 +155,8 @@
     a[href]::after { content: ""; }
   }
 </style>
+
+<script type="importmap">{"imports":{"../supabase-client.js?v=20261128-4":"../supabase-client.js?k4=20261128-5"}}</script>
 </head>
 <body>
 <div class="wrap">
@@ -190,7 +192,7 @@
     <section class="card no-print ll-digest">
       <div class="ll-digest-row">
         <div class="ll-stat"><b id="digest-logs">—</b><span>บันทึก</span></div>
-        <div class="ll-stat"><b id="digest-periods">—</b><span>คาบที่สอนจริง</span></div>
+        <div class="ll-stat" id="digest-periods-stat"><b id="digest-periods">—</b><span>คาบที่สอนจริง</span></div>
         <div class="ll-stat"><b id="digest-subjects">—</b><span>วิชา</span></div>
         <button type="button" id="print-all" class="primary no-print" disabled>พิมพ์ทั้งหมดที่ค้นเจอ (0 แผ่น)</button>
       </div>
@@ -209,7 +211,8 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, loadLessonLogCoverage, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?v=20261128-4";
+import { sb, requireAuth, signOut, getActiveYear, setActiveYear, distinctYears, loadLessonLogs, loadLessonLogCoverage, summarizeLessonLogForPrint, isProjectApprover, checkDepartment } from "../supabase-client.js?k4=20261128-5";
+import { KG_LOG_FIELDS, kgLessonPlanUrl } from "./lesson-plans.js?v=10";
 document.getElementById("btn-signout")?.addEventListener("click", e => { e.preventDefault(); signOut(); });
 const session = await requireAuth();
 if (!session) {
@@ -300,7 +303,7 @@ function logSubjectIds(rows) {
 function fillSubjects() {
   const old = el("subject").value;
   const available = subjects.filter(subject => (!el("year").value || subject.year === el("year").value) && (!el("term").value || subject.term === el("term").value));
-  const option = subject => `<option value="${escapeHtml(subject.id)}">${escapeHtml(subject.name)} · ${escapeHtml(subject.grade_level)} · ${escapeHtml(subject.year)} / ${escapeHtml(subject.term)}</option>`;
+  const option = subject => `<option value="${escapeHtml(subject.id)}">${escapeHtml(subject.name)} · ${escapeHtml(subject.grade_level)} · ${subject.level === "อนุบาล" ? "ทั้งปี "+escapeHtml(subject.year) : escapeHtml(subject.year)+" / "+escapeHtml(subject.term)}</option>`;
   const typed = available.length && available.every(subject => subjectInfo.get(subject.id)?.subject_type);
   el("subject").innerHTML = '<option value="">ทุกวิชา</option>' + (typed
     ? [["วิชาบูรณาการ", true], ["วิชาพื้นฐาน", false]].map(([label, integrated]) => {
@@ -345,6 +348,7 @@ function renderPlanRounds(log) {
   }).join("");
 }
 function renderDocument(log) {
+  if (log.subject?.level === "อนุบาล") return renderKgLogDocument(log);
   const summary = summarizeLessonLogForPrint(log), subject = log.subject || {};
   const evidence = log.sessions.map(row => `${dateText(row.session_date)} (${Number(row.periods_covered) || 0} คาบ)`).join(" · ");
   const memberIds = [...new Set(log.sessions.map(row => row.subject_id))];
@@ -368,9 +372,34 @@ function renderDocument(log) {
     <div class="signatures"><div>ลงชื่อ …………………………………<br>(ครูผู้สอน)</div><div>ลงชื่อ …………………………………<br>(ผู้นิเทศ)</div></div>
   </div></article>`;
 }
+function kgPlanTitle(log) {
+  const title = log.plan_name?.trim() || "ยังไม่ระบุแผน";
+  return log.plan?.seq ? `สัปดาห์ที่ ${log.plan.seq} · ${title}` : title;
+}
+function renderKgLogDocument(log) {
+  const subject = log.subject;
+  return `<article class="print-doc" data-log-id="${escapeHtml(log.id)}"><div class="print-content">
+    <div class="school-heading"><img class="school-logo" src="../logo.png" alt="ตราโรงเรียน"><div><div class="school-name">${escapeHtml(settings.get("receipt_school_name"))}</div><div class="school-address">${escapeHtml(settings.get("receipt_address"))}</div></div></div>
+    <h2 class="document-title">บันทึกหลังการจัดประสบการณ์</h2>
+    <div class="document-meta"><div>ชั้น: ${escapeHtml(subject.grade_level || "—")}</div><div>ปีการศึกษา ${escapeHtml(subject.year || "—")}</div><div>แผน: ${escapeHtml(kgPlanTitle(log))}</div><div>จำนวน ${escapeHtml(log.planned_periods ?? "—")} วัน</div><div>ครูประจำชั้น: ${escapeHtml(log.created_by_name || "—")}</div></div>
+    ${KG_LOG_FIELDS.map(([title,label]) => `<section class="lesson-section"><h3>${label}</h3><div class="lesson-text">${escapeHtml(log[title] || "—")}</div></section>`).join("")}
+    <div class="signatures"><div>ลงชื่อ …………………………………<br>(ครูประจำชั้น)</div></div>
+  </div></article>`;
+}
 function editLessonUrl(log) {
   const target = log.sessions.at(-1);
   return target ? "attendance.html?" + new URLSearchParams({ lesson_session:target.id }) : "attendance.html";
+}
+function editLogLink(log) {
+  if (log.rounds?.length > 1) return "";
+  const subject = log.subject;
+  const kg = subject?.level === "อนุบาล";
+  if (kg && (!log.plan_id || subject.owner_id !== session.user.id)) return "";
+  const href = kg ? kgLessonPlanUrl(subject.year,log.plan_id) : editLessonUrl(log);
+  return `<a class="ghost no-print" href="${escapeHtml(href)}">แก้ไข</a>`;
+}
+function renderKgLog(log) {
+  return `<article class="ll-log${log.id === selectedLogId ? " active" : ""}" data-log-id="${escapeHtml(log.id)}"><button type="button" class="ll-log-head" aria-expanded="false" aria-controls="ll-body-${escapeHtml(log.id)}"><span class="ll-date"><b>${escapeHtml(log.plan?.seq ?? "—")}</b><span>สัปดาห์</span></span><div><h3>${escapeHtml(kgPlanTitle(log))}</h3><div class="meta">จำนวน ${escapeHtml(log.planned_periods ?? "—")} วัน</div>${canViewTeachers && selectedCreatedBy() !== session.user.id ? `<div class="meta">ครูประจำชั้น: ${escapeHtml(log.created_by_name || "—")}</div>` : ""}</div></button><div class="ll-log-body" id="ll-body-${escapeHtml(log.id)}" hidden>${KG_LOG_FIELDS.map(([key,label]) => `<h4>${label}</h4><div class="ll-text">${escapeHtml(log[key] || "—")}</div>`).join("")}<div class="ll-actions">${editLogLink(log)}<button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button></div></div></article>`;
 }
 function renderMeter(log, summary, colors) {
   const parts = integratedParts(log);
@@ -393,13 +422,15 @@ function renderPaperPreview() {
     return;
   }
   const copy = renderDocument(log).replace(/class="print-doc" data-log-id="[^"]*"/, 'class="paper-preview-doc"').replace('alt="ตราโรงเรียน"', 'alt=""');
-  el("paper-preview").innerHTML = `<div class="ll-actions"><button type="button" class="primary no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button>${log.rounds?.length > 1 ? "" : `<a class="ghost no-print" href="${escapeHtml(editLessonUrl(log))}">แก้ไข</a>`}</div>${log.rounds?.length > 1 ? renderPlanRounds(log) : ""}<div class="ll-paper-frame">${copy}</div>`;
+  el("paper-preview").innerHTML = `<div class="ll-actions"><button type="button" class="primary no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button>${editLogLink(log)}</div>${log.rounds?.length > 1 ? renderPlanRounds(log) : ""}<div class="ll-paper-frame">${copy}</div>`;
   scalePaperPreview();
 }
 function renderResults() {
   el("result-count").textContent = `${selectedCreatedBy() === session.user.id ? "พบบันทึกของฉัน" : "พบบันทึก"} ${logs.length} รายการ`;
   el("print-all").textContent = `พิมพ์ทั้งหมดที่ค้นเจอ (${logs.length} แผ่น)`;
   el("digest-logs").textContent = loading ? "—" : logs.length;
+  const kgSelected = subjects.some(subject => subject.id === el("subject").value && subject.level === "อนุบาล");
+  el("digest-periods-stat").hidden = kgSelected || (logs.length > 0 && logs.every(log => log.subject?.level === "อนุบาล"));
   el("digest-periods").textContent = loading ? "—" : logs.reduce((total, log) => total + summarizeLessonLogForPrint(log).totalPeriods, 0);
   el("digest-subjects").textContent = loading ? "—" : new Set(logs.map(log => log.subject_id)).size;
   if (logs.length && !logs.some(log => log.id === selectedLogId)) selectedLogId = logs[0].id;
@@ -415,14 +446,15 @@ function renderResults() {
     const integrated = group.some(log => log.sessions.some(row => row.subject_id !== log.subject_id));
     const members = [...new Map(group.flatMap(integratedParts).map(part => [part.id, part])).values()].sort((a, b) => a.name.localeCompare(b.name, "th") || a.id.localeCompare(b.id));
     const colors = new Map(members.map((part, index) => [part.id, index % 3 + 1]));
-    return `<section class="ll-group"><h2 class="ll-group-title">${escapeHtml(subject.name)} <span class="meta">${escapeHtml(subject.code || "—")} · ${escapeHtml(subject.grade_level)}</span>${integrated ? '<span class="ll-tag">บูรณาการ</span>' : ""}</h2>${members.length ? `<div class="ll-members">${members.map(part => `<span><i class="ll-dot" style="background:var(--seg-${colors.get(part.id)})" aria-hidden="true"></i>${escapeHtml(part.name)}</span>`).join("")}</div>` : ""}${group.map(log => {
+    return `<section class="ll-group"><h2 class="ll-group-title">${escapeHtml(subject.name)} <span class="meta">${subject.level === "อนุบาล" && !subject.code ? "" : escapeHtml(subject.code || "—")+" · "}${escapeHtml(subject.grade_level)}</span>${integrated ? '<span class="ll-tag">บูรณาการ</span>' : ""}</h2>${members.length ? `<div class="ll-members">${members.map(part => `<span><i class="ll-dot" style="background:var(--seg-${colors.get(part.id)})" aria-hidden="true"></i>${escapeHtml(part.name)}</span>`).join("")}</div>` : ""}${group.map(log => {
+      if (subject.level === "อนุบาล") return renderKgLog(log);
       const summary = summarizeLessonLogForPrint(log), parts = integratedParts(log);
       const date = summary.lastDate ? new Date(summary.lastDate + "T00:00:00") : null;
       const month = date ? date.toLocaleDateString("th-TH", { month:"short", year:"2-digit" }) : "—";
       const sections = [["1. ผลการจัดการเรียนรู้", log.learning_outcome], ["2. ปัญหา/อุปสรรค", log.problem], ["3. แนวทางปรับปรุง/ช่วยเหลือ", log.improvement], ["4. งานที่มอบหมาย/ชิ้นงาน", log.assigned_work]];
       return `<article class="ll-log${log.id === selectedLogId ? " active" : ""}" data-log-id="${escapeHtml(log.id)}"><button type="button" class="ll-log-head" aria-expanded="false" aria-controls="ll-body-${escapeHtml(log.id)}"><span class="ll-date"><b>${date ? date.getDate() : "—"}</b><span>${escapeHtml(month)}</span></span><div><h3>${escapeHtml(log.plan_name?.trim() || "ยังไม่ระบุแผน")}${log.rounds?.length > 1 ? ` <span class="ll-tag">${log.rounds.length} รอบ</span>` : ""}</h3><div class="meta">${escapeHtml(dateRange(summary))} · ${summary.sessionCount} ครั้ง</div>${canViewTeachers && selectedCreatedBy() !== session.user.id ? `<div class="meta">ครูผู้สอน: ${escapeHtml(log.created_by_name || "—")}</div>` : ""}${renderMeter(log, summary, colors)}${log.rounds?.length > 1 ? `<div class="meta">${log.rounds.map((round, index) => `รอบ ${index + 1}: ${summarizeLessonLogForPrint(round).totalPeriods}`).join(" · ")}</div>` : ""}<div class="chips">${summary.weeks > 1 ? `<span class="chip warn">ใช้เวลา ${summary.weeks} สัปดาห์</span>` : ""}${!log.plan_name?.trim() ? '<span class="chip warn">ยังไม่ระบุแผน</span>' : ""}</div></div></button><div class="ll-log-body" id="ll-body-${escapeHtml(log.id)}" hidden>${log.rounds?.length > 1 ? renderPlanRounds(log) : `<div class="ll-sessions">${log.sessions.map(row => `<div><span>${escapeHtml(dateText(row.session_date))}${parts.length ? ` · ${escapeHtml(subjectInfo.get(row.subject_id).name)}` : ""}</span><span>${Number(row.periods_covered) || 0} คาบ</span></div>`).join("")}</div>${sections.map(([title, value]) => `<h4>${title}</h4><div class="ll-text">${escapeHtml(value || "—")}</div>`).join("")}`}<div class="ll-actions">${log.rounds?.length > 1 ? "" : `<a class="ghost no-print" href="${escapeHtml(editLessonUrl(log))}">แก้ไข</a>`}<button type="button" class="ghost no-print" data-print="${escapeHtml(log.id)}">พิมพ์ใบนี้</button></div></div></article>`;
     }).join("")}</section>`;
-  }).join("") : '<div class="card empty">ไม่พบบันทึกในช่วงที่เลือก · ลองเปลี่ยนตัวกรอง หรือเขียนบันทึกจากหน้าเช็คชื่อ</div>';
+  }).join("") : `<div class="card empty">ไม่พบบันทึกในช่วงที่เลือก · ${kgSelected ? 'เขียนได้จากแผนรายสัปดาห์' : 'ลองเปลี่ยนตัวกรอง หรือเขียนบันทึกจากหน้าเช็คชื่อ'}</div>`;
   el("print-area").innerHTML = logs.map(renderDocument).join("");
   renderPaperPreview();
   syncPrintButtons();
@@ -435,6 +467,23 @@ function renderCoverage(data, parents = new Map()) {
   card.hidden = selectedCreatedBy() !== session.user.id;
   card.innerHTML = "";
   if (card.hidden) return;
+  renderSessionCoverage(data,parents);
+  const plans = data.missingPlans || [];
+  const kgSelected = subjects.some(subject => subject.id === el("subject").value && subject.level === "อนุบาล");
+  if (kgSelected || (data.subjects?.some(subject => subject.level === "อนุบาล") && !data.total)) card.innerHTML = "";
+  if (plans.length) {
+    card.innerHTML += `<details open><summary>แผนอนุบาลที่ยังไม่เขียนบันทึก</summary>${plans.map(plan => {
+      const subject = plan.subject || {};
+      return `<div class="coverage-row"><div class="section-head"><div>${escapeHtml(subject.name)} ${escapeHtml(subject.grade_level)} · <strong>สัปดาห์ที่ ${escapeHtml(plan.seq)}</strong> · ${escapeHtml(plan.title)} (${escapeHtml(plan.planned_periods)} วัน)</div><a class="ghost no-print" href="${escapeHtml(kgLessonPlanUrl(subject.year,plan.id))}">ไปเขียน →</a></div></div>`;
+    }).join("")}</details>`;
+  } else if (data.subjects?.some(subject => subject.level === "อนุบาล")) {
+    card.innerHTML += '<p>เขียนบันทึกครบทุกแผนอนุบาลแล้ว</p>';
+  } else if (kgSelected) {
+    card.innerHTML = '<p class="hint">ยังไม่มีแผนอนุบาลที่ส่งในช่วงที่เลือก</p>';
+  }
+}
+function renderSessionCoverage(data,parents) {
+  const card = el("coverage-card");
   if (!data.total) {
     card.innerHTML = '<p class="hint">ยังไม่มีการเช็คชื่อรายวิชาในช่วงที่เลือก</p>';
     return;
@@ -465,7 +514,7 @@ async function refreshCoverage(filters, seq) {
   if (card.hidden) return;
   card.innerHTML = '<p class="hint">กำลังตรวจสอบคาบในบันทึก…</p>';
   try {
-    const data = await loadLessonLogCoverage({ userId:session.user.id, ...filters });
+    const data = await loadLessonLogCoverage({ userId:session.user.id, ...filters, ...(!filters.term && {includeKindergarten:true}) });
     if (seq !== requestSeq || selectedCreatedBy() !== session.user.id) return;
     rememberFilterOptions((data.subjects || []).map(subject => ({ subject })));
     const parents = new Map();
