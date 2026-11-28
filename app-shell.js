@@ -237,6 +237,7 @@ function syncFinanceKpiTones() {
             ["entry.html", "กรอกคะแนน"],
             ["kg-entry.html", "กรอกพัฒนาการอนุบาล", { kgEntry: true }],
             ["kg-growth.html", "น้ำหนัก/ส่วนสูงอนุบาล", { kgEntry: true }],
+            ["kg-notes.html", "ความเห็นครูและสุขภาพอนุบาล", { kgEntry: true }],
             ["grade-edit-requests.html", "คำขอแก้คะแนน"],
             ["competency-entry.html", "กรอกคะแนนกิจกรรม/กิจวัตร"],
             ["theme-works.html", "ส่งผลงานตามธีม"],
@@ -299,6 +300,10 @@ function syncFinanceKpiTones() {
           title: "น้ำหนัก/ส่วนสูงอนุบาล",
           description: "เลือกห้องและวันที่วัด ระบบแปลผลและบันทึกเมื่อออกจากช่อง",
           steps: ["เลือกห้องและวันที่", "กรอกค่าวัด", "ตรวจผล"]
+        },
+        "kg-notes.html": {
+          title: "ความเห็นครูและสุขภาพอนุบาล",
+          steps: ["เลือกห้อง", "เขียนความเห็นหรือบันทึกสุขภาพ"]
         },
         "calendar.html": {
           title: "จัดการปฏิทินปฏิบัติงาน",
@@ -962,7 +967,7 @@ function syncFinanceKpiTones() {
     } else if (kgLinks.length) {
       void (async () => {
         try {
-          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-1", appRootUrl).href);
+          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-2", appRootUrl).href);
           const { data: { session } } = await sb.auth.getSession();
           if (!session) return;
           const userId = session.user.id;
@@ -972,7 +977,7 @@ function syncFinanceKpiTones() {
           try { cached = sessionStorage.getItem(key); } catch { /* ใช้คิวรีเมื่ออ่านแคชไม่ได้ */ }
           const show = visible => {
             showKgLinks(visible);
-            if (visible && current === "kg-growth.html" && !window.matchMedia("(min-width: 1200px)").matches) {
+            if (visible && ["kg-growth.html", "kg-notes.html"].includes(current) && !window.matchMedia("(min-width: 1200px)").matches) {
               kgLinks.find(link => link.classList.contains("active"))?.scrollIntoView({ block:"nearest", inline:"nearest" });
             }
           };
@@ -1011,7 +1016,7 @@ function syncFinanceKpiTones() {
       if (!["index.html", "grade-edit-requests.html"].includes(current)) {
         const readCount = async () => {
           try {
-            const { sb } = await import(new URL("supabase-client.js?v=20261128-1", appRootUrl).href);
+            const { sb } = await import(new URL("supabase-client.js?v=20261128-2", appRootUrl).href);
             const { data } = await sb.auth.getSession();
             if (!data.session) return;
             const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=5", appRootUrl).href);

@@ -444,6 +444,21 @@ export function kgStateTermResult(scoresOfState, tieChoice) {
   return { level: validChoice ? tieChoice : level, tied, needsChoice: tied.length > 0 && !validChoice };
 }
 
+const KG_STANDARD_SUGGESTIONS = { 3:"ปฏิบัติได้คล่องแคล่ว", 2:"ปฏิบัติได้บางครั้ง", 1:"ควรส่งเสริม" };
+
+export function kgStandardSuggestion(stateResults) {
+  const results = stateResults.filter(result => !kgIsGrowthState(result.code));
+  if (results.some(result => result.needsChoice)) return { text:null, reason:"unresolved" };
+  if (!results.length || results.some(result => !Number.isInteger(result.level) || !Object.hasOwn(KG_STANDARD_SUGGESTIONS, result.level))) {
+    return { text:null, reason:"incomplete" };
+  }
+  const { level } = kgMode(results.map(result => result.level));
+  if (!level) return { text:null, reason:"tied" };
+  const counts = { 3:0, 2:0, 1:0 };
+  for (const result of results) counts[result.level]++;
+  return { text:KG_STANDARD_SUGGESTIONS[level], counts };
+}
+
 export const KG_GROWTH_BANDS = {
   "น้ำหนัก": ["น้อยกว่าเกณฑ์", "ค่อนข้างน้อย", "ตามเกณฑ์", "ค่อนข้างมาก", "มากเกินเกณฑ์"],
   "ส่วนสูง": ["เตี้ย", "ค่อนข้างเตี้ย", "ตามเกณฑ์", "ค่อนข้างสูง", "สูง"]

@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ความเห็นครูและสุขภาพอนุบาล — CRS MIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1f2a2e; --muted:#5f6b70; --line:#dfe4e3; --teal:#0f6e56; --teal-soft:#e1f5ee;
+  --bg:#f7f8f7; --white:#ffffff; --danger:#a32d2d; --danger-soft:#fceaea; --amber:#8a5a00; --amber-soft:#fff4df;
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body { margin:0; padding:16px; font:16px/1.55 "Sarabun",sans-serif; color:var(--ink); background:var(--bg); }
+.wrap { max-width:680px; margin:0 auto; }
+.notes-layout { max-width:680px; margin:0 auto; }
+.notes-layout, .notes-panel, .notes-card, .note-field, .roster, .kids { display:grid; gap:12px; min-width:0; }
+.notes-card.card { padding:14px; border:1px solid var(--line); border-radius:16px; background:var(--white); }
+.notes-layout :is(h2,h3,p) { margin:0; overflow-wrap:anywhere; }
+.notes-layout h2 { font-size:17px; }
+.notes-layout h3 { font-size:16px; }
+.field, .note-field { display:grid; gap:5px; min-width:0; margin:0; }
+.field > label, .note-field > label, legend { font-size:14.5px; font-weight:600; }
+.filter-pair, .notes-tabs, .seg, .actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.notes-layout :is(input[type="text"],input[type="date"],select,textarea) {
+  width:100%; min-width:0; min-height:44px; font:inherit; color:var(--ink); background:var(--white);
+  padding:8px 10px; border:1px solid var(--line); border-radius:10px;
+}
+.notes-layout textarea { display:block; resize:vertical; }
+.notes-layout textarea[readonly], .notes-layout input[readonly] { background:var(--bg); }
+.notes-layout textarea[aria-invalid="true"], .notes-layout input[aria-invalid="true"] { border-color:var(--danger); }
+.std textarea { height:44px; }
+.para textarea { min-height:calc(6lh + 18px); }
+.notes-layout button {
+  font:inherit; font-weight:600; color:var(--ink); background:var(--white); min-width:0; min-height:44px;
+  padding:6px 10px; border:1px solid var(--line); border-radius:10px; cursor:pointer; overflow-wrap:anywhere;
+}
+.notes-layout :is(button,select,input,textarea):focus-visible { outline:2px solid var(--teal); outline-offset:1px; }
+.notes-layout :is(button:disabled,button[aria-disabled="true"]) { opacity:.6; cursor:default; }
+.notes-layout .primary { background:var(--teal); color:var(--white); border-color:var(--teal); min-height:48px; width:100%; }
+.notes-layout .ghost { background:var(--teal-soft); }
+.notes-tabs { padding:4px; gap:4px; border:1px solid var(--line); border-radius:12px; background:var(--bg); }
+.notes-tabs button { border:0; color:var(--muted); background:transparent; }
+.notes-tabs button[aria-selected="true"] { color:var(--teal); background:var(--white); box-shadow:0 1px 3px rgb(0 0 0 / .08); }
+.heading, .roster button { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.heading { flex-wrap:wrap; }
+.roster { list-style:none; margin:0; padding:0; gap:8px; }
+.roster button { width:100%; min-height:52px; text-align:start; }
+.amount { color:var(--teal); font-size:14px; font-weight:600; white-space:nowrap; }
+.amount.partial { color:var(--amber); }
+.hint, .empty, .field-status, .count { color:var(--muted); font-size:14px; }
+.domain + .domain { margin-top:8px; }
+.notes-layout .domain h3 { color:var(--teal); padding-inline-start:8px; border-inline-start:3px solid var(--teal); }
+.std { padding:10px 0; border-bottom:1px solid var(--line); }
+.chips { display:flex; flex-wrap:wrap; gap:8px; }
+.notes-layout .chip { min-height:44px; padding:4px 10px; border-radius:999px; font-size:14px; background:var(--bg); }
+.notes-layout .chip.suggestion { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); }
+.field-status:empty { display:none; }
+.field-status.ok { color:var(--teal); }
+.field-status.err, .error { color:var(--danger); }
+.notes-layout .retry { justify-self:start; padding-inline:8px; color:var(--danger); font-size:14px; }
+.count { justify-self:end; }
+.actions button { min-height:48px; }
+.event-list { list-style:none; margin:0; padding:0; }
+.notes-layout .event {
+  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 10px;
+  width:100%; text-align:start; padding:9px 4px; border:0; border-bottom:1px solid var(--line); border-radius:0;
+}
+.event .hint { grid-column:1/-1; font-weight:400; }
+.seg button[aria-pressed="true"] { color:var(--white); background:var(--teal); border-color:var(--teal); }
+.notes-layout fieldset { border:0; padding:0; margin:0; min-width:0; }
+.kids { gap:4px; }
+.kids label { display:flex; align-items:center; gap:10px; min-height:44px; padding:0 6px; overflow-wrap:anywhere; }
+.kids label.off { color:var(--muted); }
+.kids input { flex:0 0 auto; width:22px; height:22px; accent-color:var(--teal); margin:0; }
+.warning, .readonly { padding:8px 10px; border-radius:10px; font-size:14px; }
+.warning { color:var(--amber); background:var(--amber-soft); }
+.readonly { color:var(--danger); background:var(--danger-soft); }
+.toast { position:sticky; bottom:12px; z-index:3; width:fit-content; margin:8px auto 0; border-radius:10px; }
+.toast:not(:empty) { padding:8px 12px; }
+.toast.ok { color:var(--teal); background:var(--teal-soft); }
+.toast.err { color:var(--danger); background:var(--danger-soft); }
+</style>
+<link rel="stylesheet" href="../app-shell.css?v=20261003-1">
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>ความเห็นครูและสุขภาพอนุบาล</h1>
+  <div class="nav">
+    <a href="../dashboard.html">ภาพรวม</a><a href="index.html">ฝ่ายวิชาการ</a>
+    <a href="kg-entry.html">กรอกพัฒนาการอนุบาล</a><a href="kg-growth.html">น้ำหนัก/ส่วนสูงอนุบาล</a>
+    <a href="kg-notes.html" aria-current="page">ความเห็นครูและสุขภาพอนุบาล</a>
+    <a href="#" id="btn-signout">ออกจากระบบ</a>
+  </div>
+  <script src="../app-shell.js?v=20261128-2"></script>
+</header>
+<main class="academic-content">
+  <div class="notes-layout">
+    <div class="card notes-card" id="filters" hidden>
+      <div class="field"><label for="year">ปีการศึกษา</label><select id="year"></select></div>
+      <div class="filter-pair">
+        <div class="field"><label for="room">ห้อง</label><select id="room"></select></div>
+        <div class="field" id="half-filter">
+          <label for="half">ภาค</label>
+          <select id="half"><option value="กลางปี">ภาค 1</option><option value="ปลายปี">ภาค 2</option></select>
+        </div>
+      </div>
+      <div class="notes-tabs" role="tablist" aria-label="ข้อมูลอนุบาล">
+        <button type="button" id="tab-comments" role="tab" aria-selected="true" aria-controls="comments">ความเห็นครู</button>
+        <button type="button" id="tab-health" role="tab" aria-selected="false" aria-controls="health" tabindex="-1">บริการสุขภาพ</button>
+      </div>
+      <p id="readonly" class="readonly" hidden>คุณมีสิทธิ์ดูอย่างเดียว · ครูประจำชั้นหรือหัวหน้าวิชาการเป็นผู้บันทึก</p>
+    </div>
+    <p id="load-status" class="hint" role="status" aria-atomic="true">กำลังโหลดห้องอนุบาล…</p>
+    <button type="button" id="retry-load" class="ghost" hidden>ลองโหลดอีกครั้ง</button>
+    <section id="comments" class="notes-panel" role="tabpanel" aria-labelledby="tab-comments" hidden></section>
+    <section id="health" class="notes-panel" role="tabpanel" aria-labelledby="tab-health" hidden></section>
+  </div>
+  <div id="toast" class="toast" role="status" aria-atomic="true"></div>
+</main>
+</div>
+<script type="module">
+import {
+  sb, requireAuth, signOut, fetchAllRows, fetchAllRowsByIds, ID_CHUNK, getKgEntryAccess, loadMyHomeroomRooms,
+  getActiveYear, academicYearRange, bangkokNow, toDateStr, thaiShortDateText,
+  KG_HALF_LABEL, KG_LEVELS, kgCodeOf, kgIsGrowthState, kgStateTermResult, kgStandardSuggestion
+} from "../supabase-client.js?v=20261128-2";
+
+const session = await requireAuth();
+if (session) {
+  const $ = id => document.getElementById(id);
+  const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  }[char]));
+  const collator = new Intl.Collator("th", { numeric:true });
+  const today = toDateStr(bangkokNow());
+  const tabs = ["comments", "health"];
+  const healthKinds = ["การป้องกันโรค", "การตรวจสุขภาพ"];
+  const healthItems = [
+    "วัคซีน MMR", "วัคซีน DTP", "หยอดวัคซีนโปลิโอ", "วัคซีนไข้หวัดใหญ่", "ตรวจฟัน",
+    "เคลือบฟลูออไรด์", "ตรวจสายตา", "ตรวจการได้ยิน", "ตรวจเหา", "ตรวจร่างกายทั่วไป"
+  ];
+  const phrases = ["ปฏิบัติได้คล่องแคล่ว", "ปฏิบัติได้", "ปฏิบัติได้บางครั้ง", "ควรส่งเสริม"];
+  const healthColumns = "id,student_id,kind,item,done_on,updated_at";
+  const roomName = room => room.grade_level + "/" + room.classroom;
+  const roomKey = room => room.grade_level + "\u0000" + room.classroom;
+  const studentName = student => [student.student_no, student.name].filter(Boolean).join(" ");
+  const charLength = text => [...text].length;
+  const roomLists = new Map();
+  const rooms = new Map();
+  let context, route, screen, requestId = 0, pending = 0, toastTimer;
+
+  $("btn-signout").addEventListener("click", event => { event.preventDefault(); void signOut(); });
+  window.crsHasUnsavedChanges = () => pending > 0 || [...rooms.values()].some(room =>
+    [...room.comments.values()].some(notes => [...notes.edits.values()].some(edit =>
+      edit.needsReload || edit.draft.trim() !== (notes.saved.get(edit.key)?.body || "")))
+    || room.health?.draft?.dirty);
+  window.addEventListener("beforeunload", event => {
+    if (!window.crsHasUnsavedChanges() || window.crsLeavingConfirmed) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+  history.scrollRestoration = "manual";
+
+  function rows({ data, error }) {
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function loadContext() {
+    const [access, result] = await Promise.all([
+      getKgEntryAccess(session.user.id),
+      sb.from("academic_years").select("year,start_date,term2_start_date").order("year")
+    ]);
+    const years = rows(result);
+    const started = years.filter(row => row.start_date && row.start_date <= today).reverse();
+    if (!started.length) throw new Error("academic year unavailable");
+    const ownRooms = access.isHead ? new Map() : await loadMyHomeroomRooms(session.user.id, { activeOnly:true });
+    $("year").innerHTML = started.map(row => `<option>${escapeHtml(row.year)}</option>`).join("");
+    return { access, years, started, ownRooms };
+  }
+
+  async function roomsFor(year) {
+    if (roomLists.has(year)) return roomLists.get(year);
+    let available;
+    if (context.access.canViewAll) {
+      const results = await Promise.all(["homeroom_teachers", "student_year_placements"].map(table =>
+        fetchAllRows(() => sb.from(table).select("grade_level,classroom").eq("year", year).like("grade_level", "อ.%"))));
+      available = results.flatMap(rows);
+    } else {
+      available = [...(context.ownRooms.get(year) || [])].map(key => {
+        const [grade_level, classroom] = key.split("\u0000");
+        return { grade_level, classroom };
+      }).filter(room => room.grade_level.startsWith("อ."));
+    }
+    const choices = new Map(available.map(room => [roomName(room), room]).sort(([a], [b]) => collator.compare(a, b)));
+    roomLists.set(year, choices);
+    return choices;
+  }
+
+  async function loadRoom(year, room) {
+    const key = year + ":" + roomName(room);
+    if (rooms.has(key)) return rooms.get(key);
+    const { grade_level, classroom } = room;
+    const result = await fetchAllRows(() => sb.from("student_year_placements").select("id,student:student_id(id,name,student_no)")
+      .eq("year", year).eq("grade_level", grade_level).eq("classroom", classroom));
+    const roster = rows(result).map(row => row.student).filter(Boolean).sort((a, b) =>
+      collator.compare(a.student_no || "", b.student_no || "") || collator.compare(a.name, b.name));
+    const loaded = {
+      year, grade:grade_level, roster, ids:roster.map(student => student.id), comments:new Map(),
+      canEdit:context.access.isHead || Boolean(context.ownRooms.get(year)?.has(roomKey(room)))
+    };
+    if (!rooms.has(key)) rooms.set(key, loaded);
+    return rooms.get(key);
+  }
+
+  async function loadCurriculum(room) {
+    if (room.curriculum) return room.curriculum;
+    const matches = rows(await sb.from("subjects").select("id,curriculum_id").eq("name", "การจัดประสบการณ์")
+      .eq("level", "อนุบาล").eq("grade_level", room.grade).eq("year", room.year).limit(2));
+    const subject = matches.length === 1 ? matches[0] : null;
+    const curriculumId = subject?.curriculum_id || rows(await sb.from("curricula").select("id")
+      .eq("kind", "ปฐมวัย").eq("edition", "2560"))[0]?.id;
+    if (!curriculumId) throw new Error("curriculum unavailable");
+    const [labels, states] = await Promise.all([
+      fetchAllRows(() => sb.from("curriculum_items").select("id,kind,code,parent_code,text,seq")
+        .eq("curriculum_id", curriculumId).in("kind", ["ด้าน", "มาตรฐาน"])),
+      fetchAllRows(() => sb.from("curriculum_items").select("id,code")
+        .eq("curriculum_id", curriculumId).eq("kind", "สภาพที่พึงประสงค์").eq("grade_level", room.grade))
+    ]);
+    const items = rows(labels).sort((a, b) => a.seq - b.seq);
+    const standards = items.filter(row => row.kind === "มาตรฐาน");
+    const domains = items.filter(row => row.kind === "ด้าน").map(domain => ({
+      ...domain, standards:standards.filter(standard => standard.parent_code === domain.code)
+    }));
+    if (!domains.length || new Set(domains.flatMap(domain => domain.standards.map(standard => standard.code))).size !== 12) {
+      throw new Error("curriculum standards unavailable");
+    }
+    room.curriculum = { subject, domains, expected:rows(states).map(row => row.code) };
+    return room.curriculum;
+  }
+
+  const commentKey = (studentId, standard) => studentId + ":" + (standard ?? "paragraph");
+
+  async function loadComments(room, half) {
+    if (room.comments.has(half)) return room.comments.get(half);
+    const data = rows(await fetchAllRowsByIds(ids => sb.from("kg_comments").select("id,student_id,standard_no,body")
+      .eq("year", room.year).eq("half", half).in("student_id", ids), room.ids));
+    const notes = {
+      saved:new Map(data.map(row => [commentKey(row.student_id, row.standard_no), row])),
+      edits:new Map(), suggestions:new Map()
+    };
+    if (!room.comments.has(half)) room.comments.set(half, notes);
+    return room.comments.get(half);
+  }
+
+  async function readHealth(room) {
+    return rows(await fetchAllRowsByIds(ids => sb.from("kg_health").select(healthColumns)
+      .eq("year", room.year).in("student_id", ids), room.ids));
+  }
+
+  async function loadHealth(room) {
+    if (!room.health) {
+      const data = await readHealth(room);
+      room.health ??= { rows:new Map(data.map(row => [row.id, row])), draft:null };
+    }
+    return room.health;
+  }
+
+  function readRoute() {
+    const params = new URLSearchParams(location.search);
+    return { year:params.get("year"), room:params.get("room"), half:params.get("half"), tab:params.get("tab"), student:params.get("student") };
+  }
+
+  function writeRoute(value, push, state) {
+    const url = new URL(location.href);
+    for (const [key, val] of Object.entries(value)) {
+      if (val != null) url.searchParams.set(key, val);
+      else url.searchParams.delete(key);
+    }
+    history[push ? "pushState" : "replaceState"](state, "", url);
+  }
+
+  function paintTabs(tab) {
+    for (const name of tabs) {
+      const selected = name === tab;
+      $("tab-" + name).setAttribute("aria-selected", selected);
+      $("tab-" + name).tabIndex = selected ? 0 : -1;
+      $(name).hidden = true;
+    }
+    $("half-filter").hidden = tab === "health";
+  }
+
+  async function navigate(next = readRoute(), { push = false, focus = false, restore = null, entry = {} } = {}) {
+    const request = ++requestId;
+    screen = null;
+    $("retry-load").hidden = true;
+    $("readonly").hidden = true;
+    $("load-status").textContent = "กำลังโหลดข้อมูลอนุบาล…";
+    const tab = tabs.includes(next.tab) ? next.tab : "comments";
+    paintTabs(tab);
+    try {
+      context ??= await loadContext();
+      if (request !== requestId) return;
+      const yearRow = context.started.find(row => row.year === next.year)
+        || context.started.find(row => row.year === getActiveYear()) || context.started[0];
+      const year = yearRow.year;
+      const half = Object.hasOwn(KG_HALF_LABEL, next.half) ? next.half
+        : yearRow.term2_start_date && today >= yearRow.term2_start_date ? "ปลายปี" : "กลางปี";
+      route = { year, room:next.room, half, tab, student:next.student };
+      if (push) writeRoute(route, true, entry);
+      $("year").value = year;
+      $("half").value = half;
+      $("filters").hidden = false;
+      $("room").disabled = true;
+      const choices = await roomsFor(year);
+      if (request !== requestId) return;
+      const roomLabel = next.room || choices.keys().next().value || null;
+      $("room").innerHTML = [...choices.keys()].map(label => `<option>${escapeHtml(label)}</option>`).join("");
+      $("room").value = roomLabel || "";
+      $("room").disabled = choices.size === 0;
+      route.room = roomLabel;
+      if (!choices.has(roomLabel)) {
+        writeRoute(route, false, history.state);
+        $("load-status").textContent = roomLabel
+          ? "ห้องนี้ไม่อยู่ในสิทธิ์ของคุณ กรุณาเลือกห้องประจำชั้นหรือติดต่อฝ่ายวิชาการ"
+          : "ยังไม่มีห้องอนุบาลที่คุณเปิดได้ในปีนี้ กรุณาเลือกปีอื่นหรือติดต่อฝ่ายวิชาการ";
+        return;
+      }
+      const room = await loadRoom(year, choices.get(roomLabel));
+      if (request !== requestId) return;
+      const student = room.roster.find(child => child.id === next.student);
+      route.student = student?.id ?? null;
+      writeRoute(route, false, history.state);
+      const data = tab === "comments" ? await loadComments(room, half) : await loadHealth(room);
+      const curriculum = tab === "comments" && student ? await loadCurriculum(room) : null;
+      if (request !== requestId) return;
+      screen = { room, data, student, half, tab, request };
+      $("load-status").textContent = next.student && !student ? "ไม่พบเด็กคนนี้ในห้องที่เลือก กรุณาเลือกจากรายชื่อด้านล่าง" : "";
+      $("readonly").hidden = room.canEdit;
+      $(tab).hidden = false;
+      if (tab === "health") renderHealth(screen);
+      else if (student) renderStudent(screen, curriculum);
+      else renderRoster(screen);
+      if (focus) $(tab).querySelector("h2")?.focus({ preventScroll:true });
+      if (restore != null) {
+        const target = restore.student && $("child-" + restore.student);
+        target?.focus({ preventScroll:true });
+        window.scrollTo(0, restore.scrollY || 0);
+      } else if (focus) {
+        $(tab).scrollIntoView({ block:"start" });
+      }
+    } catch (error) {
+      if (request !== requestId) return;
+      $("load-status").textContent = "โหลดข้อมูลไม่สำเร็จ กรุณาลองอีกครั้ง หากยังไม่ได้ให้ติดต่อฝ่ายวิชาการ";
+      $("retry-load").hidden = false;
+      console.warn("โหลดข้อมูล K5b ไม่สำเร็จ", error.code || error.name);
+    }
+  }
+
+  function changeTab(tab) {
+    if (tab !== route?.tab) void navigate({ ...route, tab }, { push:true, entry:{ returnToRoster:history.state?.returnToRoster } });
+  }
+
+  $("year").addEventListener("change", event => navigate({ ...route, year:event.target.value, room:null, half:null, student:null }, { push:true }));
+  $("room").addEventListener("change", event => navigate({ ...route, room:event.target.value, student:null }, { push:true }));
+  $("half").addEventListener("change", event => navigate({ ...route, half:event.target.value }, {
+    push:true, entry:{ returnToRoster:history.state?.returnToRoster }
+  }));
+  $("retry-load").addEventListener("click", () => navigate());
+  for (const name of tabs) {
+    $("tab-" + name).addEventListener("click", () => changeTab(name));
+    $("tab-" + name).addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? tabs[0] : event.key === "End" ? tabs[1] : tabs.find(tab => tab !== name);
+      changeTab(next);
+      $("tab-" + next).focus();
+    });
+  }
+  window.addEventListener("popstate", event => navigate(readRoute(), { restore:event.state?.roster || null, focus:true }));
+
+  function countComments(notes, studentId) {
+    let count = Number(notes.saved.has(commentKey(studentId, null)));
+    for (let standard = 1; standard <= 12; standard++) count += Number(notes.saved.has(commentKey(studentId, standard)));
+    return count;
+  }
+
+  function paintProgress(view) {
+    if (screen?.data !== view.data || screen.tab !== "comments") return;
+    if (screen.student) {
+      const count = countComments(view.data, screen.student.id);
+      $("student-progress").textContent = "เขียนแล้ว " + count + "/13";
+      return;
+    }
+    let complete = 0;
+    for (const child of view.room.roster) {
+      const count = countComments(view.data, child.id);
+      if (count === 13) complete++;
+      const status = $("progress-" + child.id);
+      status.textContent = count === 13 ? "✓ ครบ 13/13" : "เขียนแล้ว " + count + "/13";
+      status.classList.toggle("partial", count < 13);
+    }
+    $("roster-progress").textContent = "เขียนครบ " + complete + " จาก " + view.room.roster.length + " คน";
+  }
+
+  function renderRoster(view) {
+    const { room } = view;
+    $("comments").innerHTML = `<div class="card notes-card"><div class="heading">
+      <h2 tabindex="-1">รายชื่อเด็ก</h2><span id="roster-progress" class="hint" role="status" aria-atomic="true"></span></div>
+      ${room.roster.length ? `<ul class="roster">${room.roster.map(child => `<li>
+        <button type="button" id="child-${child.id}" data-child="${child.id}"><span>${escapeHtml(studentName(child))}</span>
+        <span class="amount" id="progress-${child.id}"></span></button></li>`).join("")}</ul>
+        <p class="hint">13 = ความเห็น 12 มาตรฐาน + ย่อหน้าพฤติกรรมที่ควรส่งเสริมและพัฒนา</p>`
+        : '<p class="empty">ยังไม่มีรายชื่อเด็กในห้องนี้ กรุณาเลือกห้องอื่นหรือติดต่อฝ่ายวิชาการ</p>'}</div>`;
+    paintProgress(view);
+    for (const button of $("comments").querySelectorAll("[data-child]")) {
+      button.addEventListener("click", () => {
+        const roster = { student:button.dataset.child, scrollY:window.scrollY };
+        history.replaceState({ roster }, "", location.href);
+        void navigate({ ...route, student:button.dataset.child }, { push:true, focus:true, entry:{ returnToRoster:roster } });
+      });
+    }
+  }
+
+  function commentField(view, standard) {
+    const paragraph = !standard;
+    const key = commentKey(view.student.id, standard?.code);
+    const edit = view.data.edits.get(key);
+    const number = paragraph ? "paragraph" : standard.code;
+    const title = paragraph ? "พฤติกรรมที่ควรส่งเสริมและพัฒนา" : number + ". " + standard.text;
+    const value = edit?.draft ?? view.data.saved.get(key)?.body ?? "";
+    return `<div class="note-field ${paragraph ? "para" : "std"}" data-standard="${number}">
+      <label for="note-${number}">${escapeHtml(title)}</label>
+      ${paragraph ? '<p id="paragraph-hint" class="hint">เขียนทั้งสิ่งที่ควรส่งเสริม และสิ่งที่ควรพัฒนา</p>' : ""}
+      <textarea id="note-${number}" rows="${paragraph ? 6 : 1}" aria-describedby="status-${number}${paragraph ? " paragraph-hint paragraph-count" : ""}" ${view.room.canEdit ? "" : "readonly"}>${"\n" + escapeHtml(value)}</textarea>
+      ${paragraph ? '<p id="paragraph-count" class="count" role="status" aria-atomic="true"></p>' : `
+        <div class="chips" role="group" aria-label="ข้อความสำเร็จรูปสำหรับมาตรฐาน ${number}">
+          ${phrases.map(text => `<button type="button" class="chip" data-phrase="${escapeHtml(text)}" ${view.room.canEdit ? "" : 'aria-disabled="true"'}>${escapeHtml(text)}</button>`).join("")}
+        </div>
+        <p class="hint suggestion-note" hidden></p>`}
+      <p id="status-${number}" class="field-status" role="status" aria-live="polite" aria-atomic="true"></p>
+      <button type="button" class="retry" hidden>ลองใหม่</button>
+    </div>`;
+  }
+
+  function renderStudent(view, curriculum) {
+    const next = view.room.roster[view.room.roster.indexOf(view.student) + 1];
+    $("comments").innerHTML = `<div class="card notes-card">
+      <div class="heading"><h2 tabindex="-1">${escapeHtml(studentName(view.student))}</h2>
+        <span id="student-progress" class="hint" role="status" aria-atomic="true"></span></div>
+      ${curriculum.domains.map(domain => `<section class="domain" aria-labelledby="domain-${escapeHtml(domain.code)}">
+        <h3 id="domain-${escapeHtml(domain.code)}">${escapeHtml(domain.text)}</h3>
+        ${domain.standards.map(standard => commentField(view, standard)).join("")}</section>`).join("")}
+      ${commentField(view, null)}
+      <div id="suggestion-status" class="hint" role="status"></div>
+      <div class="actions"><button type="button" id="back-roster">กลับรายชื่อ</button>
+        <button type="button" id="next-child" class="primary" ${next ? "" : "disabled"}>เด็กคนถัดไป</button></div>
+      </div>`;
+    paintProgress(view);
+    for (const field of $("comments").querySelectorAll("[data-standard]")) bindCommentField(view, field);
+    $("back-roster").addEventListener("click", () => {
+      const previous = history.state?.returnToRoster || { student:view.student.id, scrollY:0 };
+      void navigate({ ...route, student:null }, { push:true, restore:previous, focus:true });
+    });
+    $("next-child").addEventListener("click", () => {
+      if (!next) return;
+      const previous = history.state?.returnToRoster;
+      void navigate({ ...route, student:next.id }, { push:true, focus:true, entry:{ returnToRoster:previous } });
+    });
+    void showSuggestions(view, curriculum);
+  }
+
+  function bindCommentField(view, field) {
+    const standard = field.dataset.standard === "paragraph" ? null : Number(field.dataset.standard);
+    const key = commentKey(view.student.id, standard);
+    const input = field.querySelector("textarea");
+    const limit = standard === null ? 1500 : 200;
+    const status = field.querySelector(".field-status");
+    const retry = field.querySelector(".retry");
+    const { edits } = view.data;
+    let edit = edits.get(key);
+    if (!edit) {
+      edit = { key, draft:input.value, state:"", message:"" };
+      edits.set(key, edit);
+    }
+
+    function paint() {
+      if (!field.isConnected) return;
+      if (standard === null) $("paragraph-count").textContent = charLength(input.value) + " / 1500 ตัวอักษร";
+      status.textContent = edit.message;
+      status.className = "field-status " + edit.state;
+      retry.hidden = edit.state !== "err" || edit.invalid;
+      if (edit.invalid) input.setAttribute("aria-invalid", "true");
+      else input.removeAttribute("aria-invalid");
+    }
+
+    edit.paint = paint;
+    paint();
+    if (!view.room.canEdit) return;
+
+    function update() {
+      edit.draft = input.value;
+      edit.invalid = false;
+      if (!edit.saving) {
+        edit.state = edit.message = "";
+      }
+      paint();
+    }
+
+    function save() {
+      const value = input.value.trim();
+      if (charLength(value) > limit) {
+        edit.queued = undefined;
+        edit.state = "err";
+        edit.invalid = true;
+        edit.message = "ข้อความเกิน " + limit + " ตัวอักษร กรุณาย่อข้อความแล้วออกจากช่องอีกครั้ง";
+        paint();
+        return;
+      }
+      input.value = value;
+      edit.draft = value;
+      edit.queued = value;
+      edit.invalid = false;
+      paint();
+      const filter = { student_id:view.student.id, year:view.room.year, half:view.half, standard_no:standard };
+      void saveComment(view, edit, filter);
+    }
+
+    input.addEventListener("input", update);
+    input.addEventListener("blur", save);
+    retry.addEventListener("click", save);
+    field.querySelector(".chips")?.addEventListener("click", event => {
+      const chip = event.target.closest("[data-phrase]");
+      if (!chip) return;
+      input.value = [input.value.trim(), chip.dataset.phrase].filter(Boolean).join(" ");
+      update();
+      save();
+    });
+    field.querySelector(".chips")?.addEventListener("pointerdown", event => {
+      if (event.target.closest("[data-phrase]") && document.activeElement === input) event.preventDefault();
+    });
+  }
+
+  async function saveComment(view, edit, filter) {
+    if (edit.saving) return;
+    const { saved } = view.data;
+    const { standard_no, ...scope } = filter;
+    const selectStandard = query => standard_no == null ? query.is("standard_no", null) : query.eq("standard_no", standard_no);
+    edit.saving = true;
+    pending++;
+    try {
+      while (edit.queued !== undefined) {
+        const value = edit.queued;
+        edit.queued = undefined;
+        const reloaded = edit.needsReload;
+        if (reloaded) {
+          const [current] = rows(await selectStandard(sb.from("kg_comments").select("id,student_id,standard_no,body").match(scope)));
+          if (current) saved.set(edit.key, current);
+          else saved.delete(edit.key);
+          edit.needsReload = false;
+          paintProgress(view);
+          if (edit.invalid || edit.queued !== undefined) continue;
+        }
+        const previous = saved.get(edit.key);
+        if (value === (previous?.body || "")) {
+          if (reloaded && edit.draft.trim() === value) {
+            edit.state = "ok";
+            edit.message = value ? "✓ บันทึกแล้ว" : "✓ ล้างความเห็นแล้ว";
+          }
+          continue;
+        }
+        edit.state = "";
+        edit.message = "กำลังบันทึก…";
+        edit.paint();
+        if (value) {
+          const [row] = rows(await sb.from("kg_comments").upsert({ ...filter, body:value }, {
+            onConflict:"student_id,year,half,standard_no"
+          }).select("id,student_id,standard_no,body"));
+          if (!row) throw new Error("comment write unavailable");
+          saved.set(edit.key, row);
+        } else {
+          const query = sb.from("kg_comments").delete().match({ ...scope, id:previous.id });
+          const removed = rows(await selectStandard(query).select("id"));
+          if (!removed.length) {
+            const found = rows(await selectStandard(sb.from("kg_comments").select("id").match(scope)));
+            if (found.length) throw new Error("comment delete unavailable");
+          }
+          saved.delete(edit.key);
+        }
+        if (!edit.invalid && edit.draft.trim() === value) {
+          edit.state = "ok";
+          edit.message = value ? "✓ บันทึกแล้ว" : "✓ ล้างความเห็นแล้ว";
+        } else if (!edit.invalid) {
+          edit.state = edit.message = "";
+        }
+        paintProgress(view);
+      }
+    } catch {
+      edit.needsReload = true;
+      if (!edit.invalid) {
+        edit.state = "err";
+        edit.message = "บันทึกไม่สำเร็จ · ตรวจการเชื่อมต่อหรือสิทธิ์ แล้วกดลองใหม่";
+      }
+    } finally {
+      edit.saving = false;
+      pending--;
+      edit.paint();
+    }
+  }
+
+  async function suggestionStructure(curriculum, half) {
+    if (!curriculum.subject || !curriculum.expected.length) return null;
+    curriculum.byHalf ??= new Map();
+    if (curriculum.byHalf.has(half)) return curriculum.byHalf.get(half);
+    const subjectId = curriculum.subject.id;
+    const units = rows(await fetchAllRows(() => sb.from("units").select("id,seq").eq("subject_id", subjectId).eq("kind", "วิชา")));
+    const standardByUnit = new Map(units.map(unit => [unit.id, String(unit.seq)]));
+    const indicators = rows(await fetchAllRowsByIds(ids => sb.from("indicators").select("id,unit_id,name").in("unit_id", ids), [...standardByUnit.keys()]));
+    const expected = new Set(curriculum.expected.filter(code => !kgIsGrowthState(code)));
+    const states = new Map();
+    for (const indicator of indicators) {
+      const code = kgCodeOf(indicator.name);
+      if (!expected.has(code) || code.split(".")[0] !== standardByUnit.get(indicator.unit_id)) continue;
+      // รหัสสภาพฯ ต้องชี้ได้ข้อเดียว จึงจะใช้ผลมาทำคำแนะนำได้
+      states.set(code, states.has(code) ? null : indicator.id);
+    }
+    const collections = rows(await fetchAllRowsByIds(ids => sb.from("collections").select("id,indicator_id")
+      .eq("half", half).in("indicator_id", ids), [...states.values()]));
+    const loaded = { subjectId, states, collections };
+    curriculum.byHalf.set(half, loaded);
+    return loaded;
+  }
+
+  async function loadSuggestions(view, curriculum) {
+    const studentId = view.student.id;
+    const structure = await suggestionStructure(curriculum, view.half);
+    if (!structure) return new Map();
+    const { subjectId, states, collections } = structure;
+    const byCollection = new Map(collections.map(row => [row.id, row.indicator_id]));
+    const [scoreResult, tieResult] = await Promise.all([
+      fetchAllRowsByIds(ids => sb.from("scores").select("id,collection_id,raw_score").eq("student_id", studentId)
+        .in("collection_id", ids), [...byCollection.keys()]),
+      collections.length ? fetchAllRows(() => sb.from("kg_tie_choices").select("id,scope_key,level")
+        .eq("subject_id", subjectId).eq("student_id", studentId).eq("half", view.half).eq("scope", "สภาพ")) : { data:[] }
+    ]);
+    const raw = new Map();
+    for (const score of rows(scoreResult)) {
+      const stateId = byCollection.get(score.collection_id);
+      if (!raw.has(stateId)) raw.set(stateId, []);
+      raw.get(stateId).push(score.raw_score);
+    }
+    const choices = new Map(rows(tieResult).map(choice => [choice.scope_key, choice.level]));
+    const byStandard = new Map();
+    for (const code of curriculum.expected) {
+      const standard = code.split(".")[0];
+      const stateId = states.get(code);
+      if (!byStandard.has(standard)) byStandard.set(standard, []);
+      byStandard.get(standard).push({ code, ...kgStateTermResult(raw.get(stateId), choices.get(stateId)) });
+    }
+    return new Map([...byStandard].map(([standard, results]) => [standard, kgStandardSuggestion(results)]));
+  }
+
+  async function showSuggestions(view, curriculum) {
+    const suggestions = view.data.suggestions;
+    const studentId = view.student.id;
+    try {
+      if (!suggestions.has(studentId)) suggestions.set(studentId, await loadSuggestions(view, curriculum));
+      if (screen !== view) return;
+      for (const [standard, result] of suggestions.get(studentId)) {
+        const field = $("note-" + standard)?.closest(".note-field");
+        if (!field) continue;
+        const hint = field.querySelector(".suggestion-note");
+        if (!result.text) {
+          hint.textContent = {
+            incomplete:"ยังแนะนำไม่ได้ · ผลภาคของมาตรฐานนี้ยังไม่ครบ",
+            unresolved:"ยังแนะนำไม่ได้ · มีข้อเสมอที่ครูยังไม่ได้เลือกผล",
+            tied:"ยังแนะนำไม่ได้ · ผลของมาตรฐานนี้มีฐานนิยมเสมอกัน"
+          }[result.reason];
+          hint.hidden = false;
+          continue;
+        }
+        const chip = [...field.querySelectorAll("[data-phrase]")].find(button => button.dataset.phrase === result.text);
+        if (chip) {
+          chip.classList.add("suggestion");
+          chip.textContent = "แนะนำ: " + result.text;
+          if (!chip.parentElement.contains(document.activeElement)) chip.parentElement.prepend(chip);
+        }
+        const summary = KG_LEVELS.filter(({ v }) => result.counts[v])
+          .map(({ v, label }) => label + " " + result.counts[v]).join(" · ");
+        hint.textContent = "แนะนำจากผล" + KG_HALF_LABEL[view.half] + " ของมาตรฐานนี้: " + summary + " ข้อ";
+        hint.hidden = false;
+      }
+    } catch {
+      if (screen === view) $("suggestion-status").textContent = "โหลดผลสำหรับข้อความแนะนำไม่สำเร็จ · ยังเขียนความเห็นได้ ลองเปิดรายชื่อเด็กคนนี้อีกครั้งเพื่อโหลดใหม่";
+    }
+  }
+
+  const healthKey = ({ kind, item, done_on }) => JSON.stringify([kind, item, done_on]);
+
+  function healthGroups(data) {
+    const groups = new Map();
+    for (const row of data.rows.values()) {
+      const key = healthKey(row);
+      if (!groups.has(key)) groups.set(key, { kind:row.kind, item:row.item, done_on:row.done_on, members:[] });
+      groups.get(key).members.push(row);
+    }
+    return [...groups.values()].sort((a, b) => a.done_on.localeCompare(b.done_on) || collator.compare(a.item, b.item));
+  }
+
+  function renderHealth(view) {
+    const { room, data } = view;
+    const groups = healthGroups(data);
+    $("health").innerHTML = healthKinds.map((kind, i) => {
+      const events = groups.filter(group => group.kind === kind);
+      return `<section class="card notes-card" aria-labelledby="health-kind-${i}"><h2 id="health-kind-${i}" tabindex="-1">${kind}</h2>
+        ${events.length ? `<ul class="event-list">${events.map(group => {
+          const received = group.members.length;
+          const missed = room.roster.length - received;
+          return `<li><button type="button" class="event" data-group="${groups.indexOf(group)}">
+            <span>${escapeHtml(group.item)}</span>
+            <span class="amount ${missed ? "partial" : ""}">${received}/${room.roster.length} คน</span>
+            <span class="hint">${thaiShortDateText(group.done_on)} · ไม่ได้รับ ${missed} คน</span></button></li>`;
+        }).join("")}</ul>` : `<p class="empty">ยังไม่มีรายการ${kind}${room.canEdit && room.roster.length ? " · กดเพิ่มรายการให้ทั้งห้องเพื่อเริ่มบันทึก" : ""}</p>`}</section>`;
+    }).join("") + `
+      ${room.roster.length ? `<button type="button" id="add-health" class="primary" aria-controls="health-editor"
+        aria-expanded="false" ${room.canEdit ? "" : 'aria-disabled="true"'}>+ เพิ่มรายการให้ทั้งห้อง</button>`
+      : '<p class="empty">ยังไม่มีรายชื่อเด็กในห้องนี้ กรุณาเลือกห้องอื่นหรือติดต่อฝ่ายวิชาการ</p>'}
+      <div id="health-editor" hidden></div>`;
+    function open(group) {
+      if (data.draft?.busy || data.draft?.confirming) return;
+      data.draft = {
+        group, kind:group?.kind ?? healthKinds[0], item:group?.item ?? "", done_on:group?.done_on ?? "",
+        selected:new Set(group ? group.members.map(row => row.student_id) : room.ids),
+        owned:new Set(group?.members.map(row => row.id)), removed:new Set(), insertIds:new Map(),
+        dirty:false, busy:false, message:""
+      };
+      renderHealthEditor(view, true);
+    }
+    $("add-health")?.addEventListener("click", () => { if (room.canEdit) open(null); });
+    for (const button of $("health").querySelectorAll("[data-group]")) {
+      button.addEventListener("click", () => open(groups[Number(button.dataset.group)]));
+    }
+    renderHealthEditor(view);
+  }
+
+  function renderHealthEditor(view, focus = false) {
+    const { room, data } = view;
+    const draft = data.draft;
+    const editor = $("health-editor");
+    $("add-health")?.setAttribute("aria-expanded", Boolean(draft && !draft.group));
+    editor.hidden = !draft;
+    if (!draft) return;
+    const range = academicYearRange(room.year, context.years);
+    const max = range.end < today ? range.end : today;
+    const locked = !room.canEdit || draft.busy;
+    editor.innerHTML = `<form id="health-form" class="card notes-card" novalidate aria-busy="${draft.busy}">
+      <h2 tabindex="-1">${draft.group ? "รายการบริการสุขภาพ" : "เพิ่มรายการให้ทั้งห้อง"}</h2>
+      <div class="seg" role="group" aria-label="ประเภท">${healthKinds.map(kind => `<button type="button"
+        data-kind="${kind}" aria-pressed="${kind === draft.kind}" ${draft.group || locked ? 'aria-disabled="true"' : ""}>${kind}</button>`).join("")}</div>
+      <div class="field"><label for="health-item">รายการ</label>
+        <input id="health-item" type="text" list="health-items" value="${escapeHtml(draft.item)}" required ${locked ? "readonly" : ""} aria-describedby="item-error">
+        <datalist id="health-items">${healthItems.map(item => `<option value="${escapeHtml(item)}">`).join("")}</datalist>
+        <p id="item-error" class="hint error" aria-live="polite" hidden></p></div>
+      <div class="field"><label for="health-date">วันที่</label>
+        <input id="health-date" type="date" min="${range.start}" max="${max}" value="${escapeHtml(draft.done_on)}" required ${locked ? "readonly" : ""} aria-describedby="date-error">
+        <p id="date-error" class="hint error" aria-live="polite" hidden></p></div>
+      <fieldset>
+        <legend><span id="health-count" role="status" aria-atomic="true"></span></legend>
+        <div class="kids">${room.roster.map(child => {
+          const selected = draft.selected.has(child.id);
+          return `<label class="${selected ? "" : "off"}"><input type="checkbox" value="${child.id}"
+            ${selected ? "checked" : ""} ${locked ? "disabled" : ""}><span>${escapeHtml(studentName(child))}<span ${selected ? "hidden" : ""}> (ไม่ได้รับ)</span></span></label>`;
+        }).join("")}</div>
+      </fieldset>
+      <p id="health-warning" class="warning" role="status" aria-atomic="true" hidden></p>
+      <p id="health-status" class="hint ${draft.busy ? "" : "error"}" role="status" aria-atomic="true">${escapeHtml(draft.message)}</p>
+      <div class="actions"><button type="button" id="cancel-health" ${draft.busy ? "disabled" : ""}>${room.canEdit ? "ยกเลิก" : "ปิด"}</button>
+        ${room.canEdit ? `<button type="submit" id="save-health" class="primary" ${draft.busy ? "disabled" : ""}></button>` : ""}</div>
+    </form>`;
+    const form = $("health-form");
+    function close() {
+      if (draft.confirming) return;
+      data.draft = null;
+      renderHealth(view);
+      const index = healthGroups(data).findIndex(group => draft.group && healthKey(group) === healthKey(draft.group));
+      ($(view.tab).querySelector(`[data-group="${index}"]`) || $("add-health"))?.focus();
+    }
+    $("cancel-health").addEventListener("click", close);
+    if (!locked) {
+      const changeField = (input, key, errorId) => {
+        draft[key] = input.value;
+        draft.dirty = true;
+        input.removeAttribute("aria-invalid");
+        $(errorId).hidden = true;
+        paintHealthDraft(view);
+      };
+      $("health-item").addEventListener("input", event => changeField(event.target, "item", "item-error"));
+      $("health-date").addEventListener("input", event => changeField(event.target, "done_on", "date-error"));
+      for (const button of form.querySelectorAll("[data-kind]")) {
+        button.addEventListener("click", () => {
+          if (draft.group) return;
+          draft.kind = button.dataset.kind;
+          draft.dirty = true;
+          for (const option of form.querySelectorAll("[data-kind]")) option.setAttribute("aria-pressed", option === button);
+          paintHealthDraft(view);
+        });
+      }
+      form.addEventListener("change", event => {
+        if (event.target.type === "checkbox") void toggleRecipient(view, draft, event.target);
+      });
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        void saveHealth(view, draft);
+      });
+    } else {
+      form.addEventListener("submit", event => event.preventDefault());
+    }
+    paintHealthDraft(view);
+    if (focus) {
+      form.querySelector("h2").focus({ preventScroll:true });
+      form.scrollIntoView({ block:"start" });
+    }
+  }
+
+  function paintHealthDraft({ room, data }) {
+    const draft = data.draft;
+    $("health-count").textContent = "เด็กที่ได้รับ (" + draft.selected.size + " จาก " + room.roster.length + " คน)";
+    if ($("save-health")) $("save-health").textContent = draft.busy ? "กำลังบันทึก…" : "บันทึก " + draft.selected.size + " คน";
+    const otherCounts = new Map();
+    for (const row of data.rows.values()) {
+      if (row.kind === draft.kind && !draft.owned.has(row.id)) {
+        otherCounts.set(row.student_id, (otherCounts.get(row.student_id) || 0) + 1);
+      }
+    }
+    const over = room.roster.filter(child => draft.selected.has(child.id) && (otherCounts.get(child.id) || 0) >= 4);
+    $("health-warning").hidden = over.length === 0;
+    $("health-warning").textContent = over.length
+      ? over.map(child => child.name).join(", ") + " จะมีรายการ" + draft.kind + "เกิน 4 รายการ · สมุดพิมพ์ได้ 4 บรรทัดต่อประเภท"
+      : "";
+  }
+
+  async function toggleRecipient(view, draft, input) {
+    const id = input.value;
+    const selected = input.checked;
+    if (draft.confirming) {
+      input.checked = draft.selected.has(id);
+      return;
+    }
+    const row = !selected && [...view.data.rows.values()].find(row => row.student_id === id && draft.owned.has(row.id));
+    if (row) {
+      input.checked = true;
+      const student = view.room.roster.find(child => child.id === id);
+      draft.confirming = true;
+      let accepted = false;
+      try {
+        accepted = await window.crsAskConfirm({
+          title:"นำเด็กออกจากรายการสุขภาพ",
+          message:`เมื่อบันทึก ระบบจะลบ “${row.item}” วันที่ ${thaiShortDateText(row.done_on)} ของ ${student.name} 1 คน`,
+          okLabel:"นำออก", danger:true
+        });
+      } finally {
+        draft.confirming = false;
+      }
+      if (!accepted || screen !== view || view.data.draft !== draft) return;
+      draft.removed.add(id);
+    }
+    if (selected) draft.removed.delete(id);
+    if (selected) draft.selected.add(id);
+    else draft.selected.delete(id);
+    draft.dirty = true;
+    input.checked = selected;
+    const label = input.closest("label");
+    label.classList.toggle("off", !selected);
+    label.querySelector("span span").hidden = selected;
+    paintHealthDraft(view);
+  }
+
+  function fieldError(id, errorId, message) {
+    const input = $(id);
+    input.setAttribute("aria-invalid", "true");
+    $(errorId).hidden = false;
+    $(errorId).textContent = message;
+    input.focus();
+  }
+
+  function toast(message, ok) {
+    clearTimeout(toastTimer);
+    $("toast").textContent = message;
+    $("toast").className = "toast " + (ok ? "ok" : "err");
+    toastTimer = setTimeout(() => { $("toast").textContent = ""; }, 4000);
+  }
+
+  async function saveHealth(view, draft) {
+    const { room, data } = view;
+    if (!room.canEdit || draft.busy || draft.confirming || data.draft !== draft) return;
+    const target = { kind:draft.kind, item:draft.item.trim(), done_on:draft.done_on };
+    const range = academicYearRange(room.year, context.years);
+    const status = $("health-status");
+    if (!target.item || charLength(target.item) > 120) {
+      fieldError("health-item", "item-error", "กรุณาระบุชื่อรายการไม่เกิน 120 ตัวอักษร");
+      return;
+    }
+    if (!target.done_on || target.done_on < range.start || target.done_on > range.end || target.done_on > today) {
+      fieldError("health-date", "date-error", "กรุณาเลือกวันที่ในปีการศึกษาที่เลือก และไม่เกินวันนี้");
+      return;
+    }
+    if (!draft.group && !draft.selected.size) {
+      status.textContent = "กรุณาเลือกเด็กอย่างน้อย 1 คน";
+      $("health-form").querySelector('input[type="checkbox"]')?.focus();
+      return;
+    }
+
+    draft.busy = true;
+    draft.message = "กำลังบันทึกรายการสุขภาพ…";
+    pending++;
+    renderHealthEditor(view);
+    try {
+      if (draft.reload) {
+        data.rows = new Map((await readHealth(room)).map(row => [row.id, row]));
+        draft.reload = false;
+      }
+      const targetKey = healthKey(target);
+      if (draft.selected.size && [...data.rows.values()].some(row => healthKey(row) === targetKey && !draft.owned.has(row.id))) {
+        draft.message = "มีรายการนี้ในวันเดียวกันแล้ว · เปิดรายการเดิมเพื่อแก้รายชื่อ หรือเปลี่ยนชื่อหรือวันที่";
+        return;
+      }
+      const current = new Map([...data.rows.values()].filter(row => draft.owned.has(row.id)).map(row => [row.student_id, row]));
+      const changes = new Map();
+      const additions = [];
+      const removals = new Map();
+      if ([...current].some(([id]) => !draft.selected.has(id) && !draft.removed.has(id))) {
+        draft.message = "กรุณายืนยันการนำเด็กออกก่อนบันทึก";
+        return;
+      }
+      for (const [id, row] of current) {
+        const destination = !draft.selected.has(id) ? removals : healthKey(row) !== targetKey ? changes : null;
+        if (!destination) continue;
+        const key = healthKey(row);
+        if (!destination.has(key)) destination.set(key, []);
+        destination.get(key).push(row);
+      }
+      for (const id of draft.selected) {
+        if (current.has(id)) continue;
+        if (!draft.insertIds.has(id)) draft.insertIds.set(id, crypto.randomUUID());
+        const rowId = draft.insertIds.get(id);
+        draft.owned.add(rowId);
+        additions.push({ id:rowId, student_id:id, year:room.year, ...target });
+      }
+
+      // แยกเพิ่ม แก้ และลบตามสิทธิ์จริง เก็บผลของแต่ละชุดเพื่อให้ลองใหม่ได้หลังคำขอพลาด
+      for (const group of changes.values()) {
+        await writeBatches(group, batch => matchingHealthRows(sb.from("kg_health").update(target), room.year, batch), data);
+      }
+      await writeBatches(additions, batch => sb.from("kg_health").insert(batch), data);
+      for (const group of removals.values()) {
+        await writeBatches(group, batch => matchingHealthRows(sb.from("kg_health").delete(), room.year, batch), data, true);
+      }
+      data.draft = null;
+      if (screen === view) {
+        renderHealth(view);
+        const index = healthGroups(data).findIndex(group => healthKey(group) === targetKey);
+        ($("health").querySelector(`[data-group="${index}"]`) || $("add-health"))?.focus();
+      }
+      toast("บันทึกแล้ว · เด็กที่ได้รับ " + draft.selected.size + " คน", true);
+    } catch (error) {
+      draft.reload = true;
+      draft.message = "บันทึกไม่ครบ · ตรวจการเชื่อมต่อหรือสิทธิ์ แล้วกดบันทึกอีกครั้ง";
+      if (error.code === "23505") draft.message = "พบรายการซ้ำ · ตรวจชื่อและวันที่ แล้วกดบันทึกอีกครั้ง";
+    } finally {
+      pending--;
+      draft.busy = false;
+      if (screen?.data === data && data.draft === draft) {
+        renderHealth(screen);
+        $("health-status")?.setAttribute("tabindex", "-1");
+        $("health-status")?.focus({ preventScroll:true });
+      } else if (screen?.data === data && screen !== view) renderHealth(screen);
+    }
+  }
+
+  function matchingHealthRows(query, year, batch) {
+    const { kind, item, done_on } = batch[0];
+    return query.match({ year, kind, item, done_on }).in("id", batch.map(row => row.id));
+  }
+
+  async function writeBatches(items, queryFor, data, deleting = false) {
+    for (let offset = 0; offset < items.length; offset += ID_CHUNK) {
+      const batch = items.slice(offset, offset + ID_CHUNK);
+      const written = rows(await queryFor(batch).select(deleting ? "id" : healthColumns));
+      for (const row of written) {
+        if (deleting) data.rows.delete(row.id);
+        else data.rows.set(row.id, row);
+      }
+      if (written.length !== batch.length) throw new Error("health write unavailable");
+    }
+  }
+
+  await navigate();
+}
+</script>
+</body>
+</html>
