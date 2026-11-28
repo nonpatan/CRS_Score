@@ -3210,10 +3210,10 @@ function showCompRoomResults(focusStudentId = "") {
     escapeHtml(state.computedAt) + " น.</span></div><div class='comp-room-action-group'><div class='comp-room-actions'>" +
     "<button type='button' id='comp-room-recompute'>คำนวณใหม่</button>" +
     "<button type='button' class='comp-room-button' id='comp-room-do-print'>พิมพ์ใบตามงานทั้งห้อง</button>" +
-    (canPublishCompRoom && !kindergarten ? "<button type='button' id='comp-room-publish' aria-describedby='comp-room-publish-status comp-room-release-note'>" +
+    (canPublishCompRoom ? "<button type='button' id='comp-room-publish' aria-describedby='comp-room-publish-status comp-room-release-note'>" +
       busyIcon + "<span>บันทึกผลให้ผู้ปกครอง</span></button>" : "") +
     "<button type='button' id='comp-room-close'>ปิด</button></div>" +
-    (canPublishCompRoom && !kindergarten ? "<p id='comp-room-publish-status' class='hint comp-room-publish-feedback' role='status'></p>" +
+    (canPublishCompRoom ? "<p id='comp-room-publish-status' class='hint comp-room-publish-feedback' role='status' aria-atomic='true'></p>" +
       "<p id='comp-room-release-note' class='hint comp-room-publish-feedback'></p>" : "") + "</div>";
   const people = document.createElement("section");
   people.className = "card comp-room-people no-print";
@@ -3278,8 +3278,10 @@ function showCompRoomResults(focusStudentId = "") {
     updateCompRoomPublishControls();
     publishButton.addEventListener("click", () => publishCompRoomResults(state, publishButton));
     const note = toolbar.querySelector("#comp-room-release-note");
+    const manualNote = kindergarten ? "อนุบาลต้องกดบันทึกรายห้อง" : "";
+    note.textContent = manualNote;
     state.releaseNote ??= loadCompRoomReleaseNote(elCompYear.value, compRoomPublishTerm());
-    state.releaseNote.then(message => { note.textContent = message; });
+    state.releaseNote.then(message => { note.textContent = [manualNote, message].filter(Boolean).join(" · "); });
   }
   (focusStudentId ? [...list.querySelectorAll(".comp-student-button")]
     .find(button => button.dataset.student === String(focusStudentId)) : null)?.focus();
@@ -3331,7 +3333,9 @@ async function publishCompRoomResults(state, button) {
   const count = new Set(rows.map(row => row.student_id)).size;
   const incomplete = state.perStudent.filter(entry => entry.results.some(row => !row.combined?.complete)).length;
   const room = elCompGrade.value + "/" + elCompRoom.value;
-  const period = elCompGrade.value.startsWith("ม.") ? "ภาคเรียนที่ " + term + "/" + year : compPrimaryHalf + "/" + year;
+  const termLabel = "ภาคเรียนที่ " + term;
+  const period = (elCompGrade.value.startsWith("ม.") ? termLabel :
+    compPrimaryHalf + (elCompGrade.value.startsWith("อ.") ? " (" + termLabel + ")" : "")) + "/" + year;
   const accepted = await window.crsAskConfirm({
     title: "บันทึกผลให้ผู้ปกครอง",
     message: "บันทึกผลสมรรถนะ " + room + " " + period + " ให้ผู้ปกครองเห็น " + count + " คน?\n" +
