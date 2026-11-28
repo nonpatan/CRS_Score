@@ -114,6 +114,22 @@
   summary:focus-visible,button:focus-visible { outline:2px solid var(--teal);outline-offset:3px; }
   .weight-total { display:block;font-size:13px;font-weight:600;color:var(--amber); }
   .weight-total.complete { color:var(--teal); }
+  #kg-weight-settings .weight-row { display:grid; grid-template-columns:minmax(0,2fr) repeat(3,minmax(0,1fr)) minmax(0,1fr); gap:8px; align-items:center; }
+  #kg-weight-settings input { min-height:44px; padding-inline:8px; }
+  #kg-weight-settings .kg-weight-head { font-weight:600; color:var(--muted); }
+  #kg-weight-settings .kg-weight-row-error { grid-column:1/-1; color:var(--danger); overflow-wrap:anywhere; }
+  #kg-weight-settings .kg-weight-total { font-weight:600; overflow-wrap:anywhere; }
+  #kg-weight-settings .kg-weight-total.complete { color:var(--teal); }
+  #kg-weight-settings input[aria-invalid="true"] { border-color:var(--danger); }
+  #kg-weight-settings input[readonly] { background:var(--bg); }
+  #kg-weight-settings :is(input,button):focus-visible, #btn-save-kg-weights:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #btn-save-kg-weights:disabled { opacity:.65; cursor:default; }
+  @media (max-width:580px) {
+    #kg-weight-settings .weight-row { grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,1.2fr); }
+    #kg-weight-settings .kg-weight-head :first-child { display:none; }
+    #kg-weight-settings .kg-weight-name { grid-column:1/-1; }
+    #kg-weight-settings :is(.kg-weight-total,.kg-weight-head) { font-size:.875rem; }
+  }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -136,7 +152,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261128-3"></script>
+    <script src="../app-shell.js?v=20261128-4"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -195,6 +211,14 @@
     <button class="primary" id="btn-save-levels" style="margin-top:12px">บันทึกเกณฑ์แปลผล</button>
     <div id="settings-readonly" class="readonly" style="display:none;margin-top:12px">สัดส่วนและเกณฑ์แปลผลแก้ได้เฉพาะหัวหน้าฝ่ายวิชาการและ admin</div>
   </div>
+  <section class="card" aria-labelledby="kg-weight-title">
+    <h2 id="kg-weight-title">น้ำหนัก 3 แหล่ง · อนุบาล (ช่วงชั้นอนุบาล)</h2>
+    <p class="settings-note">แต่ละด้านต้องรวม 100% · แหล่งที่ไม่ใช้ใส่ 0%</p>
+    <div id="kg-weight-settings" class="empty">กำลังโหลด...</div>
+    <p id="kg-weight-status" role="status" aria-atomic="true" class="hint"></p>
+    <button type="button" class="primary" id="btn-save-kg-weights" disabled hidden>บันทึกน้ำหนักอนุบาล</button>
+    <p id="kg-weight-readonly" class="readonly" hidden>น้ำหนักอนุบาลแก้ได้เฉพาะหัวหน้าฝ่ายวิชาการและผู้ดูแลระบบ</p>
+  </section>
   <div class="overlay" id="name-overlay">
     <div class="modal card" role="dialog" aria-modal="true" aria-labelledby="name-modal-title">
       <h3 id="name-modal-title">แก้ชื่อรายการ</h3>
@@ -211,8 +235,8 @@
 import {
   sb, requireAuth, signOut, getProfile, checkDepartment, getSetting, isAcademicHead,
   availableCompetencyStages, getActiveYear, setActiveYear, listSelectableYears,
-  loadCompetencySettings
-} from "../supabase-client.js?v=20261128-3";
+  loadCompetencySettings, KG_COMPETENCY_STAGE
+} from "../supabase-client.js?v=20261128-4";
 const session = await requireAuth();
 if (!session) {
   // requireAuth กำลังพาไปหน้า login — ไม่เริ่มโค้ดของหน้านี้และไม่โยน error ลง console
@@ -227,6 +251,7 @@ const canManageSettings = Boolean(isAdmin || await isAcademicHead());
 document.getElementById("btn-signout").addEventListener("click", e => { e.preventDefault(); signOut(); });
 
 let competencies = [], elements = [], sourceWeights = [], interpretationLevels = [];
+let kgSourceWeights = [], kgWeightError = "", settingsRequest = 0;
 let settingsLoadError = "", catalogLoadError = "", highestGrade = null, allowedStages = [];
 let selectableSettingsYears = [], settingsByYear = new Map(), settingsYear = "", copySourceYear = "";
 let editingCatalog = null;
@@ -280,14 +305,21 @@ async function findCopySourceYear(excludedYear){
 }
 
 async function loadSettingsYear(year){
+  const request = ++settingsRequest;
   settingsYear=year;sourceWeights=[];interpretationLevels=[];settingsLoadError="";copySourceYear="";
+  kgSourceWeights=[];kgWeightError="";
+  $("kg-weight-settings").textContent = year ? "กำลังโหลด..." : "";
+  $("kg-weight-status").textContent = "";
+  $("btn-save-kg-weights").disabled = true;
   if(!year){renderSettings();return;}
   try{
     const data=await loadCompetencySettings(year);
+    if(request!==settingsRequest)return;
     sourceWeights=data.weights;interpretationLevels=data.levels;settingsByYear.set(year,data);
+    kgSourceWeights=data.kgWeights;kgWeightError=data.kgWeightError;
     if(!settingsAreComplete(data))copySourceYear=await findCopySourceYear(year);
-  }catch(error){settingsLoadError=error.message;}
-  renderSettings();
+  }catch(error){if(request===settingsRequest)settingsLoadError=error.message;}
+  if(request===settingsRequest)renderSettings();
 }
 
 $("settings-year").addEventListener("change",async()=>{
@@ -451,6 +483,7 @@ function syncWeightTotals(){
 new MutationObserver(syncWeightTotals).observe($("weight-settings"),{childList:true});
 $("weight-settings").addEventListener("input",syncWeightTotals);
 function renderSettings(){
+  renderKgWeights();
   const weightEl=$("weight-settings"),levelEl=$("level-settings"),activeRows=activeCompetencies();
   const yearLabel=settingsYear?" — ปีการศึกษา "+settingsYear:"";
   $("weight-title").textContent="น้ำหนักสรุปสมรรถนะ 3 แหล่ง"+yearLabel;
@@ -524,11 +557,112 @@ $("btn-save-weights").onclick=async()=>{
   const rows=[...$("weight-settings").querySelectorAll(".weight-row")].map(row=>({year:settingsYear,competency_id:row.dataset.competency,subject_weight:Number(row.querySelector("[data-source=subject]").value),activity_weight:Number(row.querySelector("[data-source=activity]").value),routine_weight:Number(row.querySelector("[data-source=routine]").value),updated_at:new Date().toISOString()}));
   if(rows.length!==activeCount||rows.some(row=>![row.subject_weight,row.activity_weight,row.routine_weight].every(value=>Number.isFinite(value)&&value>=0&&value<=100)||Math.abs(row.subject_weight+row.activity_weight+row.routine_weight-100)>0.000001)){toast("กรอกน้ำหนักของด้านที่ใช้งานให้ครบ แต่ละแหล่ง 0–100% และรวมกันเป็น 100%",false);return;}
   const button=$("btn-save-weights");button.disabled=true;const {error}=await sb.from("competency_source_weights").upsert(rows,{onConflict:"year,competency_id"});button.disabled=false;
-  if(error){toast("บันทึกน้ำหนักไม่สำเร็จ: "+error.message,false);return;}sourceWeights=[...sourceWeights.filter(old=>!rows.some(row=>row.competency_id===old.competency_id)),...rows];settingsByYear.set(settingsYear,{weights:sourceWeights,levels:interpretationLevels});toast("บันทึกน้ำหนัก "+activeCount+" ด้านแล้ว");
+  if(error){toast("บันทึกน้ำหนักไม่สำเร็จ: "+error.message,false);return;}sourceWeights=[...sourceWeights.filter(old=>!rows.some(row=>row.competency_id===old.competency_id)),...rows];settingsByYear.set(settingsYear,{...settingsByYear.get(settingsYear),weights:sourceWeights,levels:interpretationLevels});toast("บันทึกน้ำหนัก "+activeCount+" ด้านแล้ว");
 };
 // ขอบล่างของช่วงต่ำสุดต้องเป็น 0 ไม่ใช่ 1 — เด็กที่ได้ 0 ทุกแหล่งต้องแปลผลได้
 // (brief-score-correctness.md ข้อ 1.2 · ถ้าเปลี่ยนกลับเป็น 1 บั๊กเดิมจะกลับมาทันที)
-$("btn-save-levels").onclick=async()=>{if(!canManageSettings)return;const rows=[...$("level-settings").querySelectorAll(".level-row")].map(row=>({year:settingsYear,code:row.dataset.code,seq:Number(row.dataset.seq),label:row.querySelector("[data-field=label]").value.trim(),min_score:Number(row.querySelector("[data-field=min]").value),max_score:Number(row.querySelector("[data-field=max]").value),updated_at:new Date().toISOString()})).sort((a,b)=>a.min_score-b.min_score);if(rows.length!==4||rows.some(row=>!row.label||!Number.isInteger(row.min_score)||!Number.isInteger(row.max_score)||row.min_score<0||row.max_score>100||row.min_score>row.max_score)){toast("กรอกชื่อระดับและช่วงคะแนนจำนวนเต็ม 0–100 ให้ครบ",false);return;}if(rows[0].min_score!==0||rows[rows.length-1].max_score!==100||rows.some((row,index)=>index>0&&row.min_score!==rows[index-1].max_score+1)){toast("ช่วงคะแนนต้องต่อกันตั้งแต่ 0 ถึง 100 โดยไม่ซ้อนหรือเว้นช่วง",false);return;}const button=$("btn-save-levels");button.disabled=true;const {error}=await sb.from("competency_interpretation_levels").upsert(rows,{onConflict:"year,code"});button.disabled=false;if(error){toast("บันทึกเกณฑ์ไม่สำเร็จ: "+error.message,false);return;}interpretationLevels=rows;settingsByYear.set(settingsYear,{weights:sourceWeights,levels:interpretationLevels});renderSettings();toast("บันทึกเกณฑ์แปลผลแล้ว");};
+$("btn-save-levels").onclick=async()=>{if(!canManageSettings)return;const rows=[...$("level-settings").querySelectorAll(".level-row")].map(row=>({year:settingsYear,code:row.dataset.code,seq:Number(row.dataset.seq),label:row.querySelector("[data-field=label]").value.trim(),min_score:Number(row.querySelector("[data-field=min]").value),max_score:Number(row.querySelector("[data-field=max]").value),updated_at:new Date().toISOString()})).sort((a,b)=>a.min_score-b.min_score);if(rows.length!==4||rows.some(row=>!row.label||!Number.isInteger(row.min_score)||!Number.isInteger(row.max_score)||row.min_score<0||row.max_score>100||row.min_score>row.max_score)){toast("กรอกชื่อระดับและช่วงคะแนนจำนวนเต็ม 0–100 ให้ครบ",false);return;}if(rows[0].min_score!==0||rows[rows.length-1].max_score!==100||rows.some((row,index)=>index>0&&row.min_score!==rows[index-1].max_score+1)){toast("ช่วงคะแนนต้องต่อกันตั้งแต่ 0 ถึง 100 โดยไม่ซ้อนหรือเว้นช่วง",false);return;}const button=$("btn-save-levels");button.disabled=true;const {error}=await sb.from("competency_interpretation_levels").upsert(rows,{onConflict:"year,code"});button.disabled=false;if(error){toast("บันทึกเกณฑ์ไม่สำเร็จ: "+error.message,false);return;}interpretationLevels=rows;settingsByYear.set(settingsYear,{...settingsByYear.get(settingsYear),weights:sourceWeights,levels:interpretationLevels});renderSettings();toast("บันทึกเกณฑ์แปลผลแล้ว");};
+
+const kgWeightLabels = { subject_weight:"รายวิชา", activity_weight:"กิจกรรม", routine_weight:"กิจวัตร" };
+
+function renderKgWeights() {
+  const grid = $("kg-weight-settings"), save = $("btn-save-kg-weights");
+  const problem = kgWeightError || settingsLoadError;
+  $("kg-weight-title").textContent = "น้ำหนัก 3 แหล่ง · อนุบาล (ช่วงชั้นอนุบาล)" +
+    (settingsYear ? " — ปีการศึกษา " + settingsYear : "");
+  $("kg-weight-readonly").hidden = canManageSettings;
+  save.hidden = !canManageSettings || !settingsYear || Boolean(problem);
+  save.disabled = true;
+  if (!settingsYear || problem) {
+    grid.textContent = problem ? "โหลดน้ำหนักอนุบาลไม่สำเร็จ: " + problem : "เลือกปีการศึกษาก่อน";
+    return;
+  }
+  grid.innerHTML = "<div class='weight-row kg-weight-head' aria-hidden='true'><span>สมรรถนะ</span>" +
+    Object.values(kgWeightLabels).map(label => "<span>" + label + "</span>").join("") + "<span>รวม</span></div>";
+  for (const competency of competencies.filter(row => elements.some(e =>
+    e.competency_id === row.id && e.stage === KG_COMPETENCY_STAGE))) {
+    const weight = kgSourceWeights.find(row => row.competency_id === competency.id);
+    const row = document.createElement("div"), errorId = "kg-weight-error-" + competency.id;
+    row.className = "weight-row";
+    row.dataset.competency = competency.id;
+    row.innerHTML = "<strong class='kg-weight-name'>" + esc(competency.name) + "</strong>" +
+      Object.entries(kgWeightLabels).map(([field,label]) => `<input aria-label="${esc(competency.name + " " + label + " (%)")}"
+        aria-describedby="${esc(errorId)}" data-source="${field}" type="number" min="0" max="100" step="0.01"
+        value="${esc(weight?.[field] ?? "")}" ${canManageSettings ? "" : "readonly"}>`).join("") +
+      "<span class='kg-weight-total'></span><span class='kg-weight-row-error' id='" + esc(errorId) + "' hidden></span>";
+    grid.appendChild(row);
+  }
+  syncKgWeightRows();
+}
+
+function syncKgWeightRows({ report = false, announce = false } = {}) {
+  const rows = [...$("kg-weight-settings").querySelectorAll("[data-competency]")];
+  const values = [];
+  for (const row of rows) {
+    const inputs = [...row.querySelectorAll("input")];
+    const total = inputs.reduce((sum, input) => sum + (Number(input.value) || 0), 0);
+    const valid = inputs.every(input => input.value !== "" && input.validity.valid);
+    const complete = valid && Math.abs(total - 100) < 0.000001;
+    const badge = row.querySelector(".kg-weight-total");
+    badge.textContent = "รวม " + (inputs.every(input => input.value === "") ? "—" : Number(total.toFixed(2)) + "%");
+    badge.classList.toggle("complete", complete);
+    const error = row.querySelector(".kg-weight-row-error");
+    error.hidden = complete || !canManageSettings || (!report && !row.dataset.touched);
+    const difference = Number(Math.abs(100 - total).toFixed(2));
+    error.textContent = error.hidden ? "" : !valid ? "กรอกค่า 0–100% ให้ครบทั้งสามช่อง (ทศนิยมไม่เกิน 2 ตำแหน่ง)"
+      : total < 100 ? "ขาดอีก " + difference + "%" : "เกิน " + difference + "%";
+    for (const input of inputs) {
+      if (error.hidden) input.removeAttribute("aria-invalid");
+      else input.setAttribute("aria-invalid", "true");
+    }
+    if (complete) values.push({ year:settingsYear, competency_id:row.dataset.competency,
+      ...Object.fromEntries(inputs.map(input => [input.dataset.source, Number(input.value)])), updated_at:new Date().toISOString() });
+  }
+  if (announce) {
+    const status = $("kg-weight-status");
+    const text = "น้ำหนักอนุบาลรวม 100% แล้ว " + values.length + " จาก " + rows.length + " ด้าน";
+    if (status.textContent !== text) status.textContent = text;
+  }
+  const save = $("btn-save-kg-weights");
+  save.disabled = !canManageSettings || !rows.length || values.length !== rows.length || save.dataset.saving === "true";
+  return rows.length && values.length === rows.length ? values : null;
+}
+
+$("kg-weight-settings").addEventListener("input", () => syncKgWeightRows({ announce:true }));
+$("kg-weight-settings").addEventListener("focusout", event => {
+  const row = event.target.closest("[data-competency]");
+  if (!row || row.contains(event.relatedTarget) || !canManageSettings) return;
+  row.dataset.touched = "true";
+  syncKgWeightRows();
+});
+$("btn-save-kg-weights").onclick = async () => {
+  const button = $("btn-save-kg-weights");
+  if (!canManageSettings || button.dataset.saving === "true") return;
+  const rows = syncKgWeightRows({ report:true });
+  if (!rows) return;
+  const year = settingsYear, status = $("kg-weight-status");
+  button.dataset.saving = "true";
+  button.disabled = true;
+  status.textContent = "กำลังบันทึกน้ำหนักอนุบาล…";
+  const inputs = [...$("kg-weight-settings").querySelectorAll("input")];
+  inputs.forEach(input => { input.readOnly = true; });
+  try {
+    const { error } = await sb.from("kg_competency_source_weights").upsert(rows, { onConflict:"year,competency_id" });
+    if (error) throw error;
+    const saved = settingsByYear.get(year);
+    if (saved) saved.kgWeights = rows;
+    if (settingsYear === year) {
+      kgSourceWeights = rows;
+      status.textContent = "บันทึกน้ำหนักอนุบาลแล้ว " + rows.length + " ด้าน";
+    }
+  } catch (error) {
+    if (settingsYear === year) status.textContent = "บันทึกน้ำหนักอนุบาลไม่สำเร็จ: " + error.message + " · กดบันทึกเพื่อลองอีกครั้ง";
+  } finally {
+    button.dataset.saving = "false";
+    inputs.forEach(input => { input.readOnly = false; });
+    syncKgWeightRows();
+  }
+};
 
 await init();
 }

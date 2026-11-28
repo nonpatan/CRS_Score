@@ -208,7 +208,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261128-3"></script>
+    <script src="../app-shell.js?v=20261128-4"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -326,7 +326,7 @@ import { isRegularStudent,
   sb, requireAuth, signOut, getProfile, isAcademicHead, checkDepartment,
   getActiveYear, setActiveYear, distinctYears, listSelectableYears, saveAcademicYear,
   getSetting, setSetting, GRADE_ORDER, PRE_SCHOOL_GRADE, nextGrade, promoteClassroom, getActiveStudents, getStudentPlacements, fetchAllRowsByIds
-} from "../supabase-client.js?v=20261128-3";
+} from "../supabase-client.js?v=20261128-4";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -959,13 +959,14 @@ async function copyGradeWeightsToYear(sourceYear, newYear, addLog) {
 // ---------- คัดลอกน้ำหนัก 3 แหล่ง + เกณฑ์แปลผลสมรรถนะไปปีใหม่ ----------
 async function copyCompetencySettingsToYear(sourceYear,newYear,addLog){
   addLog("• กำลังคัดลอกค่าตั้งสมรรถนะจากปี "+sourceYear+" ไปปี "+newYear+"...");
-  const [weightResult,levelResult,competencyResult]=await Promise.all([
+  const [weightResult,levelResult,competencyResult,kgWeightResult]=await Promise.all([
     sb.from("competency_source_weights").select("competency_id,subject_weight,activity_weight,routine_weight").eq("year",sourceYear),
     sb.from("competency_interpretation_levels").select("code,label,min_score,max_score,seq").eq("year",sourceYear).order("seq"),
-    sb.from("core_competencies").select("id,name")
+    sb.from("core_competencies").select("id,name"),
+    sb.from("kg_competency_source_weights").select("competency_id,subject_weight,activity_weight,routine_weight").eq("year",sourceYear)
   ]);
-  if(weightResult.error||levelResult.error||competencyResult.error){
-    throw new Error("อ่านค่าตั้งสมรรถนะปีต้นทางไม่สำเร็จ: "+(weightResult.error||levelResult.error||competencyResult.error).message);
+  if(weightResult.error||levelResult.error||competencyResult.error||kgWeightResult.error){
+    throw new Error("อ่านค่าตั้งสมรรถนะปีต้นทางไม่สำเร็จ: "+(weightResult.error||levelResult.error||competencyResult.error||kgWeightResult.error).message);
   }
   const weights=weightResult.data||[],levels=levelResult.data||[],competencies=competencyResult.data||[];
   const weightedIds=new Set(weights.map(row=>row.competency_id));
@@ -976,13 +977,16 @@ async function copyCompetencySettingsToYear(sourceYear,newYear,addLog){
   }
   const weightRows=weights.map(row=>({year:newYear,...row}));
   const levelRows=levels.map(row=>({year:newYear,...row}));
-  const [weightCopyResult,levelCopyResult]=await Promise.all([
+  const kgWeightRows=(kgWeightResult.data||[]).map(row=>({year:newYear,...row}));
+  const [weightCopyResult,levelCopyResult,kgWeightCopyResult]=await Promise.all([
     sb.from("competency_source_weights").upsert(weightRows,{onConflict:"year,competency_id",ignoreDuplicates:true}),
-    sb.from("competency_interpretation_levels").upsert(levelRows,{onConflict:"year,code",ignoreDuplicates:true})
+    sb.from("competency_interpretation_levels").upsert(levelRows,{onConflict:"year,code",ignoreDuplicates:true}),
+    kgWeightRows.length ? sb.from("kg_competency_source_weights").upsert(kgWeightRows,{onConflict:"year,competency_id",ignoreDuplicates:true}) : {}
   ]);
-  if(weightCopyResult.error||levelCopyResult.error){
-    throw new Error("คัดลอกค่าตั้งสมรรถนะไปปีใหม่ไม่สำเร็จ: "+(weightCopyResult.error||levelCopyResult.error).message);
+  if(weightCopyResult.error||levelCopyResult.error||kgWeightCopyResult.error){
+    throw new Error("คัดลอกค่าตั้งสมรรถนะไปปีใหม่ไม่สำเร็จ: "+(weightCopyResult.error||levelCopyResult.error||kgWeightCopyResult.error).message);
   }
+  addLog(kgWeightRows.length ? "  ✓ คัดลอกน้ำหนักอนุบาล "+kgWeightRows.length+" ด้าน" : "  · ปีต้นทางยังไม่ได้กำหนดน้ำหนักอนุบาล");
   addLog("  ✓ คัดลอกน้ำหนัก "+weights.length+" ด้าน · เกณฑ์แปลผล 4 ระดับแล้ว (ค่าที่ตั้งไว้ล่วงหน้าในปีใหม่จะไม่ถูกทับ)");
 }
 

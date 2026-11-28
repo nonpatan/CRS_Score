@@ -274,7 +274,7 @@
       <a href="academic-settings.html">ตั้งค่างานวิชาการ</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261128-3"></script>
+    <script src="../app-shell.js?v=20261128-4"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -558,7 +558,7 @@
 </div>
 
 <script type="module">
-import { isKindergartenSubject, isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261128-3";
+import { isKindergartenSubject, isKindergartenGrade, KG_COMPETENCY_STAGE, isRegularStudent, clearMyExamCloseCache, sb, requireAuth, signOut, getProfile, loadGradeWeights, listSelectableYears, saveAcademicYear, getActiveYear, setActiveYear, distinctYears, buildStructureCopyPlan, competencyStageForGrade, GRADE_ORDER, getSetting, isAcademicHead, loadSubjectData, computeSubjectResult, subjectCreditInfo, subjectCodeKey, fetchAllRows, bangkokNow, toDateStr, renderPrimaryHalfBar } from "../supabase-client.js?v=20261128-4";
 
 // ต้องล็อกอินก่อนถึงจะใช้หน้านี้ได้ ไม่งั้นเด้งไปหน้า login.html ให้อัตโนมัติ
 const session = await requireAuth();
@@ -2142,7 +2142,7 @@ function configureCorePicker(type, mode, ref, isCompUnit) {
       .filter(i => mode !== "edit" || i.id !== ref.id)
       .map(i => i.core_competency_element_id).filter(Boolean));
     const availableElements = coreElements.filter(e => e.competency_id === coreUnit.core_competency_id &&
-      (((!stage || e.stage === stage) && e.active !== false) ||
+      (((!stage ? e.stage !== KG_COMPETENCY_STAGE : e.stage === stage) && e.active !== false) ||
         (mode === "edit" && e.id === ref.core_competency_element_id)));
     const elements = availableElements.filter(e => !used.has(e.id) ||
       (mode === "edit" && e.id === ref.core_competency_element_id));
@@ -2410,6 +2410,7 @@ function renderEnrollments() {
   const showAllStages = elChkAllStages.checked || !subjectStage;
   const candidates = allStudentsForEnroll.filter(s =>
     !enrolledIds.has(s.id) &&
+    (isKindergartenSubject(currentSubject) || !isKindergartenGrade(s.grade_level)) &&
     (showAllStages || competencyStageForGrade(s.grade_level) === subjectStage)
   );
   fillStudentSelectGrouped(elSelAddStudent, candidates, "— เลือกนักเรียน —");
@@ -2493,6 +2494,8 @@ document.getElementById("btn-add-student").addEventListener("click", async () =>
   const studentId = elSelAddStudent.value;
   if (!studentId) { showToast("เลือกนักเรียนก่อน", false); return; }
   const subject = currentSubject;
+  const candidate = allStudentsForEnroll.find(student => student.id === studentId);
+  if (!candidate || (!isKindergartenSubject(subject) && isKindergartenGrade(candidate.grade_level))) return;
   let checked;
   try { checked = await siblingEnrollments(subject, [{ id: studentId }]); }
   catch (error) { showToast("ตรวจวิชารหัสเดียวกันไม่สำเร็จ: " + error.message + " · ลองอีกครั้ง", false); return; }

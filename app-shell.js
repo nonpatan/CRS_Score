@@ -963,7 +963,7 @@ function syncFinanceKpiTones() {
     const bookLink = nav.querySelector("[data-kg-book]");
     if (bookLink) void (async () => {
       try {
-        const { sb, getKgEntryAccess, loadMyHomeroomRooms } = await import(new URL("supabase-client.js?v=20261128-3", appRootUrl).href);
+        const { sb, getKgEntryAccess, loadMyHomeroomRooms } = await import(new URL("supabase-client.js?v=20261128-4", appRootUrl).href);
         const { data: { session } } = await sb.auth.getSession();
         if (!session) return;
         // ผู้มีห้องประจำชั้นอาจไม่ได้เป็นเจ้าของวิชา จึงจำสิทธิ์เมนูสมุดแยกจากหน้ากรอก
@@ -996,7 +996,7 @@ function syncFinanceKpiTones() {
     } else if (kgLinks.length) {
       void (async () => {
         try {
-          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-3", appRootUrl).href);
+          const { sb, getKgEntryAccess } = await import(new URL("supabase-client.js?v=20261128-4", appRootUrl).href);
           const { data: { session } } = await sb.auth.getSession();
           if (!session) return;
           const userId = session.user.id;
@@ -1045,7 +1045,7 @@ function syncFinanceKpiTones() {
       if (!["index.html", "grade-edit-requests.html"].includes(current)) {
         const readCount = async () => {
           try {
-            const { sb } = await import(new URL("supabase-client.js?v=20261128-3", appRootUrl).href);
+            const { sb } = await import(new URL("supabase-client.js?v=20261128-4", appRootUrl).href);
             const { data } = await sb.auth.getSession();
             if (!data.session) return;
             const { gradeQueueCounts } = await import(new URL("academic/grade-lock.js?v=5", appRootUrl).href);

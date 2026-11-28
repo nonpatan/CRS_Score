@@ -206,6 +206,13 @@
   #competency-report .comp-room-people { margin-bottom:16px; }
   #competency-report .comp-room-people h3 { margin:0 0 10px; font-size:18px; }
   #competency-report .comp-room-people .student-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  #competency-report .kg-room-results { max-width:100%; overflow-x:auto; }
+  #competency-report .kg-room-results:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #competency-report .kg-room-results table { border-collapse:collapse; width:100%; min-width:640px; }
+  #competency-report .kg-room-results :is(th,td) { text-align:start; border-bottom:1px solid var(--line); padding:8px; vertical-align:top; }
+  #competency-report .kg-room-results thead th { background:var(--bg); }
+  #competency-report .kg-room-results .student-button { width:100%; text-align:start; }
+  #competency-report .kg-room-results .comp-room-score { display:block; font-weight:700; color:var(--teal); }
   #competency-report .comp-room-time { color:var(--muted); font-size:14px; }
   #competency-report .comp-list-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
   #competency-report .comp-list-head .comp-title { margin:0; }
@@ -613,7 +620,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261128-3"></script>
+    <script src="../app-shell.js?v=20261128-4"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -792,10 +799,10 @@ import {
   MS_WARN_PERCENT_PRIMARY, MS_WARN_PERCENT_SECONDARY, GRADE_ORDER, getSetting,
   loadPrimaryDailyAttendance, computePrimaryDailyAttendance, PRIMARY_SCHOOL_DAYS,
   getAcademicYears, academicYearOf, bangkokNow, toDateStr, fetchAllRows, fetchAllRowsByIds,
-  listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade,
+  listHomeroomTeachers, loadLetterSigners, thaiLetterDateText, competencyStageForGrade, KG_COMPETENCY_STAGE,
   subjectTotalScore, subjectCurrentScore, PRIMARY_HALVES, renderPrimaryHalfBar,
   isAutoPresentStudent, isAutoAbsentStudent, checkDepartment, getProfile,
-} from "../supabase-client.js?v=20261128-3";
+} from "../supabase-client.js?v=20261128-4";
 import { initGradeReleaseTab, loadGradeReleasePlacements, releaseRooms, gradeRepairCandidates, competencyPublishRows } from "./grade-release.js?v=8";
 import { traitLevel, activityRows, reportTerms, sortReportSubjects, primaryReportRows } from "../shared/report-card.js?v=20261121-2";
 
@@ -888,12 +895,15 @@ let selectedStudentId = "";
 let subjectResultsCache = new Map();
 let visibleSubjectStudents = [];
 let memberDataList = [];      // ใช้กับวิชาบูรณาการ: ข้อมูลเต็มของวิชาพื้นฐานสมาชิกแต่ละตัว (units/remarks/sessions)
+let kgCompetencyYears = [];
 let allSubjects = [];         // วิชาทั้งหมด (กรองด้วยชั้น/ภาคเรียนก่อนเติมลง dropdown)
 let memberIdSet = new Set();  // id ของวิชาพื้นฐานที่เป็นสมาชิกวิชาบูรณาการ (ซ่อนจาก dropdown)
 let integratedParentIdSet = new Set(); // วิชาบูรณาการตัวแม่ไม่มีหน่วยสมรรถนะหลักของตัวเอง
 let integratedParentByMember = new Map();
 let compSubjectResultsCache = new Map();
 let compStudents = [], coreCompetencies = [], sourceWeights = [], interpretationLevels = [];
+let kgSourceWeights = [], kgWeightError = "", kgCoreCompetencies = [];
+let compSettingsRequest = 0, compPlacementsRequest = 0;
 let competencyConfigError = "", competencySettingsError = "", competencyPlacementError = "", selectedCompStudentId = "";
 let compVisibleStudents = [], compRequestSeq = 0, compRoomRunSeq = 0;
 let compRoomState = null;
@@ -1016,7 +1026,9 @@ async function loadSubjects() {
     .from("integration_members")
     .select("member_subject_id,integrated_subject_id");
   if (memErr) { showEmpty("โหลดข้อมูลวิชาบูรณาการไม่สำเร็จ: " + memErr.message); return; }
-  const kindergartenIds = new Set((res.data || []).filter(isKindergartenSubject).map(subject => subject.id));
+  const kindergartenSubjects = (res.data || []).filter(isKindergartenSubject);
+  kgCompetencyYears = distinctYears(kindergartenSubjects);
+  const kindergartenIds = new Set(kindergartenSubjects.map(subject => subject.id));
   const gradeLinks = (memberRows || []).filter(row =>
     !kindergartenIds.has(row.member_subject_id) && !kindergartenIds.has(row.integrated_subject_id));
   memberIdSet = new Set(gradeLinks.map(r => r.member_subject_id));
@@ -2458,14 +2470,15 @@ const canPublishGradeResults = () => checkDepartment("วิชาการ");
 async function initCompetencyReport() {
   const [assessmentYears,competencies,canPublish] = await Promise.all([
     sb.from("competency_assessments").select("year"),
-    sb.from("core_competencies").select("*").order("seq"),
+    sb.from("core_competencies").select("*, core_competency_elements(stage)").order("seq"),
     canPublishGradeResults()
   ]);
   canPublishCompRoom = canPublish;
   coreCompetencies = competencies.data || [];
+  kgCoreCompetencies = coreCompetencies.filter(row => row.core_competency_elements?.some(element => element.stage === KG_COMPETENCY_STAGE));
   competencyConfigError = (competencies.error && competencies.error.message) || "";
 
-  const years = distinctYears(allSubjects.concat((assessmentYears.data || []).map(r => ({ year:r.year }))));
+  const years = distinctYears(allSubjects.concat(kgCompetencyYears.map(year => ({ year })), (assessmentYears.data || []).map(r => ({ year:r.year }))));
   elCompYear.innerHTML = "<option value=''>— เลือกปีการศึกษา —</option>";
   for (const year of years) {
     const option = document.createElement("option");
@@ -2488,24 +2501,30 @@ function pickDefaultCompetencyYear(years, savedYear, currentYear) {
 }
 
 async function loadCompetencySettingsForReport(year) {
-  sourceWeights = []; interpretationLevels = []; competencySettingsError = "";
+  const request = ++compSettingsRequest;
+  sourceWeights = []; kgSourceWeights = []; interpretationLevels = []; competencySettingsError = ""; kgWeightError = "";
   if (!year) return;
   try {
     const settings = await loadCompetencySettings(year);
+    if (request !== compSettingsRequest) return;
     sourceWeights = settings.weights;
+    kgSourceWeights = settings.kgWeights;
+    kgWeightError = settings.kgWeightError;
     interpretationLevels = settings.levels;
   } catch (error) {
-    competencySettingsError = error.message;
+    if (request === compSettingsRequest) competencySettingsError = error.message;
   }
 }
 
 async function loadCompetencyPlacements() {
+  const request = ++compPlacementsRequest;
   const year = elCompYear.value;
   compStudents = [];
   competencyPlacementError = "";
   if (!year) return;
 
   const { data, error } = await getStudentPlacements(year);
+  if (request !== compPlacementsRequest) return;
   if (error) {
     competencyPlacementError = error.message;
     return;
@@ -2526,7 +2545,7 @@ async function setDefaultCompHalf() {
 }
 
 function renderCompHalfBar(focusHalf = "") {
-  elCompHalf.hidden = !elCompGrade.value.startsWith("ป.");
+  elCompHalf.hidden = !/^(ป|อ)\./.test(elCompGrade.value);
   if (elCompHalf.hidden) return;
   renderPrimaryHalfBar(elCompHalf, compPrimaryHalf,
     compPrimaryHalf === "กลางปี" ? "สมรรถนะจากครึ่งแรกเท่านั้น" : "สมรรถนะปลายปี = เฉลี่ยครึ่งแรกและครึ่งหลัง · ครึ่งที่กรอกค้างยังสรุปไม่ได้",
@@ -2666,9 +2685,14 @@ function competencySettingsIssue() {
     return "<div class='card incomplete'>ยังใช้รายงานสมรรถนะรวมของปีการศึกษา " + escapeHtml(selectedYear||"(ยังไม่เลือก)") + ": " + escapeHtml(competencyConfigError||competencySettingsError) +
       "<br>ต้องรัน migration น้ำหนักและเกณฑ์แปลผลท้าย schema.sql ก่อน</div>";
   }
-  const missingWeightNames=coreCompetencies.filter(competency=>!sourceWeights.some(weight=>weight.competency_id===competency.id)).map(competency=>competency.name);
+  const kindergarten = elCompGrade.value.startsWith("อ.");
+  if (kindergarten && kgWeightError) return "<div class='card incomplete'>โหลดน้ำหนักอนุบาลไม่สำเร็จ: " + escapeHtml(kgWeightError) + "</div>";
+  const weights = kindergarten ? kgSourceWeights : sourceWeights;
+  const competencies = kindergarten ? kgCoreCompetencies : coreCompetencies;
+  if (kindergarten && !competencies.length) return "<div class='card incomplete'>ไม่พบองค์ประกอบสมรรถนะอนุบาล กรุณาติดต่อฝ่ายวิชาการ</div>";
+  const missingWeightNames=competencies.filter(competency=>!weights.some(weight=>weight.competency_id===competency.id)).map(competency=>competency.name);
   if (missingWeightNames.length) {
-    return "<div class='card incomplete'>ปีการศึกษา " + escapeHtml(selectedYear) + " ยังไม่ได้กำหนดน้ำหนักครบ · ขาด: " + escapeHtml(missingWeightNames.join(", ")) + "<br>ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “กำหนดสมรรถนะหลัก”</div>";
+    return "<div class='card incomplete'>ปีการศึกษา " + escapeHtml(selectedYear) + (kindergarten ? " · อนุบาล" : "") + " ยังไม่ได้กำหนดน้ำหนักครบ · ขาด: " + escapeHtml(missingWeightNames.join(", ")) + "<br>ให้ admin หรือฝ่ายวิชาการตั้งที่หน้า “กำหนดสมรรถนะหลัก”</div>";
   }
   if (interpretationLevels.length !== 4) {
     return "<div class='card incomplete'>ปีการศึกษา " + escapeHtml(selectedYear) + " มีเกณฑ์แปลผล " + interpretationLevels.length + "/4 ระดับ — ให้ admin หรือฝ่ายวิชาการตั้งให้ครบก่อนคำนวณผล</div>";
@@ -2774,7 +2798,9 @@ function externalCompetencyForStudent(studentId, rows, scope) {
 async function computeCompetencyForStudent(student, blockedResults = new Map(), scope = {}, shared = null, prefetched = null) {
   const year = scope.year ?? elCompYear.value, grade = scope.grade ?? elCompGrade.value;
   const term = grade.startsWith("ม.") ? (scope.term ?? elCompTerm.value) : "";
-  const weights = scope.weights ?? sourceWeights, levels = scope.levels ?? interpretationLevels;
+  const kindergarten = grade.startsWith("อ.");
+  const weights = kindergarten ? (scope.kgWeights ?? kgSourceWeights) : (scope.weights ?? sourceWeights);
+  const levels = scope.levels ?? interpretationLevels;
   if (!shared) shared = await loadCompetencyScopeShared(year, grade, term);
   if (!shared.ok) return shared;
   // ตัวคำนวณนี้รับทีละช่วง; ผลภายนอกของอีกช่วงไม่ขวางการคำนวณจริง
@@ -2818,7 +2844,7 @@ async function computeCompetencyForStudent(student, blockedResults = new Map(), 
   const structuredIds = new Set(activeUnits.map(unit => unit.subject_id));
   const sessionIds = new Set(activeUnits.filter(unit => (unit.indicators || []).some(indicator =>
     indicator.counts_score !== false && (indicator.collections || []).length)).map(unit => unit.subject_id));
-  const missingCompetencySubjects = subjectIds.filter(id => !integratedParentIdSet.has(id) && !sessionIds.has(id))
+  const missingCompetencySubjects = subjectIds.filter(id => !integratedParentIdSet.has(id) && !sessionIds.has(id) && !(kindergarten && structuredIds.has(id)))
     .map(id => ({ id, reason:structuredIds.has(id) ? "no-session" : "no-structure",
       structuredCount:new Set(activeUnits.filter(unit => unit.subject_id === id).map(unit => unit.core_competency_id)).size }));
   const blockedSubjects = blockedSubjectsFor(blockedResults.get(student.id), scope.parentByMember ?? integratedParentByMember);
@@ -3041,6 +3067,7 @@ function primaryCompetencyTodo(halves) {
 
 async function loadCompetencyScopeShared(year, grade, term) {
   let subjectQuery = sb.from("subjects").select("id,name,owner_id").eq("year", year).eq("grade_level", grade);
+  if (grade.startsWith("อ.")) subjectQuery = subjectQuery.eq("level", "อนุบาล").eq("name", "การจัดประสบการณ์");
   if (term) subjectQuery = subjectQuery.eq("term", term);
   const assessmentQuery = () => {
     let query = sb.from("competency_assessments").select("id,name,source_type,term,owner_id").eq("year", year);
@@ -3048,7 +3075,7 @@ async function loadCompetencyScopeShared(year, grade, term) {
     return query;
   };
   const [subjectResult, assessmentResult, externalRows] = await Promise.all([
-    subjectQuery, fetchAllRows(assessmentQuery, "id"), loadExternalCompetencyScope(year, grade)
+    subjectQuery, fetchAllRows(assessmentQuery, "id"), grade.startsWith("อ.") ? [] : loadExternalCompetencyScope(year, grade)
   ]);
   if (subjectResult.error) return { ok:false, message:"โหลดข้อมูลรายวิชาไม่สำเร็จ: " + subjectResult.error.message };
   if (assessmentResult.error) return { ok:false, message:"โหลดกิจกรรม/กิจวัตรไม่สำเร็จ: " + assessmentResult.error.message };
@@ -3085,7 +3112,9 @@ async function loadCompetencyScopeShared(year, grade, term) {
   if (unitResult.error) return { ok:false, message:"โหลดโครงสร้างสมรรถนะรายวิชาไม่สำเร็จ: " + unitResult.error.message };
   if (plannedResult.error) return { ok:false, message:"โหลดองค์ประกอบกิจกรรม/กิจวัตรไม่สำเร็จ: " + plannedResult.error.message };
   if (sessionResult.error) return { ok:false, message:"โหลดครั้งประเมินไม่สำเร็จ: " + sessionResult.error.message };
-  const plannedRows = plannedResult.data || [];
+  const kindergarten = grade.startsWith("อ.");
+  const plannedRows = (plannedResult.data || []).filter(row => kindergarten
+    ? row.element?.stage === KG_COMPETENCY_STAGE : row.element?.stage !== KG_COMPETENCY_STAGE);
   // นับเฉพาะองค์ประกอบช่วงชั้นเดียวกับชั้นที่ดู — ครั้งของช่วงชั้นอื่นไม่ใช่ครั้งที่นักเรียนชั้นนี้ควรอยู่
   const stage = competencyStageForGrade(grade);
   const stageTargetIds = new Set(plannedRows.filter(row => !stage || !row.element?.stage || row.element.stage === stage).map(row => row.id));
@@ -3172,6 +3201,7 @@ function showCompRoomResults(focusStudentId = "") {
   if (!compRoomState || compRoomState.key !== currentCompRoomKey()) return;
   ++compRequestSeq;
   const state = compRoomState;
+  const kindergarten = elCompGrade.value.startsWith("อ.");
   elCompRoomPrint.innerHTML = state.roomHtml;
   const toolbar = elCompRoomPrint.querySelector(".comp-room-toolbar");
   const busyIcon = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' aria-hidden='true' hidden><path d='M6 3h12M6 21h12M7 3v3a5 5 0 0 0 10 0V3M7 21v-3a5 5 0 0 1 10 0v3'/></svg>";
@@ -3180,15 +3210,18 @@ function showCompRoomResults(focusStudentId = "") {
     escapeHtml(state.computedAt) + " น.</span></div><div class='comp-room-action-group'><div class='comp-room-actions'>" +
     "<button type='button' id='comp-room-recompute'>คำนวณใหม่</button>" +
     "<button type='button' class='comp-room-button' id='comp-room-do-print'>พิมพ์ใบตามงานทั้งห้อง</button>" +
-    (canPublishCompRoom ? "<button type='button' id='comp-room-publish' aria-describedby='comp-room-publish-status comp-room-release-note'>" +
+    (canPublishCompRoom && !kindergarten ? "<button type='button' id='comp-room-publish' aria-describedby='comp-room-publish-status comp-room-release-note'>" +
       busyIcon + "<span>บันทึกผลให้ผู้ปกครอง</span></button>" : "") +
     "<button type='button' id='comp-room-close'>ปิด</button></div>" +
-    (canPublishCompRoom ? "<p id='comp-room-publish-status' class='hint comp-room-publish-feedback' role='status'></p>" +
+    (canPublishCompRoom && !kindergarten ? "<p id='comp-room-publish-status' class='hint comp-room-publish-feedback' role='status'></p>" +
       "<p id='comp-room-release-note' class='hint comp-room-publish-feedback'></p>" : "") + "</div>";
   const people = document.createElement("section");
   people.className = "card comp-room-people no-print";
-  people.innerHTML = "<h3>ดูรายคน</h3><div class='student-list'></div>";
-  const list = people.querySelector(".student-list");
+  people.innerHTML = kindergarten ? "<h3 id='kg-room-result-title'>ผลสมรรถนะรายนักเรียน</h3>" +
+    "<div class='kg-room-results' tabindex='0' role='region' aria-labelledby='kg-room-result-title'><table><thead><tr>" +
+    "<th scope='col'>เลขที่ · ชื่อ</th>" + kgCoreCompetencies.map(row => "<th scope='col'>" + escapeHtml(row.name) + "</th>").join("") +
+    "</tr></thead><tbody></tbody></table></div>" : "<h3>ดูรายคน</h3><div class='student-list'></div>";
+  const list = people.querySelector(kindergarten ? "tbody" : ".student-list");
   const resultById = new Map(state.perStudent.map(row => [row.student.id, row]));
   const failureById = new Map(state.failures.map(row => [row.student.id, row.message]));
   const summaryById = new Map(state.summary.studentRows.map(row => [row.student.id, row]));
@@ -3205,7 +3238,27 @@ function showCompRoomResults(focusStudentId = "") {
         : "คำนวณไม่สำเร็จ: " + escapeHtml(failure || "ไม่ทราบสาเหตุ")) + "</span>";
     button.disabled = !resultById.has(student.id);
     if (!button.disabled) button.addEventListener("click", () => selectCompStudent(student, true));
-    list.appendChild(button);
+    if (kindergarten) {
+      const row = list.insertRow(), name = document.createElement("th");
+      name.scope = "row";
+      name.append(button);
+      row.append(name);
+      const result = resultById.get(student.id);
+      if (!result) { const cell = row.insertCell(); cell.colSpan = kgCoreCompetencies.length; cell.textContent = failure || "คำนวณไม่สำเร็จ"; return; }
+      for (const competency of kgCoreCompetencies) {
+        const cell = row.insertCell();
+        const combined = result.results.find(item => item.competency.id === competency.id)?.combined;
+        if (combined?.complete) {
+          cell.innerHTML = "<span class='comp-room-score'>" + combined.score.toFixed(1) + "</span>" +
+            (combined.level ? compChip({kind:"ok", label:combined.level}) : escapeHtml(combined.reason));
+        } else {
+          const pending = result.todo.find(item => item.kind === "item" && item.blocked.has(competency.name));
+          const pendingText = pending?.expected ? "กรอกแล้ว " + pending.scored + " จาก " + pending.expected + " ครั้ง" : pending && compRoomPendingText(pending);
+          const reason = pending ? [pending.half, pending.name, pendingText].filter(Boolean).join(" · ") : combined?.reason;
+          cell.innerHTML = "<strong>ยังสรุปไม่ได้</strong>" + (reason ? "<div class='hint'>" + escapeHtml(reason) + "</div>" : "");
+        }
+      }
+    } else list.appendChild(button);
   });
   toolbar.after(people);
   elCompStudentListCard.hidden = true;
@@ -3491,8 +3544,9 @@ async function startCompStudentPrint(student, rows, todo, subjectNameById, plann
 
 async function computeCompetencyRoom(scope, roster, { cancelled, onStart, onProgress, publishing = false, sharedScope } = {}) {
   const stopped = () => cancelled?.() === true;
-  const primary = scope.grade.startsWith("ป.");
-  const blockedLoad = await loadCompSubjectResults(scope);
+  const kindergarten = scope.grade.startsWith("อ.");
+  const primary = kindergarten || scope.grade.startsWith("ป.");
+  const blockedLoad = kindergarten ? { results:new Map(), error:"" } : await loadCompSubjectResults(scope);
   if (stopped()) return { ok:false };
   if (publishing && blockedLoad.error) return { ok:false, message:"โหลดผล ร./มส. ไม่สำเร็จ: " + blockedLoad.error };
   let shared;
@@ -3629,7 +3683,7 @@ async function startCompRoomRun(focusStudentId = "") {
   elCompRoomProgressBar.max = roster.length;
   elCompRoomProgressBar.value = 0;
   elCompRoomProgressText.textContent = "กำลังคำนวณสมรรถนะทั้งห้อง 0 / " + roster.length + " คน";
-  elCompRoomProgressStatus.textContent = "กำลังตรวจ ร./มส. ทั้งชั้น…";
+  elCompRoomProgressStatus.textContent = elCompGrade.value.startsWith("อ.") ? "กำลังโหลดคะแนนสมรรถนะ…" : "กำลังตรวจ ร./มส. ทั้งชั้น…";
   let announcedQuarter = 0;
   elCompRoomPrint.hidden = true;
   elCompNav.hidden = true;
@@ -3637,6 +3691,7 @@ async function startCompRoomRun(focusStudentId = "") {
   writeCompResult(++compRequestSeq, "");
   const scope = { year:elCompYear.value, grade:elCompGrade.value, room:elCompRoom.value,
     term:elCompTerm.value, half:compPrimaryHalf };
+  if (scope.grade.startsWith("อ.")) scope.competencies = kgCoreCompetencies;
   const result = await computeCompetencyRoom(scope, roster, {
     cancelled:() => token !== compRoomRunSeq,
     onStart:() => { elCompRoomProgressStatus.textContent = "เริ่มคำนวณ " + roster.length + " คน"; },
@@ -4031,7 +4086,7 @@ function renderCompetencyResult(student, rows, year, grade, term, subjectNameByI
     (levels.length ? levels.map(level => compChip({ kind:"ok", label:level.label + " " + level.count })).join("") : compChip({ kind:"none", label:"ยังไม่มีระดับผล" })) + "</div></div>" +
     "<button type='button' class='comp-print-outline no-print' id='comp-student-print' aria-label='พิมพ์ใบตามงานของ " + escapeHtml(student.name) + "'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><path d='M6 9V3h12v6'/><rect x='6' y='14' width='12' height='7'/><path d='M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7a1 1 0 0 1-1 1h-2'/></svg>พิมพ์ใบรายคน</button></div>" +
     "<p class='comp-summary-meta'>ปี " + escapeHtml(year) + " · " + escapeHtml(grade) + " · ห้อง " + escapeHtml(student.classroom) +
-    (grade.startsWith("ป.") ? " · " + escapeHtml(term) : term ? " · ภาคเรียน " + escapeHtml(term) : " · ทั้งปี") + "</p>";
+    (/^(ป|อ)\./.test(grade) ? " · " + escapeHtml(term) : term ? " · ภาคเรียน " + escapeHtml(term) : " · ทั้งปี") + "</p>";
   if (blocker) html += "<div class='comp-blocker'>รายการที่ทำให้สรุปไม่ได้มากที่สุด: <strong>" + escapeHtml((blocker.half ? blocker.half + " · " : "") + blocker.name) + "</strong> (" + escapeHtml(blocker.sourceLabel) + " · " +
     (blocker.missingStructure ? "ยังไม่สร้างสมรรถนะหลัก" : blocker.expected ? "กรอกแล้ว " + blocker.scored + "/" + blocker.expected : "ยังไม่สร้างครั้งประเมิน") + ") — ค้างอยู่ " + blocker.blocked.size + " ด้าน</div>";
   html += "</section>" +
@@ -4411,10 +4466,10 @@ async function populateGradeSelects() {
     ? "<optgroup label='" + label + "'>" + list.map(g => "<option value='" + g + "'>" + g + "</option>").join("") + "</optgroup>"
     : "";
   const body = optGroup("ประถม", primary) + optGroup("มัธยม", secondary);
-  const setSel = (id, placeholder) => { const el = document.getElementById(id); if (el) el.innerHTML = "<option value=''>" + placeholder + "</option>" + body; };
+  const setSel = (id, placeholder, extra = "") => { const el = document.getElementById(id); if (el) el.innerHTML = "<option value=''>" + placeholder + "</option>" + extra + body; };
   setSel("filter-grade", "— ทุกชั้น —");
   setSel("att-grade", "— ทุกชั้น —");
-  setSel("comp-grade", "— เลือกชั้น —");
+  setSel("comp-grade", "— เลือกชั้น —", optGroup("อนุบาล", GRADE_ORDER.filter(g => g.startsWith("อ."))));
   setSel("gpa-grade", "— เลือกชั้น —");
 }
 

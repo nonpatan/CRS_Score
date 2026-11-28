@@ -103,6 +103,15 @@
   .late-members p { margin:0 0 8px; }
   .late-members button { min-height:44px;width:100%; }
   @media(max-width:480px) { .assessment-cards { grid-template-columns:1fr; } }
+  #score-overlay .modal { max-height:calc(100dvh - 32px); overflow:auto; border-radius:12px; }
+  #score-overlay :is(button,input):focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
+  #score-rubric:not([hidden]) { display:grid; gap:8px; }
+  #score-rubric .rubric-option { display:grid; grid-template-columns:38px minmax(0,1fr); gap:8px; align-items:start;
+    text-align:start; padding:8px; min-height:44px; color:var(--ink); background:var(--white); border:1px solid var(--line); }
+  #score-rubric .rubric-option span { white-space:pre-line; overflow-wrap:anywhere; }
+  #score-rubric .rubric-option[aria-checked="true"] { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); }
+  #score-rubric .rubric-option[aria-checked="true"] b::after { content:" ✓"; }
+  #score-rubric-status { color:var(--danger); }
 </style>
 <link rel="stylesheet" href="../app-shell.css?v=20261003-1">
 </head>
@@ -125,7 +134,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261128-3"></script>
+    <script src="../app-shell.js?v=20261128-4"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -163,7 +172,11 @@
     <div class="activity-save-bar"><div id="activity-save-counts" class="activity-save-counts" aria-live="polite"></div><button type="button" class="primary" id="btn-save-activity-pass" style="margin-top:12px">บันทึกผลกิจกรรม</button></div>
   </div>
   <div class="card" id="scores-card" style="display:none"><div id="score-heading" class="score-heading"></div><div id="score-subheading" class="meta" style="margin-bottom:10px"></div><div id="score-progress" class="completion" aria-live="polite"></div><div id="late-members" class="late-members" hidden></div><div id="readonly" class="readonly" style="display:none">คุณมีสิทธิ์ดูอย่างเดียว</div><div id="score-list"></div></div>
-  <div class="overlay" id="score-overlay"><div class="modal"><h3>บันทึกคะแนน</h3><div class="meta" id="score-modal-detail"></div><div class="field" style="margin-top:12px"><label id="score-modal-label" for="score-modal-value">คะแนน</label><input id="score-modal-value" type="number" min="0" step="0.01"></div><div class="modal-actions"><button class="ghost" id="score-modal-cancel">ยกเลิก</button><button class="primary" id="score-modal-save">บันทึก</button></div></div></div>
+  <div class="overlay" id="score-overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="score-modal-heading"><h2 id="score-modal-heading">บันทึกคะแนน</h2><div class="meta" id="score-modal-detail"></div><div class="field" id="score-number-field" style="margin-top:12px"><label id="score-modal-label" for="score-modal-value">คะแนน</label><input id="score-modal-value" type="number" min="0" step="0.01"></div>
+    <p id="score-rubric-label" class="hint" hidden></p>
+    <div id="score-rubric" role="radiogroup" aria-labelledby="score-rubric-label" hidden></div>
+    <p id="score-rubric-status" role="status" hidden></p>
+    <div class="modal-actions"><button class="ghost" id="score-modal-cancel">ยกเลิก</button><button class="primary" id="score-modal-save">บันทึก</button></div></div></div>
   <!-- กล่องยืนยันของหน้าเว็บเอง ไม่ใช้ confirm()/prompt() ของเบราว์เซอร์
        — webview บางตัว (แผงพรีวิว, แอปมือถือบางแบบ) คืน false เงียบ ๆ หรือโยน error
        ทำให้ปุ่มลบดูเหมือนกดไม่ติดโดยไม่มีสัญญาณอะไรเลย -->
@@ -172,7 +185,7 @@
   </main>
 </div>
 <script type="module">
-import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements, getSetting, availableCompetencyStages, fetchAllRowsByIds, ID_CHUNK } from "../supabase-client.js?v=20261128-3";
+import { sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, competencyStageForGrade, getStudentPlacements, getSetting, availableCompetencyStages, fetchAllRowsByIds, ID_CHUNK, KG_COMPETENCY_STAGE, KG_COMPETENCY_LEVELS, loadCompetencyRubrics } from "../supabase-client.js?v=20261128-4";
 import { readGradeLock, gradeRowLocked, gradeLockError, renderGradeLockBanner, renderGradeLockRow } from "./grade-lock.js?v=5";
 const session=await requireAuth();
 if(!session){
@@ -307,13 +320,13 @@ function renderActivityPassResults() {
 
   const editable = canEdit();
   $("activity-pass-readonly").style.display = editable ? "none" : "block";
-  $("btn-activity-all-pass").style.display = editable && assessmentMembers.length ? "block" : "none";
-  $("activity-all-pass-hint").style.display = editable && assessmentMembers.length ? "block" : "none";
-  $("btn-save-activity-pass").style.display = editable && assessmentMembers.length ? "block" : "none";
+  const students = sortedAssessmentMembers().filter(student => !student.grade_level?.startsWith("อ."));
+  $("btn-activity-all-pass").style.display = editable && students.length ? "block" : "none";
+  $("activity-all-pass-hint").style.display = editable && students.length ? "block" : "none";
+  $("btn-save-activity-pass").style.display = editable && students.length ? "block" : "none";
   const resultByStudent = new Map(activityPassResults.map(row => [row.student_id, row]));
-  const students = sortedAssessmentMembers();
   const list = $("activity-pass-list");
-  list.innerHTML = students.length ? "" : "<div class='empty'>กิจกรรมนี้ยังไม่มีนักเรียนเข้าร่วม</div>";
+  list.innerHTML = students.length ? "" : "<div class='empty'>ไม่มีนักเรียนสำหรับบันทึกผลผ่าน/ไม่ผ่าน</div>";
   for (const student of students) {
     const result = resultByStudent.get(student.id);
     const row = document.createElement("div");
@@ -424,8 +437,9 @@ function assessmentLockActions() {
 
 function applyAssessmentLock() {
   const actions = assessmentLockActions();
-  renderGradeLockBanner($("targets-wrap").parentElement, assessmentLock, sortedAssessmentMembers(),
-    { ...actions, canRequest:canEdit() });
+  const gradeMembers = sortedAssessmentMembers().filter(student => !student.grade_level?.startsWith("อ."));
+  renderGradeLockBanner($("targets-wrap").parentElement,
+    gradeMembers.length ? assessmentLock : null, gradeMembers, { ...actions, canRequest:canEdit() });
   for (const row of $("activity-pass-list").querySelectorAll(".activity-result-row")) {
     const select = row.querySelector(".activity-pass-status");
     const note = row.querySelector(".activity-pass-note");
@@ -441,7 +455,7 @@ function applyAssessmentLock() {
     renderGradeLockRow(row.firstElementChild, assessmentLock, row.dataset.studentId, actions);
   }
   if (current?.source_type === "กิจกรรม") {
-    const editable = canEdit() && assessmentMembers.some(student => !gradeRowLocked(assessmentLock, student.id));
+    const editable = canEdit() && gradeMembers.some(student => !gradeRowLocked(assessmentLock, student.id));
     for (const id of ["btn-activity-all-pass", "btn-save-activity-pass"]) $(id).disabled = activityPassSaving || !editable;
     updateActivityPassSummary();
     syncPassButtons();
@@ -688,7 +702,9 @@ async function createSession(target) {
     toast("คุณไม่มีสิทธิ์เพิ่มครั้งประเมิน", false);
     return;
   }
-  const membersResult = await loadAssessmentMembersForYear(current.id, current.year);
+  const assessment = current;
+  const membersResult = await loadAssessmentMembersForYear(assessment.id, assessment.year);
+  if (current !== assessment) return;
   if (membersResult.error) {
     toast("โหลดผู้เข้าร่วมตามปีการศึกษาไม่สำเร็จ: " + membersResult.error.message, false);
     return;
@@ -705,16 +721,19 @@ async function createSession(target) {
     .filter(s => s.target_id === target.id)
     .reduce((max, s) => Math.max(max, Number(s.attempt_no) || 0), 0) + 1;
   // ถามคะแนนเต็มของครั้งนี้ — ค่าเริ่มต้นคือน้ำหนักขององค์ประกอบ กดสร้างเลยก็ได้พฤติกรรมเดิม
+  const kindergarten = target.element.stage === KG_COMPETENCY_STAGE;
   const maxScore = await askNumber({
     title: (target.element && target.element.name || "องค์ประกอบ") + " ครั้งที่ " + attemptNo,
-    message: "คะแนนเต็มของครั้งนี้ (น้ำหนักขององค์ประกอบคือ " + target.max_score + ")",
+    message: kindergarten ? "คะแนนเต็ม 4 ตามรูบริกอนุบาล" : "คะแนนเต็มของครั้งนี้ (น้ำหนักขององค์ประกอบคือ " + target.max_score + ")",
     label: "คะแนนเต็มของครั้งนี้",
-    value: target.max_score
+    value: kindergarten ? 4 : target.max_score,
+    readOnly: kindergarten
   });
   if (maxScore === null) { toast("ยกเลิกการสร้างครั้งประเมิน"); return; }
+  if (current !== assessment) return;
   const { data:newSession, error } = await sb.from("competency_assessment_sessions")
-    .insert({ assessment_id:current.id, target_id:target.id, attempt_no:attemptNo,
-              max_score: Number(maxScore) === Number(target.max_score) ? null : maxScore })
+    .insert({ assessment_id:assessment.id, target_id:target.id, attempt_no:attemptNo,
+              max_score: kindergarten ? 4 : Number(maxScore) === Number(target.max_score) ? null : maxScore })
     .select().single();
   if (error) {
     toast("สร้างครั้งประเมินไม่สำเร็จ: " + error.message, false);
@@ -727,6 +746,7 @@ async function createSession(target) {
     toast("บันทึกรายชื่อไม่สำเร็จ: " + snapErr.message, false);
     return;
   }
+  if (current !== assessment) return;
   sessions.push(newSession);
   await loadSession(newSession.id);
   toast("สร้าง" + (target.element && target.element.name || "องค์ประกอบ") + " ครั้งที่ " + attemptNo + " แล้ว");
@@ -739,8 +759,8 @@ async function createSession(target) {
 // requireText มีค่า = ต้องพิมพ์ข้อความนั้นให้ตรงก่อนจึงกดยืนยันได้ (ใช้ตอนลบข้อมูลที่มีคะแนนแล้ว)
 // askNumber(): กล่องกรอกตัวเลขที่ใช้ overlay เดียวกัน คืน Promise<number|null> (null = ยกเลิก)
 // ใช้ตอนสร้างครั้งประเมินใหม่เพื่อถามคะแนนเต็มของครั้งนั้น
-function askNumber({ title, message, label, value = "", okLabel = "สร้าง" }) {
-  return askConfirm({ title, message, okLabel, numberInput: { label, value } })
+function askNumber({ title, message, label, value = "", okLabel = "สร้าง", readOnly = false }) {
+  return askConfirm({ title, message, okLabel, numberInput: { label, value, readOnly } })
     .then(result => (result === false ? null : result));
 }
 
@@ -754,6 +774,7 @@ function askConfirm({ title, message, requireText = null, okLabel = "ลบ", nu
       ? numberInput.label
       : "พิมพ์ชื่อรายการให้ตรงกันเพื่อยืนยัน";
     input.type = numberInput ? "number" : "text";
+    input.readOnly = Boolean(numberInput?.readOnly);
     if (numberInput) { input.min = "0.01"; input.step = "0.01"; } else { input.removeAttribute("min"); input.removeAttribute("step"); }
     ok.textContent = okLabel;
     input.value = numberInput ? String(numberInput.value ?? "") : "";
@@ -900,16 +921,18 @@ function renderScores() {
       "<div class='meta'>" + esc(student.placementMissing ? "ไม่พบชั้น/ห้อง ปี " + current.year : student.grade_level + "/" + student.classroom) +
       " · " + esc(student.student_no) + "</div></div>" +
       "<div class='score-control'></div>";
-    const editable = canEdit() && !gradeRowLocked(assessmentLock, student.id);
+    const kindergarten = currentTarget.element?.stage === KG_COMPETENCY_STAGE;
+    const editable = canEdit() && (kindergarten || !gradeRowLocked(assessmentLock, student.id));
     const box = document.createElement(editable ? "button" : "span");
     box.className = "score-box" + (value === "" ? " pending" : "");
     box.textContent = value === "" ? "—" : String(value);
     if (editable) {
       box.type = "button";
+      if (kindergarten) box.dataset.rubricStudent = student.id;
       box.setAttribute("aria-label", "แก้ไขคะแนน " + student.name);
-      box.onclick = () => openScoreModal(student, currentTarget, value);
+      box.onclick = () => openScoreModal(student, currentTarget, value, box);
     }
-    renderGradeLockRow(row.firstElementChild, assessmentLock, student.id, assessmentLockActions());
+    if (!kindergarten) renderGradeLockRow(row.firstElementChild, assessmentLock, student.id, assessmentLockActions());
     row.querySelector(".score-control").appendChild(box);
     el.appendChild(row);
   }
@@ -980,12 +1003,153 @@ async function addLateMembers(late, button) {
   await loadSession(sessionId);
 }
 let editingScore=null;
-function openScoreModal(student,target,value){editingScore={student,target};$("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");const cap=sessionMax(currentSession,target);$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+cap+")";if($("score-modal-value").readOnly)$("score-modal-value").readOnly=false;$("score-modal-value").value=value;$("score-modal-value").max=cap;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}
-function closeScoreModal(){$("score-overlay").classList.remove("show");editingScore=null;}
+const rubricCache = new Map();
+function openScoreModal(student,target,value,trigger){
+  const kindergarten = target.element?.stage === KG_COMPETENCY_STAGE;
+  const edit = { student, target, kindergarten, trigger, level:Number(value) || null };
+  editingScore = edit;
+  const choices = $("score-rubric"), status = $("score-rubric-status"), save = $("score-modal-save");
+  choices.hidden = status.hidden = $("score-rubric-label").hidden = !kindergarten;
+  $("score-number-field").hidden = kindergarten;
+  choices.replaceChildren();
+  status.textContent = "";
+  save.textContent = "บันทึก";
+  save.disabled = kindergarten;
+  if (kindergarten) {
+    $("score-modal-detail").textContent = student.name + " · " + target.element.name;
+    $("score-rubric-label").textContent = "เลือกระดับตามรูบริก (คะแนนเต็ม 4)";
+    $("score-overlay").classList.add("show");
+    $("score-modal-cancel").focus();
+    void renderScoreRubric(edit);
+    return;
+  }
+  $("score-modal-detail").textContent=student.name+" · "+(target.competency&&target.competency.name||"สมรรถนะหลัก");const cap=sessionMax(currentSession,target);$("score-modal-label").textContent=(target.element&&target.element.name||"องค์ประกอบ")+" (เต็ม "+cap+")";if($("score-modal-value").readOnly)$("score-modal-value").readOnly=false;$("score-modal-value").value=value;$("score-modal-value").max=cap;$("score-overlay").classList.add("show");setTimeout(()=>$("score-modal-value").focus(),0);}
+async function renderScoreRubric(edit) {
+  const status = $("score-rubric-status"), choices = $("score-rubric"), elementId = edit.target.element.id || edit.target.element_id;
+  status.textContent = "กำลังโหลดรูบริก…";
+  choices.replaceChildren();
+  try {
+    if (!rubricCache.has(elementId)) rubricCache.set(elementId, loadCompetencyRubrics([elementId])
+      .then(rows => {
+        const rubric = rows.get(elementId);
+        if (!KG_COMPETENCY_LEVELS.every(level => rubric?.[level])) throw new Error("รูบริกไม่ครบ");
+        return rubric;
+      }).catch(error => { rubricCache.delete(elementId); throw error; }));
+    const rubric = await rubricCache.get(elementId);
+    if (editingScore !== edit) return;
+    status.textContent = "";
+    for (const level of KG_COMPETENCY_LEVELS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rubric-option";
+      button.setAttribute("role", "radio");
+      button.dataset.level = level;
+      button.innerHTML = "<b>" + level + "</b><span>" + esc(rubric[level]) + "</span>";
+      button.onclick = () => { edit.level = level; syncScoreRubric(edit); };
+      choices.appendChild(button);
+    }
+    syncScoreRubric(edit);
+    if (document.activeElement === $("score-modal-cancel")) choices.querySelector('[tabindex="0"]')?.focus();
+  } catch {
+    if (editingScore !== edit) return;
+    status.textContent = "โหลดคำบรรยายรูบริกไม่สำเร็จ ";
+    const retry = document.createElement("button");
+    retry.type = "button"; retry.className = "ghost"; retry.textContent = "ลองโหลดอีกครั้ง";
+    retry.onclick = () => { $("score-modal-cancel").focus(); void renderScoreRubric(edit); };
+    status.appendChild(retry);
+  }
+}
+
+function syncScoreRubric(edit) {
+  const choices = [...$("score-rubric").querySelectorAll("button")];
+  const selected = choices.find(button => Number(button.dataset.level) === edit.level);
+  for (const button of choices) {
+    button.setAttribute("aria-checked", String(button === selected));
+    button.tabIndex = button === (selected || choices[0]) ? 0 : -1;
+  }
+  const save = $("score-modal-save");
+  save.disabled = !selected;
+  save.textContent = selected ? "บันทึก " + edit.level : "บันทึก";
+}
+
+$("score-rubric").addEventListener("keydown", event => {
+  if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(event.key)) return;
+  const choices = [...$("score-rubric").querySelectorAll("button")];
+  const index = choices.indexOf(event.target);
+  if (index < 0) return;
+  event.preventDefault();
+  const offset = ["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1;
+  const next = choices[(index + offset + choices.length) % choices.length];
+  next.focus();
+  next.click();
+});
+$("score-overlay").addEventListener("keydown", event => {
+  if (event.key === "Escape") closeScoreModal();
+  if (event.key !== "Tab") return;
+  const stops = [...$("score-overlay").querySelectorAll("button,input")].filter(element =>
+    !element.disabled && element.tabIndex >= 0 && element.getClientRects().length);
+  if (event.shiftKey && document.activeElement === stops[0]) { event.preventDefault(); stops.at(-1)?.focus(); }
+  if (!event.shiftKey && document.activeElement === stops.at(-1)) { event.preventDefault(); stops[0]?.focus(); }
+});
+function closeScoreModal(){
+  if (editingScore?.saving) return;
+  $("score-overlay").classList.remove("show");
+  editingScore?.trigger?.focus();
+  editingScore=null;
+}
 $("score-modal-cancel").onclick=closeScoreModal;$("score-overlay").addEventListener("click",event=>{if(event.target===$("score-overlay"))closeScoreModal();});
-$("score-modal-save").onclick=async()=>{if(!editingScore||!currentSession||gradeRowLocked(assessmentLock,editingScore.student.id))return;const input=$("score-modal-value"),raw=Number(input.value),target=editingScore.target,cap=sessionMax(currentSession,target);if(input.value===""||!Number.isFinite(raw)||raw<0||raw>cap){toast("คะแนนต้องอยู่ระหว่าง 0 ถึง "+cap,false);input.focus();return;}const button=$("score-modal-save");button.disabled=true;const sessionId=currentSession.id,studentId=editingScore.student.id;const {error}=await sb.from("competency_assessment_scores").upsert({session_id:sessionId,target_id:target.id,student_id:studentId,raw_score:raw,updated_at:new Date().toISOString()},{onConflict:"session_id,target_id,student_id"});button.disabled=false;if(gradeLockError(error)){await refreshAssessmentLock(error);if(gradeRowLocked(assessmentLock,studentId))input.readOnly=true;return;}if(error){toast("บันทึกคะแนนไม่สำเร็จ: "+error.message,false);return;}closeScoreModal();
-// ลด log Supabase (2026-10-26): เดิมเรียก loadSession ยิงใหม่ 3 GET ต่อการบันทึก 1 คน — อัปเดตคะแนนในเครื่องแทน หน้าจอเหมือนเดิม
-if(currentSession&&currentSession.id===sessionId){scoreMap.set(studentId,raw);renderScores();}toast("บันทึกคะแนนแล้ว");}
+$("score-modal-save").onclick=async()=>{
+  const edit = editingScore;
+  if (!edit || !currentSession || !canEdit() || edit.saving) return;
+  if (!edit.kindergarten && gradeRowLocked(assessmentLock, edit.student.id)) return;
+  const input = $("score-modal-value");
+  const raw = edit.kindergarten ? edit.level : Number(input.value);
+  const target = edit.target, cap = sessionMax(currentSession, target);
+  if (edit.kindergarten && !KG_COMPETENCY_LEVELS.includes(raw)) return;
+  if (!edit.kindergarten && (input.value === "" || !Number.isFinite(raw) || raw < 0 || raw > cap)) {
+    toast("คะแนนต้องอยู่ระหว่าง 0 ถึง " + cap, false);
+    input.focus();
+    return;
+  }
+  const button = $("score-modal-save");
+  const sessionId = currentSession.id, studentId = edit.student.id;
+  const status = edit.kindergarten ? $("score-rubric-status") : null;
+  const choices = status ? $("score-rubric").querySelectorAll("button") : [];
+  button.disabled = edit.saving = true;
+  choices.forEach(choice => { choice.disabled = true; });
+  if (status) status.textContent = "กำลังบันทึก…";
+  let error;
+  try {
+    ({ error } = await sb.from("competency_assessment_scores").upsert({
+      session_id:sessionId, target_id:target.id, student_id:studentId, raw_score:raw, updated_at:new Date().toISOString()
+    }, { onConflict:"session_id,target_id,student_id" }));
+  } catch (failure) {
+    error = failure;
+  } finally {
+    button.disabled = edit.saving = false;
+    choices.forEach(choice => { choice.disabled = false; });
+  }
+  if (error) {
+    if (status) {
+      status.textContent = "บันทึกคะแนนไม่สำเร็จ: " + (gradeLockError(error) || error.message) + " · กดบันทึกเพื่อลองอีกครั้ง";
+      button.focus();
+    } else if (gradeLockError(error)) {
+      await refreshAssessmentLock(error);
+      if (gradeRowLocked(assessmentLock, studentId)) input.readOnly = true;
+    } else toast("บันทึกคะแนนไม่สำเร็จ: " + error.message, false);
+    return;
+  }
+  if (status) status.textContent = "";
+  closeScoreModal();
+  // อัปเดตคะแนนในเครื่องแทน loadSession ซ้ำ
+  if (currentSession?.id === sessionId) {
+    scoreMap.set(studentId,raw);
+    renderScores();
+    if (edit.kindergarten) [...$("score-list").querySelectorAll("[data-rubric-student]")]
+      .find(box => box.dataset.rubricStudent === studentId)?.focus();
+  }
+  toast("บันทึกคะแนนแล้ว");
+};
 $("f-year").onchange=()=>{setActiveYear($("f-year").value);renderAssessments();$("sel-assessment").value="";selectAssessment()};
 $("f-term").onchange=()=>{renderAssessments();$("sel-assessment").value="";selectAssessment()};
 $("f-type").onchange=()=>{renderAssessments();if(!$("sel-assessment").value)selectAssessment();};

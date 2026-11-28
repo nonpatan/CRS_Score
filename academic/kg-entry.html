@@ -39,6 +39,17 @@ h3 { font-size:1rem; line-height:1.5; }
 .readonly { color:var(--danger); background:var(--danger-soft); border-radius:8px; padding:8px 12px; margin-top:12px; }
 .student-head, .student-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
 .student-head strong { display:block; overflow-wrap:anywhere; }
+.kg-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.kg-content .kg-tabs [aria-selected="true"] { color:var(--teal); background:var(--teal-soft); border-color:var(--teal); font-weight:600; }
+.kg-competencies > h3 { margin:0; padding:7px 10px; background:var(--teal-soft); color:var(--teal); border-radius:8px; }
+.kg-rubric-selected, .kg-rubric-all li { white-space:pre-line; }
+.kg-rubric-selected:not(:empty) { margin-top:8px; padding:8px 10px; background:var(--bg); border-radius:8px; }
+.kg-rubric-all summary { display:flex; align-items:center; gap:8px; min-height:44px; color:var(--teal); cursor:pointer; }
+.kg-rubric-all summary::before { content:"▸"; }
+.kg-rubric-all[open] summary::before { content:"▾"; }
+.kg-rubric-all ul { list-style:none; margin:0; padding:0 8px; }
+.kg-rubric-all li + li { margin-top:6px; }
+.kg-rubric-all summary:focus-visible { outline:2px solid var(--teal); outline-offset:2px; }
 .progress { color:var(--teal); font-size:.875rem; font-weight:600; }
 .roster-list { list-style:none; display:grid; gap:8px; margin:12px 0 0; padding:0; }
 .kg-content .roster-row {
@@ -46,9 +57,9 @@ h3 { font-size:1rem; line-height:1.5; }
   gap:0 12px; min-height:52px; padding:8px 12px; text-align:start; overflow-wrap:anywhere;
 }
 .roster-name { font-weight:600; }
-.standard > h2 { margin-bottom:12px; }
+.standard > h3 { margin-bottom:12px; }
 .indicator-group + .indicator-group { margin-top:20px; }
-.indicator-group > h3 { color:var(--ink); padding:8px 10px; border-inline-start:3px solid var(--line); background:var(--bg); }
+.indicator-group > h4 { margin:0; font-size:1rem; color:var(--ink); padding:8px 10px; border-inline-start:3px solid var(--line); background:var(--bg); }
 .state-row { padding:12px 0; border-bottom:1px solid var(--line); }
 .state-name { font-weight:600; }
 .growth-results { display:flex; flex-wrap:wrap; gap:4px 8px; margin-top:6px; }
@@ -87,7 +98,7 @@ h3 { font-size:1rem; line-height:1.5; }
     <a href="../dashboard.html">ภาพรวม</a><a href="index.html">ฝ่ายวิชาการ</a><a href="entry.html">กรอกคะแนน</a>
     <a href="manage.html">จัดการโครงสร้าง</a><a href="#" id="btn-signout">ออกจากระบบ</a>
   </div>
-  <script src="../app-shell.js?v=20261128-3"></script>
+  <script src="../app-shell.js?v=20261128-4"></script>
 </header>
 <main class="academic-content kg-content">
   <div class="card">
@@ -111,8 +122,9 @@ import {
   sb, requireAuth, signOut, getActiveYear, bangkokNow, toDateStr,
   fetchAllRows, fetchAllRowsByIds, getKgEntryAccess,
   KG_HALF_LABEL, KG_LEVELS, kgCodeOf, kgIsGrowthState, kgStateTermResult,
+  KG_COMPETENCY_LEVELS, KG_COMPETENCY_STAGE, loadCompetencyRubrics,
   KG_GROWTH_FIELDS, kgGrowthTermResult, loadKgGrowthReference, loadKgGrowthData, thaiShortDateText
-} from "../supabase-client.js?v=20261128-3";
+} from "../supabase-client.js?v=20261128-4";
 
 const session = await requireAuth();
 if (session) {
@@ -128,6 +140,8 @@ if (session) {
   const tieColumns = "student_id,scope_key,level";
   const tieConflict = "subject_id,student_id,half,scope,scope_key";
   const models = new Map();
+  const supportsCompetency = subject => subject.name === "การจัดประสบการณ์";
+  let development, competency;
   const growthData = new Map();
   let growthReference;
   let access, subjects, years, route, model, pendingWrites = 0;
@@ -167,10 +181,10 @@ if (session) {
     return access.isAdmin || subject.owner_id === ownerId;
   }
 
-  async function loadModel(subject, half) {
-    const key = subject.id + ":" + half;
+  async function loadModel(subject, half, kind = "development") {
+    const key = subject.id + ":" + half + ":" + kind;
     if (!models.has(key)) {
-      models.set(key, fetchModel(subject, half).catch(error => {
+      models.set(key, fetchModel(subject, half, kind).catch(error => {
         models.delete(key);
         throw error;
       }));
@@ -178,11 +192,12 @@ if (session) {
     return models.get(key);
   }
 
-  async function fetchModel(subject, half) {
+  async function fetchModel(subject, half, kind) {
+    const isCompetency = kind === "competency";
     const [unitResult, rosterResult, labelResult] = await Promise.all([
-      fetchAllRows(() => sb.from("units").select("id,name,seq").eq("subject_id", subject.id).eq("kind", "วิชา")),
+      fetchAllRows(() => sb.from("units").select("id,name,seq").eq("subject_id", subject.id).eq("kind", isCompetency ? "สมรรถนะหลัก" : "วิชา")),
       fetchAllRows(() => sb.from("enrollments").select("id,student:student_id(id,name,student_no)").eq("subject_id", subject.id)),
-      subject.curriculum_id
+      !isCompetency && subject.curriculum_id
         ? fetchAllRows(() => sb.from("curriculum_items").select("id,code,text").eq("curriculum_id", subject.curriculum_id).eq("kind", "ตัวบ่งชี้"))
         : { data:[] }
     ]);
@@ -190,20 +205,27 @@ if (session) {
     const roster = rows(rosterResult).map(row => row.student).filter(Boolean)
       .sort((a, b) => collator.compare(a.student_no || "", b.student_no || "") || collator.compare(a.name, b.name));
     const labels = new Map(rows(labelResult).map(row => [row.code, row.text]));
-    const indicators = rows(await fetchAllRowsByIds(ids => sb.from("indicators").select("id,unit_id,name,seq").in("unit_id", ids), units.map(unit => unit.id)));
+    const indicatorColumns = "id,unit_id,name,seq";
+    const indicators = rows(await fetchAllRowsByIds(ids => sb.from("indicators")
+      .select(isCompetency ? indicatorColumns + ",core_competency_element_id,element:core_competency_element_id(stage)" : indicatorColumns)
+      .in("unit_id", ids), units.map(unit => unit.id)));
+    const rubrics = isCompetency ? await loadCompetencyRubrics(indicators.map(row => row.core_competency_element_id)) : null;
     const byUnit = new Map();
     const states = new Map();
     for (const indicator of indicators) {
+      if (isCompetency && indicator.element?.stage !== KG_COMPETENCY_STAGE) continue;
       const code = kgCodeOf(indicator.name);
-      const state = { ...indicator, code, growth:kgIsGrowthState(code), collections:new Map() };
+      const state = { ...indicator, code, growth:!isCompetency && kgIsGrowthState(code), collections:new Map(),
+        rubric:rubrics?.get(indicator.core_competency_element_id) };
       states.set(state.id, state);
       if (!byUnit.has(state.unit_id)) byUnit.set(state.unit_id, []);
       byUnit.get(state.unit_id).push(state);
     }
     const standards = units.map(unit => {
       const groups = new Map();
-      const ordered = (byUnit.get(unit.id) || []).sort((a, b) => collator.compare(a.code, b.code) || bySeq(a, b));
-      for (const state of ordered) {
+      const ordered = (byUnit.get(unit.id) || []).sort(isCompetency ? bySeq : (a, b) => collator.compare(a.code, b.code) || bySeq(a, b));
+      if (isCompetency && ordered.length) groups.set("", ordered);
+      for (const state of isCompetency ? [] : ordered) {
         const code = state.code.split(".").slice(0, -1).join(".");
         if (!groups.has(code)) groups.set(code, []);
         groups.get(code).push(state);
@@ -222,16 +244,17 @@ if (session) {
     }
     const [scoreResult, tieResult] = await Promise.all([
       fetchAllRowsByIds(ids => sb.from("scores").select("id,student_id,collection_id,raw_score").in("collection_id", ids), [...collectionScores.keys()]),
-      roster.length && scorable.length
+      !isCompetency && roster.length && scorable.length
         ? fetchAllRows(() => sb.from("kg_tie_choices").select("id," + tieColumns)
           .eq("subject_id", subject.id).eq("half", half).eq("scope", "สภาพ"))
         : { data:[] }
     ]);
     for (const score of rows(scoreResult)) {
-      if (levels.has(score.raw_score)) collectionScores.get(score.collection_id).set(score.student_id, score.raw_score);
+      const valid = isCompetency ? KG_COMPETENCY_LEVELS.includes(Number(score.raw_score)) : levels.has(score.raw_score);
+      if (valid) collectionScores.get(score.collection_id).set(score.student_id, Number(score.raw_score));
     }
     const ties = new Map(rows(tieResult).map(choice => [rowKey(choice.student_id, choice.scope_key), choice.level]));
-    return { subject, half, roster, labels, standards, states, scorable, rounds, collectionScores, ties, writes:new Map() };
+    return { subject, half, kind, roster, labels, standards, states, scorable, rounds, collectionScores, ties, writes:new Map() };
   }
 
   const rowKey = (studentId, stateId) => studentId + ":" + stateId;
@@ -244,8 +267,12 @@ if (session) {
     loaded.ties.get(rowKey(studentId, state.id))
   );
   function progressFor(loaded, studentId) {
+    return "กรอกแล้ว " + progressCount(loaded, studentId);
+  }
+
+  function progressCount(loaded, studentId) {
     const count = loaded.scorable.filter(state => scoreAt(loaded, state, studentId, route.round) != null).length;
-    return "กรอกแล้ว " + count + "/58";
+    return count + (loaded.kind === "competency" ? "/21" : "/58");
   }
 
   async function paintGrowth(subject, half, studentId, request) {
@@ -279,12 +306,12 @@ if (session) {
 
   function readRoute() {
     const query = new URLSearchParams(location.search);
-    return { subjectId:query.get("subject"), half:query.get("half"), round:Number(query.get("round")), studentId:query.get("student") };
+    return { subjectId:query.get("subject"), half:query.get("half"), round:Number(query.get("round")), studentId:query.get("student"), tab:query.get("tab") };
   }
 
   function writeRoute(value, push = false, extra = {}) {
     const url = new URL(location.href);
-    for (const [key, val] of Object.entries({ subject:value.subjectId, half:value.half, round:value.round, student:value.studentId })) {
+    for (const [key, val] of Object.entries({ subject:value.subjectId, half:value.half, round:value.round, student:value.studentId, tab:value.tab === "competency" ? value.tab : null })) {
       if (val) url.searchParams.set(key, val);
       else url.searchParams.delete(key);
     }
@@ -292,13 +319,13 @@ if (session) {
   }
 
   function showRoundOptions() {
-    const available = [...new Set([1, route.round, ...(model?.rounds || [])])].sort((a, b) => a - b);
+    const available = [...new Set([1, route.round, ...(development?.rounds || []), ...(competency?.rounds || [])])].sort((a, b) => a - b);
     $("round").innerHTML = available.map(n => `<option value="${n}">ครั้งที่ ${n}</option>`).join("") +
       (model && canEdit(model.subject) ? '<option value="new">+ ครั้งใหม่</option>' : "");
     $("round").value = String(route.round);
   }
 
-  async function navigate(next = readRoute(), { push = false, extra = history.state, focus = false } = {}) {
+  async function navigate(next = readRoute(), { push = false, extra = history.state, focus = false, focusTab = false } = {}) {
     const request = ++screenRequest;
     $("retry-load").hidden = true;
     try {
@@ -323,7 +350,9 @@ if (session) {
       const half = Object.hasOwn(KG_HALF_LABEL, next.half) ? next.half
         : start && toDateStr(bangkokNow()) >= start ? "ปลายปี" : "กลางปี";
       const round = Number.isInteger(next.round) && next.round > 0 && next.round <= 2147483647 ? next.round : 1;
-      route = { subjectId:subject.id, half, round, studentId:next.studentId || null };
+      const hasCompetency = supportsCompetency(subject);
+      route = { subjectId:subject.id, half, round, studentId:next.studentId || null,
+        tab:next.studentId && hasCompetency && next.tab === "competency" ? "competency" : "development" };
       writeRoute(route, push, extra);
 
       $("context").hidden = false;
@@ -333,16 +362,22 @@ if (session) {
       $("subject").value = subject.id;
       $("half").value = half;
       $("readonly").hidden = canEdit(subject);
-      if (!model || model.subject.id !== subject.id || model.half !== half) {
+      const loadedScope = development ?? competency;
+      if (loadedScope?.subject.id !== subject.id || loadedScope?.half !== half) {
+        development = competency = null;
+      }
+      if (!model || model.subject.id !== subject.id || model.half !== half || model.kind !== route.tab) {
         model = null;
         showRoundOptions();
         $("round").disabled = true;
-        $("load-status").textContent = "กำลังโหลดรายชื่อและผลพัฒนาการ…";
+        $("load-status").textContent = route.tab === "competency" ? "กำลังโหลดผลสมรรถนะ…" : "กำลังโหลดรายชื่อและผลพัฒนาการ…";
         $("results").setAttribute("aria-busy", "true");
         $("results").replaceChildren();
-        const loaded = await loadModel(subject, half);
+        const loaded = await loadModel(subject, half, route.tab);
         if (request !== screenRequest) return;
         model = loaded;
+        if (route.tab === "competency") competency = loaded;
+        else development = loaded;
       }
       $("round").disabled = false;
       showRoundOptions();
@@ -352,9 +387,28 @@ if (session) {
         writeRoute(route, false, extra);
         $("load-status").textContent = "ไม่พบนักเรียนในรายชื่อของวิชานี้";
       }
+      if (!route.studentId && model.kind === "competency") {
+        const loaded = await loadModel(subject, half);
+        if (request !== screenRequest) return;
+        model = development = loaded;
+        route.tab = "development";
+        writeRoute(route, false, extra);
+      }
       render();
-      if (route.studentId) void paintGrowth(subject, half, route.studentId, request);
-      if (route.studentId && focus) {
+      if (model.kind === "development" && route.studentId) void paintGrowth(subject, half, route.studentId, request);
+      if (hasCompetency) {
+        const other = model.kind === "development" ? "competency" : "development";
+        void loadModel(subject, half, other).then(loaded => {
+          if (request !== screenRequest) return;
+          if (other === "competency") competency = loaded;
+          else development = loaded;
+          showRoundOptions();
+          paintTabs();
+        }).catch(() => { /* แท็บที่กำลังใช้อยู่ยังกรอกได้ · ลองใหม่เมื่อเปิดอีกแท็บ */ });
+      }
+      if (focusTab) {
+        $("kg-tab-" + route.tab)?.focus();
+      } else if (route.studentId && focus) {
         $("student-heading")?.focus();
       } else if (!route.studentId && extra?.rosterScroll != null) {
         document.getElementById("student-" + extra.rosterStudent)?.focus({ preventScroll:true });
@@ -364,7 +418,8 @@ if (session) {
       }
     } catch {
       if (request !== screenRequest) return;
-      $("load-status").textContent = "โหลดข้อมูลพัฒนาการไม่สำเร็จ กรุณาตรวจการเชื่อมต่อแล้วลองอีกครั้ง หากยังไม่ได้ให้ติดต่อฝ่ายวิชาการ";
+      $("load-status").textContent = "โหลดข้อมูล" + (route?.tab === "competency" ? "สมรรถนะ" : "พัฒนาการ") +
+        "ไม่สำเร็จ กรุณาตรวจการเชื่อมต่อแล้วลองอีกครั้ง หากยังไม่ได้ให้ติดต่อฝ่ายวิชาการ";
       $("retry-load").hidden = false;
     } finally {
       if (request === screenRequest) $("results").setAttribute("aria-busy", "false");
@@ -372,7 +427,7 @@ if (session) {
   }
 
   function render() {
-    if (!model.roster.length || !model.standards.length) {
+    if (!model.roster.length || (!route.studentId && !model.standards.length)) {
       const message = !model.roster.length
         ? "ยังไม่มีเด็กลงทะเบียนในวิชานี้ กรุณาติดต่อเจ้าของวิชาหรือฝ่ายวิชาการเพื่อเพิ่มรายชื่อ"
         : "ยังไม่มีรายการพัฒนาการสำหรับวิชานี้ กรุณาติดต่อฝ่ายวิชาการเพื่อตรวจข้อมูลหลักสูตร";
@@ -391,24 +446,44 @@ if (session) {
     }
   }
 
+  function paintTabs() {
+    if (!route.studentId || !$("kg-tab-competency")) return;
+    for (const [kind, loaded, label] of [["development", development, "พัฒนาการ"], ["competency", competency, "สมรรถนะ"]]) {
+      const tab = $("kg-tab-" + kind);
+      const text = label + (loaded ? " " + progressCount(loaded, route.studentId) : "");
+      if (tab.textContent !== text) tab.textContent = text;
+    }
+  }
+
   function renderStudent(student) {
     const canGoNext = model.roster.at(-1).id !== student.id;
+    const isCompetency = model.kind === "competency";
+    const hasTabs = supportsCompetency(model.subject);
     $("results").innerHTML = `
-      <div class="card student-head">
-        <div><strong id="student-heading" tabindex="-1">${escapeHtml(studentLabel(student))}</strong>
+      <div class="card"><div class="student-head">
+        <div><h2 id="student-heading" tabindex="-1">${escapeHtml(studentLabel(student))}</h2>
           <p class="progress" id="student-progress" role="status" aria-atomic="true">${progressFor(model, student.id)}</p></div>
         <button type="button" class="ghost" data-action="back">กลับรายชื่อ</button>
       </div>
-      ${model.standards.map(unit => `<section class="card standard" aria-labelledby="standard-${escapeHtml(unit.id)}">
-        <h2 id="standard-${escapeHtml(unit.id)}">${escapeHtml(unit.name)}</h2>
+      ${hasTabs ? `<div class="kg-tabs" role="tablist" aria-label="ผลประเมินของเด็ก">
+        ${[["development", "พัฒนาการ"], ["competency", "สมรรถนะ"]].map(([kind, label]) => `<button type="button" id="kg-tab-${kind}" role="tab"
+          data-tab="${kind}" aria-controls="kg-student-panel" aria-selected="${route.tab === kind}" tabindex="${route.tab === kind ? 0 : -1}">${label}</button>`).join("")}
+      </div>` : ""}</div>
+      <div id="kg-student-panel" ${hasTabs ? `role="tabpanel" aria-labelledby="kg-tab-${route.tab}"` : ""}>
+      ${isCompetency ? model.standards.map(unit => `<section class="card kg-competencies">
+        <h3>${escapeHtml(unit.name)}</h3>${[...unit.groups.values()].flat().map(competencyStateMarkup).join("")}
+      </section>`).join("") || '<p class="card empty">ยังไม่มีองค์ประกอบสมรรถนะของวิชานี้ กรุณาติดต่อฝ่ายวิชาการ</p>' :
+      model.standards.map(unit => `<section class="card standard" aria-labelledby="standard-${escapeHtml(unit.id)}">
+        <h3 id="standard-${escapeHtml(unit.id)}">${escapeHtml(unit.name)}</h3>
         ${[...unit.groups].map(([code, list]) => `<div class="indicator-group">
-          <h3>${escapeHtml([code, model.labels.get(code)].filter(Boolean).join(" ") || "ตัวบ่งชี้")}</h3>
+          <h4>${escapeHtml([code, model.labels.get(code)].filter(Boolean).join(" ") || "ตัวบ่งชี้")}</h4>
           ${list.map(stateMarkup).join("")}</div>`).join("")}
-      </section>`).join("")}
+      </section>`).join("")}</div>
       <div class="card student-actions">
         <button type="button" class="ghost" data-action="back">กลับรายชื่อ</button>
         ${canGoNext ? '<button type="button" class="primary" data-action="next">เด็กคนถัดไป</button>' : ""}
       </div>`;
+    paintTabs();
     for (const state of model.scorable) paintRow(state);
   }
 
@@ -438,39 +513,67 @@ if (session) {
     </div>`;
   }
 
+  function competencyStateMarkup(state) {
+    const id = escapeHtml(state.id);
+    const hasRubric = KG_COMPETENCY_LEVELS.every(level => state.rubric?.[level]);
+    return `<div class="state-row" id="state-${id}" data-state="${id}">
+      <p class="state-name" id="name-${id}">${escapeHtml(state.name)}</p>
+      <div class="state-controls"><div class="levels" role="radiogroup" aria-labelledby="name-${id}" aria-describedby="status-${id}">
+        ${KG_COMPETENCY_LEVELS.map(level => `<button type="button" class="level" role="radio" aria-checked="false"
+          tabindex="-1" data-action="score" data-level="${level}">${level}</button>`).join("")}
+      </div></div>
+      <div class="kg-rubric-selected" aria-live="polite"></div>
+      ${hasRubric ? `<details class="kg-rubric-all"><summary>ดูคำบรรยายทั้ง 4 ระดับ</summary>
+        <ul>${KG_COMPETENCY_LEVELS.map(level => `<li><b>${level}</b> ${escapeHtml(state.rubric[level])}</li>`).join("")}</ul>
+      </details>` : '<p class="hint">คำบรรยายรูบริกไม่ครบ กรุณาติดต่อฝ่ายวิชาการ</p>'}
+      <div class="save-status"><span id="status-${id}" aria-live="polite" aria-atomic="true"></span>
+        <button type="button" class="retry" data-action="retry" hidden>แตะเพื่อลองใหม่</button></div>
+    </div>`;
+  }
+
   function paintRow(state) {
     const row = $("state-" + state.id);
     if (!row) return;
     const studentId = route.studentId;
     const current = scoreAt(model, state, studentId, route.round);
-    const result = resultFor(model, state, studentId);
+
     const write = model.writes.get(rowKey(studentId, state.id));
     const relevant = write?.operation.type !== "score" || write?.operation.round === route.round;
     const busy = write?.status === "saving";
-    const readOnly = !canEdit(model.subject);
+    const isCompetency = model.kind === "competency";
+    const readOnly = !canEdit(model.subject) || (isCompetency && !KG_COMPETENCY_LEVELS.every(level => state.rubric?.[level]));
+    const displayedLevel = isCompetency && relevant && (busy || write?.status === "error") ? write.operation.level : current;
     const radios = [...row.querySelectorAll('[role="radio"]')];
     const tabStop = radios.find(button => button === document.activeElement)
-      || radios.find(button => Number(button.dataset.level) === current) || radios[0];
+      || radios.find(button => Number(button.dataset.level) === displayedLevel) || radios[0];
     for (const button of radios) {
-      button.setAttribute("aria-checked", String(Number(button.dataset.level) === current));
+      button.setAttribute("aria-checked", String(Number(button.dataset.level) === displayedLevel));
       button.setAttribute("aria-disabled", String(readOnly || busy));
       button.tabIndex = button === tabStop ? 0 : -1;
     }
-    const term = row.querySelector(".term-result");
-    term.toggleAttribute("data-resolved", result.level != null);
-    term.toggleAttribute("data-tied", readOnly && result.needsChoice);
-    term.textContent = result.level != null ? "ผลภาค: " + levels.get(result.level)
-      : result.needsChoice ? (readOnly ? "ผลภาค: เสมอ — รอครูเลือกผล" : "") : "ผลภาค: ยังไม่ได้กรอก";
+    if (isCompetency) {
+      const desc = row.querySelector(".kg-rubric-selected");
+      const text = displayedLevel == null ? "ยังไม่ประเมินครั้งนี้" : "ระดับ " + displayedLevel + ": " + (state.rubric?.[displayedLevel] || "");
+      if (desc.textContent !== text) desc.textContent = text;
+    } else {
+      const result = resultFor(model, state, studentId);
+      const term = row.querySelector(".term-result");
+      term.toggleAttribute("data-resolved", result.level != null);
+      term.toggleAttribute("data-tied", readOnly && result.needsChoice);
+      term.textContent = result.level != null ? "ผลภาค: " + levels.get(result.level)
+        : result.needsChoice ? (readOnly ? "ผลภาค: เสมอ — รอครูเลือกผล" : "") : "ผลภาค: ยังไม่ได้กรอก";
 
-    const toggle = row.querySelector(".tie-toggle");
-    toggle.hidden = readOnly || !result.tied.length;
-    toggle.textContent = result.needsChoice ? "เสมอ — เลือกผล" : "เปลี่ยนผลที่เสมอ";
-    toggle.setAttribute("aria-disabled", String(busy));
-    const panel = row.querySelector(".tie-panel");
-    if (toggle.hidden) setTiePanel(row, false);
-    for (const button of panel.querySelectorAll("button")) {
-      button.hidden = !result.tied.includes(Number(button.dataset.level));
-      button.setAttribute("aria-disabled", String(busy));
+      const toggle = row.querySelector(".tie-toggle");
+      toggle.hidden = readOnly || !result.tied.length;
+      toggle.textContent = result.needsChoice ? "เสมอ — เลือกผล" : "เปลี่ยนผลที่เสมอ";
+      toggle.setAttribute("aria-disabled", String(busy));
+      const panel = row.querySelector(".tie-panel");
+      if (toggle.hidden) setTiePanel(row, false);
+      for (const button of panel.querySelectorAll("button")) {
+        button.hidden = !result.tied.includes(Number(button.dataset.level));
+        button.setAttribute("aria-disabled", String(busy));
+      }
+
     }
 
     const status = row.querySelector(".save-status");
@@ -491,8 +594,8 @@ if (session) {
   }
 
   // คีย์คงที่ทำให้การสร้างครั้งเดียวกันจากคนละแท็บหรือคนละเครื่องชน primary key เดิม
-  async function collectionIdFor(stateId, half, round) {
-    const bytes = new TextEncoder().encode(JSON.stringify(["crs-kg-collection", stateId, half, round]));
+  async function collectionIdFor(stateId, half, round, kind) {
+    const bytes = new TextEncoder().encode(JSON.stringify([kind === "competency" ? "crs-kg-competency-collection" : "crs-kg-collection", stateId, half, round]));
     const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)).slice(0, 16);
     hash[6] = (hash[6] & 0x0f) | 0x80;
     hash[8] = (hash[8] & 0x3f) | 0x80;
@@ -506,9 +609,9 @@ if (session) {
       .eq("half", loaded.half).eq("seq", round).order("id").limit(1);
     let [existing] = rows(await find());
     if (!existing) {
-      const id = await collectionIdFor(state.id, loaded.half, round);
+      const id = await collectionIdFor(state.id, loaded.half, round, loaded.kind);
       const inserted = await sb.from("collections").insert({
-        id, indicator_id:state.id, seq:round, max_score:3, half:loaded.half
+        id, indicator_id:state.id, seq:round, max_score:loaded.kind === "competency" ? 4 : 3, half:loaded.half
       }).select("id");
       // อีกแท็บอาจสร้างเสร็จระหว่างอ่านกับ insert
       [existing] = rows(inserted.error?.code === "23505" ? await find() : inserted);
@@ -525,6 +628,7 @@ if (session) {
   }
 
   function repaintAfterWrite(loaded, state, studentId) {
+    paintTabs();
     if (loaded !== model) return;
     if (route.studentId === studentId) {
       paintRow(state);
@@ -550,6 +654,7 @@ if (session) {
     if (loaded.writes.get(key)?.status === "saving") return;
 
     const { type, level, round } = operation;
+    if (loaded.kind === "competency" && (type !== "score" || !KG_COMPETENCY_LEVELS.every(v => state.rubric?.[v]) || !KG_COMPETENCY_LEVELS.includes(level))) return;
     if (type === "score" && scoreAt(loaded, state, studentId, round) === level) return;
     if (type === "tie" && (loaded.ties.get(key) === level || !resultFor(loaded, state, studentId).tied.includes(level))) return;
     const putStatus = (status, message, action = operation) => {
@@ -577,7 +682,7 @@ if (session) {
       }
 
       const oldChoice = loaded.ties.get(key);
-      if (oldChoice != null && !resultFor(loaded, state, studentId).tied.includes(oldChoice)) {
+      if (loaded.kind === "development" && oldChoice != null && !resultFor(loaded, state, studentId).tied.includes(oldChoice)) {
         action = { type:"cleanup" };
         // ลบเฉพาะค่าค้างที่อ่านมา เผื่ออีกคนเพิ่งบันทึกค่าที่ต่างออกไป
         const filter = tieRow(loaded, state, studentId);
@@ -617,13 +722,13 @@ if (session) {
   $("round").addEventListener("change", () => {
     if (!model) return;
     const value = $("round").value;
-    const round = value === "new" ? Math.max(1, route.round, ...model.rounds) + 1 : Number(value);
+    const round = value === "new" ? Math.max(1, route.round, ...(development?.rounds || []), ...(competency?.rounds || [])) + 1 : Number(value);
     void navigate({ ...route, round }, { extra:route.studentId ? history.state : {} });
   });
   $("retry-load").addEventListener("click", () => void navigate());
   window.addEventListener("popstate", () => void navigate(readRoute(), { focus:true }));
   window.addEventListener("pageshow", event => {
-    if (event.persisted && model && route.studentId) {
+    if (event.persisted && model?.kind === "development" && route.studentId) {
       growthData.delete(model.subject.year + ":" + route.studentId);
       void paintGrowth(model.subject, model.half, route.studentId, ++screenRequest);
     }
@@ -631,6 +736,10 @@ if (session) {
   $("results").addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button || button.getAttribute("aria-disabled") === "true") return;
+    if (button.dataset.tab && button.dataset.tab !== route.tab) {
+      void navigate({ ...route, tab:button.dataset.tab }, { focusTab:true });
+      return;
+    }
     if (button.dataset.student) {
       const position = { rosterScroll:window.scrollY, rosterStudent:button.dataset.student };
       writeRoute(route, false, position);
@@ -673,6 +782,14 @@ if (session) {
       setTiePanel(row, false);
     }
     const directions = { ArrowLeft:-1, ArrowUp:-1, ArrowRight:1, ArrowDown:1 };
+    const tab = event.target.closest('[role="tab"]');
+    if (tab && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const next = event.key === "Home" ? "development" : event.key === "End" ? "competency"
+        : route.tab === "competency" ? "development" : "competency";
+      if (next !== route.tab) void navigate({ ...route, tab:next }, { focusTab:true });
+      return;
+    }
     const button = event.target.closest('[role="radio"]');
     if (!button || !Object.hasOwn(directions, event.key)) return;
     event.preventDefault();

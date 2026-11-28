@@ -231,7 +231,7 @@
       <a href="rollover.html">ขึ้นปีใหม่</a>
       <a href="#" id="btn-signout">ออกจากระบบ</a>
     </div>
-    <script src="../app-shell.js?v=20261128-3"></script>
+    <script src="../app-shell.js?v=20261128-4"></script>
     <script>
       (function(){
         var navLinks = document.querySelectorAll('.nav a');
@@ -389,7 +389,7 @@
 </div>
 
 <script type="module">
-import { isRegularStudent, sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, getAcademicYears, fetchAllRows, canUseDepartment, GRADE_ORDER } from "../supabase-client.js?v=20261128-3";
+import { isRegularStudent, sb, requireAuth, signOut, getProfile, getActiveYear, setActiveYear, listSelectableYears, getStudentPlacements, competencyStageForGrade, getSetting, availableCompetencyStages, KG_COMPETENCY_STAGE, getAcademicYears, fetchAllRows, canUseDepartment, GRADE_ORDER } from "../supabase-client.js?v=20261128-4";
 import { gradeLockError, gradeRpc } from "./grade-lock.js?v=5";
 const session = await requireAuth();
 if (!session) {
@@ -603,7 +603,9 @@ async function runActivityCheck() {
       ? GRADE_ORDER.slice(firstGradeIndex, highestGradeIndex + 1) : [];
     const requiredCategories = activityCategories.filter(row => row.active !== false).map(row => row.code);
     const today = new Intl.DateTimeFormat("en-CA", { timeZone:"Asia/Bangkok", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
-    const issues = checkModule.findActivityDataIssues({ assessments:yearAssessments, members:checkMembers,
+    // เครื่องมือนี้ตรวจผลผ่าน/ไม่ผ่านและความครบของ ปพ. · สมรรถนะอนุบาลดูในรายงานแยก
+    const gradeMembers = checkMembers.filter(row => !studentMap.get(row.student_id)?.grade_level?.startsWith("อ."));
+    const issues = checkModule.findActivityDataIssues({ assessments:yearAssessments, members:gradeMembers,
       sessions:checkSessions, passResults:checkPass, students:checkStudents, requiredGrades, requiredCategories,
       termDates:{term1End:dates.term1_end_date, term2Start:dates.term2_start_date, term2End:dates.term2_end_date}, today });
     renderActivityIssues(visibleActivityIssues(issues, yearAssessments, teacherResult.data || [], canSeeAll), yearAssessments, checkStudents, canSeeAll);
@@ -783,6 +785,13 @@ async function selectAssessment(id) {
 function renderTargets() {
   const el=$("target-list"); el.innerHTML="";
   if(!targets.length){el.innerHTML="<div class='empty-note'>ยังไม่ได้เลือกองค์ประกอบ</div>";return;}
+  if (mixesKindergartenStages(targetStageSet())) {
+    const warning = document.createElement("p");
+    warning.className = "empty-note";
+    warning.setAttribute("role", "status");
+    warning.textContent = "รายการนี้มีทั้งช่วงชั้นอนุบาลและช่วงชั้นอื่น · ครั้งประเมินและรายชื่อจะแยกตามช่วงชั้นขององค์ประกอบ";
+    el.appendChild(warning);
+  }
   const groups=new Map();
   for(const t of targets){
     const id=t.competency_id;
@@ -875,12 +884,24 @@ function renderAssessmentTeachers() {
 }
 function renderElements(){const id=$("sel-competency").value;const rows=elements.filter(e=>e.competency_id===id&&e.active!==false&&allowedCompetencyStages.includes(e.stage));const el=$("element-options");if(!rows.length){el.textContent="ไม่มีองค์ประกอบที่เปิดให้เลือกในช่วงชั้นที่โรงเรียนเปิดสอน";return;}let html="";for(const stage of allowedCompetencyStages){const list=rows.filter(e=>e.stage===stage);if(!list.length)continue;html+="<div class='element-group'><h4>"+stage+"</h4>";for(const e of list){if(targets.some(t=>t.element_id===e.id))continue;html+="<label class='element-option'><input type='checkbox' data-element='"+e.id+"'><span>"+esc(e.name)+"</span><input type='number' min='0.01' step='0.01' value='10' data-score='"+e.id+"' disabled></label>";}html+="</div>";}el.innerHTML=html||"<div class='empty'>เลือกองค์ประกอบของสมรรถนะนี้ครบแล้ว</div>";el.querySelectorAll("input[type=checkbox]").forEach(c=>c.addEventListener("change",()=>{el.querySelector("[data-score='"+c.dataset.element+"']").disabled=!c.checked;}));}
 // ช่วงชั้นที่มีองค์ประกอบรองรับอยู่จริงในรายการนี้ (รวมทุกสมรรถนะ) — ใช้บล็อกนักเรียนช่วงชั้นที่ไม่มีองค์ประกอบรองรับ
+function mixesKindergartenStages(stages) {
+  return stages.has(KG_COMPETENCY_STAGE) && stages.size > 1;
+}
 function targetStageSet(){return new Set(targets.map(t=>t.element&&t.element.stage).filter(Boolean));}
 function renderStudents(){if(!current)return;const grade=$("filter-grade").value;const room=$("filter-room").value;const rooms=[...new Set(students.filter(s=>!grade||s.grade_level===grade).map(s=>s.classroom).filter(Boolean))].sort();const keep=room;fill($("filter-room"),rooms,x=>x,"— ทุกห้อง —");if(rooms.includes(keep))$("filter-room").value=keep;const memberIds=new Set(members.map(m=>m.student_id));const rows=students.filter(s=>(!grade||s.grade_level===grade)&&(!$("filter-room").value||s.classroom===$("filter-room").value)&&!memberIds.has(s.id));const el=$("student-picker");el.innerHTML=rows.length?"":"<div class='empty' style='padding:10px'>ไม่มีรายชื่อให้เพิ่ม</div>";if(categoryOverlapError){const note=document.createElement("div");note.className="empty-note";note.setAttribute("role","status");note.textContent="ตรวจรายชื่อที่อยู่"+current.activity_category+"อื่นไม่สำเร็จ — ระบบจะตรวจอีกครั้งตอนกดเพิ่ม";el.prepend(note);}const stages=targetStageSet();for(const s of rows){const stage=competencyStageForGrade(s.grade_level);const blocked=!stage||!stages.has(stage);const overlaps=categoryOverlaps.get(s.id)||[];const overlap=overlaps.length>0;const label=document.createElement("label");label.className="student-row"+(overlap?" overlap":blocked?" blocked":"");label.innerHTML="<input type='checkbox' value='"+s.id+"'"+((blocked||overlap)?" disabled":"")+"><div class='grow'><div class='title'>"+esc(s.name)+"</div><div class='meta'>"+esc(s.grade_level)+"/"+esc(s.classroom)+" · "+esc(s.student_no)+"</div>"+(overlap?"<div class='overlap-note'>อยู่ใน"+overlaps.map(a=>esc(a.name)).join(", ")+" ("+esc(current.activity_category)+" ภาค "+esc(current.term)+") แล้ว — ต้องเอาออกจากรายการนั้นก่อนจึงเพิ่มที่นี่ได้</div>":"")+(blocked?"<div class='block-note'>ไม่มีองค์ประกอบรองรับ"+esc(stage||"ช่วงชั้นนี้")+" — เพิ่มองค์ประกอบก่อนจึงเพิ่มนักเรียนคนนี้ได้</div>":"")+"</div>";el.appendChild(label);}}
 
 $("btn-create").onclick=async()=>{const name=$("f-name").value.trim(),year=$("f-year").value,termChoice=$("f-term").value;const sourceType=$("f-type").value;if(!name||!year||!termChoice){toast("กรอกชื่อ เลือกปีการศึกษา และภาคเรียนก่อน",false);return;}const term=termChoice==="all"?null:termChoice;const ownerId=isAdmin?($("f-owner").value||session.user.id):session.user.id;const payload={name,year,term,source_type:sourceType,owner_id:ownerId,activity_category:sourceType==="กิจกรรม"?($("f-activity-category").value||null):null};if(!activityCategories.length)delete payload.activity_category;const {data,error}=await sb.from("competency_assessments").insert(payload).select().single();if(error){toast("สร้างไม่สำเร็จ: "+error.message,false);return;}assessments.unshift(data);if(!assessmentYears.includes(year)){assessmentYears.push(year);refreshAssessmentYearFilter();}$("f-name").value="";$("f-activity-category").value="";setActiveYear(year);renderAssessments();await selectAssessment(data.id);toast("สร้างรายการแล้ว");};
 $("sel-competency").onchange=renderElements;
-$("btn-add-target").onclick=async()=>{if(!canEdit())return;const chosen=[...$("element-options").querySelectorAll("[data-element]:checked")];if(!chosen.length){toast("เลือกองค์ประกอบก่อน",false);return;}const start=targets.length+1;const rows=chosen.map((c,i)=>({assessment_id:current.id,competency_id:$("sel-competency").value,element_id:c.dataset.element,max_score:Number($("element-options").querySelector("[data-score='"+c.dataset.element+"']").value),seq:start+i}));if(rows.some(r=>!r.max_score||r.max_score<=0)){toast("คะแนนเต็มต้องมากกว่า 0",false);return;}const {error}=await sb.from("competency_assessment_targets").insert(rows);if(error){toast("บันทึกไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มองค์ประกอบแล้ว");};
+$("btn-add-target").onclick=async()=>{if(!canEdit())return;const chosen=[...$("element-options").querySelectorAll("[data-element]:checked")];if(!chosen.length){toast("เลือกองค์ประกอบก่อน",false);return;}const assessment=current;
+const stages=targetStageSet();
+for(const choice of chosen) stages.add(elements.find(element=>element.id===choice.dataset.element)?.stage);
+const start=targets.length+1;const rows=chosen.map((c,i)=>({assessment_id:current.id,competency_id:$("sel-competency").value,element_id:c.dataset.element,max_score:Number($("element-options").querySelector("[data-score='"+c.dataset.element+"']").value),seq:start+i}));if(rows.some(r=>!r.max_score||r.max_score<=0)){toast("คะแนนเต็มต้องมากกว่า 0",false);return;}if(mixesKindergartenStages(stages) && !await window.crsAskConfirm({
+  title:"เพิ่มองค์ประกอบต่างช่วงชั้น",
+  message:"รายการนี้จะมีทั้งองค์ประกอบอนุบาลและช่วงชั้นอื่น ระบบจะแยกครั้งประเมินและรายชื่อให้ตรงกับช่วงชั้นขององค์ประกอบ",
+  okLabel:"ยืนยันเพิ่มองค์ประกอบ"
+}))return;
+if(current!==assessment)return;
+const {error}=await sb.from("competency_assessment_targets").insert(rows);if(error){toast("บันทึกไม่สำเร็จ: "+error.message,false);return;}await selectAssessment(current.id);toast("เพิ่มองค์ประกอบแล้ว");};
 async function allowAssessmentStructureDelete(assessment) {
   try {
     const status = await gradeRpc("assessment_lock_status", { p_assessment_id:assessment.id });

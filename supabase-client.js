@@ -909,7 +909,11 @@ export function nextTempStudentNos(existingNos, count) {
 // ผูกกับ "ชื่อชั้น" ตรง ๆ ห้ามกลับไปใช้ index ของ GRADE_ORDER อีก
 // เหตุผล: GRADE_ORDER ขยายหัวแถวได้ (เพิ่ม อ.1–อ.3 เมื่อ 2026-08-20) การอิง index
 // ทำให้ช่วงชั้นของทั้งโรงเรียนเลื่อนตามแบบเงียบ ๆ — พลาดแล้วคะแนนสมรรถนะผิดชั้นทั้งระบบ
+export const KG_COMPETENCY_STAGE = "ช่วงชั้นอนุบาล";
+export const KG_COMPETENCY_LEVELS = [4, 3, 2, 1];
+
 const STAGE_BY_GRADE = {
+  "อ.1":KG_COMPETENCY_STAGE, "อ.2":KG_COMPETENCY_STAGE, "อ.3":KG_COMPETENCY_STAGE,
   "ป.1":"ช่วงชั้น 1", "ป.2":"ช่วงชั้น 1", "ป.3":"ช่วงชั้น 1",
   "ป.4":"ช่วงชั้น 2", "ป.5":"ช่วงชั้น 2", "ป.6":"ช่วงชั้น 2",
   "ม.1":"ช่วงชั้น 3", "ม.2":"ช่วงชั้น 3", "ม.3":"ช่วงชั้น 3",
@@ -922,7 +926,7 @@ export function competencyStageForGrade(grade) {
 // ช่วงชั้นที่โรงเรียนเปิดสอนจริง — คำนวณจาก highest_grade ไม่ใช้รายการตายตัวในแต่ละหน้า
 // ถ้ายังไม่ได้ตั้งค่า/ค่าไม่รู้จัก ให้คืนครบทุกช่วงชั้นเหมือน isGradeAllowed() เพื่อไม่ล็อกข้อมูลออก
 export function availableCompetencyStages(highestGrade) {
-  const stages = ["ช่วงชั้น 1", "ช่วงชั้น 2", "ช่วงชั้น 3", "ช่วงชั้น 4"];
+  const stages = [KG_COMPETENCY_STAGE, "ช่วงชั้น 1", "ช่วงชั้น 2", "ช่วงชั้น 3", "ช่วงชั้น 4"];
   const highestStage = competencyStageForGrade(highestGrade);
   const lastIndex = stages.indexOf(highestStage);
   return lastIndex === -1 ? stages : stages.slice(0, lastIndex + 1);
@@ -1085,9 +1089,10 @@ export function computeCombinedCompetencyResult(weight, sources, levels) {
 export async function loadCompetencySettings(year) {
   const normalizedYear = String(year == null ? "" : year).trim();
   if (!normalizedYear) throw new Error("กรุณาเลือกปีการศึกษาก่อนโหลดค่าตั้งสมรรถนะ");
-  const [weightResult, levelResult] = await Promise.all([
+  const [weightResult, levelResult, kgWeightResult] = await Promise.all([
     sb.from("competency_source_weights").select("*").eq("year", normalizedYear),
-    sb.from("competency_interpretation_levels").select("*").eq("year", normalizedYear).order("seq")
+    sb.from("competency_interpretation_levels").select("*").eq("year", normalizedYear).order("seq"),
+    sb.from("kg_competency_source_weights").select("*").eq("year", normalizedYear)
   ]);
   if (weightResult.error || levelResult.error) {
     throw new Error(
@@ -1095,7 +1100,21 @@ export async function loadCompetencySettings(year) {
       (weightResult.error || levelResult.error).message
     );
   }
-  return { weights: weightResult.data || [], levels: levelResult.data || [] };
+  return { weights: weightResult.data || [], levels: levelResult.data || [],
+    kgWeights: kgWeightResult.data || [], kgWeightError: kgWeightResult.error?.message || "" };
+}
+
+// รูบริกอนุบาล เก็บตาม id องค์ประกอบและระดับเพื่อใช้ร่วมกันในหน้ากรอกทั้งสองแหล่ง
+export async function loadCompetencyRubrics(elementIds) {
+  const { data, error } = await fetchAllRowsByIds(ids => sb.from("core_competency_rubrics")
+    .select("element_id,level,body").in("element_id", ids), elementIds, ["element_id", "level"]);
+  if (error) throw error;
+  const rubrics = new Map();
+  for (const row of data || []) {
+    if (!rubrics.has(row.element_id)) rubrics.set(row.element_id, {});
+    rubrics.get(row.element_id)[row.level] = row.body;
+  }
+  return rubrics;
 }
 
 // อ่านค่าตั้งค่าส่วนกลาง 1 ตัว (เช่น highest_grade) — คืน null ถ้าไม่มี
